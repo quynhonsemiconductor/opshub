@@ -23,11 +23,12 @@ import {
 } from '@/shared/ui';
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
-import { formatDate, orDash } from '@/shared/lib/format';
+import { formatDate } from '@/shared/lib/format';
 import { RegisterAssetModal, ReclassifyAssetModal } from './asset-modals';
 import { AssetDevicesPanel, ClassificationHistoryPanel } from './asset-panels';
 import { DeviceHoldingsModal } from './device-holdings-modal';
 import { CLASSIFICATION_FILTERS, classificationTone } from './asset.types';
+import { assetDetailItems } from './asset-detail-items';
 import {
   useClassificationLevels,
   useClassificationSummary,
@@ -395,79 +396,7 @@ export function InformationAssetsPage() {
             </>
           ) : undefined
         }
-        items={
-          selected
-            ? [
-                {
-                  label: 'Classification',
-                  value: (
-                    <Badge tone={classificationTone(selected.classification)}>
-                      {humanizeStatus(selected.classification)}
-                    </Badge>
-                  ),
-                },
-                {
-                  label: 'Handling',
-                  wide: true,
-                  // The policy's own words, from the reference table.
-                  value: orDash(levelFor(selected.classification)?.handlingRules),
-                },
-                { label: 'Type', value: humanizeStatus(selected.type) },
-                {
-                  label: 'Owner',
-                  value: (
-                    <span>
-                      {orDash(selected.ownerName)}
-                      {/* The uuid stays here, secondary: the drawer has room, and it is what somebody
-                          quotes in a ticket. */}
-                      <span className="ml-2 font-mono text-2xs text-fg-subtle">
-                        {selected.ownerId}
-                      </span>
-                    </span>
-                  ),
-                },
-                {
-                  label: 'Custodian',
-                  /*
-                   * "Same as owner" is kept for the ABSENT custodian, which is a different fact from a
-                   * custodian whose name will not resolve — and it sits directly under the Owner row, so
-                   * a uuid here while the owner reads as a name looked like an oversight.
-                   */
-                  value: selected.custodianId ? (
-                    <span>
-                      {orDash(selected.custodianName)}
-                      <span className="ml-2 font-mono text-2xs text-fg-subtle">
-                        {selected.custodianId}
-                      </span>
-                    </span>
-                  ) : (
-                    'Same as owner'
-                  ),
-                },
-                {
-                  label: 'C·I·A',
-                  value: `${selected.confidentiality} · ${selected.integrity} · ${selected.availability}`,
-                },
-                { label: 'Personal data', value: selected.personalData ? 'Yes' : 'No' },
-                { label: 'Location', value: orDash(selected.location) },
-                {
-                  label: 'Retention',
-                  value: selected.retentionMonths
-                    ? `${selected.retentionMonths} months`
-                    : 'Not recorded',
-                },
-                { label: 'Last reviewed', value: formatDate(selected.lastReviewedAt) },
-                { label: 'Review due', value: formatDate(selected.reviewDueOn) },
-                // Only when it happened: a "Retired: —" row on every live asset says nothing.
-                ...(selected.retiredAt
-                  ? [{ label: 'Retired', value: formatDate(selected.retiredAt) }]
-                  : []),
-                ...(selected.description
-                  ? [{ label: 'Description', wide: true, value: selected.description }]
-                  : []),
-              ]
-            : []
-        }
+        items={selected ? assetDetailItems(selected, levelFor) : []}
         activity={
           selected ? { resourceId: selected.id, resourceType: 'information_asset' } : undefined
         }
