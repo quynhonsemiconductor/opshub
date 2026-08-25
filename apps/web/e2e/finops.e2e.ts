@@ -56,7 +56,12 @@ test.describe('finops', () => {
 
   test('renders the spend chart and the utilisation list without erroring', async ({ page }) => {
     await gotoInShell(page, '/finops');
-    await expect(page.getByRole('heading', { name: 'Monthly spend by product' })).toBeVisible();
+    // Renamed with the figure it charts: the old heading said "Monthly", which was also the word the
+    // tile used for a different number.
+    await expect(page.getByRole('heading', { name: 'Committed spend by product' })).toBeVisible();
+    // The two spend figures reconcile, and the idle one is the reason the page exists.
+    await expect(page.getByText('Committed monthly spend')).toBeVisible();
+    await expect(page.getByText('Idle spend')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Seat utilization' })).toBeVisible();
     await expect(page.getByText('Failed to load licenses.')).toHaveCount(0);
   });
