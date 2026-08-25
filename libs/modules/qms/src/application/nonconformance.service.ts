@@ -1,4 +1,4 @@
-import { REPORT_ROW_LIMIT } from '@shared-kernel';
+import { MS_PER_MIN, REPORT_ROW_LIMIT } from '@shared-kernel';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   ConflictException,
@@ -83,6 +83,24 @@ const ALLOWED_TRANSITIONS: Record<NonconformanceStatus, readonly NonconformanceS
  * 5. A SETTLED FINDING ACCEPTS NOTHING NEW — no edit, no re-grade, no further transition. The row
  *    stays because it and its CAPAs are the audit evidence.
  */
+/**
+ * How far ahead of the server's clock a client-supplied "when did this happen" may be.
+ *
+ * WHY A TOLERANCE AT ALL, on a rule whose whole point is that a thing cannot be detected in the
+ * future. Because the timestamp is generated on the CALLER's clock and judged on the server's, and
+ * those are never exactly equal: a browser on a laptop that has been asleep, a phone with no NTP, a
+ * container whose clock steps after a host suspend. A strict `>` turns a one-millisecond skew into a
+ * refusal the user cannot act on — they picked "now", and were told "now" is in the future.
+ *
+ * Measured, not hypothetical: the incidents browser journey (the same rule, one module over) sends `new Date().toISOString()` and
+ * failed intermittently on exactly this, on a machine where the clock steps backwards after a
+ * suspend. It read as a flaky test for weeks.
+ *
+ * Two minutes is chosen to be far larger than any plausible skew and far smaller than any meaningful
+ * mistake. A user who picks tomorrow, or next week, is still refused — which is what the rule is for.
+ */
+const CLOCK_SKEW_TOLERANCE_MS = 2 * MS_PER_MIN;
+
 @Injectable()
 export class NonconformanceService {
   private readonly trail: ResourceAuditTrail;
@@ -369,7 +387,7 @@ export class NonconformanceService {
 
   /** A finding cannot have been detected in the future. `detected_at` anchors every deadline. */
   private assertNotFutureDetection(detectedAt: string | undefined): void {
-    if (detectedAt && new Date(detectedAt).getTime() > Date.now()) {
+    if (detectedAt && new Date(detectedAt).getTime() > Date.now() + CLOCK_SKEW_TOLERANCE_MS) {
       throw new PreconditionFailedException(
         ErrorCodes.NONCONFORMANCE_NOT_IN_STATE,
         'A finding cannot be detected in the future — every containment deadline counts from that date',
