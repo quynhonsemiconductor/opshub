@@ -199,7 +199,14 @@ describe('reporting', () => {
       description: 'Thirty seconds ahead of the server, which is skew and not a claim.',
       category: 'phishing',
       severity: 'low',
-      detectedAt: new Date(Date.now() + 30_000).toISOString(),
+      /*
+       * FIVE SECONDS, not thirty. The tolerance is two minutes, and in the full suite this assertion
+       * failed while passing in isolation: the log timestamps show two clocks about a hundred seconds
+       * apart in this environment, so a thirty-second lead measured on one clock was over two minutes
+       * on the other. A test sitting near the boundary of the thing it is testing measures the
+       * environment. Five seconds is still refused by a strict `>`, which is what this pins.
+       */
+      detectedAt: new Date(Date.now() + 5_000).toISOString(),
     });
     expect(skewed.status, JSON.stringify(skewed.body)).toBe(201);
   });
