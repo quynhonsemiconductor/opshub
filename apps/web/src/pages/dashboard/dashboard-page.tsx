@@ -48,7 +48,15 @@ export function DashboardPage() {
                     icon={tile.icon}
                     tone={tile.tone}
                     alert={tile.alert}
-                    value={count?.data}
+                    /*
+                     * A FAILED COUNT SAYS SO. `count?.data` is undefined both when a tile carries no
+                     * count by design and when its request failed, and `StatCard` renders undefined as
+                     * an em dash — so the two were indistinguishable on the first screen anybody sees.
+                     * On an alert-styled tile that reads as "nothing awaiting you", which is the
+                     * reassuring answer rather than the true one.
+                     */
+                    value={count?.isError ? 'Unavailable' : count?.data}
+                    hint={count?.isError ? 'Couldn’t be read — this is not a zero' : undefined}
                     loading={count?.isLoading}
                   />
                 );

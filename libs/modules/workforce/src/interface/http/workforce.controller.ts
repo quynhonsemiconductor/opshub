@@ -495,7 +495,7 @@ export class WorkforceController {
   @HttpCode(HttpStatus.OK)
   @AuthorizedInService(
     'assertOwnerOrApprover on the leave request the document attaches to',
-    'workforce-access-narrowing.spec.ts',
+    'leave-document-access.e2e.spec.ts',
   )
   @ApiOperation({
     summary:
@@ -530,7 +530,7 @@ export class WorkforceController {
   @HttpCode(HttpStatus.OK)
   @AuthorizedInService(
     'assertOwnerOrApprover on the owning leave request',
-    'workforce-access-narrowing.spec.ts',
+    'leave-document-access.e2e.spec.ts',
   )
   @ApiOperation({ summary: 'Confirm leave document upload completed' })
   @ApiResponse({
@@ -549,7 +549,7 @@ export class WorkforceController {
   @Get('leave-requests/:id/document')
   @AuthorizedInService(
     'assertOwnerOrApprover on the owning leave request',
-    'workforce-access-narrowing.spec.ts',
+    'leave-document-access.e2e.spec.ts',
   )
   @ApiOperation({ summary: 'Get a time-limited download URL for the leave supporting document' })
   @ApiResponse({
@@ -559,9 +559,13 @@ export class WorkforceController {
       required: ['documentUrl'],
     },
   })
-  @ApiCommonErrors(401, 404)
-  async getLeaveDocumentUrl(@Param('id', ParseUUIDPipe) id: string) {
-    return this.service.getLeaveDocumentUrl(id);
+  // 403 joins the list: reading somebody else's certificate is refused, not merely unlisted.
+  @ApiCommonErrors(401, 403, 404)
+  async getLeaveDocumentUrl(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.service.getLeaveDocumentUrl(id, user);
   }
 
   // ── Leave balances, entitlements and the holiday calendar ───────────────────

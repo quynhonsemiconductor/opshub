@@ -18,6 +18,26 @@ import type {
   OvertimeSummaryRow,
 } from './reports.types';
 
+/**
+ * `numeric` arrives from the driver as a STRING, whatever the query claims.
+ *
+ * `sql<number>` is an assertion about the TypeScript type, not a coercion — and every aggregate in
+ * this file that goes through `round(...)::numeric` or `percentile_cont` is one. The assertion then
+ * flows into the OpenAPI spec and the generated client, so the SPA is told `number` and handed
+ * `"12.00"`.
+ *
+ * It is not a cosmetic difference. A caller summing the rows — which is exactly what the overtime
+ * tile does — CONCATENATES them: two rows of `"12.00"` and `"8.50"` reduce to `"012.008.50"`, and
+ * `Math.round` of that is `NaN`. One row happened to work, which is why it survived: overtime has a
+ * status enum, so two rows is the ordinary case and the tile rendered the literal string `NaN`.
+ *
+ * The rest of the codebase already wraps these in `Number(...)` at the point of use. Doing it here
+ * instead makes the contract true for every caller, including the generated client.
+ */
+function asNumber(value: unknown): number {
+  return typeof value === 'number' ? value : Number(value ?? 0);
+}
+
 @Injectable()
 export class ReportsService {
   constructor(@InjectDrizzle() private readonly db: DrizzleDB) {}
@@ -96,7 +116,12 @@ export class ReportsService {
       .groupBy(requestItems.type)
       .orderBy(requestItems.type);
 
-    return rows;
+    return rows.map((r) => ({
+      ...r,
+      avgHours: asNumber(r.avgHours),
+      p50Hours: asNumber(r.p50Hours),
+      p90Hours: asNumber(r.p90Hours),
+    }));
   }
 
   /**
@@ -277,10 +302,7 @@ export class ReportsService {
   /**
    * Leave requests submitted in the period, grouped by type + status.
    */
-  async getLeaveSummary(params: {
-    from: Date;
-    to: Date;
-  }): Promise<LeaveSummaryRow[]> {
+  async getLeaveSummary(params: { from: Date; to: Date }): Promise<LeaveSummaryRow[]> {
     const rows = await this.db
       .select({
         leaveType: leaveRequests.leaveType,
@@ -289,10 +311,7 @@ export class ReportsService {
       })
       .from(leaveRequests)
       .where(
-        and(
-          gte(leaveRequests.createdAt, params.from),
-          lte(leaveRequests.createdAt, params.to),
-        ),
+        and(gte(leaveRequests.createdAt, params.from), lte(leaveRequests.createdAt, params.to)),
       )
       .groupBy(leaveRequests.leaveType, leaveRequests.status)
       .orderBy(leaveRequests.leaveType, leaveRequests.status);
@@ -303,10 +322,7 @@ export class ReportsService {
   /**
    * Overtime entries submitted in the period grouped by status, with total hours.
    */
-  async getOvertimeSummary(params: {
-    from: Date;
-    to: Date;
-  }): Promise<OvertimeSummaryRow[]> {
+  async getOvertimeSummary(params: { from: Date; to: Date }): Promise<OvertimeSummaryRow[]> {
     const rows = await this.db
       .select({
         status: overtimeEntries.status,
@@ -316,14 +332,15 @@ export class ReportsService {
       })
       .from(overtimeEntries)
       .where(
-        and(
-          gte(overtimeEntries.createdAt, params.from),
-          lte(overtimeEntries.createdAt, params.to),
-        ),
+        and(gte(overtimeEntries.createdAt, params.from), lte(overtimeEntries.createdAt, params.to)),
       )
       .groupBy(overtimeEntries.status)
       .orderBy(overtimeEntries.status);
 
-    return rows;
+    return rows.map((r) => ({
+      ...r,
+      totalHours: asNumber(r.totalHours),
+      avgHours: asNumber(r.avgHours),
+    }));
   }
 }

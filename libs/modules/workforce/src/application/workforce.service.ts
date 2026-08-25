@@ -582,6 +582,19 @@ export class WorkforceService {
     const leave = await this.repo.findLeaveById(leaveId);
     if (!leave)
       throw new NotFoundException(ErrorCodes.LEAVE_REQUEST_NOT_FOUND, 'Leave request not found');
+    /*
+     * THE OWNERSHIP CHECK THIS ROUTE PROMISED AND DID NOT MAKE.
+     *
+     * All three document routes are declared `@AuthorizedInService`, which tells PolicyGuard to stand
+     * down because the service will decide — and the service decided nothing. The attachment on a
+     * leave request is a medical certificate, so what that combination allowed was any authenticated
+     * employee reading or replacing a colleague's sick note, using a leave id the list endpoint hands
+     * out. The spec cited in the decorator as the pin does not contain the word "document".
+     *
+     * `assertOwnerOrApprover` is the same rule `cancelLeave` and `submitTimesheet` already use, so the
+     * answer to "may I see this person's leave?" stays one answer across the module.
+     */
+    await this.assertOwnerOrApprover(leave.employeeId, actor);
     return this.storage.presignUpload(
       {
         fileName: input.fileName,
@@ -604,6 +617,9 @@ export class WorkforceService {
     const leave = await this.repo.findLeaveById(leaveId);
     if (!leave)
       throw new NotFoundException(ErrorCodes.LEAVE_REQUEST_NOT_FOUND, 'Leave request not found');
+    // Confirm REPLACES: it soft-deletes whatever was attached before. Overwriting somebody else's
+    // certificate is the destructive half of the same hole.
+    await this.assertOwnerOrApprover(leave.employeeId, actor);
 
     const result = await this.storage.confirmUpload(fileId, actor.sub);
 
@@ -621,11 +637,21 @@ export class WorkforceService {
     return { documentUrl: result.url };
   }
 
-  /** Returns a time-limited download URL for the leave supporting document. */
-  async getLeaveDocumentUrl(leaveId: string): Promise<{ documentUrl: string | null }> {
+  /**
+   * A time-limited download URL for the leave supporting document.
+   *
+   * TAKES AN ACTOR, which is the whole point: this signature had no caller identity in it at all, so
+   * no amount of care inside the method could have checked who was asking. A route whose guard has
+   * been told to stand down and whose service cannot see the caller is unauthenticated in effect.
+   */
+  async getLeaveDocumentUrl(
+    leaveId: string,
+    actor: Actor,
+  ): Promise<{ documentUrl: string | null }> {
     const leave = await this.repo.findLeaveById(leaveId);
     if (!leave)
       throw new NotFoundException(ErrorCodes.LEAVE_REQUEST_NOT_FOUND, 'Leave request not found');
+    await this.assertOwnerOrApprover(leave.employeeId, actor);
     if (!leave.documentStorageKey) return { documentUrl: null };
     const url = await this.storage.presignGet(leave.documentStorageKey);
     return { documentUrl: url };

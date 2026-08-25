@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
+import { apiErrorMessage } from '@/shared/api/errors';
 import { FormActions, FormField, Modal, Textarea, humanizeStatus } from '@/shared/ui';
 import type { RequestItemResponse } from '@/shared/api/types';
 
@@ -43,7 +44,17 @@ export function ReviewModal({
     });
     setLoading(false);
     if (error) {
-      setErr('Failed to process request. Please try again.');
+      /*
+       * THE API'S OWN SENTENCE, because it is the one that tells the approver what to do next. The
+       * engine refuses a decision for reasons it words carefully — `REQUEST_SOD_VIOLATION` for your
+       * own request, `REQUEST_NOT_PENDING` for one already decided, a missing step permission — and
+       * this branch replaced all of them with "please try again", which is advice that cannot work:
+       * every one of those refusals is permanent.
+       *
+       * `apiErrorMessage` was already imported and used by the cancel path in the page that opens
+       * this modal, so the convention existed and this slot bypassed it.
+       */
+      setErr(apiErrorMessage(error, 'Failed to process the request.'));
       return;
     }
 
