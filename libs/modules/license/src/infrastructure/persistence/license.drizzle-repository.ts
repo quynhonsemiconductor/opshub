@@ -180,6 +180,7 @@ export class LicenseDrizzleRepository implements ILicenseRepository {
         licenseId: softwareLicenses.id,
         name: softwareLicenses.name,
         vendor: softwareLicenses.vendor,
+        status: softwareLicenses.status,
         seatCount: softwareLicenses.seatCount,
         costPerSeatCents: softwareLicenses.costPerSeatCents,
         usedSeats: sql<number>`count(${licenseAssignments.id}) filter (where ${licenseAssignments.revokedAt} is null)`,
@@ -190,6 +191,7 @@ export class LicenseDrizzleRepository implements ILicenseRepository {
         softwareLicenses.id,
         softwareLicenses.name,
         softwareLicenses.vendor,
+        softwareLicenses.status,
         softwareLicenses.seatCount,
         softwareLicenses.costPerSeatCents,
       )
@@ -204,16 +206,31 @@ export class LicenseDrizzleRepository implements ILicenseRepository {
       const available = r.seatCount != null ? r.seatCount - used : null;
       const pct =
         r.seatCount != null && r.seatCount > 0 ? Math.round((used / r.seatCount) * 100) : null;
-      const spend = r.costPerSeatCents != null ? used * r.costPerSeatCents : null;
+      /*
+       * TWO FIGURES, NAMED FOR WHAT THEY ARE. There used to be one, called `monthlySpendCents`, and it
+       * was `used * cost` — the cost of the occupied seats. The FinOps tile summed it and called it
+       * "Monthly spend" while the table two inches below computed `seatCount * cost` from the same
+       * row, so the screen disagreed with itself; on the seeded register the tile showed about six per
+       * cent of the committed figure, and the licences with the most idle seats contributed least to
+       * it.
+       *
+       * Committed is what an invoice says. Assigned is what is being used. The gap is the number
+       * somebody acts on, and it was the one thing the page could not show.
+       */
+      const committed =
+        r.costPerSeatCents != null && r.seatCount != null ? r.seatCount * r.costPerSeatCents : null;
+      const assigned = r.costPerSeatCents != null ? used * r.costPerSeatCents : null;
       return {
         licenseId: r.licenseId,
         name: r.name,
         vendor: r.vendor,
+        status: r.status,
         seatCount: r.seatCount,
         usedSeats: used,
         availableSeats: available,
         utilizationPct: pct,
-        monthlySpendCents: spend,
+        committedSpendCents: committed,
+        assignedSpendCents: assigned,
       };
     });
   }
