@@ -6517,6 +6517,15 @@ export interface components {
       status: string;
       reviewDueOn: string | null;
       acceptedBy: string | null;
+      /**
+       * @description WHO signed the acceptance. Null when nobody has accepted the risk, and also when the acceptor's
+       *     employee row is gone — the acceptance still stands either way, which is why this is resolved with
+       *     a left lookup and never a join.
+       *
+       *     Sent because this is the signature an ISO 27001 auditor reads: accepting an exposure rather than
+       *     treating it is a decision somebody is answerable for, and "accepted by <uuid>" names nobody.
+       */
+      acceptedByName: string | null;
       acceptedAt: string | null;
       acceptanceJustification: string | null;
       /** @description The request that authorised the acceptance, when one was required. */
@@ -6895,6 +6904,11 @@ export interface components {
        */
       ownerName: string | null;
       custodianId: string | null;
+      /**
+       * @description WHO operates the controls day to day, as opposed to the owner who decides the classification.
+       *     Null when no custodian is named, and when their employee row is gone — the asset outlives them.
+       */
+      custodianName: string | null;
       confidentiality: number;
       integrity: number;
       availability: number;
@@ -6957,6 +6971,11 @@ export interface components {
        */
       ownerName: string | null;
       custodianId: string | null;
+      /**
+       * @description WHO operates the controls day to day, as opposed to the owner who decides the classification.
+       *     Null when no custodian is named, and when their employee row is gone — the asset outlives them.
+       */
+      custodianName: string | null;
       confidentiality: number;
       integrity: number;
       availability: number;

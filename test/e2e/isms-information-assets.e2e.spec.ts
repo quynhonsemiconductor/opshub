@@ -65,6 +65,8 @@ interface AssetRow {
   ownerId: string;
   ownerName: string | null;
   custodianId: string | null;
+  /** The custodian's name, resolved on the read paths. Null when no custodian is named. */
+  custodianName?: string | null;
   confidentiality: number;
   integrity: number;
   availability: number;
@@ -847,6 +849,45 @@ describe('naming the owner', () => {
     // The same name from the other method, not merely "some name": both resolve the same id, so a
     // mismatch would mean one of them is resolving something else.
     expect(unwrap<AssetRow>(one.body).ownerName).toBe(row!.ownerName);
+  });
+
+  it('names the CUSTODIAN too, which sits directly under the owner', async () => {
+    /*
+     * Two different accountabilities on one record: the owner decides the classification, the custodian
+     * operates the controls day to day. The drawer prints them one under the other, so naming only the
+     * owner left a name beside a uuid on adjacent rows — which reads as an oversight rather than a
+     * decision, and leaves the operational contact unidentifiable.
+     *
+     * A DIFFERENT person from the owner, so a resolver keyed on the wrong column cannot pass: it would
+     * report the owner's name in both places.
+     */
+    const created = await apiRequest(app, security, 'POST', '/information-assets', {
+      reference: nextRef(),
+      name: 'Owner and custodian are different people',
+      type: 'system',
+      classification: 'internal',
+      classificationReason: WHY,
+      ownerId: FIXTURE.SECURITY.id,
+      custodianId: FIXTURE.ADMIN.id,
+      confidentiality: 2,
+      integrity: 2,
+      availability: 2,
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = unwrap<AssetRow>(created.body).id;
+
+    const one = unwrap<AssetRow>(
+      (await apiRequest(app, security, 'GET', `/information-assets/${id}`)).body,
+    );
+    expect(one.custodianId).toBe(FIXTURE.ADMIN.id);
+    expect(
+      one.custodianName,
+      `custodian ${one.custodianId} came back with no name, so the drawer shows a uuid`,
+    ).toBeTruthy();
+    expect(
+      one.custodianName,
+      'the custodian was resolved from the owner column — both rows would show one person',
+    ).not.toBe(one.ownerName);
   });
 
   /*

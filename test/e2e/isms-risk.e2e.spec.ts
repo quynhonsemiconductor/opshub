@@ -57,6 +57,8 @@ interface RiskRow {
   reference: string;
   ownerId: string;
   ownerName: string | null;
+  /** Who signed the acceptance, resolved. Null until somebody accepts. */
+  acceptedByName?: string | null;
   inherentLikelihood: number;
   inherentImpact: number;
   inherentScore: number | null;
@@ -605,6 +607,48 @@ describe('naming the owner', () => {
    * eight endpoints. `null` is therefore the correct answer, and specifically not the uuid: falling
    * back to the id is a one-character mistake that would put back everything this removed.
    */
+  it('names WHO SIGNED an acceptance, not just when', async () => {
+    /*
+     * The signature, not the owner. These are two different accountabilities on the same record — the
+     * owner carries the risk, the acceptor decided to carry it rather than treat it — and the drawer
+     * printed the acceptance as "«timestamp» by «uuid»". Of every field in this module this is the one
+     * an ISO 27001 auditor reads, because accepting an exposure is a decision a named person answers
+     * for; a uuid there is an acceptance nobody signed.
+     *
+     * Asserted on the READ paths, and only after an acceptance exists: before one, null is correct and
+     * an assertion against it would pass on a page that never resolves anything.
+     */
+    const risk = await assessed([4, 4], [3, 3]);
+    const accepted = await apiRequest(app, security, 'POST', `/risks/${risk.id}/accept`, {
+      justification: 'Accepted so the signature has something to name.',
+    });
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
+
+    const one = unwrap<RiskRow>((await apiRequest(app, security, 'GET', `/risks/${risk.id}`)).body);
+    expect(one.acceptedBy).toBe(FIXTURE.SECURITY.id);
+    expect(
+      one.acceptedByName,
+      `risk ${one.reference} was accepted by ${one.acceptedBy} and the read path named nobody`,
+    ).toBeTruthy();
+    // Distinct from the owner's name would be nice to assert, but the same fixture owns and accepts
+    // here; what matters is that the field is resolved from `acceptedBy` and not left null.
+
+    const listed = unwrap<RiskRow[]>(
+      (
+        await apiRequest(
+          app,
+          security,
+          'GET',
+          `/risks?search=${encodeURIComponent(risk.reference)}&limit=100`,
+        )
+      ).body,
+    );
+    const row = listed.find((r) => r.id === risk.id);
+    expect(row?.acceptedByName, 'the list resolves it separately from the single read').toBe(
+      one.acceptedByName,
+    );
+  });
+
   it('leaves the name off a write response rather than echoing the uuid', async () => {
     const created = await identify(2, 2);
     expect(created.ownerName).toBeNull();

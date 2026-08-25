@@ -428,8 +428,18 @@ export function InformationAssetsPage() {
                 },
                 {
                   label: 'Custodian',
+                  /*
+                   * "Same as owner" is kept for the ABSENT custodian, which is a different fact from a
+                   * custodian whose name will not resolve — and it sits directly under the Owner row, so
+                   * a uuid here while the owner reads as a name looked like an oversight.
+                   */
                   value: selected.custodianId ? (
-                    <span className="font-mono text-xs">{selected.custodianId}</span>
+                    <span>
+                      {orDash(selected.custodianName)}
+                      <span className="ml-2 font-mono text-2xs text-fg-subtle">
+                        {selected.custodianId}
+                      </span>
+                    </span>
                   ) : (
                     'Same as owner'
                   ),
