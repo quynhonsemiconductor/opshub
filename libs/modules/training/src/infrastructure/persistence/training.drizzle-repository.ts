@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
-import { newId } from '@shared-kernel';
+import { newId, toIsoDate } from '@shared-kernel';
 import {
   employeePositions,
   trainingCourses,
@@ -21,6 +21,56 @@ import type {
   TrainingRequirement,
   UpdateCourseInput,
 } from '../../domain/training.types';
+
+/**
+ * `expired` IS DERIVED, not stored — and until now it was neither.
+ *
+ * `training_records.status` defaults to `valid` and the only other value ever written is `revoked`:
+ * nothing in the codebase, and no job, ever writes `expired`. But the list endpoint filtered on the
+ * stored column, so the Records tab's "Expired" chip sent `status=expired`, matched no row, and told
+ * the reader "no training records match these filters". Anybody asking "who has lapsed?" was answered
+ * "nobody", while the competency-gap report on the next tab correctly reported the same people as
+ * gaps. Two tabs, contradictory answers, and the reassuring one was wrong.
+ *
+ * The index on `(status, expires_on)` shows the derived read was always the intent.
+ *
+ * A record is expired when it is otherwise valid and its expiry date has passed. `revoked` outranks
+ * it: a revoked certificate is not "expired", it was taken away, and that distinction is the whole
+ * point of having both.
+ */
+function effectiveStatus(
+  status: TrainingRecord['status'],
+  expiresOn: string | null,
+  today: string,
+): TrainingRecord['status'] {
+  if (status !== 'valid' || !expiresOn) return status;
+  // `YYYY-MM-DD` compared as strings: in that format lexicographic order IS chronological order, so
+  // there is no parsing and no timezone in the comparison.
+  return expiresOn < today ? 'expired' : status;
+}
+
+/**
+ * The SQL for a status filter, given that one of the three values is not in the column.
+ *
+ * `expired` becomes "valid, and lapsed"; `valid` has to exclude the lapsed ones or the two filters
+ * would return overlapping sets and the counts would not add up.
+ */
+function statusFilter(status: TrainingRecord['status'], today: string) {
+  if (status === 'expired') {
+    return and(
+      eq(trainingRecords.status, 'valid'),
+      isNotNull(trainingRecords.expiresOn),
+      lt(trainingRecords.expiresOn, today),
+    );
+  }
+  if (status === 'valid') {
+    return and(
+      eq(trainingRecords.status, 'valid'),
+      or(isNull(trainingRecords.expiresOn), gte(trainingRecords.expiresOn, today)),
+    );
+  }
+  return eq(trainingRecords.status, status);
+}
 
 @Injectable()
 export class TrainingDrizzleRepository implements ITrainingRepository {
@@ -242,7 +292,7 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
     const where = and(
       filters.employeeId ? eq(trainingRecords.employeeId, filters.employeeId) : undefined,
       filters.courseId ? eq(trainingRecords.courseId, filters.courseId) : undefined,
-      filters.status ? eq(trainingRecords.status, filters.status) : undefined,
+      filters.status ? statusFilter(filters.status, toIsoDate(new Date())) : undefined,
       filters.currentOnly ? isNull(trainingRecords.supersededById) : undefined,
       // The renewal queue: only a live record can lapse, so the status is implied by the filter
       // rather than left to the caller to remember.
@@ -268,15 +318,35 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
       .from(trainingRecords)
       .where(where);
 
-    return { rows, total: count };
+    /*
+     * The row has to SAY expired, not merely be findable by the filter. The Status column rendered
+     * "Valid" on a certificate whose expiry passed years ago — so the register disagreed with the gap
+     * report about the same person, and the reassuring answer was the one on screen.
+     */
+    const today = toIsoDate(new Date());
+    return {
+      rows: rows.map((r) => ({ ...r, status: effectiveStatus(r.status, r.expiresOn, today) })),
+      total: count,
+    };
   }
 
   async listRecordsForEmployee(employeeId: string): Promise<TrainingRecord[]> {
-    return this.db
+    const rows = await this.db
       .select()
       .from(trainingRecords)
       .where(eq(trainingRecords.employeeId, employeeId))
       .orderBy(desc(trainingRecords.completedOn), asc(trainingRecords.id));
+    /*
+     * The employee's own list derives it too — this is the screen most of the company sees, and its
+     * "Current certificates" tile counts what this returns.
+     *
+     * NOT `findRecordById`, deliberately. That one is the guard every write path calls, and
+     * `transitionRecord` matches on the STORED status: handing it a derived `expired` would make
+     * verifying or revoking a lapsed certificate fail to match any row. The distinction is between a
+     * value being READ and a value being WRITTEN FROM.
+     */
+    const today = toIsoDate(new Date());
+    return rows.map((r) => ({ ...r, status: effectiveStatus(r.status, r.expiresOn, today) }));
   }
 
   async transitionRecord(
