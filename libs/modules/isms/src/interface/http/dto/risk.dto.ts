@@ -122,6 +122,18 @@ export class RiskResponseDto {
   category!: string;
   assetId!: string | null;
   ownerId!: string;
+  /**
+   * The owner's display name, resolved server-side on the READ paths.
+   *
+   * Nullable although `ownerId` is not, for two reasons. A risk outlives the person accountable for
+   * it — the lookup is a left one, never a join, because losing a register entry when an employee
+   * row goes is far worse than showing no name. And the write paths do not resolve it: their
+   * responses are refetched by the SPA, so a query nobody reads would be added to eight mutations.
+   *
+   * Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which a
+   * `risk.read` holder is not required to have, and one request per row is not a page.
+   */
+  ownerName!: string | null;
   inherentLikelihood!: number;
   inherentImpact!: number;
   /** `likelihood × impact`, computed by Postgres — never written by the application. */
@@ -133,6 +145,15 @@ export class RiskResponseDto {
   status!: string;
   reviewDueOn!: string | null;
   acceptedBy!: string | null;
+  /**
+   * WHO signed the acceptance. Null when nobody has accepted the risk, and also when the acceptor's
+   * employee row is gone — the acceptance still stands either way, which is why this is resolved with
+   * a left lookup and never a join.
+   *
+   * Sent because this is the signature an ISO 27001 auditor reads: accepting an exposure rather than
+   * treating it is a decision somebody is answerable for, and "accepted by <uuid>" names nobody.
+   */
+  acceptedByName!: string | null;
   acceptedAt!: string | null;
   acceptanceJustification!: string | null;
   /** The request that authorised the acceptance, when one was required. */

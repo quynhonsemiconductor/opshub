@@ -59,6 +59,7 @@ interface EntryRow {
   justification: string;
   status: string;
   ownerId: string | null;
+  ownerName: string | null;
   implementationNote: string | null;
   lastReviewedAt: string | null;
   reviewDueOn: string | null;
@@ -497,6 +498,100 @@ describe('risk ↔ control', () => {
     ).toBe(404);
     expect((await apiRequest(app, security, 'GET', `/risks/${missing}/controls`)).status).toBe(404);
     expect((await apiRequest(app, security, 'GET', `/controls/${missing}/risks`)).status).toBe(404);
+  });
+});
+
+describe('naming the control owner', () => {
+  /*
+   * WHY THIS IS THE HIGHEST-VALUE ONE IN THE MODULE. The Owner here is a LIST COLUMN on the document
+   * an ISO 27001 audit opens with, so the uuid was repeated once per line down the whole statement,
+   * answering "who owns this control" — asked of every row of it — with thirty-six characters that
+   * identify nobody, and worse than nobody with uuid v7, whose time prefix makes entries written in
+   * the same sitting look alike. The name has to come from the API rather than the SPA: a name per row
+   * resolved in the browser would be a request per row, and `GET /v1/employees` needs `employee.read`,
+   * which a `control.read` holder is not required to hold.
+   *
+   * OWNED BY THE AUDITOR FIXTURE, not by security, so the `ownerId` filter narrows the page to the
+   * entries this test wrote. `security` owns the entries the replacement test writes, and a page
+   * shared with those would be a page that grows past the limit.
+   */
+  it('names the owner in the statement and in the single entry', async () => {
+    const control = await makeControl();
+    const written = await apiRequest(app, security, 'PUT', `/controls/soa/${control.id}`, {
+      applicable: true,
+      justification: 'In scope and owned, so the statement has somebody to ask about it.',
+      status: 'implemented',
+      ownerId: FIXTURE.AUDITOR.id,
+    });
+    expect(written.status, JSON.stringify(written.body)).toBe(200);
+    /*
+     * The `PUT` itself resolves NOTHING, deliberately, and that is asserted here rather than assumed.
+     * The SPA discards this response and refetches the statement, so resolving a name on the write
+     * would be a directory query nobody reads. `null` is the right answer and specifically not the
+     * uuid: falling back to the id is a one-character mistake that would put back what this removed.
+     */
+    expect(unwrap<EntryRow>(written.body).ownerName).toBeNull();
+
+    const rows = unwrap<EntryRow[]>(
+      (
+        await apiRequest(
+          app,
+          security,
+          'GET',
+          `/controls/soa?ownerId=${FIXTURE.AUDITOR.id}&limit=100`,
+        )
+      ).body,
+    );
+    const mine = rows.find((e) => e.controlId === control.id);
+    expect(mine, 'the entry under test is not in the statement listing').toBeDefined();
+    expect(
+      mine!.ownerName,
+      `entry for control ${control.reference} came back with owner ${mine!.ownerId} and no name`,
+    ).toBeTruthy();
+
+    /*
+     * And EVERY row of that page carries one. The `ownerId` filter means every row here has an owner,
+     * so a single nameless row is a statement column that cannot be read — which is the state a
+     * resolver quietly handing back an empty map would produce, and which finding one's own row alone
+     * would not detect.
+     */
+    for (const row of rows) {
+      expect(
+        row.ownerName,
+        `entry ${row.id} came back with owner ${row.ownerId} and no name`,
+      ).toBeTruthy();
+    }
+
+    const one = await apiRequest(app, security, 'GET', `/controls/soa/${control.id}`);
+    expect(one.status).toBe(200);
+    /*
+     * The single-entry read resolves it too. It is a SEPARATE service method — `getEntryWithOwner`,
+     * added beside the plain `getEntry` that `markReviewed` guards on rather than widening it — so a
+     * change to one leaves the other answering with a uuid, and this is the assertion that catches it.
+     */
+    expect(unwrap<EntryRow>(one.body).ownerName).toBe(mine!.ownerName);
+  });
+
+  /*
+   * UNASSIGNED IS NOT NAMELESS-WITH-AN-OWNER, and the SoA column renders the two differently: an entry
+   * with no `ownerId` reads "Unassigned", while an owner whose employee row is gone reads as a dash.
+   * Both come back as `ownerName: null`, so the screen keys off `ownerId` — which only holds if an
+   * ownerless entry really does carry a null id rather than an empty string.
+   */
+  it('leaves both the id and the name null on an entry nobody owns', async () => {
+    const control = await makeControl();
+    const res = await apiRequest(app, security, 'PUT', `/controls/soa/${control.id}`, {
+      applicable: false,
+      justification: 'Out of scope: the organisation operates no industrial control systems.',
+      status: 'not_applicable',
+    });
+    expect(res.status).toBe(200);
+
+    const entry = unwrap<EntryRow>(
+      (await apiRequest(app, security, 'GET', `/controls/soa/${control.id}`)).body,
+    );
+    expect(entry.ownerId).toBeNull();
+    expect(entry.ownerName).toBeNull();
   });
 });
 

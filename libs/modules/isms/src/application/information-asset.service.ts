@@ -5,6 +5,8 @@ import {
   InjectDrizzle,
   NotFoundException,
   PreconditionFailedException,
+  nameOf,
+  resolveEmployeeNames,
   type DrizzleDB,
 } from '@platform';
 import type { Actor } from '@shared-kernel';
@@ -130,8 +132,54 @@ export class InformationAssetService {
     return asset;
   }
 
+  /**
+   * One asset, with its owner named — the drawer's read path.
+   *
+   * Separate from `getById` rather than folded into it, because that one is the guard every write
+   * path calls first (update, reclassify, declassify, review, retire, link a device) and none of
+   * those render an owner. Widening it would have added a lookup to nine mutations for one screen.
+   */
+  async getByIdWithOwner(
+    id: string,
+  ): Promise<InformationAsset & { ownerName: string | null; custodianName: string | null }> {
+    const asset = await this.getById(id);
+    /*
+     * Owner AND custodian. They are two different accountabilities — the owner decides the
+     * classification, the custodian operates the controls — and the drawer prints them one under the
+     * other. Naming only the first would have left a name beside a uuid on adjacent rows, which reads
+     * as an oversight rather than a decision.
+     */
+    const names = await resolveEmployeeNames(this.db, [asset.ownerId, asset.custodianId]);
+    return {
+      ...asset,
+      ownerName: nameOf(names, asset.ownerId),
+      custodianName: nameOf(names, asset.custodianId),
+    };
+  }
+
   async list(filters: InformationAssetFilters, limit: number, offset: number) {
-    return this.repo.list(filters, limit, offset);
+    const page = await this.repo.list(filters, limit, offset);
+    /*
+     * OWNER NAMES for the whole page, in one query.
+     *
+     * "Who owns this information" is the question the register answers second, after "how is it
+     * classified" — the owner is who decides the label and who is asked when it turns out to be
+     * wrong. The drawer answered it with a uuid. Resolved here rather than in the SPA because the
+     * directory endpoint needs `employee.read`, which an `information_asset.read` holder is not
+     * required to have.
+     */
+    const names = await resolveEmployeeNames(this.db, [
+      ...page.rows.map((r) => r.ownerId),
+      ...page.rows.map((r) => r.custodianId),
+    ]);
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({
+        ...r,
+        ownerName: nameOf(names, r.ownerId),
+        custodianName: nameOf(names, r.custodianId),
+      })),
+    };
   }
 
   /**

@@ -322,8 +322,16 @@ export function RequestsPage() {
                 },
                 {
                   label: 'Assignee',
+                  /* The `assigneeId` guard stays: an UNASSIGNED request is a normal pending state, not a
+                     missing name, and the row is better absent than showing a dash that reads like an
+                     error. Once there IS an assignee, it is a person, so it is named like one. */
                   value: selected.assigneeId ? (
-                    <span className="font-mono text-xs">{selected.assigneeId}</span>
+                    <span>
+                      {orDash(selected.assigneeName)}
+                      <span className="ml-2 font-mono text-2xs text-fg-subtle">
+                        {selected.assigneeId}
+                      </span>
+                    </span>
                   ) : null,
                 },
                 { label: 'SLA deadline', value: formatDateTime(selected.slaDeadline) },
@@ -349,7 +357,13 @@ export function RequestsPage() {
                     Step {a.step} — {humanizeStatus(a.decision)}
                   </StatusBadge>
                   <div className="min-w-0 flex-1 text-xs text-fg-muted">
-                    <p className="font-mono">{a.approverId}</p>
+                    {/* Who decided this step — the point of an approval history. `orDash` and not the id
+                        as the fallback, and the id kept beside it in full for a ticket, exactly as the
+                        Requester row above. */}
+                    <p>
+                      {orDash(a.approverName)}
+                      <span className="ml-2 font-mono text-2xs text-fg-subtle">{a.approverId}</span>
+                    </p>
                     {a.note && <p className="mt-0.5">{a.note}</p>}
                     <p className="mt-0.5 text-fg-subtle">{formatDateTime(a.decidedAt)}</p>
                   </div>

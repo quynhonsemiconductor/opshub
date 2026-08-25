@@ -84,10 +84,15 @@ function toRequirementDto(
   };
 }
 
-function toRecordDto(r: TrainingRecord): TrainingRecordResponseDto {
+function toRecordDto(
+  r: TrainingRecord & { employeeName?: string | null },
+): TrainingRecordResponseDto {
   return {
     id: r.id,
     employeeId: r.employeeId,
+    // Optional on the way in and null on the way out: the read paths resolve it, the write paths do
+    // not, and the shape stays one DTO rather than two that differ by a single field.
+    employeeName: r.employeeName ?? null,
     courseId: r.courseId,
     completedOn: r.completedOn,
     expiresOn: r.expiresOn,
@@ -116,8 +121,8 @@ function toCertificateDto(a: EntityAttachment): CertificateResponseDto {
   };
 }
 
-function toGapDto(g: CompetencyGap): CompetencyGapResponseDto {
-  return { ...g };
+function toGapDto(g: CompetencyGap & { employeeName?: string | null }): CompetencyGapResponseDto {
+  return { ...g, employeeName: g.employeeName ?? null };
 }
 
 @ApiTags('training')
@@ -358,7 +363,8 @@ export class TrainingController {
   @ApiOkResponse({ type: TrainingRecordResponseDto })
   @ApiCommonErrors(401, 403, 404)
   async getRecord(@Param('id', ParseUUIDPipe) id: string): Promise<TrainingRecordResponseDto> {
-    return toRecordDto(await this.service.getRecord(id));
+    // `getRecordWithEmployee`, not `getRecord`: this is a read path, and the one that names a person.
+    return toRecordDto(await this.service.getRecordWithEmployee(id));
   }
 
   @Post('records/:id/verify')

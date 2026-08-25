@@ -185,6 +185,20 @@ export class NonconformanceResponseDto {
   status!: string;
   processArea!: string;
   ownerId!: string;
+  /**
+   * The owner's display name, resolved server-side.
+   *
+   * NULLABLE because the finding outlives the person accountable for it. A leaver's employee row can
+   * go while the non-conformance and its CAPAs stay as the §10.2 evidence, so this is a LEFT lookup
+   * and never a join — dropping a finding because its owner left would be far worse than showing no
+   * name.
+   *
+   * Sent at all because the register's Owner field rendered `ownerId`, which answers "who is
+   * accountable for this failure" with thirty-six characters that identify nobody. The SPA cannot
+   * resolve it itself: `GET /v1/employees` needs `employee.read`, which a non-conformance reader is
+   * not required to hold, and a page of rows cannot cost a request per row.
+   */
+  ownerName!: string | null;
   detectedAt!: string;
   raisedBy!: string;
   incidentId!: string | null;
@@ -215,6 +229,15 @@ export class CapaResponseDto {
   nonconformanceId!: string;
   status!: string;
   ownerId!: string;
+  /**
+   * The owner's display name, resolved server-side. Null once the employee row is gone; the CAPA and
+   * its effectiveness evidence stay, so this is a left lookup and never a join.
+   *
+   * The CAPA card showed no owner AT ALL, which is worse than a uuid: `verify` and `ineffective` are
+   * withheld from the owner by `CAPA_SELF_VERIFICATION`, so a reader looking at a card with no
+   * sign-off button had nothing on screen explaining why.
+   */
+  ownerName!: string | null;
   rootCause!: string | null;
   rootCauseMethod!: string | null;
   actionPlan!: string | null;
@@ -339,6 +362,12 @@ export class InternalAuditResponseDto {
   criteria!: string;
   status!: string;
   leadAuditorId!: string;
+  /**
+   * The lead auditor's display name, resolved server-side. Null when the employee row is gone — the
+   * engagement record is §9.2.2(f) evidence and outlives the auditor who ran it, so this is a left
+   * lookup and never a join.
+   */
+  leadAuditorName!: string | null;
   plannedStartOn!: string | null;
   plannedEndOn!: string | null;
   startedAt!: string | null;
@@ -359,6 +388,14 @@ export class InternalAuditRowResponseDto extends InternalAuditResponseDto {
 
 export class AuditAuditorResponseDto {
   auditorId!: string;
+  /**
+   * Who audited, by name. Null when the employee row is gone; the roster row stays, because it is
+   * what the impartiality rule reads and a leaver still audited this engagement. A left lookup, never
+   * a join — a joined roster would silently shrink and quietly re-admit somebody to a review.
+   *
+   * The roster's whole job is to say who did the audit, and it rendered a column of uuids.
+   */
+  auditorName!: string | null;
   role!: string;
   addedBy!: string;
   createdAt!: string;
@@ -486,6 +523,12 @@ export class ManagementReviewResponseDto {
   period!: string;
   status!: string;
   chairId!: string;
+  /**
+   * The chair's display name, resolved server-side. Null when the employee row is gone — the minutes
+   * of a held review are permanent and the person who chaired it may not be, so this is a left lookup
+   * and never a join.
+   */
+  chairName!: string | null;
   scheduledFor!: string | null;
   heldOn!: string | null;
   /** The §9.3.2 inputs, frozen when the review was held. Null until then. Never settable. */
@@ -508,6 +551,14 @@ export class ReviewActionResponseDto {
   category!: string;
   description!: string;
   ownerId!: string;
+  /**
+   * Who is answerable for this output, by name. Null when the employee row is gone; the action is a
+   * §9.3.3 output that the minutes already cite, so it is a left lookup and never a join.
+   *
+   * §9.3.2(a) makes the follow-up queue read "who is chasing this", and the action card showed no
+   * owner at all — so the one question the queue exists to answer had no answer on screen.
+   */
+  ownerName!: string | null;
   dueOn!: string | null;
   status!: string;
   completedAt!: string | null;

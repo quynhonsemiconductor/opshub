@@ -117,6 +117,19 @@ export class VendorResponseDto {
   criticality!: string;
   status!: string;
   ownerId!: string;
+  /**
+   * The relationship owner's display name, resolved server-side on the READ paths.
+   *
+   * Nullable although `ownerId` is not, for two reasons. A supplier record outlives the person who
+   * owned the relationship — the lookup is a left one, never a join, because a terminated vendor's
+   * row, its assessments and its risk links are the audit evidence and must not disappear with an
+   * employee. And the write paths do not resolve it: their responses are refetched by the SPA, so it
+   * would be a query nobody reads added to nine mutations.
+   *
+   * Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which a
+   * `vendor.read` holder is not required to have.
+   */
+  ownerName!: string | null;
   dataProcessor!: boolean;
   dataProcessingAgreementId!: string | null;
   dataLocation!: string | null;

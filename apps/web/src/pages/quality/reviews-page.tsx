@@ -296,7 +296,17 @@ export function ReviewsPage() {
                 { label: 'Period', value: selected.period },
                 {
                   label: 'Chair',
-                  value: <span className="font-mono text-xs">{selected.chairId}</span>,
+                  // The NAME: §9.3 makes the chair the accountable party for the review, and the
+                  // minutes cite them by name, so a uuid here agreed with nothing anybody reads.
+                  value: (
+                    <span>
+                      {orDash(selected.chairName)}
+                      {/* The uuid stays, secondary: it is what somebody quotes in a ticket. */}
+                      <span className="ml-2 font-mono text-2xs text-fg-subtle">
+                        {selected.chairId}
+                      </span>
+                    </span>
+                  ),
                 },
                 { label: 'Scheduled for', value: formatDate(selected.scheduledFor) },
                 ...(selected.heldOn ? [{ label: 'Held', value: formatDate(selected.heldOn) }] : []),

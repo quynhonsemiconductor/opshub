@@ -87,8 +87,31 @@ export interface RequestApproval {
   decidedAt: Date;
 }
 
+/**
+ * An approval row with its approver's display name resolved for the caller.
+ *
+ * Kept as a separate interface rather than a field on {@link RequestApproval}, for the same reason
+ * {@link RequestItemWithApprovals} is separate from {@link RequestItem}: `RequestApproval` is the shape of
+ * the stored row, and a name is not stored anywhere — it is joined on at read time, so only the read
+ * shape should claim to have one.
+ */
+export interface RequestApprovalWithName extends RequestApproval {
+  /**
+   * The approver's display name, resolved for the caller.
+   *
+   * WHY IT IS NEEDED. The approval chain is the audit trail of the decision — it is the answer to "who
+   * said yes to this" — and it rendered `approverId`, a bare uuid, for every step. A trail that cannot
+   * name the decider does not discharge the review it exists for.
+   *
+   * Null when the approver's employee row is gone, and the decision outlives the decider by design: a
+   * departed manager's approval is precisely the one an access review comes back to. Resolved through the
+   * same batched lookup as the requester's name, so a page of decisions is still one query.
+   */
+  approverName?: string | null;
+}
+
 export interface RequestItemWithApprovals extends RequestItem {
-  approvals: RequestApproval[];
+  approvals: RequestApprovalWithName[];
   comments?: RequestComment[];
   /**
    * The requester's display name, resolved for the caller.
@@ -103,6 +126,19 @@ export interface RequestItemWithApprovals extends RequestItem {
    * than an inner join that would make the request disappear with the person.
    */
   requesterName?: string | null;
+  /**
+   * The current assignee's display name, resolved for the caller.
+   *
+   * The assignee is the person a pending request is WAITING ON, so this is the field that answers "whose
+   * desk is this sitting on" — and it was a uuid, which answers nothing. Chased from the drawer, where an
+   * approver looking at somebody else's queue could not tell whether it was theirs.
+   *
+   * Null in two distinct cases, deliberately collapsed into one: the request has no assignee at all —
+   * normal, since an unassigned pending request may be decided by any holder of the step's permission —
+   * or it has one whose employee row is gone. Neither is an error and neither can be shown as a name, so
+   * the caller renders a dash either way; `assigneeId` is still there to distinguish them.
+   */
+  assigneeName?: string | null;
 }
 
 export interface SubmitRequestOptions {

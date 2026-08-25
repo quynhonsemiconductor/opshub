@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { Snowflake } from 'lucide-react';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
-import { formatDate, formatDateTime, todayIso } from '@/shared/lib/format';
+import { formatDate, formatDateTime, orDash, todayIso } from '@/shared/lib/format';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { Badge, PanelAction, StatusBadge, humanizeStatus, statusTone } from '@/shared/ui';
 import { ACTION_NEXT_ACTIONS, type ManagementReview, type ReviewAgenda } from './review.types';
@@ -196,7 +196,15 @@ export function ReviewActionsPanel({ review }: { review: ManagementReview }) {
               <StatusBadge tone={statusTone(action.status)}>
                 {humanizeStatus(action.status)}
               </StatusBadge>
-              <span className={`ml-auto text-xs ${overdue ? 'text-warning' : 'text-fg-subtle'}`}>
+              {/* WHO is answerable, by name. §9.3.3 outputs exist to be followed up and this card
+                  said the category, the status and the date but never the person — so it could report
+                  an action three weeks overdue without saying overdue on whom. */}
+              <span className="ml-auto truncate text-xs text-fg-subtle">
+                {orDash(action.ownerName)}
+              </span>
+              {/* `shrink-0` because the owner name beside it truncates instead: a date that wraps
+                  or clips is unreadable, and a long name is still recognisable cut short. */}
+              <span className={`shrink-0 text-xs ${overdue ? 'text-warning' : 'text-fg-subtle'}`}>
                 {action.dueOn ? `Due ${formatDate(action.dueOn)}` : 'No due date'}
               </span>
             </div>

@@ -38,14 +38,18 @@ import {
  * Exported so the non-conformance controller can render a finding's CAPAs with the SAME shape.
  *
  * A second mapper is how one of them silently stops emitting a field a screen reads.
+ *
+ * `ownerName` is optional on the way in and always present on the way out: the read paths resolve it,
+ * the transition routes do not, because the SPA throws their responses away and refetches.
  */
-export function toCapaDto(c: Capa): CapaResponseDto {
+export function toCapaDto(c: Capa & { ownerName?: string | null }): CapaResponseDto {
   return {
     id: c.id,
     reference: c.reference,
     nonconformanceId: c.nonconformanceId,
     status: c.status,
     ownerId: c.ownerId,
+    ownerName: c.ownerName ?? null,
     rootCause: c.rootCause,
     rootCauseMethod: c.rootCauseMethod,
     actionPlan: c.actionPlan,
@@ -59,7 +63,7 @@ export function toCapaDto(c: Capa): CapaResponseDto {
   };
 }
 
-function toRowDto(r: CapaRow): CapaRowResponseDto {
+function toRowDto(r: CapaRow & { ownerName?: string | null }): CapaRowResponseDto {
   return {
     ...toCapaDto(r),
     nonconformanceReference: r.nonconformanceReference,
@@ -130,7 +134,9 @@ export class CapaController {
   @ApiOkResponse({ type: CapaResponseDto })
   @ApiCommonErrors(401, 403, 404)
   async getOne(@Param('id', ParseUUIDPipe) id: string): Promise<CapaResponseDto> {
-    return toCapaDto(await this.service.getById(id));
+    // `getWithOwner`, not `getById` — see its docblock for why the guard the transitions share was not
+    // widened to do this.
+    return toCapaDto(await this.service.getWithOwner(id));
   }
 
   @Post(':id/analysis')

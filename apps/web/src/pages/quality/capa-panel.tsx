@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CircleCheck, RotateCcw } from 'lucide-react';
-import { formatDate } from '@/shared/lib/format';
+import { formatDate, orDash } from '@/shared/lib/format';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { Badge, PanelAction, StatusBadge, humanizeStatus, statusTone } from '@/shared/ui';
 import type { Capa, Nonconformance } from './quality.types';
@@ -50,7 +50,11 @@ export function CapaCard({
             <RotateCcw className="h-3 w-3" aria-hidden="true" /> Re-analysis
           </Badge>
         )}
-        <span className="ml-auto text-xs text-fg-subtle">
+        {/* WHO is answerable, by name. The card showed no owner at all, which reads worse than a
+            uuid would: `verify` and `ineffective` are withheld from the owner, so somebody looking at
+            a card with no sign-off button had nothing on screen explaining why. */}
+        <span className="ml-auto truncate text-xs text-fg-subtle">{orDash(capa.ownerName)}</span>
+        <span className="shrink-0 text-xs text-fg-subtle">
           {capa.dueOn ? `Due ${formatDate(capa.dueOn)}` : 'No due date'}
         </span>
       </div>

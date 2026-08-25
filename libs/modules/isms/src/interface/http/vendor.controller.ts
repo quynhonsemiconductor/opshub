@@ -42,7 +42,7 @@ import {
   VendorRowResponseDto,
 } from './dto/vendor.dto';
 
-function toDto(v: Vendor): VendorResponseDto {
+function toDto(v: Vendor & { ownerName?: string | null }): VendorResponseDto {
   return {
     id: v.id,
     reference: v.reference,
@@ -52,6 +52,9 @@ function toDto(v: Vendor): VendorResponseDto {
     criticality: v.criticality,
     status: v.status,
     ownerId: v.ownerId,
+    // Absent on the write paths and on the critical-without-risk report, none of which render an
+    // owner — see `VendorResponseDto.ownerName`. Never `?? v.ownerId`: that puts the uuid back.
+    ownerName: v.ownerName ?? null,
     dataProcessor: v.dataProcessor,
     dataProcessingAgreementId: v.dataProcessingAgreementId,
     dataLocation: v.dataLocation,
@@ -65,7 +68,7 @@ function toDto(v: Vendor): VendorResponseDto {
   };
 }
 
-function toRowDto(r: VendorRow): VendorRowResponseDto {
+function toRowDto(r: VendorRow & { ownerName?: string | null }): VendorRowResponseDto {
   return {
     ...toDto(r),
     criticalityRank: r.criticalityRank,
@@ -233,7 +236,9 @@ export class VendorController {
   @ApiOkResponse({ type: VendorResponseDto })
   @ApiCommonErrors(401, 403, 404)
   async getOne(@Param('id', ParseUUIDPipe) id: string): Promise<VendorResponseDto> {
-    return toDto(await this.service.getById(id));
+    // The read path, so it resolves the owner's name. `getById` is the write-path guard and stays
+    // free of the lookup.
+    return toDto(await this.service.getByIdWithOwner(id));
   }
 
   @Patch(':id')
@@ -382,6 +387,10 @@ export class VendorController {
   @ApiCommonErrors(401, 403, 404)
   async risks(@Param('id', ParseUUIDPipe) id: string): Promise<RiskResponseDto[]> {
     // The risk register's own mapper, imported rather than reimplemented.
+    //
+    // `ownerName` therefore comes back null here, deliberately: the supplier drawer's risk panel
+    // shows the reference, the scores and the status, and resolving a name no screen prints would be
+    // a query per supplier for nothing. The register's own list and single read do resolve it.
     return (await this.service.listRisks(id)).map(toRiskDto);
   }
 

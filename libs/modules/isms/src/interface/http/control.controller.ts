@@ -61,7 +61,7 @@ function toControlDto(c: Control): ControlResponseDto {
   };
 }
 
-function toEntryDto(e: SoaEntry): SoaEntryResponseDto {
+function toEntryDto(e: SoaEntry & { ownerName?: string | null }): SoaEntryResponseDto {
   return {
     id: e.id,
     controlId: e.controlId,
@@ -71,12 +71,15 @@ function toEntryDto(e: SoaEntry): SoaEntryResponseDto {
     implementationNote: e.implementationNote,
     evidenceDocumentId: e.evidenceDocumentId,
     ownerId: e.ownerId,
+    // Absent when the statement was just written or a review was just stamped, neither of which
+    // renders an owner — see `SoaEntryResponseDto.ownerName`. Never `?? e.ownerId`.
+    ownerName: e.ownerName ?? null,
     lastReviewedAt: e.lastReviewedAt?.toISOString() ?? null,
     reviewDueOn: e.reviewDueOn,
   };
 }
 
-function toRowDto(r: SoaRow): SoaRowResponseDto {
+function toRowDto(r: SoaRow & { ownerName?: string | null }): SoaRowResponseDto {
   return {
     ...toEntryDto(r),
     controlReference: r.controlReference,
@@ -161,7 +164,9 @@ export class ControlController {
   async getEntry(
     @Param('controlId', ParseUUIDPipe) controlId: string,
   ): Promise<SoaEntryResponseDto> {
-    return toEntryDto(await this.service.getEntry(controlId));
+    // The read path, so it resolves the owner's name. `getEntry` is the guard `markReviewed` calls
+    // and stays free of the lookup.
+    return toEntryDto(await this.service.getEntryWithOwner(controlId));
   }
 
   @Put('soa/:controlId')

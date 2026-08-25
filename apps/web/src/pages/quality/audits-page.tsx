@@ -345,7 +345,17 @@ export function AuditsPage() {
                 },
                 {
                   label: 'Lead auditor',
-                  value: <span className="font-mono text-xs">{selected.leadAuditorId}</span>,
+                  // The NAME: §9.2.2 makes the lead accountable for the engagement, so a uuid here
+                  // named nobody on the one line that has to name somebody.
+                  value: (
+                    <span>
+                      {orDash(selected.leadAuditorName)}
+                      {/* The uuid stays, secondary: it is what somebody quotes in a ticket. */}
+                      <span className="ml-2 font-mono text-2xs text-fg-subtle">
+                        {selected.leadAuditorId}
+                      </span>
+                    </span>
+                  ),
                 },
                 { label: 'Objective', wide: true, value: selected.objective },
                 { label: 'Scope', wide: true, value: selected.scope },

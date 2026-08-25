@@ -42,6 +42,9 @@ function toApprovalDto(
     requestId: a.requestId,
     step: a.step,
     approverId: a.approverId,
+    // Null rather than the id when the approver's employee row is gone: falling back to the uuid would
+    // put back the very thing the name replaced.
+    approverName: a.approverName ?? null,
     decision: a.decision,
     note: a.note,
     delegatedFromId: a.delegatedFromId,
@@ -56,6 +59,9 @@ function toDto(r: RequestItemWithApprovals): RequestItemResponseDto {
     requesterId: r.requesterId,
     requesterName: r.requesterName ?? null,
     assigneeId: r.assigneeId,
+    // Null covers both an unassigned request and an assignee whose employee row is gone; the client shows
+    // a dash for either, and `assigneeId` is what tells them apart.
+    assigneeName: r.assigneeName ?? null,
     status: r.status,
     priority: r.priority,
     payload: r.payload,

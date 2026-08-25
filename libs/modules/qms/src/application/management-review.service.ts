@@ -5,6 +5,8 @@ import {
   InjectDrizzle,
   NotFoundException,
   PreconditionFailedException,
+  nameOf,
+  resolveEmployeeNames,
   type DrizzleDB,
 } from '@platform';
 import { today, type Actor, REPORT_ROW_LIMIT } from '@shared-kernel';
@@ -198,8 +200,37 @@ export class ManagementReviewService {
     return review;
   }
 
+  /**
+   * One review with its chair named — the single-record read path.
+   *
+   * Separate from `getById` rather than folded into it, because that one is the guard every write path
+   * calls first (update, hold, close, cancel and `raiseAction`) and none of them render a chair.
+   * Widening it would have put a directory query in front of five mutations — including `hold`, which
+   * is already the heaviest call in the module because it assembles the whole §9.3.2 agenda.
+   */
+  async getWithChair(id: string): Promise<ManagementReview & { chairName: string | null }> {
+    const review = await this.getById(id);
+    const names = await resolveEmployeeNames(this.db, [review.chairId]);
+    return { ...review, chairName: nameOf(names, review.chairId) };
+  }
+
   async list(filters: ReviewFilters, limit: number, offset: number) {
-    return this.repo.list(filters, limit, offset);
+    const page = await this.repo.list(filters, limit, offset);
+    /*
+     * CHAIR NAMES for the whole page, in one query.
+     *
+     * §9.3 makes the chair the accountable party for the review, and the drawer rendered that as a
+     * uuid. The programme screen reads its drawer's subject out of THIS list rather than re-fetching,
+     * so this is the resolution the user actually sees.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      page.rows.map((r) => r.chairId),
+    );
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({ ...r, chairName: nameOf(names, r.chairId) })),
+    };
   }
 
   async update(id: string, input: UpdateReviewInput, actor: Actor): Promise<ManagementReview> {
@@ -337,7 +368,24 @@ export class ManagementReviewService {
   }
 
   async listActions(filters: ActionFilters, limit: number, offset: number) {
-    return this.repo.listActions(filters, limit, offset);
+    const page = await this.repo.listActions(filters, limit, offset);
+    /*
+     * OWNER NAMES for the whole page, in one query.
+     *
+     * §9.3.3 outputs exist to be followed up, and following one up means knowing who to ask. The
+     * action card showed the category, the status and the due date but not the person, so the queue
+     * could say an action was three weeks overdue without saying overdue on whom.
+     *
+     * NOT done on `carriedForward` — see that method.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      page.rows.map((r) => r.ownerId),
+    );
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({ ...r, ownerName: nameOf(names, r.ownerId) })),
+    };
   }
 
   async updateAction(
@@ -388,7 +436,16 @@ export class ManagementReviewService {
     );
   }
 
-  /** Open actions from earlier reviews — the §9.3.2(a) input, also readable on its own. */
+  /**
+   * Open actions from earlier reviews — the §9.3.2(a) input, also readable on its own.
+   *
+   * DELIBERATELY NOT NAME-RESOLVED, unlike `listActions`. These rows are also what `assembleAgenda`
+   * freezes onto a held review, and `ReviewAgenda` is narrowed to counts and references on purpose:
+   * holding `management_review.read` must not become a way to read the registers' own detail. Adding
+   * a directory name here would put employee display names behind that permission and bake them into
+   * an immutable snapshot as well. The screen that renders these is a banner of references, not a
+   * work queue, so it does not ask who owns them.
+   */
   async carriedForward(limit = CARRIED_FORWARD_LIMIT): Promise<CarriedForwardAction[]> {
     return this.repo.carriedForward(null, limit);
   }

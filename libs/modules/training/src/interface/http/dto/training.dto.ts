@@ -142,6 +142,17 @@ export class RequirementResponseDto {
 export class TrainingRecordResponseDto {
   id!: string;
   employeeId!: string;
+  /**
+   * Who completed the course, resolved server-side. Null when the employee row is gone — a training
+   * record outlives the person who earned it, because "was this person trained when they did the
+   * work" is a question an ISO competency audit asks about people who have since left. A left
+   * lookup, never a join: an inner join would drop the record along with them.
+   *
+   * Null on the WRITE responses too (record, verify, revoke), deliberately. Those hand the row back
+   * to a caller who just supplied the employee id, so resolving it would tell them what they passed
+   * in — one directory query per mutation to restate the request.
+   */
+  employeeName!: string | null;
   courseId!: string;
   completedOn!: string;
   expiresOn!: string | null;
@@ -187,6 +198,16 @@ export class DownloadUrlResponseDto {
 
 export class CompetencyGapResponseDto {
   employeeId!: string;
+  /**
+   * Who is missing the training, resolved server-side. Null when the employee row is gone; the gap
+   * report is read from `employee_positions`, so a stale assignment can outlive the directory row it
+   * points at, and a left lookup keeps the finding visible instead of quietly dropping it.
+   *
+   * Sent because the report exists to be acted on — somebody has to be booked onto a course — and a
+   * column of uuids names nobody to book. `CoverageGapResponseDto` next door carries the same field
+   * for the same reason; it just gets it from a join, because that report drives off `employees`.
+   */
+  employeeName!: string | null;
   positionId!: string;
   courseId!: string;
   courseCode!: string;

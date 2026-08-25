@@ -580,7 +580,11 @@ describe('RequestEngine.expire()', () => {
 });
 
 /*
- * NOT TESTED HERE: that `list()` resolves requester names in ONE query rather than one per row.
+ * NOT TESTED HERE: that `list()` resolves the names on a page in ONE query rather than one per row.
+ *
+ * Three sets of ids ride that single lookup now — requesters, assignees, and the approver on every
+ * recorded decision — so the property this note is about got more valuable, not less: the obvious wrong
+ * implementation is now three queries per page instead of one, or worse, one per approval row.
  *
  * It is the property that separates the implementation from the obvious wrong one, and it is invisible
  * from outside — the response is byte-identical either way. I tried twice and shipped neither:

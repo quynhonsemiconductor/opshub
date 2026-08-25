@@ -137,12 +137,23 @@ export class ShadowItDetectionService {
    * `/v1/compliance/findings`, which pages.
    */
   async listShadowItFindings(limit = 50): Promise<(typeof complianceFindings.$inferSelect)[]> {
-    const { like } = await import('drizzle-orm');
-    return this.db
-      .select()
-      .from(complianceFindings)
-      .where(like(complianceFindings.source, 'shadow-it:%'))
-      .orderBy(complianceFindings.detectedAt, complianceFindings.id)
-      .limit(limit);
+    const { like, desc } = await import('drizzle-orm');
+    return (
+      this.db
+        .select()
+        .from(complianceFindings)
+        .where(like(complianceFindings.source, 'shadow-it:%'))
+        /*
+         * DESCENDING. This was ascending, which combined with the `limit` returned the OLDEST fifty
+         * detections — while the docblock above calls it "the most-recent SAMPLE" and the screen prints
+         * "most recent first" underneath the table. So the one thing a detection screen exists for,
+         * noticing what has just appeared, was the one thing it could not show; a tenant with more than
+         * fifty findings saw a frozen list of its earliest ones.
+         *
+         * `id` still breaks the tie, so the order stays total and a page cannot lose or repeat a row.
+         */
+        .orderBy(desc(complianceFindings.detectedAt), desc(complianceFindings.id))
+        .limit(limit)
+    );
   }
 }

@@ -44,7 +44,9 @@ import {
  *
  * A second mapper is how one of them silently stops emitting a field that a screen reads.
  */
-export function toRiskDto(r: Risk): RiskResponseDto {
+export function toRiskDto(
+  r: Risk & { ownerName?: string | null; acceptedByName?: string | null },
+): RiskResponseDto {
   return {
     id: r.id,
     reference: r.reference,
@@ -53,6 +55,9 @@ export function toRiskDto(r: Risk): RiskResponseDto {
     category: r.category,
     assetId: r.assetId,
     ownerId: r.ownerId,
+    // Absent on the write paths and on the supplier's linked-risk list, none of which render an
+    // owner — see `RiskResponseDto.ownerName`. Never `?? r.ownerId`: that puts the uuid back.
+    ownerName: r.ownerName ?? null,
     inherentLikelihood: r.inherentLikelihood,
     inherentImpact: r.inherentImpact,
     inherentScore: r.inherentScore,
@@ -63,6 +68,7 @@ export function toRiskDto(r: Risk): RiskResponseDto {
     status: r.status,
     reviewDueOn: r.reviewDueOn,
     acceptedBy: r.acceptedBy,
+    acceptedByName: r.acceptedByName ?? null,
     acceptedAt: r.acceptedAt?.toISOString() ?? null,
     acceptanceJustification: r.acceptanceJustification,
     acceptedViaRequestId: r.acceptedViaRequestId,
@@ -148,7 +154,9 @@ export class RiskController {
   @ApiOkResponse({ type: RiskResponseDto })
   @ApiCommonErrors(401, 403, 404)
   async getById(@Param('id', ParseUUIDPipe) id: string): Promise<RiskResponseDto> {
-    return toRiskDto(await this.service.getRisk(id));
+    // The read path, so it resolves the owner's name. `getRisk` is the write-path guard and stays
+    // free of the lookup.
+    return toRiskDto(await this.service.getRiskWithOwner(id));
   }
 
   @Patch(':id')

@@ -60,6 +60,8 @@ interface ReviewRow {
   reference: string;
   status: string;
   chairId: string;
+  /** Resolved server-side on the READ paths. Null only when the employee row is gone. */
+  chairName: string | null;
   scheduledFor: string | null;
   heldOn: string | null;
   inputs: Agenda | null;
@@ -94,6 +96,8 @@ interface ActionRow {
   category: string;
   status: string;
   ownerId: string;
+  /** Resolved server-side on the READ paths. Null only when the employee row is gone. */
+  ownerName: string | null;
   dueOn: string | null;
   completedAt: string | null;
   outcomeNote: string | null;
@@ -203,6 +207,73 @@ describe('the composed agenda', () => {
     );
     expect(raw).not.toContain('ownerId');
     expect(raw).not.toContain('description');
+  });
+});
+
+describe('naming the chair and the action owners', () => {
+  /*
+   * WHY THIS IS ASSERTED AT ALL. §9.3 makes the chair the accountable party for the review and §9.3.3
+   * makes every output somebody's to deliver, and the drawer rendered `chairId` as a uuid while the
+   * action card named nobody at all — so a queue could report an action three weeks overdue without
+   * saying overdue on whom. The API has to answer it: `GET /v1/employees` needs `employee.read`, which
+   * `management_review.read` does not imply.
+   */
+  it('names the chair on the programme row and on the single review', async () => {
+    const review = await scheduleReview();
+
+    const list = await apiRequest(
+      app,
+      security,
+      'GET',
+      `/management-reviews?search=${review.reference}&limit=100`,
+    );
+    expect(list.status, JSON.stringify(list.body)).toBe(200);
+    // Matched on the EXACT reference, not `[0]`: `search` is a substring match and these references
+    // are sequential, so `E2E-MR-X-1` also matches `E2E-MR-X-10`.
+    const row = unwrap<ReviewListRow[]>(list.body).find((r) => r.reference === review.reference);
+    expect(row, `no programme row for ${review.reference}`).toBeDefined();
+    expect(
+      row!.chairName,
+      `review ${row!.reference} came back with chair ${row!.chairId} and no name`,
+    ).toBeTruthy();
+
+    // The single-review read is a SEPARATE service method — `getWithChair`, added rather than widening
+    // the `getById` that update, hold, close, cancel and `raiseAction` all share — so it needs its own
+    // assertion. One of the two quietly showing a uuid is what this change exists to end.
+    const one = await apiRequest(app, security, 'GET', `/management-reviews/${review.id}`);
+    expect(one.status).toBe(200);
+    expect(unwrap<ReviewRow>(one.body).chairName).toBe(row!.chairName);
+  });
+
+  it('names the action owner, who is not the chair', async () => {
+    // Not held first, on purpose: the API accepts an action on a `scheduled` review, so this case
+    // costs nothing to set up and does not drag the whole §9.3.2 agenda assembly in behind it.
+    const review = await scheduleReview();
+    const action = await raiseAction(review.id);
+
+    const list = await apiRequest(
+      app,
+      security,
+      'GET',
+      `/management-reviews/actions?managementReviewId=${review.id}`,
+    );
+    expect(list.status, JSON.stringify(list.body)).toBe(200);
+    const row = unwrap<ActionRow[]>(list.body).find((a) => a.id === action.id);
+    expect(row, 'the action just raised is not in the follow-up queue').toBeDefined();
+    expect(
+      row!.ownerName,
+      `action ${row!.id} came back with owner ${row!.ownerId} and no name`,
+    ).toBeTruthy();
+
+    /*
+     * The owner is HR and the chair is SECURITY, so this pins that the lookup reads the ACTION's
+     * `ownerId` and not the review's `chairId`. Both are employee columns reachable from the same join,
+     * and a resolver on the wrong one would still hand back a name for every row.
+     */
+    const chairName = unwrap<ReviewRow>(
+      (await apiRequest(app, security, 'GET', `/management-reviews/${review.id}`)).body,
+    ).chairName;
+    expect(row!.ownerName).not.toBe(chairName);
   });
 });
 

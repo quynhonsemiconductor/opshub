@@ -7,6 +7,8 @@ import {
   NotFoundException,
   PreconditionFailedException,
   assertDateOrder,
+  nameOf,
+  resolveEmployeeNames,
   type DrizzleDB,
 } from '@platform';
 import type { Actor } from '@shared-kernel';
@@ -125,8 +127,38 @@ export class InternalAuditService {
     return audit;
   }
 
+  /**
+   * One audit with its lead auditor named — the single-record read path.
+   *
+   * Separate from `getById` rather than folded into it, because that one is the guard nine write paths
+   * call first (update, start, report, close, cancel, and both roster changes) and none of them render
+   * a lead. Widening it would have added a directory query to every one of them to serve one drawer.
+   */
+  async getWithLeadAuditor(
+    id: string,
+  ): Promise<InternalAudit & { leadAuditorName: string | null }> {
+    const audit = await this.getById(id);
+    const names = await resolveEmployeeNames(this.db, [audit.leadAuditorId]);
+    return { ...audit, leadAuditorName: nameOf(names, audit.leadAuditorId) };
+  }
+
   async list(filters: InternalAuditFilters, limit: number, offset: number) {
-    return this.repo.list(filters, limit, offset);
+    const page = await this.repo.list(filters, limit, offset);
+    /*
+     * LEAD AUDITOR NAMES for the whole page, in one query.
+     *
+     * The programme's drawer reads its subject out of this list rather than re-fetching it, so this is
+     * the resolution the screen actually renders. Server-side because `GET /v1/employees` needs
+     * `employee.read`, which `internal_audit.read` does not imply.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      page.rows.map((r) => r.leadAuditorId),
+    );
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({ ...r, leadAuditorName: nameOf(names, r.leadAuditorId) })),
+    };
   }
 
   async update(id: string, input: UpdateAuditInput, actor: Actor): Promise<InternalAudit> {
@@ -299,9 +331,26 @@ export class InternalAuditService {
     });
   }
 
-  async listAuditors(id: string): Promise<InternalAuditAuditor[]> {
+  /**
+   * The roster, with each person named.
+   *
+   * The roster's whole job is to say WHO audited this engagement — it is what the §9.2.2(c)
+   * impartiality rule reads, and adding somebody to it takes a decision away from them later. It
+   * rendered a column of uuids, so the one screen where knowing the person matters most named nobody.
+   *
+   * One query for the whole roster, and the names are keyed on `auditorId` — NOT on `addedBy`, which
+   * is the other employee column on the same row and would give every entry the same name.
+   */
+  async listAuditors(
+    id: string,
+  ): Promise<(InternalAuditAuditor & { auditorName: string | null })[]> {
     await this.getById(id);
-    return this.repo.listAuditors(id);
+    const rows = await this.repo.listAuditors(id);
+    const names = await resolveEmployeeNames(
+      this.db,
+      rows.map((r) => r.auditorId),
+    );
+    return rows.map((r) => ({ ...r, auditorName: nameOf(names, r.auditorId) }));
   }
 
   // ── Findings ─────────────────────────────────────────────────────────────────

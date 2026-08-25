@@ -63,6 +63,7 @@ interface AssetRow {
   type: string;
   classification: string;
   ownerId: string;
+  ownerName: string | null;
   custodianId: string | null;
   confidentiality: number;
   integrity: number;
@@ -805,6 +806,59 @@ describe('reports and listing', () => {
       ).body,
     );
     expect(rows.map((r) => r.id)).toContain(asset.id);
+  });
+});
+
+describe('naming the owner', () => {
+  /*
+   * WHY THIS IS ASSERTED AT ALL. The drawer showed `ownerId`, so "who owns this information" — the
+   * question the register answers second, after the label, and the one asked of whoever decided the
+   * label and has to answer for it — was answered with thirty-six characters identifying nobody. The
+   * name has to come from the API rather than the SPA: `GET /v1/employees` needs `employee.read`,
+   * which an `information_asset.read` holder is not required to hold, so resolving it in the browser
+   * would hand a 403 and a dash to exactly the roles that need the name.
+   *
+   * BOTH READS ARE ASSERTED because the list and the single record are SEPARATE service methods, and
+   * the single one goes through `getByIdWithOwner` while every write path still goes through the
+   * plain `getById` guard. Asserting only the list is what would let one screen quietly keep the uuid.
+   */
+  it('names the owner in the register and in the single asset', async () => {
+    const asset = await register();
+
+    const listed = unwrap<AssetListRow[]>(
+      (
+        await apiRequest(
+          app,
+          security,
+          'GET',
+          `/information-assets?search=${encodeURIComponent(asset.reference)}&limit=100`,
+        )
+      ).body,
+    );
+    const row = listed.find((r) => r.id === asset.id);
+    expect(row, 'the asset under test is not in the register listing').toBeDefined();
+    expect(
+      row!.ownerName,
+      `asset ${row!.reference} came back with owner ${row!.ownerId} and no name`,
+    ).toBeTruthy();
+
+    const one = await apiRequest(app, security, 'GET', `/information-assets/${asset.id}`);
+    expect(one.status).toBe(200);
+    // The same name from the other method, not merely "some name": both resolve the same id, so a
+    // mismatch would mean one of them is resolving something else.
+    expect(unwrap<AssetRow>(one.body).ownerName).toBe(row!.ownerName);
+  });
+
+  /*
+   * The WRITE paths deliberately do NOT resolve it. Every mutation response here is discarded by the
+   * SPA, which refetches — so resolving a name on registration, an update or a reclassification would
+   * be a directory query nobody reads on nine endpoints. `null` is the correct answer, and
+   * specifically not the uuid: falling back to the id would put back everything this removed.
+   */
+  it('leaves the name off a write response rather than echoing the uuid', async () => {
+    const asset = await register();
+    expect(asset.ownerName).toBeNull();
+    expect(asset.ownerId).toBe(FIXTURE.SECURITY.id);
   });
 });
 

@@ -5,6 +5,8 @@ import {
   InjectDrizzle,
   NotFoundException,
   PreconditionFailedException,
+  nameOf,
+  resolveEmployeeNames,
   type DrizzleDB,
 } from '@platform';
 import type { Actor } from '@shared-kernel';
@@ -139,11 +141,42 @@ export class CapaService {
     return capa;
   }
 
-  async list(filters: CapaFilters, limit: number, offset: number) {
-    return this.repo.list(filters, limit, offset);
+  /**
+   * One CAPA with its owner named — the single-record read path.
+   *
+   * Separate from `getById` rather than folded into it, because that one is the guard every write path
+   * calls first: analysis, plan, start, implemented, verify, ineffective, reopen and cancel all read it
+   * to check a precondition, and not one of them renders an owner. Widening it would have added a
+   * directory query to eight mutations to serve one screen.
+   */
+  async getWithOwner(id: string): Promise<Capa & { ownerName: string | null }> {
+    const capa = await this.getById(id);
+    const names = await resolveEmployeeNames(this.db, [capa.ownerId]);
+    return { ...capa, ownerName: nameOf(names, capa.ownerId) };
   }
 
-  async listForNonconformance(nonconformanceId: string): Promise<Capa[]> {
+  async list(filters: CapaFilters, limit: number, offset: number) {
+    const page = await this.repo.list(filters, limit, offset);
+    /*
+     * OWNER NAMES for the whole page, in one query.
+     *
+     * The CAPA queue is read to answer "what is late and who is on it", and the second half of that
+     * had no answer on screen at all. Resolved here and not in the SPA because `GET /v1/employees`
+     * needs `employee.read`, which this route's `nonconformance.read` does not imply.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      page.rows.map((r) => r.ownerId),
+    );
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({ ...r, ownerName: nameOf(names, r.ownerId) })),
+    };
+  }
+
+  async listForNonconformance(
+    nonconformanceId: string,
+  ): Promise<(Capa & { ownerName: string | null })[]> {
     const finding = await this.findings.findById(nonconformanceId);
     if (!finding) {
       throw new NotFoundException(
@@ -151,7 +184,14 @@ export class CapaService {
         `Non-conformance ${nonconformanceId} not found`,
       );
     }
-    return this.repo.listForNonconformance(nonconformanceId);
+    const rows = await this.repo.listForNonconformance(nonconformanceId);
+    // The finding's drawer renders these with the SAME card as the queue, so it needs the same field.
+    // A card that named the owner in one place and not the other would look like a loading state.
+    const names = await resolveEmployeeNames(
+      this.db,
+      rows.map((r) => r.ownerId),
+    );
+    return rows.map((r) => ({ ...r, ownerName: nameOf(names, r.ownerId) }));
   }
 
   // ── Analysis ─────────────────────────────────────────────────────────────────

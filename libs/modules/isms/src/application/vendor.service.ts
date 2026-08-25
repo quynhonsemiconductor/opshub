@@ -7,6 +7,8 @@ import {
   NotFoundException,
   PreconditionFailedException,
   assertDateOrder,
+  nameOf,
+  resolveEmployeeNames,
   type DrizzleDB,
 } from '@platform';
 import type { Actor } from '@shared-kernel';
@@ -135,8 +137,37 @@ export class VendorService {
     return vendor;
   }
 
+  /**
+   * One supplier, with its owner named — the drawer's read path.
+   *
+   * Separate from `getById` rather than folded into it, because that one is the guard every write
+   * path calls first (update, activate, suspend, reinstate, terminate, assess, link a risk) and none
+   * of those render an owner. Widening it would have added a lookup to nine mutations for one screen.
+   */
+  async getByIdWithOwner(id: string): Promise<Vendor & { ownerName: string | null }> {
+    const vendor = await this.getById(id);
+    const names = await resolveEmployeeNames(this.db, [vendor.ownerId]);
+    return { ...vendor, ownerName: nameOf(names, vendor.ownerId) };
+  }
+
   async list(filters: VendorFilters, limit: number, offset: number) {
-    return this.repo.list(filters, limit, offset);
+    const page = await this.repo.list(filters, limit, offset);
+    /*
+     * OWNER NAMES for the whole page, in one query.
+     *
+     * The relationship owner is who gets asked when an assessment falls overdue or a supplier has to
+     * be suspended, so it is the field the register is read for once the tier is known — and the
+     * drawer answered it with a uuid. Resolved here rather than in the SPA because the directory
+     * endpoint needs `employee.read`, which a `vendor.read` holder is not required to have.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      page.rows.map((r) => r.ownerId),
+    );
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({ ...r, ownerName: nameOf(names, r.ownerId) })),
+    };
   }
 
   async update(id: string, input: UpdateVendorInput, actor: Actor): Promise<Vendor> {

@@ -28,6 +28,8 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { RequestEngine } from '@platform';
+import { REQUEST_TYPE } from '@shared-kernel';
 import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
@@ -35,16 +37,56 @@ let app: NestFastifyApplication;
 let employee: Session;
 /** `hr` holds `request.read`, so it is the unconstrained side of every assertion. */
 let hr: Session;
+/**
+ * Holds `*`, so it can decide any request regardless of type.
+ *
+ * Logged in once here rather than inside the tests that need it: `AUTH_LOGIN` is rate limited, and a
+ * suite that logs the same identity in from three places starts failing on a 429 that has nothing to do
+ * with what it is testing.
+ */
+let admin: Session;
 /** A request owned by the employee, so there is something they legitimately may see. */
 let ownRequestId: string;
 /** A request owned by HR — the thing the employee must NOT be able to reach. */
 let foreignRequestId: string;
+/**
+ * A pending request that HAS an assignee, which nothing else in the suite produces.
+ *
+ * No HTTP route sets one: every caller of `engine.submit` omits `assigneeId`, and the only other writer
+ * is the multi-step advance, which needs an `ApprovalStepDef.resolverFn` and no type defines one. So a
+ * request assigned to a named person can only be made through the engine, and without one the assertion
+ * that the assignee is NAMED would pass against a null.
+ */
+let assignedRequestId: string;
+/** A request that has been decided, so there is an approval row with a real approver on it. */
+let decidedRequestId: string;
 
 interface RequestRow {
   id: string;
   requesterId: string;
   /** Resolved server-side. Null when the requester's employee row is gone. */
   requesterName: string | null;
+  assigneeId: string | null;
+  /** Resolved server-side. Null when the request is unassigned, or the assignee's row is gone. */
+  assigneeName: string | null;
+  approvals?: { step: number; approverId: string; approverName: string | null }[];
+}
+
+async function getRequest(session: Session, id: string): Promise<RequestRow> {
+  const res = await app.inject({
+    method: 'GET',
+    url: `/v1/requests/${id}`,
+    headers: bearer(session),
+  });
+  expect(res.statusCode, res.body).toBe(200);
+  /*
+   * NO `.data` HERE. The list is paged and therefore enveloped; a single request is returned bare, so
+   * reading `.data` off it yields `undefined` and every field assertion then reads a property of
+   * undefined. The shared `unwrap` in support/harness exists for exactly this and falls back to the
+   * body — this file predates it and hand-rolls its own accessors, so the fallback is spelled out.
+   */
+  const body = JSON.parse(res.body) as RequestRow & { data?: RequestRow };
+  return body.data ?? body;
 }
 
 async function listRequests(session: Session, query = ''): Promise<RequestRow[]> {
@@ -61,6 +103,7 @@ beforeAll(async () => {
   app = await createTestApp();
   employee = await login(app, FIXTURE.NO_PERMISSIONS);
   hr = await login(app, FIXTURE.HR);
+  admin = await login(app, FIXTURE.ADMIN);
 
   // File a leave request as the employee: it enters the generic engine, so it is a request
   // they ARE a party to, alongside whatever the seed created for everyone else.
@@ -117,6 +160,51 @@ beforeAll(async () => {
     },
   });
   expect(grantRes.statusCode, grantRes.body).toBe(201);
+
+  /*
+   * The two rows the naming assertions need, both raised through the engine rather than through a domain
+   * route. `catalog_request` is the type used because it is the only one whose lifecycle hooks are inert —
+   * no `onSubmit` validation and an `onApprove` that deliberately does nothing, fulfilment being manual —
+   * so submitting and approving one exercises the request engine and nothing else. Driving a leave request
+   * here instead would have made these cases fail on a working-day rule or an overlapping window, which is
+   * how the offboarding case in this file already went wrong once.
+   */
+  const engine = app.get(RequestEngine);
+  const requester = { sub: FIXTURE.NO_PERMISSIONS.id, email: FIXTURE.NO_PERMISSIONS.email };
+
+  const assigned = await engine.submit(
+    REQUEST_TYPE.CATALOG_REQUEST,
+    {
+      catalogItemId: 'visibility-fixture',
+      catalogItemName: 'Standard laptop',
+      reason: 'assignee name',
+    },
+    requester,
+    // The whole point of this fixture: a request pointed at a NAMED person, so "who is this waiting on"
+    // has an answer that can be got wrong.
+    { assigneeId: FIXTURE.HR.id },
+  );
+  assignedRequestId = assigned.id;
+
+  const toDecide = await engine.submit(
+    REQUEST_TYPE.CATALOG_REQUEST,
+    {
+      catalogItemId: 'visibility-fixture',
+      catalogItemName: 'Standard laptop',
+      reason: 'approver name',
+    },
+    requester,
+  );
+  // Decided by ADMIN and not by the requester: `allowSelfApproval` is false on this type, and an approval
+  // row whose approver is also the requester could not tell the two resolved names apart.
+  const decided = await app.inject({
+    method: 'POST',
+    url: `/v1/requests/${toDecide.id}/approve`,
+    headers: bearer(admin),
+    payload: {},
+  });
+  expect(decided.statusCode, decided.body).toBe(200);
+  decidedRequestId = toDecide.id;
 });
 
 afterAll(async () => {
@@ -171,7 +259,6 @@ describe('request visibility', () => {
      * The resolution stays a LEFT lookup and `requesterName` stays nullable anyway: it costs nothing, and
      * an inner join would make the REQUEST disappear with the employee rather than just the name.
      */
-    const admin = await login(app, FIXTURE.ADMIN);
     const email = `inbox.leaver.${Date.now().toString(36)}@opshub.local`;
 
     const created = await app.inject({
@@ -214,6 +301,75 @@ describe('request visibility', () => {
       rows[0].requesterName,
       'an offboarded requester lost their name, so an access review reads "somebody asked for this"',
     ).toBe('Departing Requester');
+  });
+
+  it('names the assignee a pending request is waiting on', async () => {
+    /*
+     * THE OTHER PERSON ON THE ROW, and the one an approver looks for first. The drawer's Assignee field
+     * rendered `assigneeId` in a monospace font — a bare uuid — so the question it exists to answer,
+     * "whose desk is this sitting on", got 36 characters that do not answer it. An approver checking
+     * whether a request was theirs could not tell without comparing uuids by eye.
+     *
+     * Asserted on the LIST row and on the by-id read both, because they are two separate resolutions in
+     * the engine — `list` batches a page, `loadUnchecked` resolves one request — and the SPA uses each:
+     * the drawer is filled from the list row it was opened from, while the by-id route is what any other
+     * caller of a single request gets. Fixing one and not the other would leave the uuid on screen for
+     * half the callers and pass a test that only looked at the other half.
+     *
+     * Null is NOT the expectation here even though the field is nullable. Nullable covers the unassigned
+     * request, which is a normal pending state, and this fixture is deliberately not that.
+     */
+    const rows = await listRequests(hr, `?requesterId=${FIXTURE.NO_PERMISSIONS.id}&limit=50`);
+    const row = rows.find((r) => r.id === assignedRequestId);
+    expect(row, 'the assigned fixture request is missing from the list').toBeDefined();
+
+    expect(row!.assigneeId, 'the fixture lost its assignee, so this proves nothing').toBe(
+      FIXTURE.HR.id,
+    );
+    expect(
+      row!.assigneeName,
+      'the assignee came back as a uuid only, so the inbox cannot say who the request is waiting on',
+    ).toBe('HR Manager');
+
+    const single = await getRequest(hr, assignedRequestId);
+    expect(
+      single.assigneeName,
+      'the by-id read resolves the assignee separately from the list, and did not resolve it',
+    ).toBe('HR Manager');
+  });
+
+  it('names the approver on each decided step', async () => {
+    /*
+     * THE APPROVAL CHAIN IS THE AUDIT TRAIL OF THE DECISION. It is the record consulted when somebody asks
+     * who granted an access, or approved an absence, or accepted a risk — and every row of it showed
+     * `approverId`, so the trail said that somebody had decided without saying who. An audit trail that
+     * cannot name the decider does not discharge the review it is kept for.
+     *
+     * The approver here is ADMIN and the requester is the unprivileged employee, so a resolution that
+     * accidentally reported the requester's name for both would fail rather than look right.
+     *
+     * Resolved in the same batched lookup as the requester and the assignee, which is why this asserts
+     * from the list: a page of decided requests must not turn into one query per approval row. The
+     * approvals were already being fetched in one query for the whole page, so their approver ids were
+     * in hand and cost nothing to add to the lookup that was happening anyway.
+     */
+    const rows = await listRequests(hr, `?requesterId=${FIXTURE.NO_PERMISSIONS.id}&limit=50`);
+    const row = rows.find((r) => r.id === decidedRequestId);
+    expect(row, 'the decided fixture request is missing from the list').toBeDefined();
+
+    const approvals = row!.approvals ?? [];
+    expect(approvals.length, 'the approval left no row, so there is no trail to name').toBe(1);
+    expect(approvals[0].approverId).toBe(FIXTURE.ADMIN.id);
+    expect(
+      approvals[0].approverName,
+      'the approval history named nobody, so it records that a decision happened and not who made it',
+    ).toBe('Admin User');
+
+    const single = await getRequest(hr, decidedRequestId);
+    expect(
+      single.approvals?.[0]?.approverName,
+      'the by-id read resolves the chain separately from the list, and did not resolve it',
+    ).toBe('Admin User');
   });
 
   it('does not let a requesterId filter widen the narrowing', async () => {

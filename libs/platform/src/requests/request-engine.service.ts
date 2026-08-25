@@ -463,9 +463,27 @@ export class RequestEngine {
         asc(requestApprovals.id),
       );
 
-    const names = await resolveEmployeeNames(this.db, [row.requesterId]);
+    /*
+     * Every person this request points at, in ONE query: the requester, the assignee it is waiting on, and
+     * the approver on each step already decided. One list rather than three calls because the helper
+     * deduplicates — a request an approver also filed is one id, not two — and because the three sets
+     * overlap constantly in a multi-step chain, where step 1's approver is usually step 2's assignee.
+     *
+     * Nulls need no guard here: an unassigned request contributes nothing to the list, and a list with no
+     * ids left costs no query at all.
+     */
+    const names = await resolveEmployeeNames(this.db, [
+      row.requesterId,
+      row.assigneeId,
+      ...approvalRows.map((a) => a.approverId),
+    ]);
 
-    return { ...row, approvals: approvalRows, requesterName: nameOf(names, row.requesterId) };
+    return {
+      ...row,
+      approvals: approvalRows.map((a) => ({ ...a, approverName: nameOf(names, a.approverId) })),
+      requesterName: nameOf(names, row.requesterId),
+      assigneeName: nameOf(names, row.assigneeId),
+    };
   }
 
   /**
@@ -539,31 +557,55 @@ export class RequestEngine {
         : [];
 
     const approvalMap = new Map<string, RequestItemWithApprovals['approvals']>();
+    /*
+     * Collected in the loop that is already walking these rows rather than by a second `.map` over them:
+     * the approvals were fetched for the page, so the approvers on them are known here for free, and
+     * naming them must not cost a query of its own.
+     */
+    const approverIds: string[] = [];
     for (const a of allApprovals) {
       const key = (a as { requestId: string }).requestId;
       (approvalMap.get(key) ?? approvalMap.set(key, []).get(key)!).push(a);
+      approverIds.push((a as { approverId: string }).approverId);
     }
 
     /*
-     * Requester names, in ONE query for the whole page — the same reason the approvals above are
-     * batched. Fifty rows must not become fifty lookups, and the alternative the SPA had was worse: it
-     * showed the uuid, so an approver could not tell who was asking without opening each row.
+     * Every person named on the page, in ONE query — the same reason the approvals above are batched.
+     * Fifty rows must not become fifty lookups, and the alternative the SPA had was worse: it showed the
+     * uuid, so an approver could not tell who was asking without opening each row.
+     *
+     * THREE SETS OF IDS, ONE CALL, on purpose. The requesters, the assignees each pending row is waiting
+     * on, and the approvers on every decision already recorded — the approvals were fetched above, so
+     * their ids were collected on the way past and cost nothing to add. A second `resolveEmployeeNames` would be a
+     * second query for a set that overlaps this one almost entirely: in a multi-step chain the approver of
+     * step 1 is the assignee of step 2, and a request somebody filed for themselves is one id twice. The
+     * helper deduplicates, so the union is cheaper than any split of it.
      *
      * Shared with every other screen that names a person: this was the first place to need it and is
      * no longer the only one.
      */
-    const names = await resolveEmployeeNames(
-      this.db,
-      rows.map((r) => r.requesterId),
-    );
+    const names = await resolveEmployeeNames(this.db, [
+      ...rows.map((r) => r.requesterId),
+      ...rows.map((r) => r.assigneeId),
+      ...approverIds,
+    ]);
 
     return {
       rows: rows.map((r) => ({
         ...r,
-        approvals: approvalMap.get(r.id) ?? [],
+        approvals: (approvalMap.get(r.id) ?? []).map((a) => ({
+          ...a,
+          // The audit trail of the decision, so it has to say WHO decided. Null when that employee's row
+          // is gone: the decision outlives the decider, and a departed approver's is the one a review
+          // comes back to.
+          approverName: nameOf(names, a.approverId),
+        })),
         // Null rather than absent when the employee row is gone: a request outlives its requester, and
         // an offboarded leaver's is the kind an auditor comes back to.
         requesterName: nameOf(names, r.requesterId),
+        // Null for an UNASSIGNED request too, which is a normal pending state rather than a fault — any
+        // holder of the step's permission may decide it. `assigneeId` still tells the two apart.
+        assigneeName: nameOf(names, r.assigneeId),
       })),
       total: count,
     };

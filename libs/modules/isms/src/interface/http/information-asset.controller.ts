@@ -45,7 +45,9 @@ import {
   UpdateInformationAssetDto,
 } from './dto/information-asset.dto';
 
-function toDto(a: InformationAsset): InformationAssetResponseDto {
+function toDto(
+  a: InformationAsset & { ownerName?: string | null; custodianName?: string | null },
+): InformationAssetResponseDto {
   return {
     id: a.id,
     reference: a.reference,
@@ -54,7 +56,11 @@ function toDto(a: InformationAsset): InformationAssetResponseDto {
     type: a.type,
     classification: a.classification,
     ownerId: a.ownerId,
+    // Absent on the write paths, which nothing renders — see `InformationAssetResponseDto.ownerName`.
+    // Never `?? a.ownerId`: that puts the uuid straight back.
+    ownerName: a.ownerName ?? null,
     custodianId: a.custodianId,
+    custodianName: a.custodianName ?? null,
     confidentiality: a.confidentiality,
     integrity: a.integrity,
     availability: a.availability,
@@ -68,7 +74,9 @@ function toDto(a: InformationAsset): InformationAssetResponseDto {
   };
 }
 
-function toRowDto(r: InformationAssetRow): InformationAssetRowResponseDto {
+function toRowDto(
+  r: InformationAssetRow & { ownerName?: string | null; custodianName?: string | null },
+): InformationAssetRowResponseDto {
   return {
     ...toDto(r),
     classificationRank: r.classificationRank,
@@ -211,7 +219,9 @@ export class InformationAssetController {
   @ApiOkResponse({ type: InformationAssetResponseDto })
   @ApiCommonErrors(401, 403, 404)
   async getOne(@Param('id', ParseUUIDPipe) id: string): Promise<InformationAssetResponseDto> {
-    return toDto(await this.service.getById(id));
+    // The read path, so it resolves the owner's name. `getById` is the write-path guard and stays
+    // free of the lookup.
+    return toDto(await this.service.getByIdWithOwner(id));
   }
 
   @Patch(':id')
