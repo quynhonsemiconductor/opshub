@@ -5,7 +5,7 @@ import { UserMinus } from 'lucide-react';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import { activeEmployeeOptions } from '@/shared/api/picker-sources';
-import { formatDate, formatMoney } from '@/shared/lib/format';
+import { formatDate, formatMoney, orDash } from '@/shared/lib/format';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import {
   Badge,
@@ -202,9 +202,11 @@ export function SeatPanel({
       <PanelState
         query={seats}
         count={rows.length}
-        empty="
-          {includeRevoked ? 'No seats have ever been assigned' : 'No seats in use'}
-        "
+        // Braces, not quotes. This read `empty="{…ternary…}"` — a STRING containing the source of a
+        // ternary, so the panel printed `{includeRevoked ? 'No seats have ever been assigned' : …}`
+        // at the user. It survived the browser spec because that literal CONTAINS the substring the
+        // spec matched on, which is the hazard of asserting with a loose `getByText`.
+        empty={includeRevoked ? 'No seats have ever been assigned' : 'No seats in use'}
         error="Failed to load the seats."
       />
 
@@ -213,11 +215,16 @@ export function SeatPanel({
         // uses some of the same words ("Active"), so the rows need a name of their own to be addressable.
         <article
           key={seat.id}
-          aria-label={`Seat ${seat.employeeId}`}
+          // Named by the HOLDER, so a screen reader and a test both address the row the way somebody
+          // deciding whose seat to reclaim would. The id stays the fallback for a leaver whose
+          // directory row has gone, because an unlabelled row is worse than an opaque one.
+          aria-label={`Seat ${seat.employeeName ?? seat.employeeId}`}
           className="rounded-md border border-border bg-surface px-2.5 py-1.5"
         >
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-mono text-xs text-fg">{seat.employeeId}</span>
+            {/* The NAME. Reclaiming a seat is a decision about a person — "does Mai still need
+                Photoshop" — and a uuid cannot be the subject of that sentence. */}
+            <span className="text-xs text-fg">{orDash(seat.employeeName)}</span>
             {seat.revokedAt ? (
               <span className="text-xs text-fg-subtle">revoked {formatDate(seat.revokedAt)}</span>
             ) : (

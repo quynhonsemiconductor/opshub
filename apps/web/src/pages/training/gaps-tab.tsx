@@ -13,7 +13,7 @@ import {
   humanizeStatus,
   type DataTableColumn,
 } from '@/shared/ui';
-import { formatDate } from '@/shared/lib/format';
+import { formatDate, orDash } from '@/shared/lib/format';
 import { useGaps } from './use-training';
 import type { CompetencyGap } from './training.types';
 
@@ -50,7 +50,10 @@ export function GapsTab() {
     {
       key: 'employee',
       header: 'Employee',
-      cell: (gap) => <span className="font-mono text-xs text-fg-muted">{gap.employeeId}</span>,
+      // The NAME. This report is filtered by POSITION as often as by employee, and in that shape it
+      // is a list of different people against the same course — so the column that says which of
+      // them is the whole output, and it cannot be a uuid.
+      cell: (gap) => <span className="text-xs text-fg-muted">{orDash(gap.employeeName)}</span>,
       hideOnMobile: true,
     },
     {

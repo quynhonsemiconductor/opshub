@@ -5,7 +5,7 @@ import { ShieldAlert, UserMinus } from 'lucide-react';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import { activeEmployeeOptions } from '@/shared/api/picker-sources';
-import { formatDate } from '@/shared/lib/format';
+import { formatDate, orDash } from '@/shared/lib/format';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import {
   Badge,
@@ -99,7 +99,15 @@ export function AuditRosterPanel({ audit }: { audit: InternalAudit }) {
           className="flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5"
         >
           <div className="min-w-0 flex-1">
-            <p className="truncate font-mono text-xs text-fg">{auditor.auditorId}</p>
+            {/* The NAME. This list is the one place in the module where knowing the person matters
+                most — being on it bars them from certifying a fix for this audit's findings — and it
+                rendered a column of uuids, so it barred somebody nobody could identify. */}
+            <p className="truncate text-xs text-fg">
+              {orDash(auditor.auditorName)}
+              {/* The uuid stays, secondary: it is what somebody quotes in a ticket, and it is what
+                  distinguishes two people who happen to share a display name. */}
+              <span className="ml-2 font-mono text-2xs text-fg-subtle">{auditor.auditorId}</span>
+            </p>
             <p className="text-xs text-fg-subtle">Added {formatDate(auditor.createdAt)}</p>
           </div>
           <Badge tone={auditor.role === 'lead' ? 'blue' : 'neutral'}>

@@ -42,6 +42,15 @@ export class RequestApprovalResponseDto {
   @ApiProperty() requestId!: string;
   @ApiProperty() step!: number;
   @ApiProperty() approverId!: string;
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'The approver\u2019s display name, resolved server-side. Null when the employee row is ' +
+      'gone: a decision outlives the person who made it, and a departed approver\u2019s is the ' +
+      'one an access review comes back to. Sent because the approval chain is the audit trail ' +
+      'of the decision, so a row showing only a uuid cannot say who said yes.',
+  })
+  approverName!: string | null;
   @ApiProperty() decision!: string;
   @ApiPropertyOptional({ nullable: true }) note!: string | null;
   @ApiPropertyOptional({
@@ -65,6 +74,16 @@ export class RequestItemResponseDto {
   })
   requesterName!: string | null;
   @ApiPropertyOptional({ nullable: true }) assigneeId!: string | null;
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'The current assignee\u2019s display name, resolved server-side. Null in two cases the ' +
+      'caller renders the same way: the request has no assignee at all — normal while pending, ' +
+      'since any holder of the step\u2019s permission may decide it — or the assignee\u2019s employee ' +
+      'row is gone. Sent because the assignee is who a pending request is WAITING ON, which a ' +
+      'uuid does not say; assigneeId still tells the two null cases apart.',
+  })
+  assigneeName!: string | null;
   @ApiProperty() status!: string;
   @ApiProperty() priority!: string;
   @ApiProperty() payload!: Record<string, unknown>;

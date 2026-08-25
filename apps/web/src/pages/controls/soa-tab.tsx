@@ -108,9 +108,14 @@ export function SoaTab() {
     {
       key: 'owner',
       header: 'Owner',
+      // The NAME, not `ownerId`. This is the document an audit opens with and this column is asked
+      // "who owns this control" of every line of it — a uuid per row answered that with nothing. The
+      // id is dropped outright rather than kept alongside: a list cell has no room for both, and the
+      // drawer is where an id gets quoted. `null` here is still "no name for a real owner", which is
+      // NOT the same as the unassigned state below, so the two branches stay separate.
       cell: (row) =>
         row.ownerId ? (
-          <span className="font-mono text-xs text-fg-muted">{row.ownerId}</span>
+          <span className="text-xs text-fg-muted">{orDash(row.ownerName)}</span>
         ) : (
           <span className="text-xs text-fg-subtle">Unassigned</span>
         ),

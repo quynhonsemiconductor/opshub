@@ -382,7 +382,16 @@ export function VendorsPage() {
                 { label: 'Services', wide: true, value: selected.services },
                 {
                   label: 'Owner',
-                  value: <span className="font-mono text-xs">{selected.ownerId}</span>,
+                  value: (
+                    <span>
+                      {orDash(selected.ownerName)}
+                      {/* The uuid stays here, secondary: the drawer has room, and it is what somebody
+                          quotes in a ticket. */}
+                      <span className="ml-2 font-mono text-2xs text-fg-subtle">
+                        {selected.ownerId}
+                      </span>
+                    </span>
+                  ),
                 },
                 {
                   label: 'Data processor',

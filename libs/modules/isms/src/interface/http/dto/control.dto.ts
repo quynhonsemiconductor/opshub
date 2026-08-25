@@ -104,6 +104,21 @@ export class SoaEntryResponseDto {
   implementationNote!: string | null;
   evidenceDocumentId!: string | null;
   ownerId!: string | null;
+  /**
+   * The owner's display name, resolved server-side on the READ paths.
+   *
+   * Nullable for THREE reasons here, and the screen has to keep them apart. `ownerId` is itself
+   * nullable — a statement may be written before anybody is made accountable, and the SoA column says
+   * "Unassigned" for that. An entry also outlives the person who owned the control, so the lookup is a
+   * left one and never a join: last year's statement is the audit evidence and losing it with an
+   * employee row would be far worse than showing no name. And the write paths do not resolve it at
+   * all, because the SPA refetches after a `PUT` or a review.
+   *
+   * Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which a
+   * `control.read` holder is not required to have, and this is a list column — one name per row would
+   * be one request per row.
+   */
+  ownerName!: string | null;
   lastReviewedAt!: string | null;
   reviewDueOn!: string | null;
 }

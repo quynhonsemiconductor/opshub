@@ -82,6 +82,16 @@ export class LicenseAssignmentResponseDto {
   id!: string;
   licenseId!: string;
   employeeId!: string;
+  /**
+   * Who holds the seat, resolved server-side. Null when the employee row is gone — the assignment
+   * outlives them on purpose, because a revoked seat is the row a vendor true-up reconciles against
+   * an invoice, and "who had a Photoshop seat in March" has to stay answerable after a leaver's
+   * directory record has been removed. A left lookup, never a join.
+   *
+   * Null on the assign response too: that write hands the row back to a caller who just supplied the
+   * employee id, and the SPA discards it and refetches the list.
+   */
+  employeeName!: string | null;
   assignedAt!: string;
   revokedAt!: string | null;
   notes!: string | null;

@@ -1,5 +1,5 @@
 import { test } from './support/test';
-import type { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext, Locator } from '@playwright/test';
 import {
   chooseFromPicker,
   csrfHeaders,
@@ -7,6 +7,28 @@ import {
   expectRowSomewhere,
   gotoInShell,
 } from './support/fixtures';
+
+/**
+ * Click one of the drawer's state-transition buttons, having first waited for it to be there.
+ *
+ * WHY THIS EXISTS. Three of the tests below walk a CAPA through consecutive transitions — accept the
+ * plan, start work, mark implemented — and they used to do it with three back-to-back clicks. This was
+ * the only spec in the suite shaped that way, and it is also the only one that failed intermittently in
+ * a full run while passing every time on its own.
+ *
+ * The race: each click fires a mutation, the cache invalidates, and the drawer re-renders its action
+ * buttons from the NEW state. Clicking straight into the next button races that re-render, and
+ * Playwright's actionability check is satisfied by a node that is about to be replaced.
+ *
+ * Waiting for the button to be visible is the right barrier rather than a timeout, because it IS the
+ * state change: `start work` only appears once the plan has been accepted. So this asserts the
+ * transition took effect as a side effect of driving the next one.
+ */
+async function advance(scope: Locator, name: RegExp): Promise<void> {
+  const button = scope.getByRole('button', { name });
+  await expect(button).toBeVisible();
+  await button.click();
+}
 
 /**
  * The non-conformance register and the CAPA loop — the QMS screens whose rules are about rows in ANOTHER
@@ -228,9 +250,9 @@ test.describe('non-conformances', () => {
     await dialog.getByRole('button', { name: /save analysis/i }).click();
     await expect(dialog).toBeHidden();
 
-    await drawer.getByRole('button', { name: /accept plan/i }).click();
-    await drawer.getByRole('button', { name: /start work/i }).click();
-    await drawer.getByRole('button', { name: /mark implemented/i }).click();
+    await advance(drawer, /accept plan/i);
+    await advance(drawer, /start work/i);
+    await advance(drawer, /mark implemented/i);
 
     dialog = page.getByRole('dialog', { name: /^Mark .+ implemented/ });
     await dialog.getByRole('button', { name: /mark implemented/i }).click();
@@ -285,9 +307,9 @@ test.describe('non-conformances', () => {
     await dialog.getByRole('button', { name: /save analysis/i }).click();
     await expect(dialog).toBeHidden();
 
-    await drawer.getByRole('button', { name: /accept plan/i }).click();
-    await drawer.getByRole('button', { name: /start work/i }).click();
-    await drawer.getByRole('button', { name: /mark implemented/i }).click();
+    await advance(drawer, /accept plan/i);
+    await advance(drawer, /start work/i);
+    await advance(drawer, /mark implemented/i);
     const implemented = page.getByRole('dialog', { name: /^Mark .+ implemented/ });
     await implemented.getByRole('button', { name: /mark implemented/i }).click();
     await expect(implemented).toBeHidden();
@@ -315,9 +337,9 @@ test.describe('corrective actions', () => {
     await dialog.getByRole('button', { name: /save analysis/i }).click();
     await expect(dialog).toBeHidden();
 
-    await drawer.getByRole('button', { name: /accept plan/i }).click();
-    await drawer.getByRole('button', { name: /start work/i }).click();
-    await drawer.getByRole('button', { name: /mark implemented/i }).click();
+    await advance(drawer, /accept plan/i);
+    await advance(drawer, /start work/i);
+    await advance(drawer, /mark implemented/i);
     dialog = page.getByRole('dialog', { name: /^Mark .+ implemented/ });
     await dialog.getByRole('button', { name: /mark implemented/i }).click();
     await expect(dialog).toBeHidden();

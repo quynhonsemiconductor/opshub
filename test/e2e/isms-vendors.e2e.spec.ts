@@ -73,6 +73,7 @@ interface VendorRow {
   criticality: string;
   status: string;
   ownerId: string;
+  ownerName: string | null;
   dataProcessor: boolean;
   dataProcessingAgreementId: string | null;
   contractStartsOn: string | null;
@@ -649,6 +650,60 @@ describe('listing', () => {
     expect(row.requiresIndependentEvidence).toBe(true);
     expect(row.lastOutcome).toBe('pass');
     expect(row.lastAssessedAt).not.toBeNull();
+  });
+});
+
+describe('naming the relationship owner', () => {
+  /*
+   * WHY THIS IS ASSERTED AT ALL. The drawer showed `ownerId`, so the field that says who gets asked
+   * when an assessment falls overdue or a supplier has to be suspended — the only actionable name on
+   * the record — was answered with thirty-six characters identifying nobody. The name has to come
+   * from the API rather than the SPA: `GET /v1/employees` needs `employee.read`, which a
+   * `vendor.read` holder is not required to hold, so resolving it in the browser would hand a 403 and
+   * a dash to exactly the roles that need the name.
+   *
+   * BOTH READS ARE ASSERTED because the register list and the single supplier are SEPARATE service
+   * methods — the single one goes through `getByIdWithOwner`, while `getById` stays the write-path
+   * guard for update, activate, suspend, reinstate, terminate and assess. Asserting only the list is
+   * what would let the drawer quietly keep the uuid.
+   */
+  it('names the owner in the register and in the single supplier', async () => {
+    const vendor = await register();
+
+    const listed = unwrap<VendorListRow[]>(
+      (
+        await apiRequest(
+          app,
+          security,
+          'GET',
+          `/vendors?search=${encodeURIComponent(vendor.reference)}&limit=100`,
+        )
+      ).body,
+    );
+    const row = listed.find((r) => r.id === vendor.id);
+    expect(row, 'the supplier under test is not in the register listing').toBeDefined();
+    expect(
+      row!.ownerName,
+      `vendor ${row!.reference} came back with owner ${row!.ownerId} and no name`,
+    ).toBeTruthy();
+
+    const one = await apiRequest(app, security, 'GET', `/vendors/${vendor.id}`);
+    expect(one.status).toBe(200);
+    // The same name from the other method, not merely "some name": both resolve the same id, so a
+    // mismatch would mean one of them is resolving something else.
+    expect(unwrap<VendorRow>(one.body).ownerName).toBe(row!.ownerName);
+  });
+
+  /*
+   * The WRITE paths deliberately do NOT resolve it. Every mutation response here is discarded by the
+   * SPA, which refetches — so resolving a name on registration or a lifecycle move would be a
+   * directory query nobody reads on nine endpoints. `null` is the correct answer, and specifically not
+   * the uuid: falling back to the id would put back everything this removed.
+   */
+  it('leaves the name off a write response rather than echoing the uuid', async () => {
+    const vendor = await register();
+    expect(vendor.ownerName).toBeNull();
+    expect(vendor.ownerId).toBe(FIXTURE.SECURITY.id);
   });
 });
 

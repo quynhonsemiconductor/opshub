@@ -5,6 +5,8 @@ import {
   PreconditionFailedException,
   ErrorCodes,
   InjectDrizzle,
+  nameOf,
+  resolveEmployeeNames,
   type DrizzleDB,
 } from '@platform';
 import { type Actor } from '@shared-kernel';
@@ -139,9 +141,34 @@ export class LicenseService {
     });
   }
 
-  async listAssignments(licenseId: string, includeRevoked = false): Promise<LicenseAssignment[]> {
+  async listAssignments(
+    licenseId: string,
+    includeRevoked = false,
+  ): Promise<(LicenseAssignment & { employeeName: string | null })[]> {
     await this.getById(licenseId);
-    return this.repo.listAssignments(licenseId, includeRevoked);
+    const rows = await this.repo.listAssignments(licenseId, includeRevoked);
+    /*
+     * WHO HOLDS THE SEAT, by name.
+     *
+     * This list is opened to make one decision — whose seat to reclaim — and a uuid per line cannot
+     * support it. The list is not a directory of people who happen to have a licence; it is a bill,
+     * and every active row is money going out every month, so "is Mai still using this" is the only
+     * question asked of it.
+     *
+     * One query for the whole list. Names resolved on the server because `GET /v1/employees` needs
+     * `employee.read`, and the tier that manages licences is `license.manage` — IT_ADMIN happens to
+     * hold both, but a finance-shaped role granted only the licence bundle would have got a 403 and
+     * a panel of dashes, which is the state this replaces.
+     *
+     * A left lookup rather than a join, and that matters more here than most: a REVOKED seat held by
+     * somebody who has since left is exactly the row a vendor true-up reconciles against an invoice,
+     * and a join would delete the evidence along with the person.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      rows.map((r) => r.employeeId),
+    );
+    return rows.map((r) => ({ ...r, employeeName: nameOf(names, r.employeeId) }));
   }
 
   async getUtilization(): Promise<LicenseUtilization[]> {

@@ -75,6 +75,8 @@ interface NcRow {
   status: string;
   processArea: string;
   ownerId: string;
+  /** Resolved server-side on the READ paths. Null only when the employee row is gone. */
+  ownerName: string | null;
   raisedBy: string;
   detectedAt: string;
   containedAt: string | null;
@@ -103,6 +105,8 @@ interface CapaRow {
   nonconformanceId: string;
   status: string;
   ownerId: string;
+  /** Resolved server-side on the READ paths. Null only when the employee row is gone. */
+  ownerName: string | null;
   rootCause: string | null;
   rootCauseMethod: string | null;
   verifiedBy: string | null;
@@ -294,6 +298,81 @@ describe('raising is open to everybody, handling is not', () => {
     });
     expect(res.status).toBe(412);
     expect(errorCode(res.body)).toBe('NONCONFORMANCE_NOT_IN_STATE');
+  });
+});
+
+describe('naming the owner rather than showing a uuid', () => {
+  /*
+   * WHY THIS IS ASSERTED AT ALL. The register's Owner field rendered `ownerId`, so the one question it
+   * exists to answer — who is accountable for this process failure — came back as thirty-six characters
+   * that identify nobody, and worse than nobody on uuid v7, where findings raised the same afternoon
+   * share a time prefix and look alike. The names have to come from the API: `GET /v1/employees` needs
+   * `employee.read`, which `nonconformance.read` does not imply, so a caller who may read the register
+   * and not the directory would get a 403 and a dash — and a page of rows cannot cost a request per row.
+   *
+   * The CREATE response is deliberately left unasserted here. It carries no name, because the SPA
+   * discards it and refetches, so resolving there would be a directory query nobody reads.
+   */
+  it('names the finding owner in the register and in the single finding', async () => {
+    const finding = await raise();
+
+    const list = await apiRequest(
+      app,
+      security,
+      'GET',
+      `/nonconformances?search=${finding.reference}&limit=100`,
+    );
+    expect(list.status, JSON.stringify(list.body)).toBe(200);
+    // Matched on the EXACT reference: `search` is a substring match and these references are
+    // sequential, so taking `[0]` reads a different finding once a run passes ten.
+    const row = unwrap<NcListRow[]>(list.body).find((r) => r.reference === finding.reference);
+    expect(row, `no register row for ${finding.reference}`).toBeDefined();
+    expect(
+      row!.ownerName,
+      `finding ${row!.reference} came back with owner ${row!.ownerId} and no name`,
+    ).toBeTruthy();
+
+    // The single-finding read is a SEPARATE service method from the list — `getRowById`, not `list` —
+    // so it needs its own assertion. One of the two silently showing a uuid is the exact state this
+    // change was made to end, and nothing else in the suite would notice.
+    const one = await apiRequest(app, security, 'GET', `/nonconformances/${finding.id}`);
+    expect(one.status).toBe(200);
+    expect(unwrap<NcListRow>(one.body).ownerName).toBe(row!.ownerName);
+  });
+
+  it('names the CAPA owner in the queue, under its finding, and on its own', async () => {
+    const finding = await raise();
+    const capa = await openCapa(finding.id);
+
+    /*
+     * THREE read paths, three service methods. The queue (`list`) and the finding's drawer
+     * (`listForNonconformance`) render the SAME card component, so one of them omitting the field
+     * would look like a card stuck loading rather than like a bug; and `GET /capas/:id` resolves
+     * through `getWithOwner`, which exists precisely because `getById` is the guard eight transitions
+     * share and none of them render an owner.
+     */
+    const queue = await apiRequest(app, security, 'GET', `/capas?nonconformanceId=${finding.id}`);
+    expect(queue.status, JSON.stringify(queue.body)).toBe(200);
+    const queued = unwrap<CapaRow[]>(queue.body).find((c) => c.id === capa.id);
+    expect(queued, `CAPA ${capa.reference} is not in the queue`).toBeDefined();
+    expect(
+      queued!.ownerName,
+      `CAPA ${capa.reference} came back with owner ${capa.ownerId} and no name`,
+    ).toBeTruthy();
+
+    const underFinding = await apiRequest(
+      app,
+      security,
+      'GET',
+      `/nonconformances/${finding.id}/capas`,
+    );
+    expect(underFinding.status).toBe(200);
+    const nested = unwrap<CapaRow[]>(underFinding.body).find((c) => c.id === capa.id)!;
+    expect(nested.ownerName).toBe(queued!.ownerName);
+
+    const one = await apiRequest(app, security, 'GET', `/capas/${capa.id}`);
+    expect(one.status).toBe(200);
+    expect(unwrap<CapaRow>(one.body).ownerName).toBe(queued!.ownerName);
   });
 });
 

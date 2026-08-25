@@ -6,6 +6,8 @@ import {
   NotFoundException,
   PreconditionFailedException,
   RequestEngine,
+  nameOf,
+  resolveEmployeeNames,
   type DbExecutor,
   type DrizzleDB,
 } from '@platform';
@@ -82,8 +84,55 @@ export class RiskService {
     return risk;
   }
 
+  /**
+   * One risk, with its owner named — the drawer's read path.
+   *
+   * Separate from `getRisk` rather than folded into it, because that one is the guard every write
+   * path calls first (assess, treat, accept, close, update) and none of those render an owner.
+   * Widening it would have added a lookup to eight mutations to serve one screen.
+   */
+  async getRiskWithOwner(
+    id: string,
+  ): Promise<Risk & { ownerName: string | null; acceptedByName: string | null }> {
+    const risk = await this.getRisk(id);
+    // Owner and acceptor together: the drawer shows both, and one query answers both.
+    const names = await resolveEmployeeNames(this.db, [risk.ownerId, risk.acceptedBy]);
+    return {
+      ...risk,
+      ownerName: nameOf(names, risk.ownerId),
+      acceptedByName: nameOf(names, risk.acceptedBy),
+    };
+  }
+
   async listRisks(filters: RiskFilters, limit: number, offset: number) {
-    return this.repo.list(filters, limit, offset);
+    const page = await this.repo.list(filters, limit, offset);
+    /*
+     * OWNER NAMES for the whole page, in one query.
+     *
+     * A risk's owner is the person accountable for carrying or reducing the exposure — the single
+     * fact the register is read for after the score — and the drawer answered it with thirty-six
+     * characters that identify nobody. Resolved here rather than in the SPA because the directory
+     * endpoint needs `employee.read`, and the roles holding an ISMS bundle are exactly the ones not
+     * required to hold it.
+     */
+    /*
+     * `acceptedBy` rides the SAME query. It is the SIGNATURE on a risk acceptance — the one field an
+     * ISO 27001 auditor reads, because accepting an exposure is a decision somebody is answerable
+     * for — and it was rendered as "accepted at <date> by <uuid>". The resolver deduplicates, so a
+     * register where one person accepted twenty risks adds one id, not twenty.
+     */
+    const names = await resolveEmployeeNames(this.db, [
+      ...page.rows.map((r) => r.ownerId),
+      ...page.rows.map((r) => r.acceptedBy),
+    ]);
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({
+        ...r,
+        ownerName: nameOf(names, r.ownerId),
+        acceptedByName: nameOf(names, r.acceptedBy),
+      })),
+    };
   }
 
   async listTreatments(riskId: string): Promise<RiskTreatment[]> {

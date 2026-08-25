@@ -111,7 +111,25 @@ export class InformationAssetResponseDto {
   type!: string;
   classification!: string;
   ownerId!: string;
+  /**
+   * The owner's display name, resolved server-side on the READ paths.
+   *
+   * Nullable although `ownerId` is not, for two reasons. An asset outlives the person who owns it —
+   * the lookup is a left one, never a join, because dropping a registered asset when an employee row
+   * goes would lose the very record a risk assessment and an incident reference. And the write paths
+   * do not resolve it: their responses are refetched by the SPA, so it would be a query nobody reads
+   * added to nine mutations.
+   *
+   * Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which an
+   * `information_asset.read` holder is not required to have.
+   */
+  ownerName!: string | null;
   custodianId!: string | null;
+  /**
+   * WHO operates the controls day to day, as opposed to the owner who decides the classification.
+   * Null when no custodian is named, and when their employee row is gone — the asset outlives them.
+   */
+  custodianName!: string | null;
   confidentiality!: number;
   integrity!: number;
   availability!: number;

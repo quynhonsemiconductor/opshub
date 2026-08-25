@@ -237,6 +237,13 @@ export async function createAccessRequest(request: APIRequestContext): Promise<s
  *
  * Walking also proves the pager works, which is new on every screen this migration touched.
  *
+ * LOOKS INSIDE A ROW, not anywhere on the page. The name says row and it used to accept a match in any
+ * text node, which made it stop paging as soon as the reference appeared in something that was not the
+ * table: the incidents screen prints the references of its five overdue breaches in a banner ABOVE the
+ * list, so a spec whose fixture was overdue matched the banner on page 1, returned, and then failed on
+ * the very next line because the actual row was on page 2. It read as a missing row on a screen that
+ * was displaying the reference twice.
+ *
  * SETTLES BEFORE IT LOOKS, on every page. Called straight after a filter change, the loop otherwise
  * reads the PREVIOUS result set: the row is missing because its page has not arrived yet, and the
  * pager still belongs to the old query — so the loop can page forward off the row it is looking for
@@ -260,7 +267,7 @@ export async function expectRowSomewhere(page: Page, text: string): Promise<void
     await expect(page.getByText('Loading…')).toHaveCount(0, { timeout: 15_000 });
     if (
       await page
-        .getByText(text)
+        .locator('tbody tr', { hasText: text })
         .first()
         .isVisible()
         .catch(() => false)
@@ -275,8 +282,8 @@ export async function expectRowSomewhere(page: Page, text: string): Promise<void
   // spec failed on it once and passed on retry, which is the signature of a timeout rather than a
   // missing row.
   await expect(
-    page.getByText(text).first(),
-    `"${text}" was not on any page of the list`,
+    page.locator('tbody tr', { hasText: text }).first(),
+    `"${text}" was not in a row on any page of the list`,
   ).toBeVisible({ timeout: 15_000 });
 }
 

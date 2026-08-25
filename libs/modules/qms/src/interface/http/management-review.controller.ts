@@ -48,7 +48,11 @@ import {
   UpdateReviewDto,
 } from './dto/qms.dto';
 
-function toDto(r: ManagementReview): ManagementReviewResponseDto {
+/**
+ * `chairName` is optional on the way in and always present on the way out: the read paths resolve it,
+ * the lifecycle routes do not, because the SPA discards their responses and refetches.
+ */
+function toDto(r: ManagementReview & { chairName?: string | null }): ManagementReviewResponseDto {
   return {
     id: r.id,
     reference: r.reference,
@@ -56,6 +60,7 @@ function toDto(r: ManagementReview): ManagementReviewResponseDto {
     period: r.period,
     status: r.status,
     chairId: r.chairId,
+    chairName: r.chairName ?? null,
     scheduledFor: r.scheduledFor,
     heldOn: r.heldOn,
     inputs: r.inputs,
@@ -67,17 +72,22 @@ function toDto(r: ManagementReview): ManagementReviewResponseDto {
   };
 }
 
-function toRowDto(r: ManagementReviewRow): ManagementReviewRowResponseDto {
+function toRowDto(
+  r: ManagementReviewRow & { chairName?: string | null },
+): ManagementReviewRowResponseDto {
   return { ...toDto(r), actionCount: r.actionCount, openActionCount: r.openActionCount };
 }
 
-function toActionDto(a: ManagementReviewAction): ReviewActionResponseDto {
+function toActionDto(
+  a: ManagementReviewAction & { ownerName?: string | null },
+): ReviewActionResponseDto {
   return {
     id: a.id,
     managementReviewId: a.managementReviewId,
     category: a.category,
     description: a.description,
     ownerId: a.ownerId,
+    ownerName: a.ownerName ?? null,
     dueOn: a.dueOn,
     status: a.status,
     completedAt: a.completedAt?.toISOString() ?? null,
@@ -86,7 +96,9 @@ function toActionDto(a: ManagementReviewAction): ReviewActionResponseDto {
   };
 }
 
-function toActionRowDto(r: ReviewActionRow): ReviewActionRowResponseDto {
+function toActionRowDto(
+  r: ReviewActionRow & { ownerName?: string | null },
+): ReviewActionRowResponseDto {
   return { ...toActionDto(r), reviewReference: r.reviewReference, reviewPeriod: r.reviewPeriod };
 }
 
@@ -287,7 +299,9 @@ export class ManagementReviewController {
   @ApiOkResponse({ type: ManagementReviewResponseDto })
   @ApiCommonErrors(401, 403, 404)
   async getOne(@Param('id', ParseUUIDPipe) id: string): Promise<ManagementReviewResponseDto> {
-    return toDto(await this.service.getById(id));
+    // `getWithChair`, not `getById` — see its docblock for why the guard the lifecycle routes share
+    // was not widened to do this.
+    return toDto(await this.service.getWithChair(id));
   }
 
   @Get(':id/agenda')

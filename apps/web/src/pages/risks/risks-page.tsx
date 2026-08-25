@@ -314,7 +314,16 @@ export function RisksPage() {
                 { label: 'Category', value: selected.category },
                 {
                   label: 'Owner',
-                  value: <span className="font-mono text-xs">{selected.ownerId}</span>,
+                  value: (
+                    <span>
+                      {orDash(selected.ownerName)}
+                      {/* The uuid stays here, secondary: the drawer has room, and it is what somebody
+                          quotes in a ticket. */}
+                      <span className="ml-2 font-mono text-2xs text-fg-subtle">
+                        {selected.ownerId}
+                      </span>
+                    </span>
+                  ),
                 },
                 {
                   label: 'Inherent',
@@ -349,7 +358,21 @@ export function RisksPage() {
                   ? [
                       {
                         label: 'Accepted',
-                        value: `${formatDateTime(selected.acceptedAt)} by ${selected.acceptedBy ?? 'unknown'}`,
+                        // BY NAME. This is the signature on the acceptance — the field an auditor reads,
+                        // because carrying an exposure rather than treating it is a decision somebody is
+                        // answerable for — and it used to render the acceptor's uuid. The uuid stays,
+                        // secondary, since it is what gets quoted in a ticket.
+                        value: (
+                          <span>
+                            {formatDateTime(selected.acceptedAt)} by{' '}
+                            {orDash(selected.acceptedByName)}
+                            {selected.acceptedBy ? (
+                              <span className="ml-2 font-mono text-2xs text-fg-subtle">
+                                {selected.acceptedBy}
+                              </span>
+                            ) : null}
+                          </span>
+                        ),
                       },
                       {
                         label: 'Justification',

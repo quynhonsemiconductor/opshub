@@ -72,6 +72,11 @@ interface CourseRow {
 interface RecordRow {
   id: string;
   employeeId: string;
+  /**
+   * Resolved server-side on the READ paths only. Null on the write responses, which is asserted
+   * below — a record hands the row back to a caller who just supplied the employee id.
+   */
+  employeeName: string | null;
   courseId: string;
   completedOn: string;
   expiresOn: string | null;
@@ -83,6 +88,9 @@ interface GapRow {
   courseCode: string;
   kind: string;
   reason: string;
+  employeeId: string;
+  /** Resolved server-side. Null only when the directory row behind the assignment has gone. */
+  employeeName: string | null;
 }
 interface PresignRow {
   fileId: string;
@@ -514,6 +522,103 @@ describe('the competency gap report', () => {
   it('lets an employee see their own gaps with no training permission', async () => {
     const res = await apiRequest(app, subject, 'GET', '/training/me/gaps');
     expect(res.status).toBe(200);
+  });
+});
+
+describe('naming the person a record and a gap are about', () => {
+  /*
+   * Both of these screens are read to answer "who", and both answered it with a uuid.
+   *
+   * The record list is the org-wide view — filtered by COURSE as often as by employee — so its
+   * Employee column is the only thing on a row that says which person completed the training. The
+   * gap report is worse still: filtered by position it is a list of different people against the
+   * same course, so the employee column IS the output.
+   *
+   * Asserted through the API rather than the SPA because the name has to be resolved server-side:
+   * `GET /v1/employees` needs `employee.read`, and `training.read` does not imply it — the AUDITOR
+   * tier below holds one without the other, so a client-side lookup would have given exactly the
+   * caller who reads compliance reports a 403 and a column of dashes.
+   */
+  it('names the employee on every row of the record list', async () => {
+    /*
+     * TWO PEOPLE on ONE course, and the list filtered by that course. A resolver keyed on the wrong
+     * column — the verifier, say, or the course — would hand both rows the same name, and a
+     * single-subject list could not tell the difference.
+     */
+    const course = await createCourse({ validityMonths: null });
+    for (const employeeId of [FIXTURE.SECURITY.id, FIXTURE.NO_PERMISSIONS.id]) {
+      const created = await apiRequest(app, hr, 'POST', '/training/records', {
+        employeeId,
+        courseId: course.id,
+        completedOn: '2026-02-01',
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      // The WRITE deliberately does not resolve: this caller just supplied the employee id, so a
+      // name here would be a directory query spent restating the request. Pinned so it is not
+      // "made consistent" later.
+      expect(unwrap<RecordRow>(created.body).employeeName).toBeNull();
+    }
+
+    const rows = unwrap<RecordRow[]>(
+      (await apiRequest(app, hr, 'GET', `/training/records?courseId=${course.id}&limit=100`)).body,
+    );
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(
+        row.employeeName,
+        `record ${row.id} came back with employee ${row.employeeId} and no name`,
+      ).toBeTruthy();
+    }
+    expect(new Set(rows.map((r) => r.employeeName)).size).toBe(2);
+  });
+
+  it('names them on the single record too', async () => {
+    /*
+     * A separate service method from the list, and deliberately separate from the `getRecord` that
+     * guards verify, revoke and all five certificate routes — so this read needs its own assertion.
+     * One of the two paths quietly showing a uuid is the state this change was made to end.
+     */
+    const course = await createCourse({ validityMonths: null });
+    const created = await apiRequest(app, hr, 'POST', '/training/records', {
+      employeeId: FIXTURE.SECURITY.id,
+      courseId: course.id,
+      completedOn: '2026-02-02',
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const recordId = unwrap<RecordRow>(created.body).id;
+
+    const one = await apiRequest(app, hr, 'GET', `/training/records/${recordId}`);
+    expect(one.status, JSON.stringify(one.body)).toBe(200);
+    const got = unwrap<RecordRow>(one.body);
+    expect(got.employeeName).toBeTruthy();
+    // Not the id dressed up as a name: `nameOf` falls back to null on purpose, because `?? id` is a
+    // one-character mistake that puts the uuid straight back.
+    expect(got.employeeName).not.toBe(got.employeeId);
+  });
+
+  it('names the person who is missing the training, in the gap report', async () => {
+    /*
+     * `2054-01-01` because the assignments in this file are strictly increasing: `positionWithEmployee`
+     * transfers the same subject, and a date behind the open assignment is refused with
+     * `POSITION_INVALID_WINDOW`.
+     */
+    const course = await createCourse({ validityMonths: null });
+    const positionId = await positionWithEmployee('2054-01-01');
+    expect(
+      (
+        await apiRequest(app, hr, 'POST', `/training/positions/${positionId}/requirements`, {
+          courseId: course.id,
+        })
+      ).status,
+    ).toBe(201);
+
+    const gaps = unwrap<GapRow[]>(
+      (await apiRequest(app, hr, 'GET', `/training/gaps?positionId=${positionId}`)).body,
+    );
+    const gap = gaps.find((g) => g.courseCode === course.code);
+    expect(gap, 'the requirement did not produce a gap to name anybody in').toBeDefined();
+    expect(gap!.employeeName, `gap on ${gap!.employeeId} came back with no name`).toBeTruthy();
+    expect(gap!.employeeName).not.toBe(gap!.employeeId);
   });
 });
 

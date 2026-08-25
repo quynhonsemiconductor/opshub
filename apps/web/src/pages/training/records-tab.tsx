@@ -99,8 +99,10 @@ export function RecordsTab() {
     {
       key: 'employee',
       header: 'Employee',
+      // The NAME, not `employeeId`. This column is the only thing on the row that says which person
+      // the record is about, and thirty-six characters of uuid answered that with nothing.
       cell: (record) => (
-        <span className="font-mono text-xs text-fg-muted">{record.employeeId}</span>
+        <span className="text-xs text-fg-muted">{orDash(record.employeeName)}</span>
       ),
       hideOnMobile: true,
     },
@@ -291,7 +293,16 @@ export function RecordsTab() {
                 },
                 {
                   label: 'Employee',
-                  value: <span className="font-mono text-xs">{selected.employeeId}</span>,
+                  value: (
+                    <span>
+                      {orDash(selected.employeeName)}
+                      {/* The uuid stays here, secondary: the drawer has room, and it is what somebody
+                          quotes in a ticket. */}
+                      <span className="ml-2 font-mono text-2xs text-fg-subtle">
+                        {selected.employeeId}
+                      </span>
+                    </span>
+                  ),
                 },
                 // Only shown when it happened: an empty "Revoked because" row on a valid record reads
                 // as a record that was revoked for no stated reason.

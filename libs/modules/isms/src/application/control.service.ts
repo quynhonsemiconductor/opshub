@@ -6,6 +6,8 @@ import {
   InjectDrizzle,
   NotFoundException,
   PreconditionFailedException,
+  nameOf,
+  resolveEmployeeNames,
   type DrizzleDB,
 } from '@platform';
 import type { Actor } from '@shared-kernel';
@@ -177,7 +179,27 @@ export class ControlService {
   }
 
   async listEntries(filters: SoaFilters, limit: number, offset: number) {
-    return this.repo.listEntries(filters, limit, offset);
+    const page = await this.repo.listEntries(filters, limit, offset);
+    /*
+     * OWNER NAMES for the whole page, in one query.
+     *
+     * The highest-value one of these in the module: this is a LIST COLUMN, so the uuid was repeated
+     * once per row down the document an ISO 27001 audit opens with, and "who owns this control" is
+     * the question asked of every line of it. Resolved here rather than in the SPA because the
+     * directory endpoint needs `employee.read`, which a `control.read` holder is not required to
+     * have — and because a name per row would otherwise be a request per row.
+     *
+     * `ownerId` is nullable here, unlike on a risk or an asset. `resolveEmployeeNames` drops nulls
+     * and issues no query at all when a page has none, so an undecided-owner statement costs nothing.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      page.rows.map((r) => r.ownerId),
+    );
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({ ...r, ownerName: nameOf(names, r.ownerId) })),
+    };
   }
 
   async getEntry(controlId: string): Promise<SoaEntry> {
@@ -191,6 +213,19 @@ export class ControlService {
       );
     }
     return entry;
+  }
+
+  /**
+   * One statement entry, with its owner named — the single-entry read path.
+   *
+   * Separate from `getEntry` rather than folded into it, because that one is the guard `markReviewed`
+   * calls first, and stamping a review renders nothing. Widening it would have put a lookup in front
+   * of a mutation whose response the SPA discards.
+   */
+  async getEntryWithOwner(controlId: string): Promise<SoaEntry & { ownerName: string | null }> {
+    const entry = await this.getEntry(controlId);
+    const names = await resolveEmployeeNames(this.db, [entry.ownerId]);
+    return { ...entry, ownerName: nameOf(names, entry.ownerId) };
   }
 
   /** Stamp a review as having happened, and optionally move the next one. */

@@ -41,7 +41,11 @@ import {
   UpdateAuditDto,
 } from './dto/qms.dto';
 
-function toDto(a: InternalAudit): InternalAuditResponseDto {
+/**
+ * `leadAuditorName` is optional on the way in and always present on the way out: the read paths resolve
+ * it, the lifecycle routes do not, because the SPA discards their responses and refetches.
+ */
+function toDto(a: InternalAudit & { leadAuditorName?: string | null }): InternalAuditResponseDto {
   return {
     id: a.id,
     reference: a.reference,
@@ -51,6 +55,7 @@ function toDto(a: InternalAudit): InternalAuditResponseDto {
     criteria: a.criteria,
     status: a.status,
     leadAuditorId: a.leadAuditorId,
+    leadAuditorName: a.leadAuditorName ?? null,
     plannedStartOn: a.plannedStartOn,
     plannedEndOn: a.plannedEndOn,
     startedAt: a.startedAt?.toISOString() ?? null,
@@ -63,7 +68,9 @@ function toDto(a: InternalAudit): InternalAuditResponseDto {
   };
 }
 
-function toRowDto(r: InternalAuditRow): InternalAuditRowResponseDto {
+function toRowDto(
+  r: InternalAuditRow & { leadAuditorName?: string | null },
+): InternalAuditRowResponseDto {
   return {
     ...toDto(r),
     auditorCount: r.auditorCount,
@@ -157,7 +164,9 @@ export class InternalAuditController {
   @ApiOkResponse({ type: InternalAuditResponseDto })
   @ApiCommonErrors(401, 403, 404)
   async getOne(@Param('id', ParseUUIDPipe) id: string): Promise<InternalAuditResponseDto> {
-    return toDto(await this.service.getById(id));
+    // `getWithLeadAuditor`, not `getById` — see its docblock for why the guard the lifecycle routes
+    // share was not widened to do this.
+    return toDto(await this.service.getWithLeadAuditor(id));
   }
 
   @Patch(':id')
@@ -272,6 +281,7 @@ export class InternalAuditController {
   async auditors(@Param('id', ParseUUIDPipe) id: string): Promise<AuditAuditorResponseDto[]> {
     return (await this.service.listAuditors(id)).map((a) => ({
       auditorId: a.auditorId,
+      auditorName: a.auditorName,
       role: a.role,
       addedBy: a.addedBy,
       createdAt: a.createdAt.toISOString(),

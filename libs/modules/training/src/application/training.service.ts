@@ -7,6 +7,8 @@ import {
   NotFoundException,
   PreconditionFailedException,
   assertDateOrder,
+  nameOf,
+  resolveEmployeeNames,
   type AttachmentRef,
   type DrizzleDB,
   type EntityAttachment,
@@ -321,8 +323,45 @@ export class TrainingService {
     return record;
   }
 
+  /**
+   * One record, with the employee it belongs to named — the drawer's read path.
+   *
+   * Separate from `getRecord` rather than folded into it, because that one is the guard nearly every
+   * other path here calls first: verify, revoke, and all five certificate routes go through it, and
+   * `assertMayAttach` in the controller calls it on every upload. None of those render a person's
+   * name. Widening `getRecord` would have bought one screen a name at the cost of a directory lookup
+   * on every attachment presign, confirm, download and delete.
+   */
+  async getRecordWithEmployee(
+    id: string,
+  ): Promise<TrainingRecord & { employeeName: string | null }> {
+    const record = await this.getRecord(id);
+    const names = await resolveEmployeeNames(this.db, [record.employeeId]);
+    return { ...record, employeeName: nameOf(names, record.employeeId) };
+  }
+
   async listRecords(filters: RecordFilters, limit: number, offset: number) {
-    return this.repo.listRecords(filters, limit, offset);
+    const page = await this.repo.listRecords(filters, limit, offset);
+    /*
+     * THE EMPLOYEE COLUMN, by name, for the whole page in one query.
+     *
+     * This list is the org-wide view of who has completed what, so its Employee column is the only
+     * thing that says which person a row is about — and it rendered `employeeId`, thirty-six
+     * characters that identify nobody. Worse here than most, because uuid v7 time-prefixes make the
+     * records filed in one batch look like each other.
+     *
+     * Resolved on the server rather than in the SPA because `GET /v1/employees` needs
+     * `employee.read`, which a `training.read` holder is not required to hold — the auditor tier is
+     * exactly that shape, and it would have got a 403 and a column of dashes.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      page.rows.map((r) => r.employeeId),
+    );
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({ ...r, employeeName: nameOf(names, r.employeeId) })),
+    };
   }
 
   async listRecordsForEmployee(employeeId: string): Promise<TrainingRecord[]> {
@@ -501,13 +540,31 @@ export class TrainingService {
     positionId?: string;
     asOf?: string;
     includeRecommended?: boolean;
-  }): Promise<CompetencyGap[]> {
-    return this.repo.competencyGaps({
+  }): Promise<(CompetencyGap & { employeeName: string | null })[]> {
+    const rows = await this.repo.competencyGaps({
       employeeId: input.employeeId,
       positionId: input.positionId,
       asOf: input.asOf ?? today(),
       includeRecommended: input.includeRecommended ?? false,
     });
+    /*
+     * WHO IS MISSING THE TRAINING, by name.
+     *
+     * Unlike the performance module's coverage-gap report, which drives off `employees` and so gets
+     * `displayName` from the same row it already selects, this query drives off `employee_positions`
+     * and never touches the directory. Adding an inner join to `employees` here would also change
+     * what the report MEANS: a gap would disappear along with the person's row, which is the failure
+     * mode `resolveEmployeeNames` is a left lookup to avoid.
+     *
+     * Filtering by position is the common case — "what is my team missing" — and that returns one
+     * row per person per course, so several rows share an employee. The resolver deduplicates, so a
+     * position with twelve requirements and four holders is four ids, not forty-eight.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      rows.map((r) => r.employeeId),
+    );
+    return rows.map((r) => ({ ...r, employeeName: nameOf(names, r.employeeId) }));
   }
 
   // ── Shared internals ─────────────────────────────────────────────────────────

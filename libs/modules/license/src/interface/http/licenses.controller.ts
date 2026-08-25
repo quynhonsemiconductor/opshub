@@ -60,11 +60,16 @@ function toLicenseDto(l: SoftwareLicense): LicenseResponseDto {
   };
 }
 
-function toAssignmentDto(a: LicenseAssignment): LicenseAssignmentResponseDto {
+function toAssignmentDto(
+  a: LicenseAssignment & { employeeName?: string | null },
+): LicenseAssignmentResponseDto {
   return {
     id: a.id,
     licenseId: a.licenseId,
     employeeId: a.employeeId,
+    // Resolved on the list read, absent on the assign write — one DTO, and the field is nullable
+    // rather than the shape being forked over a single value.
+    employeeName: a.employeeName ?? null,
     assignedAt: a.assignedAt.toISOString(),
     revokedAt: a.revokedAt ? a.revokedAt.toISOString() : null,
     notes: a.notes,

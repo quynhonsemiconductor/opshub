@@ -6,6 +6,8 @@ import {
   InjectDrizzle,
   NotFoundException,
   PreconditionFailedException,
+  nameOf,
+  resolveEmployeeNames,
   type DrizzleDB,
 } from '@platform';
 import type { Actor } from '@shared-kernel';
@@ -143,21 +145,41 @@ export class NonconformanceService {
   }
 
   /**
-   * One finding as the register sees it — grade rules and CAPA counts included.
+   * One finding as the register sees it — grade rules, CAPA counts and the owner's NAME included.
    *
    * The read path for a detail view. Transitions keep using `getById`: they need the row they are about to
    * guard, not the counts, and reading the heavier projection there would compute two subqueries per move.
+   * The owner lookup rides here for the same reason — contain, close and void render nobody, so widening
+   * `getById` would have added a directory read to every transition to serve one drawer.
    */
-  async getRowById(id: string): Promise<NonconformanceRow> {
+  async getRowById(id: string): Promise<NonconformanceRow & { ownerName: string | null }> {
     const row = await this.repo.findRowById(id);
     if (!row) {
       throw new NotFoundException(ErrorCodes.NOT_FOUND, `Non-conformance ${id} not found`);
     }
-    return row;
+    const names = await resolveEmployeeNames(this.db, [row.ownerId]);
+    return { ...row, ownerName: nameOf(names, row.ownerId) };
   }
 
   async list(filters: NonconformanceFilters, limit: number, offset: number) {
-    return this.repo.list(filters, limit, offset);
+    const page = await this.repo.list(filters, limit, offset);
+    /*
+     * OWNER NAMES for the whole page, in one query.
+     *
+     * The register's Owner field rendered `ownerId` — thirty-six characters answering "who is
+     * accountable for this failure" with nothing, and worse than nothing on uuid v7, where findings
+     * raised the same afternoon share a time prefix and look alike. Resolved here rather than in the
+     * SPA because the directory endpoint needs `employee.read`, which a non-conformance reader is not
+     * required to hold.
+     */
+    const names = await resolveEmployeeNames(
+      this.db,
+      page.rows.map((r) => r.ownerId),
+    );
+    return {
+      ...page,
+      rows: page.rows.map((r) => ({ ...r, ownerName: nameOf(names, r.ownerId) })),
+    };
   }
 
   async update(

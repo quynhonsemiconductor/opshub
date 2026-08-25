@@ -70,6 +70,8 @@ interface AuditRow {
   reference: string;
   status: string;
   leadAuditorId: string;
+  /** Resolved server-side on the READ paths. Null only when the employee row is gone. */
+  leadAuditorName: string | null;
   startedAt: string | null;
   reportedAt: string | null;
   conclusion: string | null;
@@ -84,6 +86,8 @@ interface AuditListRow extends AuditRow {
 }
 interface RosterRow {
   auditorId: string;
+  /** Resolved server-side. Null only when the employee row is gone; the roster row stays. */
+  auditorName: string | null;
   role: string;
 }
 interface FindingRow {
@@ -320,6 +324,62 @@ describe('the roster', () => {
     const row = await programmeRow(audit.reference);
     // The lead only. An observer did not audit, and the count is what a reader judges coverage by.
     expect(row.auditorCount).toBe(1);
+  });
+});
+
+describe('naming the people rather than showing uuids', () => {
+  /*
+   * WHY THIS IS ASSERTED AT ALL. The programme drawer rendered `leadAuditorId` and the roster rendered
+   * a column of uuids, so the two lines in this module that have to name somebody named nobody. It is
+   * worst on the roster: being on it is what bars a person from certifying a fix for this audit's
+   * findings under §9.2.2(c), so a screen that cannot say who is on it cannot explain the refusal it
+   * causes. The API has to resolve it — `GET /v1/employees` needs `employee.read`, which
+   * `internal_audit.read` does not imply.
+   */
+  it('names the lead auditor on the programme row and on the single audit', async () => {
+    const audit = await planAudit();
+
+    // `programmeRow` matches on the EXACT reference, for the substring reason in its docblock.
+    const row = await programmeRow(audit.reference);
+    expect(
+      row.leadAuditorName,
+      `audit ${row.reference} came back with lead ${row.leadAuditorId} and no name`,
+    ).toBeTruthy();
+
+    // The single-audit read is a SEPARATE service method — `getWithLeadAuditor`, added rather than
+    // widening the `getById` that nine write paths share — so it needs its own assertion. One of the
+    // two showing a uuid is the state this change was made to end.
+    const one = await apiRequest(app, security, 'GET', `/internal-audits/${audit.id}`);
+    expect(one.status).toBe(200);
+    expect(unwrap<AuditRow>(one.body).leadAuditorName).toBe(row.leadAuditorName);
+  });
+
+  it('gives two different auditors two different names', async () => {
+    /*
+     * THE ASSERTION WORTH HAVING ON A ROSTER. Every row here carries TWO employee columns — the person
+     * who audited and the person who put them on — so a resolver keyed on `addedBy` instead of
+     * `auditorId` would still return a name for every row, and every one of them would be the same
+     * name. Two distinct people on one roster is the only shape that catches it.
+     */
+    const audit = await planAudit();
+    const added = await apiRequest(
+      app,
+      security,
+      'PUT',
+      `/internal-audits/${audit.id}/auditors/${FIXTURE.HR.id}`,
+      { role: 'auditor' },
+    );
+    expect(added.status, JSON.stringify(added.body)).toBe(204);
+
+    const roster = unwrap<RosterRow[]>(
+      (await apiRequest(app, security, 'GET', `/internal-audits/${audit.id}/auditors`)).body,
+    );
+    const lead = roster.find((r) => r.auditorId === FIXTURE.SECURITY.id)!;
+    const second = roster.find((r) => r.auditorId === FIXTURE.HR.id)!;
+    expect(lead.auditorName, `lead ${lead.auditorId} came back with no name`).toBeTruthy();
+    expect(second.auditorName, `auditor ${second.auditorId} came back with no name`).toBeTruthy();
+    // Both were added BY security, so this is what fails if the lookup reads the wrong column.
+    expect(second.auditorName).not.toBe(lead.auditorName);
   });
 });
 

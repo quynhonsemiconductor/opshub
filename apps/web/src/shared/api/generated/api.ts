@@ -5674,6 +5674,8 @@ export interface components {
       requestId: string;
       step: number;
       approverId: string;
+      /** @description The approver’s display name, resolved server-side. Null when the employee row is gone: a decision outlives the person who made it, and a departed approver’s is the one an access review comes back to. Sent because the approval chain is the audit trail of the decision, so a row showing only a uuid cannot say who said yes. */
+      approverName?: string | null;
       decision: string;
       note?: string | null;
       /** @description Set when approver was acting as delegate for this user */
@@ -5687,6 +5689,8 @@ export interface components {
       /** @description The requester’s display name, resolved server-side. Null when the employee row is gone — a request outlives the person who filed it. Sent because an approval queue showing a uuid does not say who is asking. */
       requesterName?: string | null;
       assigneeId?: string | null;
+      /** @description The current assignee’s display name, resolved server-side. Null in two cases the caller renders the same way: the request has no assignee at all — normal while pending, since any holder of the step’s permission may decide it — or the assignee’s employee row is gone. Sent because the assignee is who a pending request is WAITING ON, which a uuid does not say; assigneeId still tells the two null cases apart. */
+      assigneeName?: string | null;
       status: string;
       priority: string;
       payload: {
@@ -5915,6 +5919,16 @@ export interface components {
       id: string;
       licenseId: string;
       employeeId: string;
+      /**
+       * @description Who holds the seat, resolved server-side. Null when the employee row is gone — the assignment
+       *     outlives them on purpose, because a revoked seat is the row a vendor true-up reconciles against
+       *     an invoice, and "who had a Photoshop seat in March" has to stay answerable after a leaver's
+       *     directory record has been removed. A left lookup, never a join.
+       *
+       *     Null on the assign response too: that write hands the row back to a caller who just supplied the
+       *     employee id, and the SPA discards it and refetches the list.
+       */
+      employeeName: string | null;
       assignedAt: string;
       revokedAt: string | null;
       notes: string | null;
@@ -6210,6 +6224,17 @@ export interface components {
     TrainingRecordResponseDto: {
       id: string;
       employeeId: string;
+      /**
+       * @description Who completed the course, resolved server-side. Null when the employee row is gone — a training
+       *     record outlives the person who earned it, because "was this person trained when they did the
+       *     work" is a question an ISO competency audit asks about people who have since left. A left
+       *     lookup, never a join: an inner join would drop the record along with them.
+       *
+       *     Null on the WRITE responses too (record, verify, revoke), deliberately. Those hand the row back
+       *     to a caller who just supplied the employee id, so resolving it would tell them what they passed
+       *     in — one directory query per mutation to restate the request.
+       */
+      employeeName: string | null;
       courseId: string;
       completedOn: string;
       expiresOn: string | null;
@@ -6225,6 +6250,16 @@ export interface components {
     };
     CompetencyGapResponseDto: {
       employeeId: string;
+      /**
+       * @description Who is missing the training, resolved server-side. Null when the employee row is gone; the gap
+       *     report is read from `employee_positions`, so a stale assignment can outlive the directory row it
+       *     points at, and a left lookup keeps the finding visible instead of quietly dropping it.
+       *
+       *     Sent because the report exists to be acted on — somebody has to be booked onto a course — and a
+       *     column of uuids names nobody to book. `CoverageGapResponseDto` next door carries the same field
+       *     for the same reason; it just gets it from a join, because that report drives off `employees`.
+       */
+      employeeName: string | null;
       positionId: string;
       courseId: string;
       courseCode: string;
@@ -6459,6 +6494,18 @@ export interface components {
       category: string;
       assetId: string | null;
       ownerId: string;
+      /**
+       * @description The owner's display name, resolved server-side on the READ paths.
+       *
+       *     Nullable although `ownerId` is not, for two reasons. A risk outlives the person accountable for
+       *     it — the lookup is a left one, never a join, because losing a register entry when an employee
+       *     row goes is far worse than showing no name. And the write paths do not resolve it: their
+       *     responses are refetched by the SPA, so a query nobody reads would be added to eight mutations.
+       *
+       *     Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which a
+       *     `risk.read` holder is not required to have, and one request per row is not a page.
+       */
+      ownerName: string | null;
       inherentLikelihood: number;
       inherentImpact: number;
       /** @description `likelihood × impact`, computed by Postgres — never written by the application. */
@@ -6470,6 +6517,15 @@ export interface components {
       status: string;
       reviewDueOn: string | null;
       acceptedBy: string | null;
+      /**
+       * @description WHO signed the acceptance. Null when nobody has accepted the risk, and also when the acceptor's
+       *     employee row is gone — the acceptance still stands either way, which is why this is resolved with
+       *     a left lookup and never a join.
+       *
+       *     Sent because this is the signature an ISO 27001 auditor reads: accepting an exposure rather than
+       *     treating it is a decision somebody is answerable for, and "accepted by <uuid>" names nobody.
+       */
+      acceptedByName: string | null;
       acceptedAt: string | null;
       acceptanceJustification: string | null;
       /** @description The request that authorised the acceptance, when one was required. */
@@ -6575,6 +6631,21 @@ export interface components {
       implementationNote: string | null;
       evidenceDocumentId: string | null;
       ownerId: string | null;
+      /**
+       * @description The owner's display name, resolved server-side on the READ paths.
+       *
+       *     Nullable for THREE reasons here, and the screen has to keep them apart. `ownerId` is itself
+       *     nullable — a statement may be written before anybody is made accountable, and the SoA column says
+       *     "Unassigned" for that. An entry also outlives the person who owned the control, so the lookup is a
+       *     left one and never a join: last year's statement is the audit evidence and losing it with an
+       *     employee row would be far worse than showing no name. And the write paths do not resolve it at
+       *     all, because the SPA refetches after a `PUT` or a review.
+       *
+       *     Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which a
+       *     `control.read` holder is not required to have, and this is a list column — one name per row would
+       *     be one request per row.
+       */
+      ownerName: string | null;
       lastReviewedAt: string | null;
       reviewDueOn: string | null;
     };
@@ -6605,6 +6676,21 @@ export interface components {
       implementationNote: string | null;
       evidenceDocumentId: string | null;
       ownerId: string | null;
+      /**
+       * @description The owner's display name, resolved server-side on the READ paths.
+       *
+       *     Nullable for THREE reasons here, and the screen has to keep them apart. `ownerId` is itself
+       *     nullable — a statement may be written before anybody is made accountable, and the SoA column says
+       *     "Unassigned" for that. An entry also outlives the person who owned the control, so the lookup is a
+       *     left one and never a join: last year's statement is the audit evidence and losing it with an
+       *     employee row would be far worse than showing no name. And the write paths do not resolve it at
+       *     all, because the SPA refetches after a `PUT` or a review.
+       *
+       *     Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which a
+       *     `control.read` holder is not required to have, and this is a list column — one name per row would
+       *     be one request per row.
+       */
+      ownerName: string | null;
       lastReviewedAt: string | null;
       reviewDueOn: string | null;
     };
@@ -6804,7 +6890,25 @@ export interface components {
       type: string;
       classification: string;
       ownerId: string;
+      /**
+       * @description The owner's display name, resolved server-side on the READ paths.
+       *
+       *     Nullable although `ownerId` is not, for two reasons. An asset outlives the person who owns it —
+       *     the lookup is a left one, never a join, because dropping a registered asset when an employee row
+       *     goes would lose the very record a risk assessment and an incident reference. And the write paths
+       *     do not resolve it: their responses are refetched by the SPA, so it would be a query nobody reads
+       *     added to nine mutations.
+       *
+       *     Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which an
+       *     `information_asset.read` holder is not required to have.
+       */
+      ownerName: string | null;
       custodianId: string | null;
+      /**
+       * @description WHO operates the controls day to day, as opposed to the owner who decides the classification.
+       *     Null when no custodian is named, and when their employee row is gone — the asset outlives them.
+       */
+      custodianName: string | null;
       confidentiality: number;
       integrity: number;
       availability: number;
@@ -6853,7 +6957,25 @@ export interface components {
       type: string;
       classification: string;
       ownerId: string;
+      /**
+       * @description The owner's display name, resolved server-side on the READ paths.
+       *
+       *     Nullable although `ownerId` is not, for two reasons. An asset outlives the person who owns it —
+       *     the lookup is a left one, never a join, because dropping a registered asset when an employee row
+       *     goes would lose the very record a risk assessment and an incident reference. And the write paths
+       *     do not resolve it: their responses are refetched by the SPA, so it would be a query nobody reads
+       *     added to nine mutations.
+       *
+       *     Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which an
+       *     `information_asset.read` holder is not required to have.
+       */
+      ownerName: string | null;
       custodianId: string | null;
+      /**
+       * @description WHO operates the controls day to day, as opposed to the owner who decides the classification.
+       *     Null when no custodian is named, and when their employee row is gone — the asset outlives them.
+       */
+      custodianName: string | null;
       confidentiality: number;
       integrity: number;
       availability: number;
@@ -6946,6 +7068,19 @@ export interface components {
       criticality: string;
       status: string;
       ownerId: string;
+      /**
+       * @description The relationship owner's display name, resolved server-side on the READ paths.
+       *
+       *     Nullable although `ownerId` is not, for two reasons. A supplier record outlives the person who
+       *     owned the relationship — the lookup is a left one, never a join, because a terminated vendor's
+       *     row, its assessments and its risk links are the audit evidence and must not disappear with an
+       *     employee. And the write paths do not resolve it: their responses are refetched by the SPA, so it
+       *     would be a query nobody reads added to nine mutations.
+       *
+       *     Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which a
+       *     `vendor.read` holder is not required to have.
+       */
+      ownerName: string | null;
       dataProcessor: boolean;
       dataProcessingAgreementId: string | null;
       dataLocation: string | null;
@@ -6979,6 +7114,19 @@ export interface components {
       criticality: string;
       status: string;
       ownerId: string;
+      /**
+       * @description The relationship owner's display name, resolved server-side on the READ paths.
+       *
+       *     Nullable although `ownerId` is not, for two reasons. A supplier record outlives the person who
+       *     owned the relationship — the lookup is a left one, never a join, because a terminated vendor's
+       *     row, its assessments and its risk links are the audit evidence and must not disappear with an
+       *     employee. And the write paths do not resolve it: their responses are refetched by the SPA, so it
+       *     would be a query nobody reads added to nine mutations.
+       *
+       *     Sent rather than resolved by the SPA because `GET /v1/employees` needs `employee.read`, which a
+       *     `vendor.read` holder is not required to have.
+       */
+      ownerName: string | null;
       dataProcessor: boolean;
       dataProcessingAgreementId: string | null;
       dataLocation: string | null;
@@ -7105,6 +7253,20 @@ export interface components {
       status: string;
       processArea: string;
       ownerId: string;
+      /**
+       * @description The owner's display name, resolved server-side.
+       *
+       *     NULLABLE because the finding outlives the person accountable for it. A leaver's employee row can
+       *     go while the non-conformance and its CAPAs stay as the §10.2 evidence, so this is a LEFT lookup
+       *     and never a join — dropping a finding because its owner left would be far worse than showing no
+       *     name.
+       *
+       *     Sent at all because the register's Owner field rendered `ownerId`, which answers "who is
+       *     accountable for this failure" with thirty-six characters that identify nobody. The SPA cannot
+       *     resolve it itself: `GET /v1/employees` needs `employee.read`, which a non-conformance reader is
+       *     not required to hold, and a page of rows cannot cost a request per row.
+       */
+      ownerName: string | null;
       detectedAt: string;
       raisedBy: string;
       incidentId: string | null;
@@ -7154,6 +7316,20 @@ export interface components {
       status: string;
       processArea: string;
       ownerId: string;
+      /**
+       * @description The owner's display name, resolved server-side.
+       *
+       *     NULLABLE because the finding outlives the person accountable for it. A leaver's employee row can
+       *     go while the non-conformance and its CAPAs stay as the §10.2 evidence, so this is a LEFT lookup
+       *     and never a join — dropping a finding because its owner left would be far worse than showing no
+       *     name.
+       *
+       *     Sent at all because the register's Owner field rendered `ownerId`, which answers "who is
+       *     accountable for this failure" with thirty-six characters that identify nobody. The SPA cannot
+       *     resolve it itself: `GET /v1/employees` needs `employee.read`, which a non-conformance reader is
+       *     not required to hold, and a page of rows cannot cost a request per row.
+       */
+      ownerName: string | null;
       detectedAt: string;
       raisedBy: string;
       incidentId: string | null;
@@ -7208,6 +7384,15 @@ export interface components {
       nonconformanceId: string;
       status: string;
       ownerId: string;
+      /**
+       * @description The owner's display name, resolved server-side. Null once the employee row is gone; the CAPA and
+       *     its effectiveness evidence stay, so this is a left lookup and never a join.
+       *
+       *     The CAPA card showed no owner AT ALL, which is worse than a uuid: `verify` and `ineffective` are
+       *     withheld from the owner by `CAPA_SELF_VERIFICATION`, so a reader looking at a card with no
+       *     sign-off button had nothing on screen explaining why.
+       */
+      ownerName: string | null;
       rootCause: string | null;
       rootCauseMethod: string | null;
       actionPlan: string | null;
@@ -7225,6 +7410,15 @@ export interface components {
       nonconformanceId: string;
       status: string;
       ownerId: string;
+      /**
+       * @description The owner's display name, resolved server-side. Null once the employee row is gone; the CAPA and
+       *     its effectiveness evidence stay, so this is a left lookup and never a join.
+       *
+       *     The CAPA card showed no owner AT ALL, which is worse than a uuid: `verify` and `ineffective` are
+       *     withheld from the owner by `CAPA_SELF_VERIFICATION`, so a reader looking at a card with no
+       *     sign-off button had nothing on screen explaining why.
+       */
+      ownerName: string | null;
       rootCause: string | null;
       rootCauseMethod: string | null;
       actionPlan: string | null;
@@ -7284,6 +7478,12 @@ export interface components {
       criteria: string;
       status: string;
       leadAuditorId: string;
+      /**
+       * @description The lead auditor's display name, resolved server-side. Null when the employee row is gone — the
+       *     engagement record is §9.2.2(f) evidence and outlives the auditor who ran it, so this is a left
+       *     lookup and never a join.
+       */
+      leadAuditorName: string | null;
       plannedStartOn: string | null;
       plannedEndOn: string | null;
       startedAt: string | null;
@@ -7314,6 +7514,12 @@ export interface components {
       criteria: string;
       status: string;
       leadAuditorId: string;
+      /**
+       * @description The lead auditor's display name, resolved server-side. Null when the employee row is gone — the
+       *     engagement record is §9.2.2(f) evidence and outlives the auditor who ran it, so this is a left
+       *     lookup and never a join.
+       */
+      leadAuditorName: string | null;
       plannedStartOn: string | null;
       plannedEndOn: string | null;
       startedAt: string | null;
@@ -7348,6 +7554,14 @@ export interface components {
     };
     AuditAuditorResponseDto: {
       auditorId: string;
+      /**
+       * @description Who audited, by name. Null when the employee row is gone; the roster row stays, because it is
+       *     what the impartiality rule reads and a leaver still audited this engagement. A left lookup, never
+       *     a join — a joined roster would silently shrink and quietly re-admit somebody to a review.
+       *
+       *     The roster's whole job is to say who did the audit, and it rendered a column of uuids.
+       */
+      auditorName: string | null;
       role: string;
       addedBy: string;
       createdAt: string;
@@ -7411,6 +7625,14 @@ export interface components {
       category: string;
       description: string;
       ownerId: string;
+      /**
+       * @description Who is answerable for this output, by name. Null when the employee row is gone; the action is a
+       *     §9.3.3 output that the minutes already cite, so it is a left lookup and never a join.
+       *
+       *     §9.3.2(a) makes the follow-up queue read "who is chasing this", and the action card showed no
+       *     owner at all — so the one question the queue exists to answer had no answer on screen.
+       */
+      ownerName: string | null;
       dueOn: string | null;
       status: string;
       completedAt: string | null;
@@ -7426,6 +7648,12 @@ export interface components {
       period: string;
       status: string;
       chairId: string;
+      /**
+       * @description The chair's display name, resolved server-side. Null when the employee row is gone — the minutes
+       *     of a held review are permanent and the person who chaired it may not be, so this is a left lookup
+       *     and never a join.
+       */
+      chairName: string | null;
       scheduledFor: string | null;
       heldOn: string | null;
       /** @description The §9.3.2 inputs, frozen when the review was held. Null until then. Never settable. */
@@ -7453,6 +7681,12 @@ export interface components {
       period: string;
       status: string;
       chairId: string;
+      /**
+       * @description The chair's display name, resolved server-side. Null when the employee row is gone — the minutes
+       *     of a held review are permanent and the person who chaired it may not be, so this is a left lookup
+       *     and never a join.
+       */
+      chairName: string | null;
       scheduledFor: string | null;
       heldOn: string | null;
       /** @description The §9.3.2 inputs, frozen when the review was held. Null until then. Never settable. */
@@ -7479,6 +7713,14 @@ export interface components {
       category: string;
       description: string;
       ownerId: string;
+      /**
+       * @description Who is answerable for this output, by name. Null when the employee row is gone; the action is a
+       *     §9.3.3 output that the minutes already cite, so it is a left lookup and never a join.
+       *
+       *     §9.3.2(a) makes the follow-up queue read "who is chasing this", and the action card showed no
+       *     owner at all — so the one question the queue exists to answer had no answer on screen.
+       */
+      ownerName: string | null;
       dueOn: string | null;
       status: string;
       completedAt: string | null;

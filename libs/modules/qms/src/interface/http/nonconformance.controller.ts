@@ -25,7 +25,7 @@ import {
 import { EmployeeService } from '@modules/identity';
 import { NonconformanceService } from '../../application/nonconformance.service';
 import { CapaService } from '../../application/capa.service';
-import type { Capa, Nonconformance, NonconformanceRow } from '../../domain/qms.types';
+import type { Nonconformance, NonconformanceRow } from '../../domain/qms.types';
 import {
   CapaResponseDto,
   CloseNonconformanceDto,
@@ -42,7 +42,13 @@ import {
 } from './dto/qms.dto';
 import { toCapaDto } from './capa.controller';
 
-function toDto(n: Nonconformance): NonconformanceResponseDto {
+/**
+ * `ownerName` is OPTIONAL on the way in and always present on the way out.
+ *
+ * The read paths (`list`, `getRowById`) resolve it; the write paths do not, because their responses are
+ * discarded by the SPA, which refetches — resolving there would be a directory query nobody reads.
+ */
+function toDto(n: Nonconformance & { ownerName?: string | null }): NonconformanceResponseDto {
   return {
     id: n.id,
     reference: n.reference,
@@ -54,6 +60,7 @@ function toDto(n: Nonconformance): NonconformanceResponseDto {
     status: n.status,
     processArea: n.processArea,
     ownerId: n.ownerId,
+    ownerName: n.ownerName ?? null,
     detectedAt: n.detectedAt.toISOString(),
     raisedBy: n.raisedBy,
     incidentId: n.incidentId,
@@ -68,7 +75,9 @@ function toDto(n: Nonconformance): NonconformanceResponseDto {
   };
 }
 
-function toRowDto(r: NonconformanceRow): NonconformanceRowResponseDto {
+function toRowDto(
+  r: NonconformanceRow & { ownerName?: string | null },
+): NonconformanceRowResponseDto {
   return {
     ...toDto(r),
     severityRank: r.severityRank,
@@ -316,7 +325,10 @@ export class NonconformanceController {
   @ApiOkResponse({ type: [CapaResponseDto] })
   @ApiCommonErrors(401, 403, 404)
   async capasFor(@Param('id', ParseUUIDPipe) id: string): Promise<CapaResponseDto[]> {
-    const rows: Capa[] = await this.capas.listForNonconformance(id);
+    // NOT annotated `Capa[]`: that widening threw away the `ownerName` the service resolves, and
+    // `toCapaDto` would then have emitted null for it on this path alone — the finding's drawer and
+    // the CAPA queue render the same card, so it would have looked like a card stuck loading.
+    const rows = await this.capas.listForNonconformance(id);
     // The CAPA controller's own mapper, imported rather than reimplemented.
     return rows.map(toCapaDto);
   }
