@@ -237,6 +237,120 @@ test.describe('performance', () => {
     await expect(drawer.getByText('No goals set')).toBeVisible();
   });
 
+  test('grades the goals, so a review with goals can actually be sent for approval', async ({
+    page,
+    request,
+  }) => {
+    /*
+     * THE JOURNEY THAT COULD NOT BE COMPLETED. `POST /reviews/:id/rating` has always accepted
+     * `goals: [{ id, rating, outcome }]` and the rating form never sent the field — and nothing else
+     * can set a goal's grade, because `SetGoalSchema` has no rating on it. So every goal stayed
+     * ungraded, and `assertGoalsComplete` refuses to submit a review with an ungraded goal: add one
+     * goal and the review could never leave the reviewer's desk. The confirmation dialog on "Send for
+     * approval" recited the rule while the product offered no way to satisfy it.
+     *
+     * Driven entirely through the UI, because that is where the gap was — the API half worked the
+     * whole time.
+     */
+    const cycle = await createCycle(request, unique('PWGOAL').toUpperCase());
+    const reviewerId = await myEmployeeId(request);
+    await request.post(`/v1/performance/cycles/${cycle.id}/open`, {
+      headers: await csrfHeaders(request),
+    });
+
+    // The seeded fixture, so the SUBJECT can sign in and submit their own self-assessment — a review
+    // is born in `self_assessment` and only its subject can move it on.
+    const employee = await request.get('/v1/employees', {
+      params: { search: FIXTURE.EMPLOYEE.email, limit: '1' },
+    });
+    const employeeId = ((await employee.json()) as { data: { id: string }[] }).data[0]?.id;
+    expect(employeeId, `the seeded fixture ${FIXTURE.EMPLOYEE.email} was not found`).toBeTruthy();
+
+    const created = await request.post(`/v1/performance/cycles/${cycle.id}/reviews`, {
+      headers: await csrfHeaders(request),
+      data: { employeeId, reviewerId },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    const reviewId =
+      ((await created.json()) as { id?: string; data?: { id: string } }).data?.id ??
+      ((await created.json()) as { id: string }).id;
+
+    const asEmployee = await contextAs(FIXTURE.EMPLOYEE.email);
+    const submitted = await asEmployee.post(`/v1/performance/reviews/${reviewId}/self-assessment`, {
+      headers: await csrfHeaders(asEmployee),
+      data: { selfAssessment: 'Written so the review reaches its reviewer.' },
+    });
+    expect(submitted.status(), await submitted.text()).toBe(200);
+    await asEmployee.dispose();
+
+    // ONE GOAL AT 100%, added through the API: the weights rule is not what this test is about, and a
+    // second goal would only make the arithmetic incidental.
+    const goal = await request.post(`/v1/performance/reviews/${reviewId}/goals`, {
+      headers: await csrfHeaders(request),
+      data: {
+        title: 'Ship the platform migration',
+        target: 'Live by the end of the half',
+        weight: 100,
+      },
+    });
+    expect(goal.status(), await goal.text()).toBe(201);
+
+    await gotoInShell(page, '/performance');
+    await page.getByRole('tab', { name: 'My reviews' }).click();
+    const owed = page.locator('tbody tr', { hasText: cycle.reference });
+    await expect(owed).toBeVisible({ timeout: 15_000 });
+    await owed.getByRole('button', { name: /^Rate$/ }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    /*
+     * The form now says WHY it will be refused, before it is. This is the sentence a reviewer needed
+     * and did not have — and it is asserted before the grade is set, so it cannot pass on a form that
+     * simply never mentions the rule.
+     */
+    await expect(dialog.getByText(/1 still ungraded/i)).toBeVisible();
+
+    const scale = await request.get('/v1/performance/rating-scale');
+    const levels = (await scale.json()) as { code: string; label: string }[];
+    const anyLevel = levels[0]!;
+
+    await dialog.getByLabel('Grade').selectOption(anyLevel.code);
+    await dialog
+      .getByLabel('Outcome')
+      .fill('Delivered in May, two weeks after the date we agreed.');
+    // The warning goes once the goal is graded.
+    await expect(dialog.getByText(/still ungraded/i)).toHaveCount(0);
+
+    await dialog.getByLabel('Overall rating').selectOption(anyLevel.code);
+    await dialog.getByLabel('Summary').fill('A strong half against the goal we agreed in January.');
+    const plan = dialog.getByLabel('Development plan');
+    if (await plan.evaluate((el: HTMLTextAreaElement) => el.required)) {
+      await plan.fill('Pair on the next migration so the knowledge is not held by one person.');
+    }
+    await dialog
+      .getByRole('button', { name: /save|rate/i })
+      .last()
+      .click();
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
+
+    /*
+     * THE ASSERTION THAT MATTERS: the review can now be SENT. Before this change the API refused with
+     * "1 goal(s) have no grade" and there was no way through it from any screen.
+     */
+    const graded = await request.get(`/v1/performance/reviews/${reviewId}/goals`);
+    const gradedGoals = (await graded.json()) as { rating: string | null }[];
+    expect(
+      gradedGoals.every((g) => g.rating !== null),
+      'a goal is still ungraded',
+    ).toBe(true);
+
+    const sent = await request.post(`/v1/performance/reviews/${reviewId}/submit`, {
+      headers: await csrfHeaders(request),
+    });
+    expect(sent.status(), await sent.text()).toBe(200);
+  });
+
   test('a rating that demands a development plan says so before it is saved', async ({
     page,
     request,

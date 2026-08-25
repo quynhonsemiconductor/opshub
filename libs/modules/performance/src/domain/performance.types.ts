@@ -83,6 +83,16 @@ export interface CreateReviewInput {
   reviewerId: string;
   positionId: string | null;
   createdBy: string;
+  /**
+   * The state the review OPENS IN, which depends on the cycle rather than on the column default.
+   *
+   * A review used to be born `self_assessment` unconditionally. The only transition out of that state
+   * is the subject submitting their own account — so a cycle with no self-assessment step, which the
+   * product explicitly offers ("leave the date empty"), produced reviews that nobody could ever rate:
+   * the reviewer saw no Rate action because rating requires `manager_review`, and the subject was
+   * required to write something the cycle had said was not required.
+   */
+  status: PerformanceReview['status'];
 }
 
 export interface SetGoalInput {

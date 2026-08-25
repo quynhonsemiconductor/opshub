@@ -168,6 +168,8 @@ export class PerformanceDrizzleRepository implements IPerformanceRepository {
         reviewerId: input.reviewerId,
         positionId: input.positionId,
         createdBy: input.createdBy,
+        // Explicit, not the column default: see `CreateReviewInput.status`.
+        status: input.status,
       })
       .returning();
     return row;

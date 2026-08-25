@@ -130,8 +130,14 @@ export function CyclesTab() {
       align: 'right',
       cell: (cycle) => (
         <RowActions>
-          {/* Reviews are added while the cycle is a DRAFT or OPEN: a closed cycle takes nobody new. */}
-          {cycle.status !== 'closed' && (
+          {/*
+            OPEN ONLY. This read `status !== 'closed'` under a comment claiming reviews are added while
+            a cycle is "a DRAFT or OPEN" — and `createReview` refuses anything but open, with a message
+            naming the state. So the action was offered on every draft cycle, the reviewer filled in two
+            employee pickers, and the save was refused by a rule no screen had mentioned. The comment
+            was the wrong side of the disagreement: the API's refusal is pinned by a test.
+          */}
+          {cycle.status === 'open' && (
             <Button
               variant="ghost"
               size="icon-sm"

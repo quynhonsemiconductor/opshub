@@ -285,9 +285,26 @@ export class PerformanceService {
 
     const current = await this.positions.currentAssignment(input.employeeId);
 
+    /*
+     * WHERE THE REVIEW STARTS depends on whether the cycle HAS a self-assessment step.
+     *
+     * `selfAssessmentDue` is nullable and the cycle form offers leaving it empty in as many words —
+     * "for a cycle with no self-assessment step". But a review was always created in
+     * `self_assessment`, and the only way out of that state is the subject submitting one. So those
+     * cycles produced reviews that could never be rated: `recordRating` requires `manager_review`, the
+     * reviewer was shown no Rate action, and the employee was asked for something the cycle had
+     * declared unnecessary. Every review in such a cycle was stuck from the moment it was created.
+     */
+    const initialStatus = cycle.selfAssessmentDue ? 'self_assessment' : 'manager_review';
+
     return this.db.transaction(async (tx) => {
       const review = await this.repo.createReview(
-        { ...input, positionId: current?.positionId ?? null, createdBy: actor.sub },
+        {
+          ...input,
+          positionId: current?.positionId ?? null,
+          createdBy: actor.sub,
+          status: initialStatus,
+        },
         tx,
       );
       await this.reviewTrail.record(AUDIT_ACTION.PERFORMANCE_REVIEW_CREATED, review.id, actor, tx, {
