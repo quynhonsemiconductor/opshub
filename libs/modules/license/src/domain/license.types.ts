@@ -33,11 +33,24 @@ export interface LicenseUtilization {
   licenseId: string;
   name: string;
   vendor: string;
+  /** So a caller can leave cancelled and expired licences out of a spend total. */
+  status: LicenseStatus;
   seatCount: number | null;
   usedSeats: number;
   availableSeats: number | null;
   utilizationPct: number | null;
-  monthlySpendCents: number | null;
+  /**
+   * WHAT THE ORGANISATION PAYS: seats bought × unit cost.
+   *
+   * This replaces `monthlySpendCents`, which was `usedSeats × unit cost` — the cost of the seats
+   * somebody is sitting in. The two are wildly different on a real register, and the FinOps tile summed
+   * the second while the table beside it computed the first, so one screen gave two answers to "what
+   * does this cost". Committed is the one a renewal decision is made on: an unassigned seat is still
+   * invoiced.
+   */
+  committedSpendCents: number | null;
+  /** The part of the committed spend that is actually in use. The difference is the waste. */
+  assignedSpendCents: number | null;
 }
 
 export interface CreateLicenseInput {

@@ -5899,7 +5899,12 @@ export interface components {
       usedSeats: number;
       availableSeats: number | null;
       utilizationPct: number | null;
-      monthlySpendCents: number | null;
+      /** @description The licence's own status, so a spend total can leave cancelled and expired ones out. */
+      status: string;
+      /** @description Seats bought × unit cost — what is invoiced, whether or not anybody is using the seats. */
+      committedSpendCents: number | null;
+      /** @description The part of that which is assigned. `committed - assigned` is the idle spend. */
+      assignedSpendCents: number | null;
     };
     UpdateLicenseDto: {
       name?: string;

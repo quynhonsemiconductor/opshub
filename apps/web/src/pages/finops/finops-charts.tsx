@@ -19,17 +19,29 @@ const SLICE_TONES = [
   'var(--color-accent)',
 ];
 
-/** Monthly spend by product, biggest six. */
+/**
+ * Committed spend by product, biggest six, plus the tail as one slice.
+ *
+ * THREE THINGS WERE WRONG WITH THE OLD VERSION and they compounded. It charted
+ * `monthlySpendCents` — the cost of ASSIGNED seats — so it disagreed with the tile above it. It then
+ * filtered to `> 0`, which drops a licence nobody is assigned to: the single most wasteful row in the
+ * register was the one row guaranteed to be absent. And `slice(0, 6)` discarded the rest silently, so
+ * the slices did not sum to the total anywhere on screen.
+ *
+ * Now: committed spend, active licences, and an explicit "N others" slice so the chart accounts for
+ * the whole figure the tile reports.
+ */
 export function SpendByProductChart({ rows }: { rows: LicenseUtilization[] }) {
-  const data = rows
-    .filter((r) => r.monthlySpendCents != null && r.monthlySpendCents > 0)
-    .sort((a, b) => (b.monthlySpendCents ?? 0) - (a.monthlySpendCents ?? 0))
-    .slice(0, 6)
-    .map((r) => ({ name: r.name, value: r.monthlySpendCents ?? 0 }));
+  const priced = rows
+    .filter((r) => r.status === 'active' && (r.committedSpendCents ?? 0) > 0)
+    .sort((a, b) => (b.committedSpendCents ?? 0) - (a.committedSpendCents ?? 0));
+  const top = priced.slice(0, 6).map((r) => ({ name: r.name, value: r.committedSpendCents ?? 0 }));
+  const tail = priced.slice(6).reduce((sum, r) => sum + (r.committedSpendCents ?? 0), 0);
+  const data = tail > 0 ? [...top, { name: `${priced.length - 6} others`, value: tail }] : top;
 
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
-      <h2 className="mb-3 text-sm font-semibold text-fg">Monthly spend by product</h2>
+      <h2 className="mb-3 text-sm font-semibold text-fg">Committed spend by product</h2>
       {data.length === 0 ? (
         <p className="text-xs text-fg-muted">No cost data yet.</p>
       ) : (
