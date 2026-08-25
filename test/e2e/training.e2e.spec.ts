@@ -218,6 +218,128 @@ describe('the course catalogue', () => {
   });
 });
 
+describe('a lapsed certificate', () => {
+  /*
+   * "WHO HAS LAPSED?" USED TO ANSWER "NOBODY", ALWAYS.
+   *
+   * `training_records.status` defaults to `valid` and the only other value ever written is `revoked`
+   * — nothing in the product, and no job, ever writes `expired`. The list endpoint filtered on the
+   * stored column, so the Records tab's "Expired" chip matched no row and reported "no training
+   * records match these filters", while the competency-gap report on the next tab correctly counted
+   * the same people as gaps. Two tabs, contradictory answers, and the reassuring one was on the
+   * screen somebody reads to chase a renewal.
+   *
+   * `expired` is DERIVED: otherwise-valid, with an expiry date in the past. Both halves are asserted
+   * here, because they are separate pieces of code — the row has to SAY it, and the filter has to
+   * FIND it, and either alone leaves the register contradicting itself.
+   */
+  it('reads as expired, and is found by the expired filter', async () => {
+    // Completed in 2020 with a 12-month validity: lapsed long ago, whenever this runs.
+    const course = await createCourse({ validityMonths: 12 });
+    const created = await apiRequest(app, hr, 'POST', '/training/records', {
+      employeeId: FIXTURE.SECURITY.id,
+      courseId: course.id,
+      completedOn: '2020-01-15',
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const recordId = unwrap<RecordRow>(created.body).id;
+
+    const listed = await apiRequest(app, hr, 'GET', `/training/records?courseId=${course.id}`);
+    expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+    const row = unwrap<RecordRow[]>(listed.body).find((r) => r.id === recordId);
+    expect(row, 'the record under test is missing from the list').toBeDefined();
+    expect(
+      row!.status,
+      `a certificate that expired on ${row!.expiresOn} still reads as ${row!.status}`,
+    ).toBe('expired');
+
+    const filtered = await apiRequest(
+      app,
+      hr,
+      'GET',
+      `/training/records?courseId=${course.id}&status=expired`,
+    );
+    expect(filtered.status).toBe(200);
+    expect(
+      unwrap<RecordRow[]>(filtered.body).map((r) => r.id),
+      'the Expired filter did not find a lapsed record',
+    ).toContain(recordId);
+  });
+
+  it('is not counted as valid, so the two filters do not overlap', async () => {
+    /*
+     * The other half, and the reason `valid` had to change too: if `valid` still meant "the stored
+     * value", a lapsed record would appear under BOTH chips and the counts would not add up.
+     */
+    const course = await createCourse({ validityMonths: 12 });
+    const lapsed = await apiRequest(app, hr, 'POST', '/training/records', {
+      employeeId: FIXTURE.SECURITY.id,
+      courseId: course.id,
+      completedOn: '2020-02-20',
+    });
+    expect(lapsed.status, JSON.stringify(lapsed.body)).toBe(201);
+    const lapsedId = unwrap<RecordRow>(lapsed.body).id;
+
+    const valid = await apiRequest(
+      app,
+      hr,
+      'GET',
+      `/training/records?courseId=${course.id}&status=valid`,
+    );
+    expect(valid.status).toBe(200);
+    expect(
+      unwrap<RecordRow[]>(valid.body).map((r) => r.id),
+      'a lapsed certificate is being counted as a current one',
+    ).not.toContain(lapsedId);
+  });
+
+  it('leaves a certificate with no expiry alone', async () => {
+    /*
+     * `validityMonths: null` means the qualification does not lapse — a degree, an induction. Deriving
+     * a status from a null expiry would invent an expiry that the course deliberately does not have.
+     */
+    const course = await createCourse({ validityMonths: null });
+    const created = await apiRequest(app, hr, 'POST', '/training/records', {
+      employeeId: FIXTURE.SECURITY.id,
+      courseId: course.id,
+      completedOn: '2020-03-10',
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const recordId = unwrap<RecordRow>(created.body).id;
+
+    const row = unwrap<RecordRow[]>(
+      (await apiRequest(app, hr, 'GET', `/training/records?courseId=${course.id}`)).body,
+    ).find((r) => r.id === recordId);
+    expect(row!.expiresOn).toBeNull();
+    expect(row!.status, 'a qualification that never lapses was marked expired').toBe('valid');
+  });
+
+  it('keeps saying revoked, which outranks expired', async () => {
+    /*
+     * A revoked certificate is not "expired" — it was taken away, and that distinction is the whole
+     * reason both values exist. Derived status must not overwrite it, which a naive
+     * "expiry in the past ⇒ expired" would do for every old revoked record.
+     */
+    const course = await createCourse({ validityMonths: 12 });
+    const created = await apiRequest(app, hr, 'POST', '/training/records', {
+      employeeId: FIXTURE.SECURITY.id,
+      courseId: course.id,
+      completedOn: '2020-04-01',
+    });
+    const recordId = unwrap<RecordRow>(created.body).id;
+
+    const revoked = await apiRequest(app, hr, 'POST', `/training/records/${recordId}/revoke`, {
+      reason: 'e2e: revoked outranks expired',
+    });
+    expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
+
+    const row = unwrap<RecordRow[]>(
+      (await apiRequest(app, hr, 'GET', `/training/records?courseId=${course.id}`)).body,
+    ).find((r) => r.id === recordId);
+    expect(row!.status).toBe('revoked');
+  });
+});
+
 describe('recording a completion', () => {
   it('derives the expiry from the course and freezes it against a later edit', async () => {
     const course = await createCourse({ validityMonths: 12 });
