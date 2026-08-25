@@ -90,20 +90,30 @@ export class EmailRelayService
   }
 
   protected async processRow(row: EmailOutboxRow, _tx: DrizzleTx): Promise<PostCommitTask | void> {
-    await this.emailService.sendTemplate(
-      row.to,
-      row.template as EmailTemplateName,
-      row.vars as EmailTemplateVars[EmailTemplateName],
-      { idempotencyKey: row.idempotencyKey ?? row.id },
-    );
+    // Held so markSent can persist it in the SAME transaction that flips the row to
+    // sent: the provider's message id is the feedback loop's only exact match key, and
+    // storing it anywhere looser than the status write risks a `sent` row that can never
+    // be bounce-matched.
+    this.pendingMessageId = (
+      await this.emailService.sendTemplate(
+        row.to,
+        row.template as EmailTemplateName,
+        row.vars as EmailTemplateVars[EmailTemplateName],
+        { idempotencyKey: row.idempotencyKey ?? row.id },
+      )
+    ).messageId;
     // No post-commit work needed — email dispatch is synchronous within processRow.
   }
+
+  /** Message id from the most recent processRow in this relay pass. See processRow. */
+  private pendingMessageId: string | null = null;
 
   protected async markSent(tx: DrizzleTx, rowId: string): Promise<void> {
     await tx
       .update(emailOutbox)
-      .set({ status: 'sent', sentAt: new Date() })
+      .set({ status: 'sent', sentAt: new Date(), messageId: this.pendingMessageId })
       .where(eq(emailOutbox.id, rowId));
+    this.pendingMessageId = null;
   }
 
   protected async markFailed(

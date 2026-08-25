@@ -29,6 +29,7 @@ import { ResendEmailProvider } from './email/providers/resend.provider';
 import { SesEmailProvider } from './email/providers/ses.provider';
 import { EmailService } from './email/email.service';
 import { EmailSchedulerService } from './email/email-scheduler.service';
+import { EmailDeliveryService } from './email/email-delivery.service';
 import { NotificationSchedulerService } from './notifications/notification-scheduler.service';
 import { NotificationPubSubService } from './notifications/notification-pubsub.service';
 import { DelegationService } from './authz/delegation.service';
@@ -130,6 +131,7 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     },
     EmailService,
     EmailSchedulerService,
+    EmailDeliveryService,
     NotificationSchedulerService,
     NotificationPubSubService,
     DelegationService,
@@ -160,6 +162,7 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     ResilienceService,
     EmailService,
     EmailSchedulerService,
+    EmailDeliveryService,
     NotificationSchedulerService,
     NotificationPubSubService,
     DelegationService,

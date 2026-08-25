@@ -225,6 +225,13 @@
       "when": 1784641606000,
       "tag": "0031_fk_webhook_delivery_subscription",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787324703374,
+      "tag": "0032_email_bounce_feedback",
+      "breakpoints": true
     }
   ]
 }

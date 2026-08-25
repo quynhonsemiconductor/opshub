@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
-import type { EmailPayload, IEmailProvider } from '../email.provider';
+import type { EmailPayload, EmailSendResult, IEmailProvider } from '../email.provider';
 
 /**
  * AWS SES transport, on the v2 API.
@@ -46,7 +46,7 @@ export class SesEmailProvider implements IEmailProvider {
     this.ses = new SESv2Client({ region });
   }
 
-  async send(payload: EmailPayload): Promise<void> {
+  async send(payload: EmailPayload): Promise<EmailSendResult> {
     if (!payload.from) {
       /*
        * NO HARD-CODED FALLBACK SENDER, for the same reason the Resend provider refuses one: a default
@@ -90,6 +90,11 @@ export class SesEmailProvider implements IEmailProvider {
         { to: payload.to, subject: payload.subject, messageId: result.MessageId ?? null },
         'Email accepted by SES',
       );
+
+      // ACCEPTED, NOT DELIVERED — and the id is the feedback loop's only exact match key
+      // for the verdict that may arrive minutes later (BounceFeedbackService matches on
+      // it). Returned so the relay can persist it in the same write that marks the row sent.
+      return { messageId: result.MessageId ?? null };
     } catch (err) {
       this.logger.error({ err, to: payload.to, subject: payload.subject }, 'SES send failed');
       throw err;

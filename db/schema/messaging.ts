@@ -81,6 +81,15 @@ export const emailOutbox = messagingSchema.table(
     recipientId: uuid('recipient_id'),
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull().defaultNow(),
     sentAt: timestamp('sent_at', { withTimezone: true }),
+    /**
+     * The provider's message id, stored by the relay at acceptance so the asynchronous
+     * feedback loop can match a bounce/complaint event back to this row (SES echoes it
+     * as `mail.messageId` in every event notification). NULL for rows sent before the
+     * loop existed, and for providers without an id (dev).
+     */
+    messageId: varchar('message_id', { length: 255 }),
+    /** When the feedback loop recorded a bounce or complaint. NULL unless it did. */
+    feedbackAt: timestamp('feedback_at', { withTimezone: true }),
   },
   (t) => ({
     pendingIdx: index('ix_email_outbox_pending').on(t.status, t.scheduledAt),
@@ -88,6 +97,10 @@ export const emailOutbox = messagingSchema.table(
     idempotencyIdx: uniqueIndex('uq_email_outbox_idempotency')
       .on(t.idempotencyKey)
       .where(sql`idempotency_key IS NOT NULL`),
+    // The feedback loop's only lookup: match an inbound SES event to its row.
+    messageIdIdx: index('ix_email_outbox_message_id')
+      .on(t.messageId)
+      .where(sql`message_id IS NOT NULL`),
   }),
 );
 

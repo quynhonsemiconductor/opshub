@@ -15,6 +15,7 @@ import { DelegationExpiryCron } from './cron/delegation-expiry.cron';
 import { ContractExpiryCron } from './cron/contract-expiry.cron';
 import { StorageCleanupCron } from './cron/storage-cleanup.cron';
 import { ReviewDueCron } from './cron/review-due.cron';
+import { BounceFeedbackService } from './email/bounce-feedback.service';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ReviewDueCron } from './cron/review-due.cron';
     IsmsModule,
   ],
   providers: [
+    BounceFeedbackService,
     ComplianceSyncCron,
     SecurityPostureSyncCron,
     RequestExpiryCron,

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Resend } from 'resend';
-import { type IEmailProvider, type EmailPayload } from '../email.provider';
+import { type IEmailProvider, type EmailPayload, type EmailSendResult } from '../email.provider';
 
 /**
  * Resend email provider — uses the official Resend SDK.
@@ -23,7 +23,7 @@ export class ResendEmailProvider implements IEmailProvider {
     this.client = new Resend(apiKey);
   }
 
-  async send(payload: EmailPayload): Promise<void> {
+  async send(payload: EmailPayload): Promise<EmailSendResult> {
     if (!payload.from) {
       /*
        * NO HARD-CODED FALLBACK SENDER. This used to default to `OpsHub <no-reply@opshub.app>`, a
@@ -38,7 +38,7 @@ export class ResendEmailProvider implements IEmailProvider {
       throw new Error('Resend: no sender address configured (MAIL_FROM_EMAIL)');
     }
 
-    const { error } = await this.client.emails.send(
+    const { data, error } = await this.client.emails.send(
       {
         from: payload.from,
         to: [payload.to],
@@ -57,5 +57,9 @@ export class ResendEmailProvider implements IEmailProvider {
       this.logger.error({ error, to: payload.to }, 'Resend delivery failed');
       throw new Error(`Resend: ${error.message}`);
     }
+
+    // Resend's id is what its webhook events carry; no webhook is wired here, but
+    // returning it costs nothing and keeps the provider contract uniform.
+    return { messageId: data?.id ?? null };
   }
 }

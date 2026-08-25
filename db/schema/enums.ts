@@ -123,7 +123,19 @@ export const licenseStatusEnum = pgEnum('license_status', [
   'cancelled',
 ]);
 
-export const outboxStatusEnum = pgEnum('outbox_status', ['pending', 'sent', 'failed', 'delivered']);
+/**
+ * `bounced` and `complained` are EMAIL verdicts (migration 0032): written only by
+ * BounceFeedbackService, overlaying a row already `sent`. They sit on the shared
+ * outbox enum because email_outbox reuses it — webhook rows can never carry them.
+ */
+export const outboxStatusEnum = pgEnum('outbox_status', [
+  'pending',
+  'sent',
+  'failed',
+  'delivered',
+  'bounced',
+  'complained',
+]);
 
 export const requestDecisionEnum = pgEnum('request_decision', [
   'approved',

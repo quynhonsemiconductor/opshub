@@ -139,6 +139,14 @@ export const EnvSchema = z
 
     // ── AWS (optional in dev) ──────────────────────────────────────────────────
     AWS_REGION: z.string().default('ap-southeast-1'),
+    /** LocalStack/local-dev endpoint for the AWS SDK clients (SES, SQS). Unset in AWS. */
+    AWS_ENDPOINT_URL: z.string().optional(),
+    /**
+     * The SQS queue BounceFeedbackService drains for SES bounce/complaint verdicts.
+     * OPTIONAL and the consumer's OFF switch: unset = no consumer starts. Pairs with
+     * SES_CONFIGURATION_SET above — the set tags the send, this is where the verdict lands.
+     */
+    SES_BOUNCE_QUEUE_URL: z.string().default(''),
     /** S3 bucket for all stored files — injected by infra as S3_FILES_BUCKET. Optional in dev (uploads stubbed when unset). */
     S3_FILES_BUCKET: z.string().optional(),
     /** CloudFront base URL for file downloads. When set, overrides presigned S3 GET URLs. */

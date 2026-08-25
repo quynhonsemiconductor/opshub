@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
-import { EMAIL_PROVIDER, type IEmailProvider } from './email.provider';
+import { EMAIL_PROVIDER, type IEmailProvider, type EmailSendResult } from './email.provider';
 import { renderEmailTemplate, type EmailTemplateName, type EmailTemplateVars } from './templates';
 
 /**
@@ -52,10 +52,12 @@ export class EmailService {
     template: K,
     vars: EmailTemplateVars[K],
     opts?: { replyTo?: string; idempotencyKey?: string },
-  ): Promise<void> {
+  ): Promise<EmailSendResult> {
     const rendered = renderEmailTemplate(template, vars);
     try {
-      await this.provider.send({
+      // Returned so the relay can persist the provider's message id at acceptance —
+      // that id is the feedback loop's only exact match key for a later verdict.
+      return await this.provider.send({
         to,
         from: this.from,
         replyTo: opts?.replyTo ?? this.replyTo,
