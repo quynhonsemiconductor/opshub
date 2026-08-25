@@ -407,19 +407,59 @@ describe('FE consistency ratchets (only ever decrease)', () => {
   });
 
   it(`invented failure messages <= ${MAX_INVENTED_ERROR_MESSAGE}`, () => {
-    // A string literal as the FIRST argument. `toast.error(e.message)` and
-    // `toast.error(apiErrorMessage(error, '…'))` both pass; only a bare sentence counts.
-    const { total, byFile } = countMatches((f) => /\.tsx?$/.test(f), /toast\.error\(['`]/g);
+    /*
+     * A string literal as the FIRST argument. `toast.error(e.message)` and
+     * `toast.error(apiErrorMessage(error, '…'))` both pass; only a bare sentence counts.
+     *
+     * ALSO `setErr`/`setError`, which this check used to miss entirely — it matched `toast.error` only,
+     * so it read 0 while fifteen screens set a hard-coded sentence into form state instead. Those were
+     * the worse half: a toast is glanceable and gone, and a form error is the sentence somebody reads
+     * while deciding what to do next. Among them the Inbox's "Failed to process request. Please try
+     * again." for a permanent refusal, and the RBAC screen's "Check the user ID" for what was really a
+     * missing permission.
+     *
+     * A ratchet reading 0 while violations exist is worse than no ratchet, because it certifies the
+     * thing it cannot see.
+     *
+     * BUT THE OBVIOUS WIDER PATTERN IS WRONG, and I tried it first: matching every
+     * `setErr('Capitalised…')` flags CLIENT-SIDE VALIDATION, which is not this defect at all. "A reason
+     * is required for rejection." is a sentence the form is entitled to invent, because no API was
+     * asked. What is forbidden is inventing one when the API has already answered — so the shape
+     * matched is a literal set INSIDE an error branch, which is exactly where the API's message was
+     * available and discarded.
+     */
+    const { total, byFile } = countMatches(
+      (f) => /\.tsx?$/.test(f),
+      /(?:toast\.error\(['`]|if \(\s*(?:err|error)[\w.!\s|]*\)\s*\{[^{}]*?set(?:Err|Error)\(\s*['`"][A-Z])/g,
+    );
     assertRatchet('invented failure message count', total, MAX_INVENTED_ERROR_MESSAGE, byFile);
+  });
+
+  it('reads the API’s message somewhere, so the check above is not passing over a desert', () => {
+    /*
+     * THE FLOOR. `apiErrorMessage` is what the check above pushes callers towards; if it stopped being
+     * used the count would fall to zero for the wrong reason. Same shape as the `FormError` floor
+     * below, and the same reason: a ratchet needs to know the corpus it is measuring still exists.
+     */
+    const { total } = countMatches((f) => /\.tsx?$/.test(f), /apiErrorMessage\(/g);
+    expect(
+      total,
+      'nothing calls apiErrorMessage any more — the invented-message check proves nothing',
+    ).toBeGreaterThan(20);
   });
 
   it(`form errors rendered without role="alert" <= ${MAX_UNANNOUNCED_FORM_ERROR}`, () => {
     // The exact shape that was everywhere: a danger-toned paragraph whose only child is an `error`
     // binding. `FormError` renders the same markup WITH the role, so a match here is a slot that
     // bypassed it rather than a styling choice.
+    /*
+     * ANY binding, not one whose name happens to contain "error". The pattern used to require
+     * `error` in the identifier, so six real violations bound to `err` and `submitError` — including
+     * the profile form and all three RBAC tabs — were invisible and this read 0.
+     */
     const { total, byFile } = countMatches(
       (rel) => rel.endsWith('.tsx') && !rel.startsWith('shared/ui/'),
-      /<p className="text-xs text-danger">\{[\w.]*error[\w.]*\}<\/p>/g,
+      /<p className="text-xs text-danger">\{[\w.]+\}<\/p>/g,
     );
     assertRatchet('unannounced form errors', total, MAX_UNANNOUNCED_FORM_ERROR, byFile);
   });

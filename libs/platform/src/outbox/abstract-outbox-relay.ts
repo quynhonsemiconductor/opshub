@@ -222,8 +222,33 @@ export abstract class AbstractOutboxRelay<TRow extends { id: string; attempts: n
 
         for (const row of batch) {
           try {
-            const task = await this.processRow(row, tx);
-            await this.markSent(tx, row.id);
+            /*
+             * A SAVEPOINT PER ROW, and the reason is not tidiness — it is that the `catch` below
+             * could not do its job without one.
+             *
+             * The whole batch runs in one transaction. When a row failed for a DATABASE reason,
+             * Postgres had already marked that transaction aborted, so the very first statement in
+             * the catch — `markFailed` — failed too, with "current transaction is aborted, commands
+             * ignored until end of transaction block". That error escaped the catch, propagated out
+             * of the transaction callback, and rolled back the ENTIRE batch: every row that had
+             * already been processed and marked sent went back, and the failing row's attempt
+             * counter went back with them.
+             *
+             * So the queue stalled permanently. The next poll fetched the same batch, hit the same
+             * poison row, and rolled everything back again — and because the attempt counter never
+             * survived, the row never reached `maxAttempts` and never dead-lettered. One malformed
+             * notification was enough to stop every email behind it, indefinitely, with the dead
+             * letter alarm silent because nothing was ever marked failed.
+             *
+             * `tx.transaction()` on Postgres issues a SAVEPOINT. A database error inside now rolls
+             * back to here, which leaves the outer transaction usable — which is exactly what the
+             * catch needs.
+             */
+            const task = await tx.transaction(async (rowTx) => {
+              const result = await this.processRow(row, rowTx);
+              await this.markSent(rowTx, row.id);
+              return result;
+            });
             if (task) postCommitTasks.push(task);
             processed += 1;
           } catch (err) {
@@ -234,7 +259,29 @@ export abstract class AbstractOutboxRelay<TRow extends { id: string; attempts: n
               newAttempts >= this.maxAttempts ? 'failed' : 'pending';
             const nextAttemptAt = new Date(Date.now() + this.backoffDelayMs(newAttempts));
 
-            await this.markFailed(tx, row.id, newAttempts, newStatus, errMsg, nextAttemptAt);
+            /*
+             * Also in its own savepoint. If recording the failure itself fails — the row deleted
+             * under us, a constraint on the error text — the batch must still finish rather than
+             * lose the rows that succeeded. Logged rather than rethrown for the same reason: the
+             * whole point of this loop is that one row cannot take the others with it.
+             */
+            try {
+              await tx.transaction(async (failTx) => {
+                await this.markFailed(
+                  failTx,
+                  row.id,
+                  newAttempts,
+                  newStatus,
+                  errMsg,
+                  nextAttemptAt,
+                );
+              });
+            } catch (markErr) {
+              this.logger.error(
+                { rowId: row.id, err: markErr },
+                'Relay could not record a row failure — the row will be retried on the next poll',
+              );
+            }
 
             // Only the TERMINAL failure carries DEAD_LETTER_FIELD. A row still inside its
             // retry budget is the retry machinery working as designed; tagging every attempt

@@ -17,11 +17,13 @@ import { useState } from 'react';
 import { User, Mail, Briefcase, Building2, ExternalLink, CheckCircle2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
+import { apiErrorMessage } from '@/shared/api/errors';
 import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import {
   Badge,
   Button,
   FormActions,
+  FormError,
   FormField,
   Input,
   Modal,
@@ -148,7 +150,12 @@ function EditProfileModal({ employee, onClose, onSuccess }: EditProfileModalProp
 
     setLoading(false);
     if (error || !data) {
-      setErr('Failed to update profile. Please try again.');
+      /*
+       * A 403 dressed as a transient failure. `PATCH /employees/:id` carries no scope descriptor, so
+       * for the roles this page exists for the refusal is permanent — and "please try again" is
+       * advice to repeat it forever.
+       */
+      setErr(apiErrorMessage(error, 'Failed to update your profile.'));
       return;
     }
     toast.success('Profile updated');
@@ -185,7 +192,7 @@ function EditProfileModal({ employee, onClose, onSuccess }: EditProfileModalProp
           />
         </FormField>
 
-        {err && <p className="text-xs text-danger">{err}</p>}
+        <FormError message={err} />
 
         <FormActions loading={loading} onClose={onClose} submitLabel="Save changes" />
       </form>

@@ -99,6 +99,59 @@ function toReviewDto(
   };
 }
 
+/**
+ * The statuses at which a judgement has been DELIBERATELY released to its subject.
+ *
+ * `shared` is the act of releasing it; `acknowledged` is the subject having read it. Everything else —
+ * including `cancelled` — is a draft, and a cancelled draft is the last thing to hand over.
+ */
+const RELEASED_TO_SUBJECT = new Set(['shared', 'acknowledged']);
+
+/**
+ * Blank the manager's judgement when the person reading it is the person being judged and it has not
+ * been shared yet.
+ *
+ * WHY THIS EXISTS. `pending_approval` is a calibration step: a rating is written, then signed off by a
+ * holder of `performance.approve`, and only then shared. `performance.approve` is withheld from
+ * managers on purpose so that no single person can both write a rating and release it. The READ path
+ * walked straight around that control — `GET /performance/me` returned `managerSummary`,
+ * `overallRating` and `developmentPlan` with no status gate, so the subject saw their rating the
+ * instant their reviewer saved a draft.
+ *
+ * It went unnoticed because the SPA asserts the opposite in a docblock ("a rating is only visible once
+ * the review is SHARED; before that it exists and is not yours to see") and renders "Not shared yet"
+ * whenever `overallRating` is null — which looks exactly like a working gate for as long as no draft
+ * exists.
+ *
+ * NOT A PERMISSION CHECK. Reviewers, and anyone holding `performance.read`, still see everything: the
+ * point is not secrecy from the organisation, it is that a judgement reaches its subject once, when
+ * somebody decides to release it.
+ */
+function redactUnsharedJudgement(dto: ReviewResponseDto, viewerId: string): ReviewResponseDto {
+  if (dto.employeeId !== viewerId) return dto;
+  if (RELEASED_TO_SUBJECT.has(dto.status)) return dto;
+  return {
+    ...dto,
+    managerSummary: null,
+    overallRating: null,
+    developmentPlan: null,
+    // `ratedAt` goes too: "rated last Tuesday, contents withheld" tells the subject a judgement
+    // exists and is being withheld, which is worse than not knowing it has been started.
+    ratedAt: null,
+  };
+}
+
+/** The same rule for a goal's grade, which is half of the judgement. */
+function redactUnsharedGoal(
+  dto: GoalResponseDto,
+  review: { employeeId: string; status: string },
+  viewerId: string,
+): GoalResponseDto {
+  if (review.employeeId !== viewerId) return dto;
+  if (RELEASED_TO_SUBJECT.has(review.status)) return dto;
+  return { ...dto, rating: null, outcome: null };
+}
+
 function toGoalDto(g: PerformanceGoal): GoalResponseDto {
   return {
     id: g.id,
@@ -176,7 +229,14 @@ export class PerformanceController {
       query.limit,
       query.offset,
     );
-    return buildPageResult(rows.map(toReviewDto), total, query.limit, query.offset);
+    return buildPageResult(
+      // The caller may be the subject of one of these rows — `/reviews` is a permissioned list, and
+      // holding `performance.read` does not release your own unshared rating to you.
+      rows.map((r) => redactUnsharedJudgement(toReviewDto(r), user.sub)),
+      total,
+      query.limit,
+      query.offset,
+    );
   }
 
   /** The reviews the caller has to write. */
@@ -194,7 +254,14 @@ export class PerformanceController {
       query.limit,
       query.offset,
     );
-    return buildPageResult(rows.map(toReviewDto), total, query.limit, query.offset);
+    return buildPageResult(
+      // The caller may be the subject of one of these rows — `/reviews` is a permissioned list, and
+      // holding `performance.read` does not release your own unshared rating to you.
+      rows.map((r) => redactUnsharedJudgement(toReviewDto(r), user.sub)),
+      total,
+      query.limit,
+      query.offset,
+    );
   }
 
   // ── The rating scale ───────────────────────────────────────────────────────
@@ -362,7 +429,10 @@ export class PerformanceController {
   @ApiOperation({ summary: 'List reviews, newest first' })
   @ApiPagedResponse(ReviewResponseDto)
   @ApiCommonErrors(401, 403)
-  async listReviews(@Query() query: ListReviewsQueryDto): Promise<PagedResult<ReviewResponseDto>> {
+  async listReviews(
+    @Query() query: ListReviewsQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PagedResult<ReviewResponseDto>> {
     const { rows, total } = await this.service.listReviews(
       {
         cycleId: query.cycleId,
@@ -373,7 +443,14 @@ export class PerformanceController {
       query.limit,
       query.offset,
     );
-    return buildPageResult(rows.map(toReviewDto), total, query.limit, query.offset);
+    return buildPageResult(
+      // The caller may be the subject of one of these rows — `/reviews` is a permissioned list, and
+      // holding `performance.read` does not release your own unshared rating to you.
+      rows.map((r) => redactUnsharedJudgement(toReviewDto(r), user.sub)),
+      total,
+      query.limit,
+      query.offset,
+    );
   }
 
   @Get('reviews/:id')
@@ -388,7 +465,7 @@ export class PerformanceController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<ReviewResponseDto> {
-    return toReviewDto(await this.mustSeeReview(user, id));
+    return redactUnsharedJudgement(toReviewDto(await this.mustSeeReview(user, id)), user.sub);
   }
 
   @Get('reviews/:id/goals')
@@ -403,8 +480,10 @@ export class PerformanceController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<GoalResponseDto[]> {
-    await this.mustSeeReview(user, id);
-    return (await this.service.listGoals(id)).map(toGoalDto);
+    const review = await this.mustSeeReview(user, id);
+    return (await this.service.listGoals(id)).map((g) =>
+      redactUnsharedGoal(toGoalDto(g), review, user.sub),
+    );
   }
 
   @Patch('reviews/:id/reviewer')

@@ -287,6 +287,115 @@ describe('creating a review', () => {
   });
 });
 
+describe('an unshared judgement', () => {
+  /*
+   * THE CONTROL THIS PROTECTS. A rating is written by the reviewer, calibrated by a holder of
+   * `performance.approve` — a permission deliberately withheld from managers so one person cannot both
+   * write a judgement and release it — and only then shared. The read path walked around all of it:
+   * `GET /performance/me` returned `managerSummary`, `overallRating` and `developmentPlan` with no
+   * status gate, so the subject saw their rating the moment their reviewer saved a draft.
+   *
+   * It hid because the SPA asserts the opposite in a docblock and prints "Not shared yet" whenever the
+   * rating is null — which is indistinguishable from a working gate until a draft exists.
+   *
+   * So these assertions are from the SUBJECT's own eyes, on every path that can reach them.
+   */
+  it('is withheld from its subject until it is shared', async () => {
+    const cycle = await openCycle('REDACT');
+    const { review, goal } = await reviewReadyToSubmit(
+      cycle.id,
+      employee,
+      FIXTURE.NO_PERMISSIONS.id,
+      manager,
+      FIXTURE.MANAGER.id,
+    );
+
+    // The reviewer, who wrote it, still sees everything. This is not secrecy from the organisation.
+    const asReviewer = unwrap<ReviewRow>(
+      (await apiRequest(app, manager, 'GET', `/performance/reviews/${review.id}`)).body,
+    );
+    expect(asReviewer.overallRating).toBe('exceeds');
+    expect(asReviewer.managerSummary).toContain('strong half');
+
+    // The subject sees the shape of the review and none of the judgement.
+    const single = unwrap<ReviewRow>(
+      (await apiRequest(app, employee, 'GET', `/performance/reviews/${review.id}`)).body,
+    );
+    expect(single.status).toBe('manager_review');
+    expect(single.overallRating, 'the subject can read their unshared rating').toBeNull();
+    expect(single.managerSummary).toBeNull();
+    expect(single.developmentPlan).toBeNull();
+    // Their own words are still theirs.
+    expect(single.selfAssessment).toContain('shipped the thing');
+
+    // The LIST path is a separate mapping and needs its own assertion.
+    const mine = unwrap<ReviewRow[]>(
+      (await apiRequest(app, employee, 'GET', '/performance/me?limit=50')).body,
+    ).find((r) => r.id === review.id);
+    expect(mine, 'the review is missing from the subject’s own list').toBeDefined();
+    expect(mine!.overallRating, '/me leaks what /reviews/:id withholds').toBeNull();
+
+    // And the GOAL grade, which is half of the judgement.
+    const goals = unwrap<{ id: string; rating: string | null; outcome: string | null }[]>(
+      (await apiRequest(app, employee, 'GET', `/performance/reviews/${review.id}/goals`)).body,
+    );
+    const seen = goals.find((g) => g.id === goal.id);
+    expect(seen, 'the goal vanished for its own subject').toBeDefined();
+    expect(seen!.rating, 'the goal grade leaks the rating the review withholds').toBeNull();
+    expect(seen!.outcome).toBeNull();
+  });
+
+  it('reaches its subject once it IS shared', async () => {
+    /*
+     * The other half. Without this, redacting unconditionally would also pass — and a rating the
+     * subject can never read is a performance process with no purpose.
+     */
+    const cycle = await openCycle('RELEASE');
+    const { review } = await reviewReadyToSubmit(
+      cycle.id,
+      employee,
+      FIXTURE.NO_PERMISSIONS.id,
+      manager,
+      FIXTURE.MANAGER.id,
+    );
+
+    const submitted = await apiRequest(
+      app,
+      manager,
+      'POST',
+      `/performance/reviews/${review.id}/submit`,
+      {},
+    );
+    expect(submitted.status, JSON.stringify(submitted.body)).toBe(200);
+
+    /*
+     * SHARING IS THE APPROVAL, not a route of its own. `submit` raises an engine request; approving it
+     * runs the type-def's `onApprove`, which is what moves the review to `shared`. My first draft
+     * posted to `/reviews/:id/share`, which does not exist — the release is deliberately the same
+     * approval mechanism every other decision in the product goes through.
+     *
+     * Approved by ADMIN: the reviewer is barred by `allowSelfApproval: false`, and the subject by a
+     * check inside `onApprove`.
+     */
+    const requestId = unwrap<ReviewRow & { requestId: string | null }>(
+      (await apiRequest(app, manager, 'GET', `/performance/reviews/${review.id}`)).body,
+    ).requestId;
+    expect(requestId, 'submitting raised no engine request').toBeTruthy();
+
+    const approved = await apiRequest(app, admin, 'POST', `/requests/${requestId}/approve`, {});
+    expect(approved.status, JSON.stringify(approved.body)).toBe(200);
+
+    const single = unwrap<ReviewRow>(
+      (await apiRequest(app, employee, 'GET', `/performance/reviews/${review.id}`)).body,
+    );
+    expect(single.status).toBe('shared');
+    expect(single.overallRating, 'a shared rating is still hidden from its subject').toBe(
+      'exceeds',
+    );
+    expect(single.managerSummary).toContain('strong half');
+  });
+});
+
 describe('naming the two people a review is about', () => {
   /*
    * "Who reviews whom" is the sentence at the top of this screen, and both columns that answer it

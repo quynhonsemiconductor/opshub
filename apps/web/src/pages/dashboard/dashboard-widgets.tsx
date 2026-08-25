@@ -19,6 +19,7 @@ export function StatTileLink({
   to,
   label,
   value,
+  hint,
   loading,
   icon,
   tone,
@@ -27,6 +28,8 @@ export function StatTileLink({
   to: string;
   label: string;
   value: number | string | undefined;
+  /** The line under the figure — a denominator, or why the figure is missing. */
+  hint?: string;
   loading?: boolean;
   icon: DashboardIcon;
   tone: BadgeTone;
@@ -37,6 +40,7 @@ export function StatTileLink({
       <StatCard
         label={label}
         value={value}
+        hint={hint}
         loading={loading}
         icon={icon}
         tone={tone}

@@ -105,5 +105,10 @@ export class LicenseUtilizationDto {
   usedSeats!: number;
   availableSeats!: number | null;
   utilizationPct!: number | null;
-  monthlySpendCents!: number | null;
+  /** The licence's own status, so a spend total can leave cancelled and expired ones out. */
+  status!: string;
+  /** Seats bought × unit cost — what is invoiced, whether or not anybody is using the seats. */
+  committedSpendCents!: number | null;
+  /** The part of that which is assigned. `committed - assigned` is the idle spend. */
+  assignedSpendCents!: number | null;
 }

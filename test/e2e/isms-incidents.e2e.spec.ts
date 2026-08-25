@@ -179,6 +179,36 @@ describe('reporting', () => {
     });
     expect(future.status).toBe(412);
     expect(errorCode(future.body)).toBe('INCIDENT_TIMELINE_ORDER');
+
+    /*
+     * BUT NOW IS NOT THE FUTURE, even when the caller's clock is a little ahead of ours.
+     *
+     * The check used to be a strict `>` against `Date.now()`, and the timestamp is generated on the
+     * CALLER's clock: a browser on a laptop that has been asleep, a container whose clock steps after
+     * a host suspend. A one-millisecond skew became a refusal the user could not act on — they picked
+     * "now" and were told "now" is in the future. It surfaced as an intermittently failing browser
+     * journey, which is the shape a clock problem always takes.
+     *
+     * Asserted from both sides, in one case, because a tolerance is only correct if it still refuses
+     * a real mistake: an hour ahead is refused above, thirty seconds ahead is accepted here, and
+     * neither assertion means anything without the other.
+     */
+    const skewed = await apiRequest(app, security, 'POST', '/incidents/report', {
+      reference: nextRef(),
+      title: 'Reported by a client whose clock runs fast',
+      description: 'Thirty seconds ahead of the server, which is skew and not a claim.',
+      category: 'phishing',
+      severity: 'low',
+      /*
+       * FIVE SECONDS, not thirty. The tolerance is two minutes, and in the full suite this assertion
+       * failed while passing in isolation: the log timestamps show two clocks about a hundred seconds
+       * apart in this environment, so a thirty-second lead measured on one clock was over two minutes
+       * on the other. A test sitting near the boundary of the thing it is testing measures the
+       * environment. Five seconds is still refused by a strict `>`, which is what this pins.
+       */
+      detectedAt: new Date(Date.now() + 5_000).toISOString(),
+    });
+    expect(skewed.status, JSON.stringify(skewed.body)).toBe(201);
   });
 
   it('opens the timeline at the detection time', async () => {

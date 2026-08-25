@@ -85,7 +85,9 @@ function toUtilDto(u: LicenseUtilization): LicenseUtilizationDto {
     usedSeats: u.usedSeats,
     availableSeats: u.availableSeats,
     utilizationPct: u.utilizationPct,
-    monthlySpendCents: u.monthlySpendCents,
+    status: u.status,
+    committedSpendCents: u.committedSpendCents,
+    assignedSpendCents: u.assignedSpendCents,
   };
 }
 

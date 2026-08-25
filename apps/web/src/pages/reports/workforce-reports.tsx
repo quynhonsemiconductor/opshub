@@ -12,6 +12,7 @@ import { api } from '@/shared/api/client';
 import { STALE } from '@/shared/api/cache';
 import type { LeaveSummaryResponse, OvertimeSummaryResponse } from '@/shared/api/types';
 import { dateRange } from './report-config';
+import { ChartSkeleton, ErrorMsg } from './report-parts';
 
 export function WorkforceSummary({ days }: { days: number }) {
   const { from, to } = dateRange(days);
@@ -40,9 +41,21 @@ export function WorkforceSummary({ days }: { days: number }) {
     staleTime: STALE.REPORT,
   });
 
-  const totalLeave = leaveQ.data?.rows.reduce((s, r) => s + r.count, 0) ?? 0;
-  const totalOTHours = otQ.data?.rows.reduce((s, r) => s + r.totalHours, 0) ?? 0;
-  const approvedOT = otQ.data?.rows.find((r) => r.status === 'approved');
+  /*
+   * THE STATES THIS PANEL DID NOT HAVE. It rendered four bold figures unconditionally with `?? 0`, so
+   * a 403 or a dropped request printed "Leave requests 0 — this period" as a confident fact. Its three
+   * sibling report files each use these two components; this was the one that did not, which is why it
+   * was the only panel that could report a failure as data.
+   *
+   * Both queries are required before any figure is shown: two tiles from a live query beside two from
+   * a failed one is a panel that is half true, and there is no way for a reader to tell which half.
+   */
+  if (leaveQ.isLoading || otQ.isLoading) return <ChartSkeleton />;
+  if (leaveQ.isError || otQ.isError || !leaveQ.data || !otQ.data) return <ErrorMsg />;
+
+  const totalLeave = leaveQ.data.rows.reduce((s, r) => s + r.count, 0);
+  const totalOTHours = otQ.data.rows.reduce((s, r) => s + r.totalHours, 0);
+  const approvedOT = otQ.data.rows.find((r) => r.status === 'approved');
 
   return (
     <div className="grid grid-cols-2 gap-3">

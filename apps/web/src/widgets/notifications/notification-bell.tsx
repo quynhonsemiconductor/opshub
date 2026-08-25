@@ -101,7 +101,7 @@ export function NotificationBell() {
   const { unreadCount, resetUnread, decrementUnread } = useSSENotifications();
 
   // Re-fetch list whenever panel opens
-  const { data, isLoading } = useNotificationList(open);
+  const { data, isLoading, isError } = useNotificationList(open);
 
   // Invalidate list when SSE delivers a new notification
   useEffect(() => {
@@ -207,7 +207,23 @@ export function NotificationBell() {
                 <span className="text-sm text-fg-subtle">Loading…</span>
               </div>
             )}
-            {!isLoading && !data?.items.length && (
+            {/*
+              A FAILED FETCH IS NOT AN EMPTY INBOX. This branch fired on `!data?.items.length`, which
+              an error also produces — so a dropped request told the reader they had nothing waiting.
+              Of all the places to invent silence, the notification bell is the worst: the whole point
+              of it is to be the thing you trust instead of checking every screen.
+            */}
+            {!isLoading && isError && (
+              <div
+                role="alert"
+                className="flex flex-col items-center justify-center gap-2 py-10 text-center"
+              >
+                <Inbox className="h-8 w-8 text-fg-subtle" strokeWidth={1.5} />
+                <p className="text-sm text-fg-muted">Couldn&apos;t load your notifications</p>
+                <p className="text-2xs text-fg-subtle">This is not an empty inbox — try again.</p>
+              </div>
+            )}
+            {!isLoading && !isError && !data?.items.length && (
               <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
                 <Inbox className="h-8 w-8 text-fg-subtle" strokeWidth={1.5} />
                 <p className="text-sm text-fg-subtle">No notifications yet</p>

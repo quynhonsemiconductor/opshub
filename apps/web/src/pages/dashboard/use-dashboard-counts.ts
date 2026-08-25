@@ -24,11 +24,23 @@ export interface DashboardCounts {
 export interface CountResult {
   data: number | undefined;
   isLoading: boolean;
+  /**
+   * WHETHER THE COUNT COULD BE READ AT ALL — which this type had no way to express.
+   *
+   * `isError` was absent from the interface, not merely unhandled, so no tile *could* report a failure
+   * however carefully it was written. A 403 or a dropped request left `data` undefined, and an
+   * undefined value renders as an em dash — pixel-identical to the tiles that deliberately carry no
+   * count. So on the first screen everybody sees, a failure and a design decision looked the same.
+   *
+   * That matters most for the alert-styled tiles: "Awaiting my approval —" reads as "nothing awaiting
+   * you", which is the reassuring answer and the wrong one.
+   */
+  isError: boolean;
 }
 
 function useTotal(key: string[], fetch: () => Promise<number>): CountResult {
   const q = useQuery({ queryKey: key, queryFn: fetch, staleTime: STALE.ACTIVITY });
-  return { data: q.data, isLoading: q.isLoading };
+  return { data: q.data, isLoading: q.isLoading, isError: q.isError };
 }
 
 /**

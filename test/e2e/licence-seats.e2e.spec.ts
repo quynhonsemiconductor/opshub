@@ -84,6 +84,68 @@ const seats = async (licenseId: string, includeRevoked = false): Promise<SeatRow
     ).body,
   );
 
+interface UtilRow {
+  licenseId: string;
+  status: string;
+  seatCount: number | null;
+  usedSeats: number;
+  committedSpendCents: number | null;
+  assignedSpendCents: number | null;
+}
+
+describe('the utilisation report', () => {
+  /*
+   * THE NUMBER THE FINOPS PAGE IS READ FOR. There used to be one spend figure, `monthlySpendCents`,
+   * computed as `usedSeats × unit cost` — the cost of the seats somebody is sitting in — and the tile
+   * summed it under the label "Monthly spend" while the table two inches below computed
+   * `seatCount × unit cost` from the same row. One screen, two answers, and the tile was the smaller
+   * one: on the seeded register it showed roughly six per cent of what is actually invoiced, so 162
+   * paid-for idle seats were invisible on the page whose job is to find them.
+   *
+   * The gap between the two is the waste, which is why both are returned and named.
+   */
+  it('reports committed spend separately from the part in use', async () => {
+    // 10 seats at 2400 cents; two of them assigned.
+    const licenseId = await createLicense(10);
+    // Seeded fixtures, as everywhere else in this file: a fresh licence means the seats are free.
+    await assignSeat(licenseId, FIXTURE.NO_PERMISSIONS.id, 'e2e: idle-spend arithmetic');
+    await assignSeat(licenseId, FIXTURE.MANAGER.id, 'e2e: idle-spend arithmetic');
+
+    const res = await apiRequest(app, admin, 'GET', '/licenses/utilization');
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const row = unwrap<UtilRow[]>(res.body).find((r) => r.licenseId === licenseId);
+    expect(row, 'the licence under test is missing from the utilisation report').toBeDefined();
+
+    expect(row!.usedSeats).toBe(2);
+    // Committed follows the SEATS BOUGHT: an unassigned seat is still invoiced.
+    expect(row!.committedSpendCents, 'committed spend is not seats × unit cost').toBe(10 * 2400);
+    expect(row!.assignedSpendCents, 'assigned spend is not used seats × unit cost').toBe(2 * 2400);
+    /*
+     * AND THEY MUST DIFFER HERE. Asserted explicitly, because the defect was that one figure served
+     * as both — a test checking only "committed is 24000" would pass against a row where assigned
+     * was also 24000, which is the shape that made the tile and the table disagree.
+     */
+    expect(row!.committedSpendCents).toBeGreaterThan(row!.assignedSpendCents!);
+  });
+
+  it('carries the status, so a cancelled subscription can be left out of a total', async () => {
+    /*
+     * The report returns every licence, because the utilisation table wants them all. Nobody is
+     * invoiced for a cancelled subscription, though, so the spend total has to be able to exclude
+     * them — and it could not: `status` was not on the row at all, and the query has no filter, so
+     * cancelled and expired licences were being counted in "Monthly spend".
+     */
+    const licenseId = await createLicense(5);
+
+    const res = await apiRequest(app, admin, 'GET', '/licenses/utilization');
+    const row = unwrap<UtilRow[]>(res.body).find((r) => r.licenseId === licenseId);
+    expect(
+      row?.status,
+      'the row carries no status, so nothing can be excluded from a spend total',
+    ).toBe('active');
+  });
+});
+
 describe('the seat list', () => {
   it('names every holder, including the ones whose seat was revoked', async () => {
     /*

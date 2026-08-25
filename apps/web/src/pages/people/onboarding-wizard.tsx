@@ -5,6 +5,7 @@ import { api } from '@/shared/api/client';
 import {
   Button,
   DescriptionList,
+  FormError,
   FormField,
   Input,
   SegmentedControl,
@@ -322,7 +323,7 @@ export function OnboardingWizard({ employee, onClose, onSuccess }: OnboardingWiz
               </p>
             </div>
 
-            {submitError && <p className="text-xs text-danger">{submitError}</p>}
+            <FormError message={submitError} />
           </div>
         )}
       </div>

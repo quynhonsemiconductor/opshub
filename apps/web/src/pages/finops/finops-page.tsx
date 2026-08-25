@@ -64,7 +64,21 @@ export function FinOpsPage() {
   // enforced against — recomputing it here would be a second answer to the same question.
   const selectedUtil = selectedId ? util.find((r) => r.licenseId === selectedId) : undefined;
 
-  const monthlySpend = util.reduce((sum, r) => sum + (r.monthlySpendCents ?? 0), 0);
+  /*
+   * SPEND, THE WAY AN INVOICE MEANS IT. This tile used to sum `monthlySpendCents`, which the API
+   * computed as `usedSeats × unit cost` — the cost of the occupied seats — while the Monthly column in
+   * the table below computed `seatCount × unit cost` from the same row. One screen, two answers, and
+   * the tile was the smaller one by roughly fifteen times on the seeded register.
+   *
+   * Cancelled and expired licences are excluded here: the report returns every licence because the
+   * utilisation table wants them, but nobody is invoiced for a cancelled subscription, and including
+   * them inflated the figure the page is read for.
+   */
+  const live = util.filter((r) => r.status === 'active');
+  const committedSpend = live.reduce((sum, r) => sum + (r.committedSpendCents ?? 0), 0);
+  const assignedSpend = live.reduce((sum, r) => sum + (r.assignedSpendCents ?? 0), 0);
+  /* The number the page exists for and could not show: seats paid for that nobody is sitting in. */
+  const idleSpend = committedSpend - assignedSpend;
   const assignedSeats = util.reduce((sum, r) => sum + r.usedSeats, 0);
   const totalSeats = util.reduce((sum, r) => sum + (r.seatCount ?? 0), 0);
   const expiring = rows.filter(isExpiringSoon).length;
@@ -92,10 +106,14 @@ export function FinOpsPage() {
     },
     {
       key: 'monthly',
-      header: 'Monthly',
+      header: 'Committed',
       align: 'right',
-      // Seats × unit cost, computed here rather than stored: it is arithmetic over two columns, and a
-      // stored total would disagree with them the first time either changed.
+      /*
+       * Renamed from "Monthly", which was the word the tile also used for a different number. The
+       * arithmetic stays here rather than being read from the utilisation report: this table pages over
+       * `licenses`, the report is a separate unpaged query, and joining them per row to display two
+       * multiplied columns would be a lookup to avoid a multiplication.
+       */
       cell: (l) =>
         l.seatCount != null && l.costPerSeatCents != null
           ? formatMoney(l.seatCount * l.costPerSeatCents)
@@ -156,10 +174,25 @@ export function FinOpsPage() {
         <div className="flex flex-col gap-5">
           <StatGrid>
             <StatCard
-              label="Monthly spend"
-              value={formatMoney(monthlySpend)}
+              label="Committed monthly spend"
+              value={formatMoney(committedSpend)}
+              hint="Seats bought × unit cost, active licences"
               icon={DollarSign}
               tone="green"
+              loading={utilization.isLoading}
+            />
+            <StatCard
+              label="Idle spend"
+              value={formatMoney(idleSpend)}
+              // The actionable half of the figure beside it: what is being paid for seats nobody holds.
+              hint={
+                totalSeats > assignedSeats
+                  ? `${totalSeats - assignedSeats} seats paid for and unassigned`
+                  : 'Every seat is assigned'
+              }
+              icon={AlertTriangle}
+              tone={idleSpend > 0 ? 'amber' : 'green'}
+              alert={idleSpend > 0}
               loading={utilization.isLoading}
             />
             <StatCard

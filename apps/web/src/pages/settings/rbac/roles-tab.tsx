@@ -12,6 +12,7 @@ import {
   EntityDetailPanel,
   FOCUS_RING,
   FormActions,
+  FormError,
   FormField,
   IconAction,
   Input,
@@ -51,7 +52,9 @@ function CreateRoleModal({
     });
     setLoading(false);
     if (error) {
-      setErr('Failed to create role. Key may already exist.');
+      // The API says WHICH key collided, and whether a collision was the problem at all — this file
+      // already reads its message on the delete path two functions below.
+      setErr(apiErrorMessage(error, 'Failed to create the role.'));
       return;
     }
     toast.success('Role created');
@@ -83,7 +86,7 @@ function CreateRoleModal({
             placeholder="e.g. Compliance Reviewer"
           />
         </FormField>
-        {err && <p className="text-xs text-danger">{err}</p>}
+        <FormError message={err} />
         <FormActions
           loading={loading}
           onClose={onClose}

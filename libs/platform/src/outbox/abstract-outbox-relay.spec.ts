@@ -22,6 +22,14 @@ interface TestRow {
   id: string;
   attempts: number;
   shouldFail: boolean;
+  /**
+   * Fails the way a DATABASE fails: the statement errors AND the transaction is left aborted.
+   *
+   * The distinction is the whole point. A row that throws in application code leaves the
+   * transaction usable; a row that violates a constraint does not, and Postgres then refuses every
+   * subsequent statement — including the one that records the failure.
+   */
+  abortsTransaction?: boolean;
 }
 
 /** Minimal concrete relay exposing hooks the tests can assert against. */
@@ -34,6 +42,8 @@ class TestRelay extends AbstractOutboxRelay<TestRow> {
     nextAttemptAt: Date;
   }> = [];
   markSentCalls: string[] = [];
+  /** Makes `markFailed` itself fail, for the "even recording the failure fails" case. */
+  markFailedThrows = false;
 
   // Not `async`: opshub's eslint enforces @typescript-eslint/require-await, and a stub with
   // nothing to await would need a disable comment on each one.
@@ -41,31 +51,88 @@ class TestRelay extends AbstractOutboxRelay<TestRow> {
     return Promise.resolve(this.fetchBatchResult);
   }
 
-  protected processRow(row: TestRow): Promise<PostCommitTask | void> {
+  protected processRow(row: TestRow, tx: DrizzleTx): Promise<PostCommitTask | void> {
+    if (row.abortsTransaction) {
+      // Order matters, and it is the order Postgres uses: the transaction is poisoned first, then
+      // the caller learns about it.
+      (tx as unknown as { fail(): void }).fail();
+      return Promise.reject(new Error(`row ${row.id} violated a constraint`));
+    }
     return row.shouldFail ? Promise.reject(new Error(`row ${row.id} failed`)) : Promise.resolve();
   }
 
-  protected markSent(_tx: DrizzleTx, rowId: string): Promise<void> {
+  protected markSent(tx: DrizzleTx, rowId: string): Promise<void> {
+    // Every statement goes through the handle, so an aborted transaction is felt here as it would be.
+    (tx as unknown as { assertUsable(): void }).assertUsable();
     this.markSentCalls.push(rowId);
     return Promise.resolve();
   }
 
   protected markFailed(
-    _tx: DrizzleTx,
+    tx: DrizzleTx,
     rowId: string,
     newAttempts: number,
     newStatus: 'pending' | 'failed',
     _lastError: string,
     nextAttemptAt: Date,
   ): Promise<void> {
+    (tx as unknown as { assertUsable(): void }).assertUsable();
+    if (this.markFailedThrows) return Promise.reject(new Error('could not record the failure'));
     this.markFailedCalls.push({ rowId, newAttempts, newStatus, nextAttemptAt });
     return Promise.resolve();
   }
 }
 
+/**
+ * A transaction double that MODELS THE ABORT, because the abort is the behaviour under test.
+ *
+ * The old double was `transaction: (cb) => cb({})` — a callback runner with no notion of a
+ * transaction at all. Under it, "one failing row in a batch does not block the others" passed while
+ * the real behaviour was a permanently stalled queue: a row failing for a DATABASE reason left
+ * Postgres refusing every subsequent statement, so `markFailed` in the catch threw too, the throw
+ * escaped the transaction, and the whole batch rolled back — including rows already marked sent, and
+ * including the attempt counter that would eventually have dead-lettered the poison row.
+ *
+ * So this double does what Postgres does: once a statement inside the transaction has failed, any
+ * further statement on the SAME handle throws "current transaction is aborted" until something rolls
+ * back. `transaction()` on a handle opens a SAVEPOINT — a child handle whose failure marks only
+ * itself aborted, and whose rollback leaves the parent usable.
+ *
+ * Without this, the fix and the bug are indistinguishable from the test's point of view.
+ */
+function makeTxHandle(parent?: { aborted: boolean }): DrizzleTx & { aborted: boolean } {
+  const state = { aborted: false };
+  const handle = {
+    get aborted() {
+      return state.aborted;
+    },
+    /** Every statement a relay runs goes through here in the tests. */
+    assertUsable() {
+      if (state.aborted || parent?.aborted) {
+        throw new Error(
+          'current transaction is aborted, commands ignored until end of transaction block',
+        );
+      }
+    },
+    fail() {
+      state.aborted = true;
+    },
+    /*
+     * A SAVEPOINT. The child gets its own abort flag, so a statement that fails inside it poisons
+     * only the child — and because the child is discarded on the way out, the parent is left usable.
+     * That asymmetry IS the fix under test: with one shared flag, a row failure would abort the whole
+     * batch exactly as it did in production.
+     */
+    async transaction(cb: (child: DrizzleTx) => Promise<unknown>) {
+      return cb(makeTxHandle(state));
+    },
+  };
+  return handle as unknown as DrizzleTx & { aborted: boolean };
+}
+
 function makeFakeDb(): DrizzleDB {
   return {
-    transaction: async (cb: (tx: DrizzleTx) => Promise<void>) => cb({} as DrizzleTx),
+    transaction: async (cb: (tx: DrizzleTx) => Promise<void>) => cb(makeTxHandle()),
   } as unknown as DrizzleDB;
 }
 
@@ -136,6 +203,63 @@ describe('AbstractOutboxRelay.relay() — retry/backoff wiring', () => {
 
     expect(relay.markSentCalls).toEqual(['row-good']);
     expect(relay.markFailedCalls.map((c) => c.rowId)).toEqual(['row-bad']);
+  });
+
+  it('a row that ABORTS THE TRANSACTION does not take the batch with it', async () => {
+    /*
+     * THE FAILURE THIS FILE COULD NOT SEE. The test above — "one failing row in a batch does not
+     * block the others" — passed for years against a relay where this was untrue, because its
+     * failing row threw in application code and left the transaction usable. Almost no real failure
+     * looks like that: a constraint violation, a value too long, a deleted foreign key all leave
+     * Postgres refusing every further statement.
+     *
+     * What happened then: `markFailed` in the catch was the next statement, so it threw too. That
+     * throw escaped the catch, propagated out of the transaction callback, and rolled back the whole
+     * batch — the rows already marked sent, and the poison row's attempt counter with them. The next
+     * poll fetched the same batch and did it again. The queue stalled permanently, and because no
+     * attempt was ever recorded the row never reached `maxAttempts`, so the dead-letter alarm that
+     * exists to catch exactly this stayed silent.
+     *
+     * Found in an e2e run where three notification-email tests failed only in the full suite: an
+     * unrelated spec had queued a malformed notification first, and it blocked everything behind it.
+     */
+    const relay = new TestRelay(makeFakeDb());
+    relay.fetchBatchResult = [
+      { id: 'row-poison', attempts: 0, shouldFail: true, abortsTransaction: true },
+      { id: 'row-behind-it', attempts: 0, shouldFail: false },
+    ];
+
+    // Must not throw: a poison row is a row-level event, not a pass-level one.
+    await relay.relay();
+
+    // The row behind the poison one still went out. This is the assertion that fails without the
+    // per-row savepoint, and it is the one that matters — a stalled queue is invisible until
+    // somebody asks why an email never arrived.
+    expect(relay.markSentCalls).toEqual(['row-behind-it']);
+    // And the poison row's attempt was RECORDED, so it can eventually dead-letter rather than
+    // blocking the queue for ever.
+    expect(relay.markFailedCalls.map((c) => c.rowId)).toEqual(['row-poison']);
+    expect(relay.markFailedCalls[0]?.newAttempts).toBe(1);
+  });
+
+  it('keeps going when even recording the failure fails', async () => {
+    /*
+     * The last line of defence. If the row is gone, or the error text violates something itself,
+     * `markFailed` can fail on its own account — and the batch must still finish. Modelled by
+     * aborting the transaction and giving the relay a row whose failure cannot be recorded.
+     */
+    const relay = new TestRelay(makeFakeDb());
+    relay.markFailedThrows = true;
+    relay.fetchBatchResult = [
+      { id: 'row-unrecordable', attempts: 0, shouldFail: true },
+      { id: 'row-after', attempts: 0, shouldFail: false },
+    ];
+
+    await relay.relay();
+
+    expect(relay.markSentCalls, 'a failed markFailed swallowed the rest of the batch').toEqual([
+      'row-after',
+    ]);
   });
 
   it('coalesces racing calls into exactly one extra pass the callers await directly', async () => {

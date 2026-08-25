@@ -13,7 +13,7 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, Clock, User } from 'lucide-react';
+import { AlertCircle, ChevronDown, Clock, User } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { formatDate } from '@/shared/lib/format';
 import { api } from '@/shared/api/client';
@@ -145,6 +145,37 @@ function TimelineEmpty() {
   );
 }
 
+/**
+ * "The history could not be read" — which is NOT "there is no history".
+ *
+ * WHY THIS IS A SEPARATE STATE. The error branch used to fall through to {@link TimelineEmpty}, so a
+ * failed request asserted, in the product's own voice, that a record had no audit trail. That is a
+ * false compliance statement in an app whose ISMS and QMS modules exist to produce audit trails.
+ *
+ * And it was not an edge case: the query reads `/v1/audit-logs`, which requires `audit.read`, and
+ * three of the eight seeded roles — manager, helpdesk, employee — do not hold it. For those roles
+ * EVERY detail drawer in the product (this component is mounted by `EntityDetailPanel`, so ~27 of
+ * them) said the record had never been touched.
+ *
+ * The docblock on the component below diagnosed exactly this disease for a different symptom — an
+ * unmatched `resourceType` looking identical to a genuinely empty history — and fixed that one while
+ * leaving `isError` doing the same thing.
+ *
+ * `role="alert"` because a reader who has already moved on needs telling; the permission possibility
+ * is named because for three roles it is the likeliest cause and it is not a fault they can fix.
+ */
+function TimelineUnreadable() {
+  return (
+    <div role="alert" className="flex flex-col items-center gap-2 py-8 text-center">
+      <AlertCircle className="h-7 w-7 text-fg-subtle" strokeWidth={1.25} />
+      <p className="text-xs text-fg-muted">Couldn&apos;t load the history.</p>
+      <p className="text-2xs text-fg-subtle">
+        This is not an empty record — you may not have permission to read the audit trail.
+      </p>
+    </div>
+  );
+}
+
 // ── Public component ──────────────────────────────────────────────────────────
 
 export interface ActivityTimelineProps {
@@ -183,7 +214,8 @@ export function ActivityTimeline({ resourceId, resourceType, limit = 30 }: Activ
   });
 
   if (isLoading) return <TimelineSkeleton />;
-  if (isError || !data) return <TimelineEmpty />;
+  // Order matters: the failure has to be claimed before the absence is announced.
+  if (isError || !data) return <TimelineUnreadable />;
 
   const events = (data.data ?? []) as AuditLogResponse[];
   if (events.length === 0) return <TimelineEmpty />;

@@ -10,6 +10,7 @@ import {
   DataTable,
   EntityPicker,
   FormActions,
+  FormError,
   FormField,
   IconAction,
   Input,
@@ -56,7 +57,7 @@ function CreateDelegationModal({
     });
     setLoading(false);
     if (error) {
-      setErr('Failed to create delegation. Check the user ID.');
+      setErr(apiErrorMessage(error, 'Failed to create the delegation.'));
       return;
     }
     toast.success('Delegation created');
@@ -103,7 +104,7 @@ function CreateDelegationModal({
             placeholder="e.g. Parental leave coverage"
           />
         </FormField>
-        {err && <p className="text-xs text-danger">{err}</p>}
+        <FormError message={err} />
         <FormActions
           loading={loading}
           onClose={onClose}
