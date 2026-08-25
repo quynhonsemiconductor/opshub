@@ -29,18 +29,33 @@ function unique(prefix: string): string {
 }
 
 /** The seeded admin, who is the caller in every spec here. */
-async function createEmployee(request: APIRequestContext): Promise<string> {
+/**
+ * A fresh employee for this run, and its NAME as well as its id.
+ *
+ * The name is returned because a spec that filters the reviews table has to search for THIS probe.
+ * The filter used to be given the bare prefix "Perf Probe" with `getByRole('option').first()` — which
+ * is correct on an empty database and wrong on the second run, because every previous run left a
+ * "Perf Probe <stamp>" behind. It then filtered to somebody else's review and waited fifteen seconds
+ * for a row that was never going to arrive.
+ *
+ * That was the intermittent failure in this file: whether it passed depended on which probe happened
+ * to sort first, which is a property of the accumulated data rather than of the product.
+ */
+async function createEmployee(
+  request: APIRequestContext,
+): Promise<{ id: string; displayName: string }> {
   const stamp = Date.now();
+  const displayName = `Perf Probe ${stamp}`;
   const res = await request.post('/v1/employees', {
     headers: await csrfHeaders(request),
     data: {
       email: `perf.probe.${stamp}@opshub.local`,
-      displayName: `Perf Probe ${stamp}`,
+      displayName,
     },
   });
   expect(res.status(), await res.text()).toBe(201);
   const body = (await res.json()) as { data?: { id: string }; id?: string };
-  return body.data?.id ?? body.id!;
+  return { id: body.data?.id ?? body.id!, displayName };
 }
 
 /** A cycle, created through the API so a spec can start from the state it needs. */
@@ -100,7 +115,7 @@ test.describe('performance', () => {
     // The rule is a COUNT ACROSS ROWS, so nothing about a single row can express it. Closing regardless
     // would make the coverage report claim a cycle finished that nobody finished.
     const cycle = await createCycle(request, unique('PWX').toUpperCase());
-    const employeeId = await createEmployee(request);
+    const { id: employeeId } = await createEmployee(request);
     const reviewerId = await myEmployeeId(request);
 
     const opened = await request.post(`/v1/performance/cycles/${cycle.id}/open`, {
@@ -187,7 +202,7 @@ test.describe('performance', () => {
     request,
   }) => {
     const cycle = await createCycle(request, unique('PWG').toUpperCase());
-    const employeeId = await createEmployee(request);
+    const { id: employeeId, displayName: employeeName } = await createEmployee(request);
     const reviewerId = await myEmployeeId(request);
     await request.post(`/v1/performance/cycles/${cycle.id}/open`, {
       headers: await csrfHeaders(request),
@@ -202,8 +217,13 @@ test.describe('performance', () => {
     await page.getByRole('tab', { name: 'All reviews' }).click();
     // Filtered to this cycle's review by the employee it is about — the reviewer is the caller, so the
     // row also proves the "You" badge path.
-    await page.getByRole('combobox', { name: 'Filter by employee' }).fill(`Perf Probe`);
-    await page.getByRole('option').first().click();
+    // The FULL unique name, not the shared prefix: `option.first()` over "Perf Probe" picks whichever
+    // of the accumulated probes sorts first, which is rarely the one this test just created.
+    await page.getByRole('combobox', { name: 'Filter by employee' }).fill(employeeName);
+    await page
+      .getByRole('option', { name: new RegExp(employeeName) })
+      .first()
+      .click();
 
     // A brand-new review starts in `self_assessment`; the reviewer cannot rate until the employee has
     // had their say or the cycle moves it on. Assert the state rather than assuming it.
