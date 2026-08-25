@@ -1,35 +1,13 @@
-import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import type { components } from '@/shared/api/types';
-import {
-  Shield,
-  ShieldCheck,
-  ShieldAlert,
-  TrendingUp,
-  TrendingDown,
-  Minus,
-  RefreshCw,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  Eye,
-  EyeOff,
-} from 'lucide-react';
+import { Shield, ShieldAlert, TrendingUp, TrendingDown, Minus, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  Button,
-  PageHeader,
-  StatusBadge,
-  UpgradeGate,
-  humanizeStatus,
-  statusTone,
-  type BadgeTone,
-} from '@/shared/ui';
+import { Button, PageHeader, UpgradeGate, type BadgeTone } from '@/shared/ui';
 import { FEATURES } from '@/shared/config/features';
 import { cn } from '@/shared/lib/utils';
-import { orDash } from '@/shared/lib/format';
+import { BaselinePanel } from './baseline-panel';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -173,15 +151,8 @@ function gradeClass(g: string): string {
 }
 
 /** A baseline check's verdict. `not_applicable` says so rather than showing a colour for nothing. */
-function CheckVerdict({ status }: { status: string }) {
-  if (status === 'not_applicable') return <span className="text-xs text-fg-subtle">N/A</span>;
-  const icon = status === 'pass' ? CheckCircle : status === 'fail' ? XCircle : AlertTriangle;
-  return (
-    <StatusBadge tone={statusTone(status === 'pass' ? 'approved' : status)} icon={icon}>
-      {humanizeStatus(status)}
-    </StatusBadge>
-  );
-}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 const CATEGORY_LABELS: Record<string, string> = {
   asr: 'Attack Surface Reduction',
@@ -191,8 +162,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   identity: 'Identity',
   other: 'Other',
 };
-
-// ── Page ──────────────────────────────────────────────────────────────────────
 
 export function SecurityPosturePage() {
   if (!FEATURES.SECURITY_POSTURE) {
@@ -217,7 +186,6 @@ export function SecurityPosturePage() {
 
 function SecurityPostureContent() {
   const qc = useQueryClient();
-  const [showPassing, setShowPassing] = useState(false);
 
   const scoreQ = useSecureScore();
   const historyQ = useScoreHistory(30);
@@ -385,96 +353,40 @@ function SecurityPostureContent() {
         </div>
       )}
 
-      {/* ── Baseline checks table ────────────────────────────────────────── */}
-      {checks.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-fg">Baseline Drift Details</h2>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-fg-subtle">
-                {checks.filter((c) => c.status === 'fail').length} failing ·{' '}
-                {checks.filter((c) => c.status === 'pass').length} passing
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowPassing((p) => !p)}
-                className="gap-1.5 hover:border-border-strong"
-              >
-                {showPassing ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                {showPassing ? 'Hide passing' : 'Show passing'}
-              </Button>
-            </div>
-          </div>
+      <BaselinePanel checks={checks} isError={baselineQ.isError} />
 
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm" role="grid" aria-label="Baseline checks">
-              <thead>
-                <tr className="border-b border-border bg-surface-muted text-left text-xs font-medium text-fg-subtle">
-                  <th scope="col" className="px-4 py-3">
-                    Category
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Check
-                  </th>
-                  <th scope="col" className="px-4 py-3">
-                    Status
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right tabular-nums">
-                    Score
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {checks
-                  .filter((c) =>
-                    showPassing
-                      ? c.status !== 'not_applicable'
-                      : c.status !== 'pass' && c.status !== 'not_applicable',
-                  )
-                  .slice(0, 50)
-                  .map((c) => (
-                    <tr
-                      key={c.id}
-                      className="border-b border-border last:border-0 hover:bg-surface-muted/50"
-                    >
-                      <td className="px-4 py-3 text-xs text-fg-muted">
-                        {CATEGORY_LABELS[c.category] ?? c.category}
-                      </td>
-                      <td className="px-4 py-3 text-fg">{c.checkName}</td>
-                      <td className="px-4 py-3">
-                        <CheckVerdict status={c.status} />
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-fg-muted text-xs">
-                        {orDash(c.actualValue)} / {orDash(c.expectedValue)}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
+      {/*
+        A FAILED REQUEST IS NOT A MISSING INTEGRATION. This branch fired on `!latest`, which an error
+        also produces — so a 403 or a 500 was diagnosed on screen as "no data yet" and the reader was
+        told to go and rotate three server secrets that were fine.
 
-          {checks.filter((c) => c.status !== 'pass' && c.status !== 'not_applicable').length ===
-            0 && (
-            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900/30 dark:bg-emerald-950/20">
-              <ShieldCheck className="h-4 w-4 text-emerald-600" />
-              <p className="text-sm text-emerald-700 dark:text-emerald-400">
-                All baseline checks are passing.
-              </p>
-            </div>
-          )}
+        The two states now say different things, and the error one names no environment variables:
+        the person hitting a 403 is not the person who edits the server's configuration.
+      */}
+      {!scoreQ.isLoading && scoreQ.isError && (
+        <div
+          role="alert"
+          className="flex flex-col items-center gap-4 rounded-xl border border-border bg-surface p-12 text-center"
+        >
+          <ShieldAlert className="h-10 w-10 text-fg-subtle" />
+          <div>
+            <p className="font-medium text-fg">Couldn&apos;t load the security posture</p>
+            <p className="mt-1 text-sm text-fg-muted">
+              The score was not read, so nothing here reflects your tenant. Try again; if it keeps
+              failing, you may not have permission to view it.
+            </p>
+          </div>
         </div>
       )}
 
-      {/* Empty state when no data */}
-      {!scoreQ.isLoading && !latest && (
+      {!scoreQ.isLoading && !scoreQ.isError && !latest && (
         <div className="flex flex-col items-center gap-4 rounded-xl border border-border bg-surface p-12 text-center">
           <ShieldAlert className="h-10 w-10 text-fg-subtle" />
           <div>
             <p className="font-medium text-fg">No security posture data yet</p>
             <p className="mt-1 text-sm text-fg-muted">
-              Configure ENTRA_TENANT_ID, ENTRA_CLIENT_ID, and GRAPH_CLIENT_SECRET, then click Sync
-              now.
+              Nothing has been synced from Microsoft Graph yet. An administrator configures the
+              integration, then runs a sync.
             </p>
           </div>
         </div>

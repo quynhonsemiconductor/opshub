@@ -11,6 +11,7 @@ import {
   DataTable,
   EntityPicker,
   FormActions,
+  FormError,
   FormField,
   IconAction,
   Input,
@@ -54,7 +55,13 @@ function AssignRoleModal({
     });
     setLoading(false);
     if (error) {
-      setErr('Failed to assign role. Check the user ID.');
+      /*
+       * NOT "check the user ID". The likeliest cause is a permission: this screen renders its write
+       * controls to anybody who can reach it, and only `admin` holds `role.assign` — so `it-admin`
+       * and `auditor`, who hold `rbac.read`, reach the form and are refused by the API. Blaming the
+       * id sends them looking for a typo in a value the picker supplied.
+       */
+      setErr(apiErrorMessage(error, 'Failed to assign the role.'));
       return;
     }
     toast.success('Role assigned');
@@ -90,7 +97,7 @@ function AssignRoleModal({
             ))}
           </Select>
         </FormField>
-        {err && <p className="text-xs text-danger">{err}</p>}
+        <FormError message={err} />
         <FormActions
           loading={loading}
           onClose={onClose}

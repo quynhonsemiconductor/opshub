@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
+import { apiErrorMessage } from '@/shared/api/errors';
 import { FormActions, FormError, FormField, Input, Modal } from '@/shared/ui';
 import { RoleChip } from './people-shared';
 import type { EmployeeResponse } from './people.types';
@@ -45,7 +46,9 @@ export function EmployeeModal({ mode, employee, onClose, onSuccess }: EmployeeMo
         },
       });
       if (err) {
-        setError('Failed to create employee');
+        // "Employee jane@x.com already exists" is the API's answer and the only actionable one;
+        // this slot replaced it with a sentence that names nothing.
+        setError(apiErrorMessage(err, 'Failed to create the employee.'));
         setLoading(false);
         return;
       }
@@ -59,7 +62,7 @@ export function EmployeeModal({ mode, employee, onClose, onSuccess }: EmployeeMo
         },
       });
       if (err) {
-        setError('Failed to update employee');
+        setError(apiErrorMessage(err, 'Failed to update the employee.'));
         setLoading(false);
         return;
       }

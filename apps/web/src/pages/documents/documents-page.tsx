@@ -150,6 +150,17 @@ export function DocumentsPage() {
   const inForce = (selectedVersions.data ?? []).find(
     (version) => version.status === 'published' && !version.supersededAt,
   );
+  /*
+   * "Nothing published yet" is a claim about a controlled document, so it must not be what a failed
+   * request renders. `selectedVersions.data` is undefined on error exactly as it is before anything
+   * has been published, and for a policy library those two facts are not interchangeable: one means
+   * the document has no force, the other means we could not tell.
+   */
+  const inForceLabel = selectedVersions.isError
+    ? 'Couldn’t read the revisions'
+    : inForce
+      ? `v${inForce.version}, published ${formatDate(inForce.publishedAt)}`
+      : 'Nothing published yet';
 
   return (
     <>
@@ -277,9 +288,7 @@ export function DocumentsPage() {
                   label: 'In force',
                   // The version, not the document: "what is in force" is the first question, and it is
                   // unanswerable from the document row alone.
-                  value: inForce
-                    ? `v${inForce.version}, published ${formatDate(inForce.publishedAt)}`
-                    : 'Nothing published yet',
+                  value: inForceLabel,
                 },
                 {
                   label: 'Review due',

@@ -11,6 +11,7 @@ import {
   DataTable,
   DescriptionList,
   FormActions,
+  FormError,
   FormField,
   Input,
   ListPage,
@@ -108,7 +109,11 @@ function SubmitModal({ open, onClose, onSuccess }: SubmitModalProps) {
     });
     setLoading(false);
     if (error) {
-      setErr('Failed to submit request. Please try again.');
+      /*
+       * The commonest refusal here is the 10-character minimum on `justification`, which the form
+       * does not state — so "please try again" sent the user round the same loop with the same text.
+       */
+      setErr(apiErrorMessage(error, 'Failed to submit the request.'));
       return;
     }
     toast.success('Access request submitted');
@@ -170,7 +175,7 @@ function SubmitModal({ open, onClose, onSuccess }: SubmitModalProps) {
           />
         </FormField>
 
-        {err && <p className="text-xs text-danger">{err}</p>}
+        <FormError message={err} />
 
         <FormActions
           loading={loading}

@@ -11304,6 +11304,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Not Found */
       404: {
         headers: {
