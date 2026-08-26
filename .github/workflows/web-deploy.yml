@@ -78,6 +78,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 2
+          persist-credentials: false
 
       - name: Does this commit change infrastructure?
         id: touched
@@ -180,6 +181,13 @@ jobs:
 
   deploy:
     needs: [wait-for-infra, wait-for-ci]
+    # Must match the UNION of every inner job's own permissions in the reusable
+    # web-deploy.yml, not just default (GitHub validates the whole chain at
+    # startup) -- packages:read is for the build job's pnpm install of private
+    # @qnsc-vn/* packages.
+    permissions:
+      contents: read
+      packages: read
     uses: QNSC-VN/qnsc-ci/.github/workflows/web-deploy.yml@v1.10.0
     with:
       product: opshub

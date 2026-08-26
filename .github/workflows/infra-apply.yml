@@ -60,7 +60,6 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  id-token: write
   contents: read
 
 env:
@@ -74,6 +73,9 @@ jobs:
   apply-shared:
     runs-on: ubuntu-latest
     environment: shared
+    permissions:
+      contents: read
+      id-token: write
     timeout-minutes: 60
 
     # The one thing that genuinely must not run twice at once, and the reason the
@@ -92,6 +94,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: QNSC-VN/qnsc-ci/actions/setup-tofu-aws@v1.10.0
         with:
@@ -119,10 +123,15 @@ jobs:
     if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
     environment: develop   # no approval gate
+    permissions:
+      contents: read
+      id-token: write
     timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: QNSC-VN/qnsc-ci/actions/setup-tofu-aws@v1.10.0
         with:
@@ -208,10 +217,15 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
+      id-token: write
     timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0   # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: QNSC-VN/qnsc-ci/actions/setup-tofu-aws@v1.10.0
         with:
