@@ -49,6 +49,7 @@ export {
   type FormModalProps,
 } from './tab-scaffold';
 export { Textarea, type TextareaProps } from './textarea';
+export { Tooltip, type TooltipProps } from './tooltip';
 export { ThemeToggle } from './theme-toggle';
 export { UpgradeGate } from './upgrade-gate';
 export * from './checkbox';

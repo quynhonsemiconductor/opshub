@@ -194,6 +194,67 @@
   --radius-lg: var(--radius-lg);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Motion. An `--animate-*` token plus its `@keyframes` IS the whole mechanism in
+   Tailwind v4 — it generates the `animate-<name>` utility, and there is no
+   plugin to install.
+
+   WHY THIS BLOCK EXISTS. `Modal`, `ConfirmDialog` and the command palette all
+   carried `animate-in fade-in-0 zoom-in-95 duration-150`. That is
+   `tailwindcss-animate`'s vocabulary, the plugin is not a dependency of this
+   repo, and there were no `@keyframes` anywhere — so three utilities generated
+   NOTHING and every dialog in the product appeared instantly. `duration-150` is
+   the tell: it compiles, but to `transition-duration`, which an animation never
+   reads. The class string described motion nobody had written.
+
+   ONE TOKEN PER SURFACE, not one utility per property. A dialog's entrance is a
+   single decision, so the timing and the easing live in the token and a call
+   site cannot half-specify it the way the old four-class string did. Reuse
+   `animate-dialog-in` for the next centred overlay rather than adding a second
+   token that differs by 20ms.
+
+   NOT `@theme inline`, unlike the colour map above, and the difference is
+   load-bearing: `inline` bakes the value into the utility, whereas a plain
+   `@theme` compiles to `animation: var(--animate-dialog-in)`. That indirection
+   is what lets the reduced-motion block at the foot of this file switch the
+   motion off by redefining ONE variable, for every current and future call site
+   at once, instead of every component remembering a `motion-reduce:` prefix.
+   ───────────────────────────────────────────────────────────────────────────── */
+@theme {
+  --animate-dialog-in: dialog-in 150ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* `transform`, not the `scale` property: Tailwind v4 renders `-translate-x-1/2`
+     through the standalone `translate` property, so a transform-based keyframe
+     composes with the centring on `ConfirmDialog` and the palette rather than
+     fighting it. */
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  /* A SECOND token, not `animate-dialog-in` reused, and the difference is the
+     point: a tooltip is a transient hint that follows the pointer, so it fades
+     and does not scale — a bubble growing next to the cursor reads as a thing
+     arriving rather than a thing being explained, and it is quicker. Opacity
+     only, so nothing moves. */
+  --animate-tooltip-in: tooltip-in 100ms ease-out;
+
+  @keyframes tooltip-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
 *,
 *::before,
 *::after {
@@ -276,8 +337,29 @@ pre {
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Reduced motion — collapse transitions/animations for users who request it.
+
+   TWO LAYERS, and both are needed. A dialog that zooms is a dialog that can
+   trigger vestibular symptoms, so this is not a nicety.
+
+   1. Every `--animate-*` token from the motion block above is switched to
+      `none` HERE, at the token, so the animation does not merely run fast — it
+      does not run. Because the tokens are declared in a plain `@theme` (see
+      that block), the utility reads `animation: var(--animate-dialog-in)` and
+      one redefinition reaches every element using it, including the ones nobody
+      has written yet. This is the line the next component cannot forget.
+      `motion.spec.ts` fails if a token is added above without an entry here.
+   2. The blanket sweep stays for TRANSITIONS, which have no token layer to
+      switch: `SlideOver`'s 300ms `transition-transform` and the hover
+      `transition-colors` on every control are reachable only this way.
    ───────────────────────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
+  /* Unlayered on purpose: Tailwind emits theme variables inside `@layer theme`,
+     and unlayered declarations beat any layer regardless of source order. */
+  :root {
+    --animate-dialog-in: none;
+    --animate-tooltip-in: none;
+  }
+
   *,
   *::before,
   *::after {

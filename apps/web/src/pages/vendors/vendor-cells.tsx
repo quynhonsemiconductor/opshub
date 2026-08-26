@@ -1,4 +1,4 @@
-import { Badge, humanizeStatus } from '@/shared/ui';
+import { Badge, Tooltip, humanizeStatus } from '@/shared/ui';
 import { formatDate } from '@/shared/lib/format';
 import { outcomeTone, type Vendor } from './vendor.types';
 
@@ -40,14 +40,26 @@ export function ProcessorCell({
    * `Badge.onClick` owns the button semantics and the `stopPropagation` a clickable row needs, so this
    * stays a badge rather than becoming a hand-rolled button wrapper.
    */
+  /*
+   * AND THE ACRONYM IS EXPLAINED WHERE IT IS READ. This badge carried `title="Record the data processing
+   * agreement"`, which is invisible on a tablet — the device this register gets reviewed on — and which
+   * a screen reader may or may not read out depending on whose it is. "No DPA" in red is also three
+   * letters and a colour: it does not say what is missing, which rule wants it, or that the badge is the
+   * way to fix it, so a reader who does not already know Article 28(3) is left guessing at the loudest
+   * finding on the screen.
+   *
+   * Only in the interactive case, and that is not a shortcut: a `Badge` without `onClick` renders a
+   * `<span>`, which is never focused, so a tooltip on it would be mouse-only help — exactly what this
+   * component exists not to be. The read-only reader gets the finding named in the drawer instead.
+   */
+  if (!onRecordAgreement) return <Badge tone="red">No DPA</Badge>;
+
   return (
-    <Badge
-      tone="red"
-      title={onRecordAgreement ? 'Record the data processing agreement' : undefined}
-      onClick={onRecordAgreement}
-    >
-      No DPA
-    </Badge>
+    <Tooltip content="No data processing agreement on file, which GDPR Article 28(3) requires before a processor handles personal data. Opens the form on the agreement field.">
+      <Badge tone="red" onClick={onRecordAgreement}>
+        No DPA
+      </Badge>
+    </Tooltip>
   );
 }
 

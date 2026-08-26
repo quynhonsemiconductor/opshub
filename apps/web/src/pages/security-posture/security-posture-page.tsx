@@ -4,7 +4,7 @@ import { apiErrorMessage } from '@/shared/api/errors';
 import type { components } from '@/shared/api/types';
 import { Shield, ShieldAlert, TrendingUp, TrendingDown, Minus, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-import { Button, PageHeader, UpgradeGate, type BadgeTone } from '@/shared/ui';
+import { Button, PageHeader, Tooltip, UpgradeGate, type BadgeTone } from '@/shared/ui';
 import { FEATURES } from '@/shared/config/features';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { cn } from '@/shared/lib/utils';
@@ -245,15 +245,26 @@ function SecurityPostureContent() {
         description="Microsoft Secure Score trends and baseline drift checks"
         actions={
           canSync ? (
-            <Button
-              variant="outline"
-              onClick={() => syncMut.mutate()}
-              disabled={syncMut.isPending}
-              className="hover:border-border-strong"
+            /*
+             * "Sync now" NAMES A VERB AND NOT ITS OBJECT. Two people asked what it syncs, in which
+             * direction, and whether it would overwrite the baseline they had just edited — a fair
+             * question about a button on a compliance screen. The answer cannot go in the label without
+             * a paragraph in the header, and the toast only says it afterwards.
+             */
+            <Tooltip
+              content="Pulls the latest Secure Score and baseline results from Microsoft Graph. Read-only, and the figures land a few minutes after the run."
+              placement="bottom"
             >
-              <RefreshCw className={cn('h-3.5 w-3.5', syncMut.isPending && 'animate-spin')} />
-              Sync now
-            </Button>
+              <Button
+                variant="outline"
+                onClick={() => syncMut.mutate()}
+                disabled={syncMut.isPending}
+                className="hover:border-border-strong"
+              >
+                <RefreshCw className={cn('h-3.5 w-3.5', syncMut.isPending && 'animate-spin')} />
+                Sync now
+              </Button>
+            </Tooltip>
           ) : undefined
         }
       />
