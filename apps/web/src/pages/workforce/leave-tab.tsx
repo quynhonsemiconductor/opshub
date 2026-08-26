@@ -29,8 +29,12 @@ import {
   type FormModalProps,
 } from '@/shared/ui';
 import { useLeaveDocumentUrl } from '@/shared/api/attachment-urls';
+import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import { useListState } from '@/shared/hooks/use-list-state';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash } from '@/shared/lib/format';
+import { DecisionNote } from './decision-note';
+import { canCancelLeave, decisionNote, leaveReviewVerdict } from './workforce-policy';
 import type { LeaveResponse, LeaveStatus, LeaveType } from '@/shared/api/types';
 
 const LEAVE_FILTERS: { value: LeaveStatus | ''; label: string }[] = [
@@ -126,6 +130,14 @@ function RequestLeaveModal({ open, onClose, onSuccess }: FormModalProps) {
 
 export function LeaveTab() {
   const qc = useQueryClient();
+  /*
+   * WHO IS LOOKING, which this tab did not ask. Both halves are needed and neither alone is enough:
+   * `can` answers whether the API would let this caller decide anything at all, and `me.data.sub`
+   * answers whose record it is — the question separation of duties turns on. Filing leave stays
+   * ungated, because `POST /leave` is `@SelfScoped` and needs no permission.
+   */
+  const me = useCurrentUser();
+  const { can } = usePermissions();
   const [statusFilter, setStatusFilter] = useState<LeaveStatus | ''>('');
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState<LeaveResponse | null>(null);
@@ -211,25 +223,49 @@ export function LeaveTab() {
     {
       key: 'actions',
       header: 'Actions',
-      cell: (l) => (
-        <RowActions>
-          {l.status === 'pending' && (
-            <>
-              <RowAction tone="success" onClick={() => handleReview(l.id, true)}>
-                Approve
-              </RowAction>
-              <RowAction tone="danger" onClick={() => handleReview(l.id, false)}>
-                Reject
-              </RowAction>
+      /*
+       * THREE BUTTONS THAT WERE GATED ON THE STATUS ALONE. Approve and Reject are now offered only where
+       * the route guard AND the engine would both allow the click; Cancel is gated the other way round,
+       * on owning the row, because withdrawing is the requester's own act.
+       *
+       * The note and Cancel appear TOGETHER on the viewer's own pending request, and that pairing is the
+       * point: it says why the decision is not here and what the requester can do instead.
+       */
+      cell: (l) => {
+        const verdict = leaveReviewVerdict(l, me.data?.sub, can);
+        return (
+          <RowActions>
+            {verdict === 'offer' && (
+              <>
+                <RowAction tone="success" onClick={() => handleReview(l.id, true)}>
+                  Approve
+                </RowAction>
+                <RowAction tone="danger" onClick={() => handleReview(l.id, false)}>
+                  Reject
+                </RowAction>
+              </>
+            )}
+            {canCancelLeave(l, me.data?.sub, can) && (
               <RowAction tone="muted" onClick={() => handleCancel(l.id)}>
                 Cancel
               </RowAction>
-            </>
-          )}
-        </RowActions>
-      ),
+            )}
+            <DecisionNote verdict={verdict} />
+          </RowActions>
+        );
+      },
     },
   ];
+
+  // Read once for the drawer, which asks the same two questions about the one open row.
+  const selectedVerdict = selected
+    ? leaveReviewVerdict(selected, me.data?.sub, can)
+    : 'not_pending';
+  const selectedCancellable = selected ? canCancelLeave(selected, me.data?.sub, can) : false;
+  // An empty header row is a visible gap in the drawer, so the wrapper appears only when it holds
+  // something — a button, or the sentence explaining why there is none.
+  const showPanelActions =
+    selectedVerdict === 'offer' || selectedCancellable || !!decisionNote(selectedVerdict);
 
   return (
     <>
@@ -288,35 +324,42 @@ export function LeaveTab() {
             : undefined
         }
         headerActions={
-          selected?.status === 'pending' ? (
+          selected && showPanelActions ? (
             <div className="flex items-center gap-2">
-              <PanelAction
-                tone="success"
-                onClick={() => {
-                  handleReview(selected.id, true);
-                  setSelected(null);
-                }}
-              >
-                Approve
-              </PanelAction>
-              <PanelAction
-                tone="danger"
-                onClick={() => {
-                  handleReview(selected.id, false);
-                  setSelected(null);
-                }}
-              >
-                Reject
-              </PanelAction>
-              <PanelAction
-                tone="muted"
-                onClick={() => {
-                  handleCancel(selected.id);
-                  setSelected(null);
-                }}
-              >
-                Cancel
-              </PanelAction>
+              {selectedVerdict === 'offer' && (
+                <>
+                  <PanelAction
+                    tone="success"
+                    onClick={() => {
+                      handleReview(selected.id, true);
+                      setSelected(null);
+                    }}
+                  >
+                    Approve
+                  </PanelAction>
+                  <PanelAction
+                    tone="danger"
+                    onClick={() => {
+                      handleReview(selected.id, false);
+                      setSelected(null);
+                    }}
+                  >
+                    Reject
+                  </PanelAction>
+                </>
+              )}
+              {selectedCancellable && (
+                <PanelAction
+                  tone="muted"
+                  onClick={() => {
+                    handleCancel(selected.id);
+                    setSelected(null);
+                  }}
+                >
+                  Cancel
+                </PanelAction>
+              )}
+              <DecisionNote verdict={selectedVerdict} />
             </div>
           ) : undefined
         }

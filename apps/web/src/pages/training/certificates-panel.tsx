@@ -25,14 +25,35 @@ import type { Certificate } from './training.types';
  *
  * The upload goes through `useUpload`, which was broken until this branch: it sent no CSRF header, so
  * every presign in the SPA answered 403. Certificates would have been the fourth dead upload surface.
+ *
+ * AUTHORIZATION AND LIFECYCLE ARRIVE AS SEPARATE PROPS, and the split is deliberate. There used to be one
+ * `canManage`, and its only caller passed `selected.status !== 'revoked'` into it — so the panel believed
+ * it had been told who the reader was when it had been told what state the record was in, and every
+ * holder of `training.read` got Attach and Delete on records that were not theirs. Two booleans cannot be
+ * folded into one here without losing a real case: a record can be writable and revoked, or unwritable
+ * and live, and the reader must be told which.
+ *
+ * `canPost` ALSO GOVERNS THE LIST, not just the buttons. `GET …/certificates` runs through the same
+ * `assertMayAttach` as the presign, so a reader who may not attach may not enumerate either — firing that
+ * request anyway would spend a round trip to render a 403 as "Failed to load the certificates", which
+ * blames the network for a permission.
  */
 export function CertificatesPanel({
   recordId,
-  canManage,
+  canPost,
+  frozen,
 }: {
   recordId: string;
-  /** Verified records are still writable, but a revoked one takes no new evidence. */
-  canManage: boolean;
+  /**
+   * AUTHORIZATION: may this caller read and write this record's evidence? Mirrors `assertMayAttach` —
+   * their own record, or `training.manage`. Never a status expression; that is what `frozen` is for.
+   */
+  canPost: boolean;
+  /**
+   * LIFECYCLE: a revoked record is settled and takes no further evidence. Independent of who is asking,
+   * and ours rather than the API's — the service does not refuse a presign on a revoked record.
+   */
+  frozen: boolean;
 }) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -40,7 +61,8 @@ export function CertificatesPanel({
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState<Certificate | null>(null);
 
-  const certificates = useCertificates(recordId);
+  // `null` skips the request entirely — see the docblock: the list is behind the same check the presign is.
+  const certificates = useCertificates(canPost ? recordId : null);
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: ['training', 'certificates', recordId] });
 
@@ -90,6 +112,27 @@ export function CertificatesPanel({
   }
 
   const rows = certificates.data ?? [];
+  /*
+   * Attaching and deleting need BOTH halves. Named once, because two controls reading the same rule
+   * out of two hand-written expressions is how they drift apart — and the one that drifts is the one
+   * nobody clicks.
+   */
+  const writable = canPost && !frozen;
+
+  /*
+   * SAID, NOT SHOWN AS AN EMPTY SECTION. A reader looking at somebody else's record cannot otherwise
+   * tell a completion with no evidence from one whose evidence they may not see, and the first reading
+   * is the dangerous one: it looks like a compliance gap that is not there. The reason is also
+   * actionable — a training administrator can grant the code — which is why it is a sentence rather
+   * than a disabled button.
+   */
+  if (!canPost) {
+    return (
+      <p className="text-xs text-fg-subtle">
+        Certificates on somebody else&rsquo;s record are visible to training administrators only.
+      </p>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -132,7 +175,9 @@ export function CertificatesPanel({
             >
               <Download className="h-3.5 w-3.5" strokeWidth={2} />
             </Button>
-            {canManage && (
+            {/* Download stays for anybody who got this far — reading your own evidence, or evidence you
+                administer, is the whole point of the list. Deleting is a write. */}
+            {writable && (
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -147,7 +192,7 @@ export function CertificatesPanel({
         </div>
       ))}
 
-      {canManage && (
+      {writable && (
         <>
           <Button
             variant="outline"
@@ -172,6 +217,16 @@ export function CertificatesPanel({
             }}
           />
         </>
+      )}
+
+      {/* The OTHER half of the old single boolean, now able to speak for itself. Somebody who may write
+          to this record still gets told why they cannot, instead of hunting for a button that a status
+          removed — and it distinguishes "no evidence was ever attached" from "this record is closed". */}
+      {canPost && frozen && (
+        <p className="text-xs text-fg-subtle">
+          This record was revoked, so it takes no further evidence. What is already attached is
+          kept, because an audit asks what was on file at the time.
+        </p>
       )}
 
       <FormError message={error} />

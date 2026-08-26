@@ -22,6 +22,7 @@ import {
   humanizeStatus,
   type DataTableColumn,
 } from '@/shared/ui';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { orDash } from '@/shared/lib/format';
 import { REQUIREMENT_KINDS } from './training.types';
 import { useRequirements } from './use-training';
@@ -37,6 +38,14 @@ import type { Requirement } from './training.types';
  *
  * GRACE DAYS are how long after a lapse the requirement still counts as met — a week to re-sit a course
  * without the person showing up as non-compliant on the day it expired.
+ *
+ * WRITING THE RULE NEEDS `training.manage`; READING IT NEEDS `training.read`. `POST
+ * /training/positions/{positionId}/requirements` and `DELETE /training/requirements/{id}` both carry
+ * `@RequirePermission('training.manage')`, while `GET /training/positions/{positionId}/requirements`
+ * asks only for `training.read`. That asymmetry is the point of the tab for a read-only holder: a
+ * manager or an auditor comes here to see what a job demands, not to change what it demands — and a
+ * requirement is the input to the gap report, so an auditor able to delete one could delete the finding
+ * along with it.
  */
 function AddRequirementModal({
   positionId,
@@ -135,6 +144,8 @@ function AddRequirementModal({
 
 export function RequirementsTab() {
   const qc = useQueryClient();
+  const { can } = usePermissions();
+  const canManage = can('training.manage');
   const [positionId, setPositionId] = useState('');
   const [positionTitle, setPositionTitle] = useState('');
   const [adding, setAdding] = useState(false);
@@ -190,19 +201,20 @@ export function RequirementsTab() {
       key: 'actions',
       header: '',
       align: 'right',
-      cell: (requirement) => (
-        <RowActions>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Remove ${requirement.courseTitle}`}
-            title="Remove"
-            onClick={() => setRemoving(requirement)}
-          >
-            <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-          </Button>
-        </RowActions>
-      ),
+      cell: (requirement) =>
+        canManage ? (
+          <RowActions>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Remove ${requirement.courseTitle}`}
+              title="Remove"
+              onClick={() => setRemoving(requirement)}
+            >
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+            </Button>
+          </RowActions>
+        ) : null,
     },
   ];
 
@@ -247,15 +259,21 @@ export function RequirementsTab() {
           </div>
         }
         action={
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!positionId}
-            onClick={() => setAdding(true)}
-          >
-            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-            Require a course
-          </Button>
+          // TWO DIFFERENT REASONS TO WITHHOLD THIS, and they are not interchangeable. `disabled` means
+          // "not yet — name a position first", which is actionable and resolves in one click, so the
+          // button stays on screen saying so. No `training.manage` means "not you, ever, on this
+          // screen", which no amount of clicking resolves, so the button is absent instead of greyed.
+          canManage ? (
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!positionId}
+              onClick={() => setAdding(true)}
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+              Require a course
+            </Button>
+          ) : undefined
         }
       />
 

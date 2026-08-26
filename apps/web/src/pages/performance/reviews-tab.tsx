@@ -25,6 +25,7 @@ import {
   type DataTableColumn,
 } from '@/shared/ui';
 import { useListState } from '@/shared/hooks/use-list-state';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, formatDateTime, orDash } from '@/shared/lib/format';
 import { GoalsPanel } from './goals-panel';
 import { CancelReviewModal, RateReviewModal, SelfAssessmentModal } from './rating-modals';
@@ -45,11 +46,28 @@ import type { Review } from './performance.types';
  * SUBMIT GOES TO AN APPROVAL CHAIN, which is why "Send for approval" is not "Share". The engine keeps the
  * submitter out of their own chain, and the type def additionally refuses the SUBJECT as approver —
  * otherwise anybody holding `performance.approve` could sign off their own review.
+ *
+ * SO THE ROW ACTIONS AND THE DRAWER ACTIONS ARE GOVERNED DIFFERENTLY, route by route, and the difference
+ * is not cosmetic:
+ *   · Self-assess and Acknowledge are the SUBJECT'S — the controller rejects anybody else by id and says
+ *     `performance.manage` "does not help here", because a self-assessment somebody else wrote is not one
+ *     and an acknowledgement recorded by a third party is evidence of nothing. Gating these on a
+ *     permission would have hidden the two things an ordinary employee comes to this page to do, which is
+ *     the same defect as the ungated buttons, pointing the other way.
+ *   · Rate and Send for approval are the ASSIGNED REVIEWER'S, enforced in the service. Also no permission.
+ *   · Reassign (`PATCH reviews/{id}/reviewer`) and Cancel (`POST reviews/{id}/cancel`) DO carry
+ *     `@RequirePermission(PERMISSION.PERFORMANCE_MANAGE)`. They were the two ungated ones: every holder of
+ *     `performance.read` was offered the power to move somebody else's review to a different reviewer, or
+ *     withdraw it, from the drawer header.
+ *   · Goals are the widest — `mustWriteReview` accepts the assigned reviewer OR `performance.manage`,
+ *     because HR sets a cycle's goals up and the reviewer refines them. See the `GoalsPanel` call.
  */
 export function ReviewsTab() {
   const qc = useQueryClient();
   const list = useListState();
   const me = useAuthStore((state) => state.user);
+  const { can } = usePermissions();
+  const canManage = can('performance.manage');
   const [status, setStatus] = useState('');
   const [cycleId, setCycleId] = useState('');
   const [employeeId, setEmployeeId] = useState('');
@@ -303,7 +321,15 @@ export function ReviewsTab() {
         title={selected ? cycleLabel(selected.cycleId) : 'Review'}
         description={selected ? humanizeStatus(selected.status) : undefined}
         headerActions={
-          selected && selected.status !== 'cancelled' && selected.status !== 'acknowledged' ? (
+          // BOTH OF THESE ARE `performance.manage`, and the status conjunction stays because it answers a
+          // different question — a cancelled or acknowledged review is finished, so there is nothing left
+          // to reassign or withdraw whoever is asking. Withheld silently rather than explained: unlike
+          // the certificates panel next door, there is nothing a manager could do about it and nothing
+          // they were looking for here, so a sentence in the drawer header would only be noise.
+          selected &&
+          canManage &&
+          selected.status !== 'cancelled' &&
+          selected.status !== 'acknowledged' ? (
             <>
               <PanelAction tone="muted" onClick={() => setReassigning(selected)}>
                 Reassign
@@ -410,9 +436,16 @@ export function ReviewsTab() {
           <SlideOverSection title="Goals">
             <GoalsPanel
               reviewId={selected.id}
-              // Goals are the reviewer's to set, and only while the review is still being written:
-              // once it is with an approver the set is what was judged.
-              canEdit={isReviewer(selected) && selected.status === 'manager_review'}
+              // REVIEWER **OR** `performance.manage`, which is wider than this used to be and matches
+              // `mustWriteReview`: the controller's own docblock says HR sets a cycle's goals up and the
+              // reviewer refines them, "so both routes exist for both people". Gating on `isReviewer`
+              // alone locked HR out of the setup step their own routes were written for — the mirror
+              // image of the ungated buttons, and just as invisible, because the admin seats the browser
+              // suite runs as are reviewers on the seeded data and never noticed.
+              //
+              // The status half is unchanged and still ANDed: once a review is with an approver the goal
+              // set is what was judged, and that is true of HR and the reviewer alike.
+              canEdit={(isReviewer(selected) || canManage) && selected.status === 'manager_review'}
             />
           </SlideOverSection>
         )}

@@ -184,6 +184,25 @@ export class WorkforceService {
 
   async reviewTimesheet(id: string, approve: boolean, actor: Actor): Promise<Timesheet> {
     const t = await this.getTimesheet(id);
+    /*
+     * NOBODY APPROVES THEIR OWN TIMESHEET. This is the record payroll is computed from, so it is the
+     * one in this module where self-approval matters most — and it was the one place without the
+     * check.
+     *
+     * Leave and overtime are routed through the request engine, which refuses self-approval by
+     * `allowSelfApproval: false` on their type definitions. Timesheets never go near the engine:
+     * `reviewTimesheet` writes the status directly, so it inherited none of that and compared the
+     * actor to nothing. A `workforce.approve` holder could submit their own hours and approve them.
+     *
+     * Same error code the engine uses, so a client can tell "ask a colleague" from "ask for access"
+     * without knowing which of the two paths answered it.
+     */
+    if (t.employeeId === actor.sub) {
+      throw new PermissionDeniedException(
+        'You cannot approve or reject your own timesheet — payroll is computed from it',
+        ErrorCodes.REQUEST_SOD_VIOLATION,
+      );
+    }
     if (t.status !== 'submitted') {
       throw new PreconditionFailedException(
         ErrorCodes.TIMESHEET_NOT_EDITABLE,

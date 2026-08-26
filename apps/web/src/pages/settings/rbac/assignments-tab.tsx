@@ -22,6 +22,7 @@ import {
 } from '@/shared/ui';
 import { employeeOptions } from '@/shared/api/picker-sources';
 import { formatDate } from '@/shared/lib/format';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { SectionCard, SectionHeader } from './rbac-shared';
 import { useRoles } from './use-rbac';
 import type { RoleAssignmentResponse, RoleResponse } from '@/shared/api/types';
@@ -56,10 +57,11 @@ function AssignRoleModal({
     setLoading(false);
     if (error) {
       /*
-       * NOT "check the user ID". The likeliest cause is a permission: this screen renders its write
-       * controls to anybody who can reach it, and only `admin` holds `role.assign` — so `it-admin`
-       * and `auditor`, who hold `rbac.read`, reach the form and are refused by the API. Blaming the
-       * id sends them looking for a typo in a value the picker supplied.
+       * NOT "check the user ID", which is what this said. The id came out of a picker, so it is the
+       * one part of the submission nobody mistyped; the likeliest refusal is `role.assign`, which only
+       * `admin` holds. The tab now hides Assign from a caller who lacks it, but the message still has
+       * to pass the API's own sentence through: a stale token, a role deleted underneath the form, or
+       * a scope the caller may not write all answer here, and each says something different.
        */
       setErr(apiErrorMessage(error, 'Failed to assign the role.'));
       return;
@@ -118,6 +120,18 @@ function AssignRoleModal({
  */
 export function AssignmentsTab() {
   const qc = useQueryClient();
+  /*
+   * `role.assign`, and DELIBERATELY NOT `rbac.manage`. `POST /authz/assignments` and
+   * `DELETE /authz/assignments/:id` both carry `@RequirePermission('role.assign')` in
+   * `libs/modules/authz/src/interface/http/authz.controller.ts`, while the Roles tab's routes carry
+   * `rbac.manage`. They are two separable capabilities — editing what a role MEANS is not the same
+   * authority as deciding who HOLDS it — so this tab asks for its own, and a holder of only the other
+   * one sees no Assign and no Revoke here.
+   *
+   * The LOOKUP below stays ungated: `GET /authz/users/:userId/assignments` is `rbac.read`, which is
+   * what it takes to reach this screen at all. An auditor is meant to read who holds what.
+   */
+  const canAssign = usePermissions().can('role.assign');
   const [lookupUserId, setLookupUserId] = useState('');
   const [searchUserId, setSearchUserId] = useState('');
   const [pendingRevokeId, setPendingRevokeId] = useState<string | null>(null);
@@ -182,14 +196,17 @@ export function AssignmentsTab() {
       key: 'actions',
       header: '',
       align: 'right',
-      cell: (a) => (
-        <IconAction
-          label="Revoke assignment"
-          icon={Trash2}
-          tone="danger"
-          onClick={() => setPendingRevokeId(a.id)}
-        />
-      ),
+      // Null rather than an absent column, so the table keeps its shape for a reader: the header is
+      // already blank, and dropping the column would reflow every other one on the same data.
+      cell: (a) =>
+        !canAssign ? null : (
+          <IconAction
+            label="Revoke assignment"
+            icon={Trash2}
+            tone="danger"
+            onClick={() => setPendingRevokeId(a.id)}
+          />
+        ),
     },
   ];
 
@@ -218,9 +235,11 @@ export function AssignmentsTab() {
           title="Assignments"
           description="Look a user up by id to see and revoke what they hold."
           action={
-            <Button variant="primary" size="sm" onClick={() => setShowAssign(true)}>
-              <UserCheck className="h-3.5 w-3.5" /> Assign role
-            </Button>
+            canAssign ? (
+              <Button variant="primary" size="sm" onClick={() => setShowAssign(true)}>
+                <UserCheck className="h-3.5 w-3.5" /> Assign role
+              </Button>
+            ) : undefined
           }
         />
 
