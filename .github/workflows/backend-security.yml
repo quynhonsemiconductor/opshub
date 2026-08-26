@@ -5,6 +5,13 @@
 # Semgrep (SAST — replaces CodeQL, no GHAS needed), Gitleaks (secrets) and
 # osv-scanner (dependency CVEs — replaces dependency-review). Runs on every PR,
 # every push to main, and weekly to catch newly disclosed CVEs between pushes.
+#
+# actions-security (zizmor) replaces Code Scanning Default Setup's
+# `Analyze (actions)` as the GitHub Actions workflow security gate — Default
+# Setup autobuild is unreliable on bot-authored PRs and on repos with a lone
+# script in a language the repo isn't otherwise built in (see rally's
+# tools/*.py false-red). Non-blocking here on first rollout; flip
+# `blocking: true` after triaging the initial findings.
 # =============================================================================
 name: Security · Scan
 
@@ -38,3 +45,9 @@ jobs:
       # chore/defer-semgrep-blocking decision.
       osv_blocking: true
     # security.yml declares no secrets — nothing to pass (no `secrets: inherit`).
+
+  actions-security:
+    permissions:
+      contents: read
+      security-events: write
+    uses: QNSC-VN/qnsc-ci/.github/workflows/actions-security.yml@v1
