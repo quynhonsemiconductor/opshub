@@ -11,6 +11,10 @@
  *   - THE TIMELINE IS WRITTEN BY THE TRANSITION and is APPEND-ONLY. Five status changes produce five
  *     entries in chronological order, and there is no route that edits or deletes one.
  *   - RESOLVING NEEDS A CAUSE, CLOSING NEEDS A LESSON (ISO 27001 A.5.27)
+ *   - THE RECORD IS CORRECTABLE WHILE IT IS STILL BEING HANDLED. `PATCH /incidents/:id` is what makes
+ *     the register a register rather than an append-only log of first impressions — and it is refused
+ *     in both terminal states, refuses to move detection past a timestamp already recorded, and does
+ *     not honour a reference sent with it.
  *   - THE 72-HOUR BREACH CLOCK: a breach detected more than 72 hours ago appears on the overdue
  *     report with the shortfall computed, drops off once notified, and cannot be notified twice
  *   - `incident.read` is not `incident.manage`
@@ -42,6 +46,8 @@ let security: Session;
 let auditor: Session;
 /** Holds no permission codes at all — and must still be able to report. */
 let employee: Session;
+/** Only to create the hardware asset a correction links to — `asset.manage` is not the responder's. */
+let admin: Session;
 
 const RUN = Date.now().toString(36).toUpperCase().slice(-6);
 let seq = 0;
@@ -70,6 +76,9 @@ interface IncidentRow {
   personalDataBreach: boolean;
   notificationDueAt: string | null;
   regulatorNotifiedAt: string | null;
+  /** The risk this realised and the machine it happened on — both settable only by a correction. */
+  riskId: string | null;
+  assetId: string | null;
 }
 interface EventRow {
   id: string;
@@ -129,6 +138,7 @@ beforeAll(async () => {
   security = await login(app, FIXTURE.SECURITY);
   auditor = await login(app, FIXTURE.AUDITOR);
   employee = await login(app, FIXTURE.NO_PERMISSIONS);
+  admin = await login(app, FIXTURE.ADMIN);
 }, 60_000);
 
 afterAll(async () => {
@@ -589,6 +599,255 @@ describe('the register view', () => {
     expect(linked.status, JSON.stringify(linked.body)).toBe(200);
 
     expect(await unlinked()).not.toContain(incident.id);
+  });
+});
+
+describe('correcting the record', () => {
+  /*
+   * WHY THIS BLOCK EXISTS.
+   *
+   * `PATCH /incidents/:id` shipped with the module and no screen called it, so in practice the register
+   * was append-only: whatever severity somebody chose in the first ten minutes of a response was the
+   * severity for ever. That is the field the response queue is ORDERED by, so a `critical` graded `low`
+   * sinks to the bottom of the list the responders actually read — and the only ways out were to close
+   * the incident and report a duplicate under a new reference (breaking every citation of the old one)
+   * or to leave the record wrong.
+   *
+   * The screen now calls it, which is what makes each guard below reachable by a person rather than only
+   * by a script: everything asserted here is something the correction form can attempt.
+   */
+
+  it('regrades a severity, and the register serves the correction', async () => {
+    const incident = await report(security, { severity: 'low', detectedAt: hoursAgo(2) });
+
+    const corrected = await apiRequest(app, security, 'PATCH', `/incidents/${incident.id}`, {
+      severity: 'critical',
+      category: 'data_loss',
+      title: 'Customer export exposed — not the phishing report it was first filed as',
+    });
+    expect(corrected.status, JSON.stringify(corrected.body)).toBe(200);
+    expect(unwrap<IncidentRow>(corrected.body).severity).toBe('critical');
+
+    /*
+     * READ BACK, and through the LIST rather than the record. The PATCH response echoing `critical`
+     * only proves the service returned what it was given; the queue is what a responder reads, it is
+     * ordered and filtered by severity in SQL, and an update that touched the response but not the row
+     * would pass an assertion on the response alone. Both directions, because "now critical" without
+     * "no longer low" would also pass against a row that had been duplicated rather than updated.
+     */
+    const queuedAs = async (value: string) =>
+      unwrap<IncidentRow[]>(
+        (await apiRequest(app, security, 'GET', `/incidents?severity=${value}&limit=100`)).body,
+      ).map((i) => i.id);
+    expect(await queuedAs('critical')).toContain(incident.id);
+    expect(await queuedAs('low')).not.toContain(incident.id);
+  });
+
+  it('withdraws a wrongly-ticked breach, and the deadline goes with it', async () => {
+    // A flag ticked by somebody being careful in the first minutes, and wrong: the export held no
+    // personal data. Leaving it set leaves a GDPR Article 33 deadline on the record and the incident on
+    // the overdue report, so this is a correction with a regulator on the other end of getting it wrong.
+    const incident = await report(security, {
+      personalDataBreach: true,
+      detectedAt: hoursAgo(80),
+    });
+    expect(incident.notificationDueAt).not.toBeNull();
+    expect(
+      unwrap<OverdueRow[]>(
+        (await apiRequest(app, security, 'GET', '/incidents/breaches/overdue')).body,
+      ).map((o) => o.id),
+    ).toContain(incident.id);
+
+    const corrected = await apiRequest(app, security, 'PATCH', `/incidents/${incident.id}`, {
+      personalDataBreach: false,
+    });
+    expect(corrected.status, JSON.stringify(corrected.body)).toBe(200);
+    const after = unwrap<IncidentRow>(corrected.body);
+    expect(after.personalDataBreach).toBe(false);
+    // DERIVED, so correcting the flag corrects the deadline — nothing has to remember to clear it.
+    expect(after.notificationDueAt).toBeNull();
+    expect(
+      unwrap<OverdueRow[]>(
+        (await apiRequest(app, security, 'GET', '/incidents/breaches/overdue')).body,
+      ).map((o) => o.id),
+    ).not.toContain(incident.id);
+  });
+
+  it('does not honour a reference sent with a correction', async () => {
+    const incident = await report();
+
+    const res = await apiRequest(app, security, 'PATCH', `/incidents/${incident.id}`, {
+      reference: nextRef(),
+      severity: 'low',
+    });
+    /*
+     * ACCEPTED AND IGNORED, which is the behaviour the form's disabled reference field relies on.
+     * `UpdateIncidentSchema` omits `reference` and the pipe strips what the schema does not declare, so
+     * the field cannot be renamed through this route at all — and it must not be, because the
+     * post-incident report, the breach notification and any regulator correspondence quote it. Renaming
+     * one would orphan every citation, which is why the schema omits it rather than making it optional.
+     */
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(unwrap<IncidentRow>(res.body).reference).toBe(incident.reference);
+    expect(unwrap<IncidentRow>(res.body).severity).toBe('low');
+  });
+
+  it('refuses a correction in both terminal states', async () => {
+    /*
+     * BOTH, because the screen decides whether to draw its Correct action from one list and this is that
+     * list. `closed` alone was already pinned above; `false_positive` is the one that gets forgotten —
+     * it is reached by a different route (`/dismiss`) and is just as finished, and an action offered on
+     * it would be a button whose only possible outcome is this refusal.
+     */
+    const closed = await walkTo('closed');
+    const dismissed = await report();
+    expect(
+      (
+        await apiRequest(app, security, 'POST', `/incidents/${dismissed.id}/dismiss`, {
+          reason: 'A scheduled penetration test nobody had announced.',
+        })
+      ).status,
+    ).toBe(200);
+
+    for (const finished of [closed, dismissed]) {
+      const res = await apiRequest(app, security, 'PATCH', `/incidents/${finished.id}`, {
+        severity: 'low',
+      });
+      expect(res.status, finished.reference).toBe(412);
+      // The CODE, not just the status: the screen shows the API's message, and this is the one that
+      // tells a responder to add a timeline entry instead.
+      expect(errorCode(res.body), finished.reference).toBe('INCIDENT_NOT_IN_STATE');
+    }
+  });
+
+  it('moves detection earlier, and refuses it past a containment or into the future', async () => {
+    /*
+     * DETECTED SIX HOURS AGO, CONTAINED FIVE — both backdated, and the containment explicitly rather
+     * than through `walkTo`, which stamps `now`. With containment at `now` there is no instant that is
+     * both after it and not in the future, so the future check would answer first and this test would
+     * pass while asserting nothing about the timestamp comparison it exists for. Measured: it did.
+     */
+    const contained = await report(security, { detectedAt: hoursAgo(6) });
+    for (const [url, payload] of [
+      ['/triage', { assignedTo: FIXTURE.SECURITY.id }],
+      ['/contain', { containedAt: hoursAgo(5) }],
+    ] as const) {
+      const step = await apiRequest(
+        app,
+        security,
+        'POST',
+        `/incidents/${contained.id}${url}`,
+        payload,
+      );
+      expect(step.status, `${url}: ${JSON.stringify(step.body)}`).toBe(200);
+    }
+
+    // EARLIER IS THE LEGITIMATE CORRECTION, and the one this route exists for: somebody finds the alert
+    // in a log and realises it fired hours before anybody noticed. It also moves the breach deadline,
+    // which is why it must be possible rather than blocked along with the mistakes.
+    const earlier = await apiRequest(app, security, 'PATCH', `/incidents/${contained.id}`, {
+      detectedAt: hoursAgo(9),
+    });
+    expect(earlier.status, JSON.stringify(earlier.body)).toBe(200);
+    expect(new Date(unwrap<IncidentRow>(earlier.body).detectedAt).getTime()).toBeLessThan(
+      new Date(contained.detectedAt).getTime(),
+    );
+
+    /*
+     * FORWARD PAST THE CONTAINMENT IS REFUSED, and the refusal has to come from the service: the row
+     * would violate `ck_incident_timeline_order`, which arrives as a 500 with no code and nothing a
+     * responder can act on. The message NAMES the timestamp that blocks it, which is why the form does
+     * not pre-empt this with a rule of its own — a client-side guard could only grey the field out,
+     * while this says which recorded moment the new one collides with.
+     */
+    const past = await apiRequest(app, security, 'PATCH', `/incidents/${contained.id}`, {
+      detectedAt: hoursAgo(2),
+    });
+    expect(past.status, JSON.stringify(past.body)).toBe(412);
+    expect(errorCode(past.body)).toBe('INCIDENT_TIMELINE_ORDER');
+    expect((past.body as { error?: { message?: string } }).error?.message).toContain('contained');
+
+    // And a correction cannot claim the incident was noticed tomorrow. An hour, not seconds: the
+    // tolerance is two minutes and a test sitting on that boundary measures the environment's clocks
+    // rather than the rule — see the skew case in `reporting`.
+    const future = await apiRequest(app, security, 'PATCH', `/incidents/${contained.id}`, {
+      detectedAt: new Date(Date.now() + HOUR).toISOString(),
+    });
+    expect(future.status).toBe(412);
+    expect(errorCode(future.body)).toBe('INCIDENT_TIMELINE_ORDER');
+  });
+
+  it('links the risk it realised and the device it happened on, and lets both be removed', async () => {
+    /*
+     * THE FEEDBACK LOOP, and the gap that made it unusable: both ids are in the schema and were in no
+     * form, so an incident could never be traced to the risk it realised — while
+     * `/incidents/unlinked-to-risk` sat there listing everything, with no way to act on the list.
+     *
+     * REMOVAL MATTERS AS MUCH AS LINKING. A link to the wrong risk is the same class of mistake as a
+     * mis-graded severity, so `null` has to clear the field rather than being treated as "unchanged" —
+     * otherwise the first wrong choice is permanent, which is the very thing this route exists to fix.
+     */
+    const incident = await report();
+
+    const risk = await apiRequest(app, security, 'POST', '/risks', {
+      reference: `E2E-INC-CR-${RUN}-${++seq}`,
+      title: 'Credential harvesting via spoofed vendor mail',
+      description: 'Staff may enter credentials on a convincing fake portal.',
+      category: 'phishing',
+      ownerId: FIXTURE.SECURITY.id,
+      inherent: { likelihood: 4, impact: 3 },
+    });
+    expect(risk.status, JSON.stringify(risk.body)).toBe(201);
+    const riskId = unwrap<{ id: string }>(risk.body).id;
+
+    const asset = await apiRequest(app, admin, 'POST', '/assets', {
+      assetTag: `E2E-INC-A-${RUN}-${++seq}`,
+      type: 'laptop',
+      manufacturer: 'Acme',
+      model: 'Book 13',
+      status: 'in_stock',
+    });
+    expect(asset.status, JSON.stringify(asset.body)).toBe(201);
+    const assetId = unwrap<{ id: string }>(asset.body).id;
+
+    const linked = await apiRequest(app, security, 'PATCH', `/incidents/${incident.id}`, {
+      riskId,
+      assetId,
+    });
+    expect(linked.status, JSON.stringify(linked.body)).toBe(200);
+    expect(unwrap<IncidentRow>(linked.body).riskId).toBe(riskId);
+    expect(unwrap<IncidentRow>(linked.body).assetId).toBe(assetId);
+
+    const cleared = await apiRequest(app, security, 'PATCH', `/incidents/${incident.id}`, {
+      riskId: null,
+      assetId: null,
+    });
+    expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+    expect(unwrap<IncidentRow>(cleared.body).riskId).toBeNull();
+    expect(unwrap<IncidentRow>(cleared.body).assetId).toBeNull();
+    // Back on the "no risk linked" report, which is the queue somebody works through.
+    expect(
+      unwrap<IncidentRow[]>(
+        (await apiRequest(app, security, 'GET', '/incidents/unlinked-to-risk')).body,
+      ).map((i) => i.id),
+    ).toContain(incident.id);
+  });
+
+  it('needs at least one field, and refuses a reader who can see the form is missing', async () => {
+    const incident = await report();
+
+    // `UpdateIncidentSchema` refines on a non-empty object: an empty correction is a request that means
+    // nothing, and answering 200 to it would report success for a change nobody made.
+    expect((await apiRequest(app, security, 'PATCH', `/incidents/${incident.id}`, {})).status).toBe(
+      422,
+    );
+
+    // THE BUTTON BEING HIDDEN IS NOT THE ENFORCEMENT. The screen draws Correct only for
+    // `incident.manage`, and an auditor holding `incident.read` can reach the route regardless.
+    const auditorAttempt = await apiRequest(app, auditor, 'PATCH', `/incidents/${incident.id}`, {
+      severity: 'low',
+    });
+    expect(auditorAttempt.status).toBe(403);
   });
 });
 

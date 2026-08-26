@@ -2,6 +2,7 @@ import { test } from './support/test';
 import type { APIRequestContext } from '@playwright/test';
 import {
   chooseFromPicker,
+  createRisk,
   csrfHeaders,
   expect,
   expectRowSomewhere,
@@ -21,6 +22,8 @@ import {
  *   the entry in its own transaction
  * - a personal-data breach carries a 72-hour deadline the API computes, and the row says which of three
  *   states it is in: not a breach, due, or notified
+ * - THE RECORD IS CORRECTABLE while it is still being handled, through the same form that reported it —
+ *   and the action is absent, not merely refused, once the record is finished
  *
  * Everything asserted here is created here — the register is shared with the API suites.
  */
@@ -64,6 +67,15 @@ test.describe('incidents', () => {
     await expect(dialog).toBeVisible();
     // The 72 hours are NAMED in the form, because ticking this box is what starts them.
     await expect(dialog.getByText(/72-hour notification clock/i)).toBeVisible();
+    /*
+     * AND NO LINK FIELDS, which is the one way this form differs from the correction form it shares its
+     * code with. `/v1/risks` and `/v1/assets` need `risk.read` and `asset.read`, while reporting needs
+     * nothing at all — so for the person the ungated form exists for those two pickers would be empty
+     * boxes. Which register risk an incident realised is a triage judgement, made later, by somebody
+     * holding the register.
+     */
+    await expect(dialog.getByLabel('Linked risk')).toHaveCount(0);
+    await expect(dialog.getByLabel('Affected device')).toHaveCount(0);
 
     await dialog.getByLabel('Reference').fill(reference);
     await dialog.getByLabel('Category').fill('Phishing');
@@ -186,6 +198,144 @@ test.describe('incidents', () => {
       'Notified',
       { timeout: 15_000 },
     );
+
+    /*
+     * AND THE BREACH FLAG IS NOW LOCKED, which the API does not enforce and cannot.
+     * `UpdateIncidentSchema` accepts `personalDataBreach: false` on an incident whose regulator has
+     * already been notified, and nothing refuses it: the incident would drop off the overdue report and
+     * out of the 72-hour arithmetic while `regulatorNotifiedAt` still records that a regulator was told
+     * about a breach — a record contradicting itself, with no route to un-notify. Correcting a wrongly
+     * ticked breach is one of the reasons the correction form exists, so it stays available right up to
+     * the notification and stops there, and this is the only assertion that holds that line.
+     */
+    await page.keyboard.press('Escape');
+    await expectRowSomewhere(page, incident.reference);
+    await page
+      .locator('tbody tr', { hasText: incident.reference })
+      .getByRole('button', { name: 'Correct' })
+      .click();
+    const correction = page.getByRole('dialog');
+    await expect(
+      correction.getByLabel(/personal data was or may have been exposed/i),
+    ).toBeDisabled();
+    await expect(correction.getByText(/can no longer be withdrawn/i)).toBeVisible();
+  });
+
+  test('corrects a mis-graded severity and links the risk it realised', async ({
+    page,
+    request,
+  }) => {
+    /*
+     * WHY THIS TEST EXISTS. `PATCH /v1/incidents/:id` shipped with the module and no screen called it, so
+     * the severity somebody chose in the first ten minutes of a response was the severity for ever — and
+     * severity is what the response queue is ORDERED by, so a critical filed as high sits below things
+     * that matter less. The same PATCH is the only way to set `riskId`, which is the ISMS's feedback loop:
+     * without it "the register said this could happen" can never be recorded against the incident proving
+     * it did.
+     *
+     * A PRECISE INSTANT, seconds and milliseconds included, because the last assertion is about them.
+     */
+    const detectedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const incident = await reportIncident(request, unique('PWC').toUpperCase(), { detectedAt });
+    const risk = await createRisk(request, unique('PWCR').toUpperCase(), 3, 3);
+
+    await gotoInShell(page, '/incidents');
+    await expectRowSomewhere(page, incident.reference);
+    await page
+      .locator('tbody tr', { hasText: incident.reference })
+      .getByRole('button', { name: 'Correct' })
+      .click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(
+      dialog.getByRole('heading', { name: `Correct ${incident.reference}` }),
+    ).toBeVisible();
+
+    /*
+     * PREFILLED FROM THE RECORD. A correction that opened blank would be a re-entry form: every field
+     * left alone would be sent empty, so fixing the severity would erase the description a regulator may
+     * read. `high` is what the API holds.
+     */
+    await expect(dialog.getByLabel('Severity')).toHaveValue('high');
+
+    /*
+     * AND THE REFERENCE IS READ-ONLY. The post-incident report, the breach notification and any regulator
+     * correspondence quote it, so renaming one would orphan every citation — which is why
+     * `UpdateIncidentSchema` omits the field rather than making it optional. Disabled here, and the API
+     * drops a reference sent anyway; this assertion is what keeps the screen from disagreeing with that.
+     */
+    const reference = dialog.getByLabel('Reference');
+    await expect(reference).toBeDisabled();
+    await expect(reference).toHaveValue(incident.reference);
+
+    await dialog.getByLabel('Severity').selectOption('critical');
+    await chooseFromPicker(page, dialog, 'Linked risk', risk.reference);
+    await dialog.getByRole('button', { name: /save correction/i }).click();
+    await expect(dialog).toBeHidden();
+
+    /*
+     * THE ROW A RESPONDER READS, REGRADED — and looked up from the start of the list again, because a
+     * regrade MOVES it. The register is ordered worst-first, so `critical` jumps toward the front while
+     * the viewer stays on whatever page the first lookup walked to. Asserted against the current page
+     * alone this passed or failed depending on how many incidents the shared register happened to hold.
+     */
+    await expectRowSomewhere(page, incident.reference);
+    await expect(page.locator('tbody tr', { hasText: incident.reference }).first()).toContainText(
+      'Critical',
+      { timeout: 15_000 },
+    );
+
+    const stored = await request.get(`/v1/incidents/${incident.id}`);
+    expect(stored.ok(), await stored.text()).toBe(true);
+    // `data` when the envelope is there and the body itself when it is not — same shape-tolerance as
+    // `reportIncident` above, because the BFF unwraps single records and the API does not.
+    const body = (await stored.json()) as { data?: Record<string, unknown> } & Record<
+      string,
+      unknown
+    >;
+    const record = body.data ?? body;
+    expect(record.severity).toBe('critical');
+    // The link the register could not record before — and the only place it can be set.
+    expect(record.riskId).toBe(risk.id);
+    /*
+     * DETECTION UNTOUCHED, TO THE MILLISECOND, and this is the assertion that cannot be made anywhere but
+     * here. `datetime-local` cannot represent seconds, so a form that re-sent the field it had prefilled
+     * would round a detection recorded at 09:14:37 down to 09:14 — silently moving the instant every
+     * deadline in this module counts from, including the 72-hour one, on a correction that was only ever
+     * about the severity. The form therefore sends `detectedAt` only when the value actually moved, which
+     * an API-level spec cannot observe because it never goes through the control.
+     */
+    expect(record.detectedAt).toBe(detectedAt);
+  });
+
+  test('offers no correction once the record is finished', async ({ page, request }) => {
+    /*
+     * `updateIncident` calls `assertOpen`, so a finished record answers `INCIDENT_NOT_IN_STATE` — "add a
+     * timeline entry instead". A Correct button on such a row would be a button whose only possible
+     * outcome is that refusal, teaching the rule through an error rather than through the absence of the
+     * action.
+     *
+     * DISMISSED RATHER THAN CLOSED, deliberately: `false_positive` is the terminal state that gets
+     * forgotten, because it is reached by a different route and does not have "closed" in its name. The
+     * closed half of the same rule is pinned in the API suite.
+     */
+    const incident = await reportIncident(request, unique('PWN').toUpperCase());
+    const dismissed = await request.post(`/v1/incidents/${incident.id}/dismiss`, {
+      headers: await csrfHeaders(request),
+      data: { reason: 'A scheduled penetration test nobody had announced.' },
+    });
+    expect(dismissed.status(), await dismissed.text()).toBe(200);
+
+    await gotoInShell(page, '/incidents');
+    await page
+      .getByRole('radiogroup', { name: /status/i })
+      .getByRole('radio', { name: 'False positive' })
+      .click();
+    await expectRowSomewhere(page, incident.reference);
+
+    const row = page.locator('tbody tr', { hasText: incident.reference });
+    await expect(row).toContainText('False positive');
+    await expect(row.getByRole('button', { name: 'Correct' })).toHaveCount(0);
   });
 
   test('dismissing needs a reason, and the report stays in the register', async ({

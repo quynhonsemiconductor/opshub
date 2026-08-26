@@ -24,15 +24,16 @@ import {
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash } from '@/shared/lib/format';
+import { LastAssessedCell, ProcessorCell } from './vendor-cells';
 import { RecordAssessmentModal, VendorReasonModal } from './vendor-decision-modals';
-import { RegisterVendorModal } from './vendor-modals';
+import { RegisterVendorModal, type VendorCorrectionFocus } from './vendor-modals';
 import { VendorAssessmentsPanel, VendorRisksPanel } from './vendor-panels';
 import {
   CriticalWithoutRiskBanner,
   ReviewGapsBanner,
   UnassessedSpendBanner,
 } from './vendor-reports';
-import { VENDOR_STATUS_FILTERS, outcomeTone } from './vendor.types';
+import { VENDOR_STATUS_FILTERS } from './vendor.types';
 import { useCriticalityLevels, useVendors } from './use-vendors';
 import type { Vendor } from './vendor.types';
 
@@ -62,6 +63,14 @@ export function VendorsPage() {
   const [criticality, setCriticality] = useState('');
   const [processorsOnly, setProcessorsOnly] = useState(false);
   const [registering, setRegistering] = useState(false);
+  /**
+   * The supplier being CORRECTED, not a new one registered. Same form, `PATCH` not `POST`. `focus` says
+   * which field the correction was opened ON, so "No DPA" is a route to the field that closes it.
+   */
+  const [correcting, setCorrecting] = useState<{
+    vendor: Vendor;
+    focus?: VendorCorrectionFocus;
+  } | null>(null);
   const [assessing, setAssessing] = useState<Vendor | null>(null);
   const [reasonFor, setReasonFor] = useState<{
     vendor: Vendor;
@@ -142,36 +151,22 @@ export function VendorsPage() {
     {
       key: 'processor',
       header: 'Processor',
-      // A processor with no DPA is its own finding, so the two facts sit together rather than in separate
-      // columns nobody reads across.
-      cell: (vendor) =>
-        vendor.dataProcessor ? (
-          vendor.dataProcessingAgreementId ? (
-            <Badge tone="green">DPA on file</Badge>
-          ) : (
-            <Badge tone="red">No DPA</Badge>
-          )
-        ) : (
-          <span className="text-xs text-fg-subtle">No</span>
-        ),
+      cell: (vendor) => (
+        <ProcessorCell
+          vendor={vendor}
+          // Omitted, not disabled, when there is nothing to open — see `ProcessorCell`.
+          onRecordAgreement={
+            canManage && vendor.status !== 'terminated'
+              ? () => setCorrecting({ vendor, focus: 'dataProcessingAgreement' })
+              : undefined
+          }
+        />
+      ),
     },
     {
       key: 'assessment',
       header: 'Last assessed',
-      cell: (vendor) =>
-        vendor.lastAssessedAt ? (
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-fg-muted">{formatDate(vendor.lastAssessedAt)}</span>
-            {vendor.lastOutcome && (
-              <Badge tone={outcomeTone(vendor.lastOutcome)}>
-                {humanizeStatus(vendor.lastOutcome)}
-              </Badge>
-            )}
-          </div>
-        ) : (
-          // Never, not blank: an unassessed supplier is the review-gap report's subject.
-          <span className="text-xs text-warning">Never</span>
-        ),
+      cell: (vendor) => <LastAssessedCell vendor={vendor} />,
     },
     {
       key: 'risks',
@@ -208,7 +203,17 @@ export function VendorsPage() {
               Reinstate
             </RowAction>
           )}
-          {/* Manage-gated: the record and the judgements about it. */}
+          {/* Manage-gated: the record and the judgements about it.
+              CORRECT, on anything not terminated. `PATCH /v1/vendors/:id` had existed since the module
+              was written with no caller, so criticality — which IS the assessment cadence — the owner,
+              the contract window, the notice period and the DPA were permanent once onboarded. A
+              terminated supplier is excluded: `update` calls `assertNotTerminated` and answers
+              `VENDOR_TERMINATED`, and an action whose only outcome is that refusal is not offered. */}
+          {canManage && vendor.status !== 'terminated' && (
+            <RowAction tone="muted" onClick={() => setCorrecting({ vendor })}>
+              Correct
+            </RowAction>
+          )}
           {canManage && vendor.status !== 'terminated' && (
             <RowAction tone="accent" onClick={() => setAssessing(vendor)}>
               Assess
@@ -238,6 +243,16 @@ export function VendorsPage() {
         onClose={() => setRegistering(false)}
         onSuccess={invalidate}
       />
+      {/* One form, two verbs: `vendor` present means correct the record rather than register a new one. */}
+      {correcting && (
+        <RegisterVendorModal
+          open
+          vendor={correcting.vendor}
+          focus={correcting.focus}
+          onClose={() => setCorrecting(null)}
+          onSuccess={invalidate}
+        />
+      )}
       {assessing && (
         <RecordAssessmentModal
           vendor={assessing}
@@ -343,9 +358,16 @@ export function VendorsPage() {
         description={selected?.reference}
         headerActions={
           selected && canManage && selected.status !== 'terminated' ? (
-            <PanelAction tone="accent" onClick={() => setAssessing(selected)}>
-              Assess
-            </PanelAction>
+            <>
+              {/* The drawer renders the same findings in words — "Yes — NO DPA recorded" — so it needs
+                  the same way to act on them. Same gate: `update` refuses a terminated supplier. */}
+              <PanelAction tone="muted" onClick={() => setCorrecting({ vendor: selected })}>
+                Correct
+              </PanelAction>
+              <PanelAction tone="accent" onClick={() => setAssessing(selected)}>
+                Assess
+              </PanelAction>
+            </>
           ) : undefined
         }
         items={

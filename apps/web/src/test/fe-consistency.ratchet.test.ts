@@ -603,18 +603,28 @@ describe('FE consistency ratchets (only ever decrease)', () => {
     expect(total, 'nothing formats a date through format.ts').toBeGreaterThan(40);
   });
 
-  it(`largest source file <= ${MAX_FILE_LINES} lines`, () => {
-    const byFile: Record<string, number> = {};
-    for (const rel of files(() => true)) {
-      byFile[rel] = readFileSync(join(SRC, rel), 'utf8').split('\n').length;
-    }
-    const [file, lines] = Object.entries(byFile).sort((a, b) => b[1] - a[1])[0] ?? ['', 0];
-    if (lines > MAX_FILE_LINES) {
+  it(`every source file <= ${MAX_FILE_LINES} lines`, () => {
+    /*
+     * EVERY offender, not the largest one.
+     *
+     * This used to sort by size and report only the top file, which hid the rest — so decomposing the
+     * one it named revealed the next, and the next. Three separate rounds of that happened in one
+     * afternoon, and worse, an agent working on a different page could not tell that its own file was
+     * over the line because somebody else's was bigger. A ratchet that reports one of N failures
+     * teaches the reader that fixing it is the end of the job.
+     */
+    const over = files(() => true)
+      .map((rel) => [rel, readFileSync(join(SRC, rel), 'utf8').split('\n').length] as const)
+      .filter(([, lines]) => lines > MAX_FILE_LINES)
+      .sort((a, b) => b[1] - a[1]);
+
+    if (over.length > 0) {
       throw new Error(
-        `${file} is ${lines} lines (ceiling ${MAX_FILE_LINES}). Decompose it rather than ` +
-          `raising the ceiling — pages are composition, one component per file.`,
+        `${over.length} file(s) over the ${MAX_FILE_LINES}-line ceiling. Decompose them rather than ` +
+          `raising it — pages are composition, one component per file:\n` +
+          over.map(([rel, lines]) => `  ${lines}  ${rel}`).join('\n'),
       );
     }
-    expect(lines).toBeLessThanOrEqual(MAX_FILE_LINES);
+    expect(over).toEqual([]);
   });
 });

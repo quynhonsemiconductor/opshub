@@ -24,7 +24,8 @@ import {
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate } from '@/shared/lib/format';
-import { RegisterAssetModal, ReclassifyAssetModal } from './asset-modals';
+import { RegisterAssetModal } from './asset-modals';
+import { ReclassifyAssetModal } from './reclassify-modal';
 import { AssetDevicesPanel, ClassificationHistoryPanel } from './asset-panels';
 import { DeviceHoldingsModal } from './device-holdings-modal';
 import { CLASSIFICATION_FILTERS, classificationTone } from './asset.types';
@@ -43,6 +44,11 @@ import type { InformationAsset } from './asset.types';
  * row, so the register answers "when did this become restricted and who said so" — and LOWERING a
  * classification is a different permission (`information_asset.declassify`) because it takes protection
  * away. The screen routes to the endpoint that matches the direction rather than asking the user which.
+ *
+ * A REGISTER THAT CANNOT BE CORRECTED IS A REGISTER THAT GOES STALE. `Correct` sends the register form
+ * at `PATCH` instead of `POST`, which is also the only way to move a CIA rating — and since a
+ * reclassification upwards is judged against the rating already stored, an asset registered `internal`
+ * at confidentiality 3 could not be raised to `restricted` by any route this screen offered until it did.
  *
  * THE THREE CIA RATINGS STAY SEPARATE. A public dataset can still be availability-critical; a single
  * combined score would throw that away, and the API keeps them apart for the same reason.
@@ -66,6 +72,12 @@ export function InformationAssetsPage() {
   const [personalDataOnly, setPersonalDataOnly] = useState(false);
   const [includeRetired, setIncludeRetired] = useState(false);
   const [registering, setRegistering] = useState(false);
+  /**
+   * The entry being CORRECTED, as opposed to a new one being registered. Same form, `PATCH` not
+   * `POST` — and the only route in the product that can move a CIA rating, which is what a
+   * reclassification upwards is judged against.
+   */
+  const [correcting, setCorrecting] = useState<InformationAsset | null>(null);
   const [reclassifying, setReclassifying] = useState<InformationAsset | null>(null);
   const [reviewing, setReviewing] = useState<InformationAsset | null>(null);
   const [retiring, setRetiring] = useState<InformationAsset | null>(null);
@@ -222,6 +234,26 @@ export function InformationAssetsPage() {
       cell: (asset) =>
         asset.retiredAt ? null : (
           <RowActions>
+            {/*
+              CORRECT. `PATCH /v1/information-assets/:id` has existed since the module was written and
+              no screen called it, so the register was append-only by accident: a wrong owner or a
+              mis-rated asset stayed wrong for ever, and the only way out was to retire the entry and
+              register a new one — which loses the classification history.
+
+              IT ALSO UNSTICKS RECLASSIFYING. `restricted` needs a confidentiality rating of at least
+              4 and the reclassify route judges the new label against the rating ALREADY STORED, so an
+              asset registered `internal` at 3 could not be raised to `restricted` by any route the
+              product offered. This is the one that can move the rating.
+
+              Not offered on a retired asset — the whole cell is already absent for one, because the
+              API refuses every change to it and an action whose only outcome is a 412 is not an
+              action.
+            */}
+            {canManage && (
+              <RowAction tone="muted" onClick={() => setCorrecting(asset)}>
+                Correct
+              </RowAction>
+            )}
             {(canManage || canDeclassify) && (
               <RowAction tone="accent" onClick={() => setReclassifying(asset)}>
                 Reclassify
@@ -244,6 +276,18 @@ export function InformationAssetsPage() {
         onClose={() => setRegistering(false)}
         onSuccess={invalidate}
       />
+      {/* One form, two verbs: `asset` present means correct the entry rather than register a new
+          one. Keyed on the id so opening it for a second row starts from that row's values instead
+          of the first row's — the form seeds its state once, from the prop. */}
+      {correcting && (
+        <RegisterAssetModal
+          key={correcting.id}
+          open
+          asset={correcting}
+          onClose={() => setCorrecting(null)}
+          onSuccess={invalidate}
+        />
+      )}
       {reclassifying && (
         <ReclassifyAssetModal
           asset={reclassifying}

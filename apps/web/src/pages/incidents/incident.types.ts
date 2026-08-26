@@ -45,6 +45,24 @@ export const NEXT_ACTIONS: Record<
   false_positive: [],
 };
 
+/**
+ * The statuses that accept no further correction, mirrored from the repository's `CLOSED_STATUSES`.
+ *
+ * `PATCH /v1/incidents/:id` runs `assertOpen` first, so both of these answer `INCIDENT_NOT_IN_STATE`
+ * with "add a timeline entry instead". The screen uses this to decide whether to DRAW the Correct
+ * action and never to decide whether a correction is legal — an action whose only outcome is a
+ * refusal is worse than no action, because the user learns the rule from an error instead of from
+ * the absence of a button.
+ *
+ * `false_positive` belongs here alongside `closed` for the same reason the API puts it there: it is a
+ * finished record, not a state somebody is still working in.
+ */
+export const TERMINAL_INCIDENT_STATUSES = ['closed', 'false_positive'] as const;
+
+/** Named after the API's own exported helper, so the two cannot drift on what "finished" means. */
+export const isTerminalIncidentStatus = (status: string): boolean =>
+  (TERMINAL_INCIDENT_STATUSES as readonly string[]).includes(status);
+
 export const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
 
 /** What a timeline entry can be. `status_change` is written by the API, never by a person. */

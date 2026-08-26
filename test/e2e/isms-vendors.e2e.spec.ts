@@ -166,6 +166,26 @@ async function liveVendor(over: Record<string, unknown> = {}): Promise<VendorRow
   return unwrap<VendorRow>(activated.body);
 }
 
+/**
+ * One supplier AS THE REGISTER RENDERS IT — the joined row, not the plain record.
+ *
+ * `criticalityRank`, `reviewIntervalMonths` and `requiresIndependentEvidence` come from the tier table
+ * in the list query and exist nowhere on `GET /vendors/{id}`, so a correction to `criticality` can only
+ * be shown to have moved the SCHEDULE by reading it back from here.
+ */
+async function registerRow(reference: string): Promise<VendorListRow> {
+  const res = await apiRequest(
+    app,
+    security,
+    'GET',
+    `/vendors?search=${encodeURIComponent(reference)}&includeTerminated=true&limit=100`,
+  );
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  const rows = unwrap<VendorListRow[]>(res.body).filter((r) => r.reference === reference);
+  expect(rows, `no register row for ${reference}`).toHaveLength(1);
+  return rows[0];
+}
+
 /** A risk to link, borrowed from the register the vendor module joins to. */
 async function createRisk(): Promise<string> {
   const res = await apiRequest(app, security, 'POST', '/risks', {
@@ -387,6 +407,174 @@ describe('data processors', () => {
     const ids = rows.map((r) => r.id);
     expect(ids).toContain(processor.id);
     expect(ids).not.toContain(plain.id);
+  });
+});
+
+/*
+ * CORRECTING THE RECORD — `PATCH /v1/vendors/:id`.
+ *
+ * WHY THIS SUITE EXISTS AT ALL. The endpoint had been there since the module was written and no screen
+ * called it, so a supplier record was append-only by accident: criticality — which IS the assessment
+ * cadence — the relationship owner, the contract window, the notice period and the data-processing
+ * agreement were all permanent once somebody was onboarded, and the only way out was to terminate the
+ * supplier and register them again, which throws away the assessment history that is the audit evidence.
+ * The register form now serves both verbs, so what the API accepts and refuses on this path is now
+ * user-visible behaviour rather than an untouched route.
+ */
+describe('correcting the record', () => {
+  /** Stand-ins for controlled documents. There is no FK — see `dataProcessingAgreementId` in the schema. */
+  const DPA = '00000000-0000-7000-8000-0000000d0a04';
+  const OTHER_DPA = '00000000-0000-7000-8000-0000000d0a05';
+
+  it('moves the criticality AND the cadence that hangs off it, not just the label', async () => {
+    /*
+     * THE CORRECTION THAT MATTERS MOST. Criticality is not a label, it is a schedule: the tier carries
+     * the review interval and whether independent evidence counts. A mis-tiered supplier therefore had
+     * the wrong reassessment cadence for ever, and no screen could fix it.
+     *
+     * `low` is seeded at 36 months with no independent evidence required; `critical` at 6 months with it
+     * required. Both ends are asserted so the test says what changed rather than that something did.
+     */
+    const vendor = await register({ criticality: 'low' });
+    const before = await registerRow(vendor.reference);
+    expect(before.reviewIntervalMonths).toBe(36);
+    expect(before.requiresIndependentEvidence).toBe(false);
+
+    // `ownerId` rides along because the form sends the WHOLE record, not a diff — so a whole-form patch
+    // is what the endpoint actually receives, and testing a narrower one would test something else.
+    const patched = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
+      criticality: 'critical',
+      ownerId: FIXTURE.SECURITY.id,
+    });
+    expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+    expect(unwrap<VendorRow>(patched.body).criticality).toBe('critical');
+
+    /*
+     * THE REGISTER ROW, not merely the patch response. The tier facts are joined in the list query, so
+     * this is what the screen renders as the supplier's assessment schedule and what the assess form
+     * reads to demand independent evidence. Asserting only the patch response would leave a corrected
+     * label sitting above the old schedule.
+     */
+    const after = await registerRow(vendor.reference);
+    expect(after.criticality).toBe('critical');
+    expect(after.reviewIntervalMonths).toBe(6);
+    expect(after.requiresIndependentEvidence).toBe(true);
+    // Ranking is what the register sorts on, so a corrected tier has to move the row as well.
+    expect(after.criticalityRank).toBeGreaterThan(before.criticalityRank);
+
+    /*
+     * AND THE ARITHMETIC USES THE NEW TIER. This is the assertion that makes the correction real:
+     * `review_due_on` is computed from the tier's interval when an assessment is recorded, so the next
+     * assessment must land 6 months out and not 36. Without this, a patch that updated the enum column
+     * and left the cadence keyed off the old tier would pass everything above it.
+     */
+    await assess(vendor.id, { assessedAt: '2026-03-15T09:00:00.000Z' });
+    const reread = unwrap<VendorRow>(
+      (await apiRequest(app, security, 'GET', `/vendors/${vendor.id}`)).body,
+    );
+    expect(reread.reviewDueOn).toBe('2026-09-15');
+  });
+
+  it('records a data-processing agreement, and the "no DPA" finding goes with it', async () => {
+    /*
+     * THE FINDING IS ASSERTED FIRST, DELIBERATELY. The register renders a red "No DPA" for a processor
+     * with no agreement and the drawer says "Yes — NO DPA recorded", while `dataProcessingAgreementId`
+     * was settable on both write paths and present in NO form — so the screen named a GDPR Article
+     * 28(3) gap that the product gave nobody a way to close.
+     *
+     * A test that checked only the after state would pass just as happily against a register that never
+     * produced the finding in the first place — a `dataProcessor` flag that never came back true, or a
+     * column dropped from the row projection. Then the "fix" would be verified against nothing. So the
+     * gap is proved to exist before it is closed.
+     */
+    const vendor = await register({ dataProcessor: true });
+    const before = await registerRow(vendor.reference);
+    expect(before.dataProcessor, 'the row must say they process personal data').toBe(true);
+    expect(
+      before.dataProcessingAgreementId,
+      'the "No DPA" finding must be PRESENT before this test can claim to have cleared it',
+    ).toBeNull();
+
+    const patched = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
+      dataProcessingAgreementId: DPA,
+      ownerId: FIXTURE.SECURITY.id,
+    });
+    expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+
+    const after = await registerRow(vendor.reference);
+    expect(after.dataProcessingAgreementId).toBe(DPA);
+    // The flag it is PAIRED with, still set. `ck_vendor_processor_agreement` couples the two, and a
+    // patch that recorded the agreement by quietly clearing `dataProcessor` would also make the badge
+    // go green — for the wrong reason, and with the Article 28 obligation dropped off the record.
+    expect(after.dataProcessor).toBe(true);
+
+    /*
+     * AND THE GATE IT UNBLOCKS. The agreement is not decoration: activation refuses a processor without
+     * one, so recording it through this path is what lets the supplier be relied on at all. This is the
+     * end-to-end reason the field had to become reachable, and it is the complement of the existing
+     * `cannot go live without one` case — that one pins the refusal, this one pins the way out of it.
+     */
+    await assess(vendor.id);
+    const activated = await apiRequest(app, admin, 'POST', `/vendors/${vendor.id}/activate`);
+    expect(activated.status, JSON.stringify(activated.body)).toBe(200);
+    expect(unwrap<VendorRow>(activated.body).status).toBe('active');
+  });
+
+  it('refuses a correction to a terminated supplier, which is why the screen does not offer one', async () => {
+    /*
+     * `VendorService.update` calls `assertNotTerminated`, and the row stays because last year's
+     * assessments and the risks linked to them are the audit evidence.
+     *
+     * Asserted with the AGREEMENT field rather than only with `name` — which the termination suite
+     * already covers — because the DPA is the field this branch made reachable, and "let the compliance
+     * gap be filled in even after termination" is the plausible-sounding exception that would quietly
+     * reopen a terminated record to edits. The `Correct` row action and the clickable "No DPA" badge are
+     * gated on exactly this condition: an action whose only outcome is this refusal is not offered.
+     */
+    const vendor = await liveVendor({ dataProcessor: true, dataProcessingAgreementId: DPA });
+    const terminated = await apiRequest(app, security, 'POST', `/vendors/${vendor.id}/terminate`, {
+      reason: WHY,
+    });
+    expect(terminated.status, JSON.stringify(terminated.body)).toBe(200);
+
+    const res = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
+      dataProcessingAgreementId: OTHER_DPA,
+    });
+    expect(res.status).toBe(412);
+    expect(errorCode(res.body)).toBe('VENDOR_TERMINATED');
+
+    // Refused, not partially applied: the stored agreement is the one from before the attempt.
+    expect((await registerRow(vendor.reference)).dataProcessingAgreementId).toBe(DPA);
+  });
+
+  it('will not accept a corrected reference, which is why the form locks the field', async () => {
+    /*
+     * `UpdateVendorSchema` omits `reference` because assessments, risk links, the review-gap report and
+     * the unassessed-spend report all quote it. The form renders it disabled when correcting, and this
+     * is the assertion that the two agree: a field the API rejects outright must not look editable.
+     *
+     * 422 and not a silent no-op matters — a no-op would look like it worked.
+     */
+    const vendor = await register();
+    const res = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
+      reference: nextRef(),
+    });
+    expect(res.status).toBe(422);
+    expect(
+      unwrap<VendorRow>((await apiRequest(app, security, 'GET', `/vendors/${vendor.id}`)).body)
+        .reference,
+    ).toBe(vendor.reference);
+  });
+
+  it('needs manage, not read, so the correction cannot come from a read-only identity', async () => {
+    // The affordance is new, so its gate is asserted here rather than assumed from the register route:
+    // `auditor` holds `vendor.read` alone, and the screen hides `Correct` behind the same `vendor.manage`
+    // the endpoint requires.
+    const vendor = await register({ dataProcessor: true });
+    const res = await apiRequest(app, auditor, 'PATCH', `/vendors/${vendor.id}`, {
+      dataProcessingAgreementId: DPA,
+    });
+    expect(res.status).toBe(403);
   });
 });
 

@@ -22,12 +22,18 @@ import {
  *   permission (`information_asset.declassify`), and the dialog says which one it is about to do
  * - every classification change is appended with its reason, so the register answers "when did this become
  *   restricted and who said so"
+ * - CORRECTING an entry is the way past a reclassification the rating refuses: `restricted` needs a
+ *   confidentiality of at least 4, and the correction form is the only screen that can move a rating — so
+ *   refused, corrected, accepted is walked in one test, since either half alone proves nothing
  * - the asset-to-device link is readable in BOTH directions, and the count on the row moves with it
  * - retirement ends the changes, not the row: the entry keeps its history and its links, stops offering
  *   every action the API would refuse, and stays reachable behind a filter
  * - a supplier is registered PROSPECTIVE and activating it needs `vendor.approve`, not `vendor.manage`
  * - `pass_with_conditions` demands its conditions, because a conditional pass with nothing written down is
  *   just a pass
+ * - the register's red "No DPA" finding is the WAY IN to recording the agreement, not a dead end: the
+ *   field was settable on the API and present in no form, so the screen named a GDPR Article 28(3) gap
+ *   nobody could close from here
  */
 
 function unique(prefix: string): string {
@@ -46,6 +52,11 @@ async function registerAsset(
    * that supports the destination.
    */
   confidentiality = 3,
+  /**
+   * Personal data cannot be classified below `confidential`. So a test that deliberately starts at
+   * `internal` has to turn this off, or the registration is refused for a reason it was not about.
+   */
+  personalData = true,
 ): Promise<{ id: string; reference: string }> {
   const ownerId = await myEmployeeId(request);
   const res = await request.post('/v1/information-assets', {
@@ -60,7 +71,7 @@ async function registerAsset(
       confidentiality,
       integrity: 3,
       availability: 3,
-      personalData: true,
+      personalData,
     },
   });
   expect(res.status(), await res.text()).toBe(201);
@@ -176,6 +187,88 @@ test.describe('information assets', () => {
     await expect(drawer.getByText(/Scope now includes payment identifiers/)).toBeVisible();
   });
 
+  /**
+   * THE DEAD END, WALKED THROUGH THE UI.
+   *
+   * Reclassifying judges the NEW label against the CIA rating ALREADY STORED — `restricted` needs a
+   * confidentiality of at least 4 — and `PATCH /v1/information-assets/:id` is the only route that can
+   * move a rating. No screen called that route, so an asset registered `internal` at 3 could not be
+   * raised to `restricted` from the product at all: the dialog 412'd and there was nowhere to go.
+   *
+   * The refusal and the success are one test on purpose. The refusal alone would still pass if
+   * `restricted` were simply unreachable; the success alone would pass if the coherence rule had been
+   * dropped. Together they say: refused for the stated reason, and the way out that the refusal
+   * implies is actually reachable by clicking.
+   */
+  test('correcting the rating is the way past a reclassification the rating refuses', async ({
+    page,
+    request,
+  }) => {
+    const asset = await registerAsset(
+      request,
+      unique('PWC').toUpperCase(),
+      'internal',
+      3,
+      // No personal data: at `internal` that pair is refused for a different reason, and a test that
+      // can fail two ways cannot say which rule it was pinning.
+      false,
+    );
+
+    await gotoInShell(page, '/information-assets');
+    await page.getByRole('searchbox').fill(asset.reference);
+    const row = () => page.locator('tbody tr', { hasText: asset.reference });
+    await expect(row()).toBeVisible({ timeout: 15_000 });
+    await expect(row()).toContainText('3·3·3');
+
+    // 1. REFUSED, and the dialog hands over the API's own sentence — the label and the number it
+    // wanted — rather than a sentence this screen invented about what might be wrong.
+    await row().getByRole('button', { name: 'Reclassify' }).click();
+    let dialog = page.getByRole('dialog', { name: `Reclassify ${asset.reference}` });
+    await dialog.getByLabel('New classification').selectOption('restricted');
+    await dialog.getByLabel('Reason').fill('Now in scope for the cardholder data environment.');
+    await dialog.getByRole('button', { name: /^Reclassify$/ }).click();
+    await expect(dialog.getByText(/confidentiality rating of at least 4/i)).toBeVisible();
+    await expect(row()).toContainText('Internal');
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+    // 2. CORRECT THE RATING — the reassessment the refusal was asking for, on the register form
+    // serving `PATCH` instead of `POST`.
+    await row().getByRole('button', { name: 'Correct' }).click();
+    dialog = page.getByRole('dialog', { name: `Correct ${asset.reference}` });
+    // It opened on THIS entry's values, not on the register form's defaults. A correction form seeded
+    // with blanks would silently wipe every field the user did not retype.
+    await expect(dialog.getByLabel(/^Name/)).toHaveValue(`Playwright asset ${asset.reference}`);
+    // The reference is read-only: risk assessments and the classification history quote it.
+    await expect(dialog.getByLabel('Reference')).toBeDisabled();
+    /*
+     * AND THE CLASSIFICATION IS NOT ON OFFER HERE. `UpdateInformationAssetSchema` omits it and its
+     * reason, because changing a label appends a history row and lowering it needs
+     * `information_asset.declassify`. If this form grew the field, a label could move with no history
+     * and no permission check — so its absence is asserted, and so is the note that says where to go
+     * instead.
+     */
+    await expect(dialog.getByLabel(/^Classification/)).toHaveCount(0);
+    await expect(dialog.getByLabel('Why this classification')).toHaveCount(0);
+    await expect(dialog.getByText(/Changing that is a reclassification/i)).toBeVisible();
+
+    await dialog.getByLabel(/^Confidentiality/).selectOption('5');
+    await dialog.getByRole('button', { name: /save correction/i }).click();
+    await expect(dialog).toBeHidden();
+    await expect(row()).toContainText('5·3·3', { timeout: 15_000 });
+    // Still `internal`. A re-rating is not a reclassification — and if it were, step 3 would be
+    // proving nothing.
+    await expect(row()).toContainText('Internal');
+
+    // 3. NOW IT GOES THROUGH, through the same dialog that refused it.
+    await row().getByRole('button', { name: 'Reclassify' }).click();
+    dialog = page.getByRole('dialog', { name: `Reclassify ${asset.reference}` });
+    await dialog.getByLabel('New classification').selectOption('restricted');
+    await dialog.getByLabel('Reason').fill('Now in scope for the cardholder data environment.');
+    await dialog.getByRole('button', { name: /^Reclassify$/ }).click();
+    await expect(dialog).toBeHidden();
+    await expect(row()).toContainText('Restricted', { timeout: 15_000 });
+  });
+
   test('links a device, reads the register backwards from it, then unlinks', async ({
     page,
     request,
@@ -289,6 +382,9 @@ test.describe('information assets', () => {
     // and failing.
     await expect(retired.getByRole('button', { name: 'Reclassify' })).toHaveCount(0);
     await expect(retired.getByRole('button', { name: 'Reviewed' })).toHaveCount(0);
+    // Correcting included: `update` calls `assertNotRetired` first, so the form could only ever come
+    // back with "is retired and accepts no further changes".
+    await expect(retired.getByRole('button', { name: 'Correct' })).toHaveCount(0);
 
     await retired.click();
     const retiredDrawer = page.getByRole('dialog', {
@@ -475,5 +571,91 @@ test.describe('suppliers', () => {
     await expect(drawer.getByRole('heading', { name: 'Risks (0)' })).toBeVisible({
       timeout: 15_000,
     });
+  });
+
+  /**
+   * THE LOUDEST FINDING ON THE REGISTER, AND IT USED TO GO NOWHERE.
+   *
+   * `dataProcessingAgreementId` has always been settable on `POST /v1/vendors` and
+   * `PATCH /v1/vendors/:id`, and appeared in no form at all — while the row rendered a red "No DPA" and
+   * the drawer said "Yes — NO DPA recorded". So the screen shouted about a GDPR Article 28(3) gap that
+   * the product gave nobody a way to close, and the supplier could never be activated either, because
+   * the API refuses a live processor without an agreement.
+   *
+   * THE FINDING IS ASSERTED BEFORE IT IS CLEARED. A test that only checked for "DPA on file" at the end
+   * would pass just as happily against a register that never produced the finding in the first place —
+   * and then the fix would be verified against nothing.
+   */
+  test('the red "No DPA" finding is the way to record the agreement', async ({ page, request }) => {
+    const reference = unique('PWD').toUpperCase();
+    const code = unique('PW-DPA').toUpperCase();
+    const ownerId = await myEmployeeId(request);
+
+    // The agreement is a CONTROLLED DOCUMENT, chosen the same way an audit's report and a review's
+    // minutes are — so the spec creates a real one to pick rather than pretending a uuid box is fine.
+    const document = await request.post('/v1/documents', {
+      headers: await csrfHeaders(request),
+      data: {
+        code,
+        title: `Playwright data processing agreement ${code}`,
+        category: 'contract_template',
+        ownerId,
+      },
+    });
+    expect(document.status(), await document.text()).toBe(201);
+
+    const created = await request.post('/v1/vendors', {
+      headers: await csrfHeaders(request),
+      data: {
+        reference,
+        name: `Playwright supplier ${reference}`,
+        services: 'Created by an e2e spec.',
+        criticality: 'high',
+        ownerId,
+        // A processor with no agreement recorded: exactly the state the register flags, and the normal
+        // order of events, which is why the CHECK is scoped to `active` rather than to registration.
+        dataProcessor: true,
+      },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+
+    await gotoInShell(page, '/vendors');
+    await page.getByRole('searchbox').fill(reference);
+    const row = () => page.locator('tbody tr', { hasText: reference });
+    await expect(row()).toBeVisible({ timeout: 15_000 });
+
+    // THE FINDING, and it is a CONTROL rather than a label — `getByRole('button')` is the assertion.
+    // Rendered as a plain badge without `vendor.manage` or on a terminated supplier, because there is
+    // nothing to click through to in either case.
+    const finding = row().getByRole('button', { name: 'No DPA' });
+    await expect(finding).toBeVisible();
+    await finding.click();
+
+    const dialog = page.getByRole('dialog');
+    // One form, two verbs: the register form in its correcting mode, named after the entry it is about.
+    await expect(dialog.getByRole('heading', { name: `Correct ${reference}` })).toBeVisible();
+    // The reference is locked. Assessments, risk links and both spend reports quote it, so
+    // `UpdateVendorSchema` omits it — and a field the API rejects outright must not look editable.
+    await expect(dialog.getByLabel('Reference')).toBeDisabled();
+    /*
+     * AND THE FORM OPENED ON THE FIELD THE FINDING WAS ABOUT. This is what makes the badge a route
+     * rather than a shortcut to a form with eleven inputs: `Modal` focuses the requested control instead
+     * of the first one. Without it the reader lands on the close button and has to hunt.
+     */
+    await expect(dialog.getByLabel('Data processing agreement')).toBeFocused();
+
+    await chooseFromPicker(page, dialog, 'Data processing agreement', code);
+    await dialog.getByRole('button', { name: /save correction/i }).click();
+    await expect(dialog).toBeHidden();
+
+    // The finding is gone from the row, and specifically replaced by the positive statement — a blank
+    // cell would mean the processor flag had been lost along with the gap.
+    await expect(row()).toContainText('DPA on file', { timeout: 15_000 });
+    await expect(row().getByRole('button', { name: 'No DPA' })).toHaveCount(0);
+
+    // And in the drawer, which rendered the same gap in words.
+    await row().click();
+    const drawer = page.getByRole('dialog', { name: `Playwright supplier ${reference}` });
+    await expect(drawer.getByText('Yes — DPA on file')).toBeVisible();
   });
 });
