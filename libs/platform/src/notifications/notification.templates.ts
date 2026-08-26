@@ -5,22 +5,44 @@
 
 // ── Template names ────────────────────────────────────────────────────────────
 
-export type NotificationTemplateName =
-  | 'access_request.submitted'
-  | 'access_request.approved'
-  | 'access_request.denied'
-  | 'asset.assigned'
-  | 'asset.unassigned'
-  | 'employee.offboarded'
-  | 'contract.expiring_soon'
-  | 'contract.expired'
-  | 'review.due'
-  | 'request.sla_breach'
-  | 'request.delegation_created'
-  | 'request.step_ready'
-  | 'request.submitted'
-  | 'request.approved'
-  | 'request.rejected';
+/**
+ * Every notification the system can render, and therefore every one it can send.
+ *
+ * A CONST FIRST, WITH THE TYPE DERIVED FROM IT — not the bare union this was. The union was
+ * unenumerable at run time, so nothing could check the settings screen against it, and the screen
+ * drifted badly: it offered 19 toggles of which 13 named an event that has no template at all and so
+ * could never fire however it was set, while 9 templates that CAN fire had no toggle — including
+ * `contract.expiring_soon`, `review.due` and `request.step_ready`, the ones people actually receive.
+ * Every notification a user got was one they had no way to turn off.
+ *
+ * `notification-preference-contract.spec.ts` now pins the two together in both directions, and it can
+ * only do that because this is a value. Adding a name here without a toggle fails that test, which is
+ * the point: the settings screen is part of shipping a notification, not a thing to remember later.
+ *
+ * Ordered by domain rather than alphabetically so a reader can see which areas notify at all.
+ */
+export const NOTIFICATION_TEMPLATE_NAMES = [
+  'access_request.submitted',
+  'access_request.approved',
+  'access_request.denied',
+  'asset.assigned',
+  'asset.unassigned',
+  'employee.offboarded',
+  'contract.expiring_soon',
+  'contract.expired',
+  'review.due',
+  'request.sla_breach',
+  'request.delegation_created',
+  'request.step_ready',
+  'request.submitted',
+  'request.approved',
+  'request.rejected',
+] as const;
+
+export type NotificationTemplateName = (typeof NOTIFICATION_TEMPLATE_NAMES)[number];
+
+/** `*` is not a template — it is the global mute the preferences API accepts alongside a real type. */
+export const GLOBAL_PREFERENCE_TYPE = '*';
 
 // ── Per-template variable shapes ─────────────────────────────────────────────
 

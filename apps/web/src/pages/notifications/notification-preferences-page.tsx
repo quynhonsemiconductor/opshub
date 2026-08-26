@@ -27,12 +27,33 @@ import { IconAction } from '@/shared/ui';
 
 type PreferenceDto = components['schemas']['PreferenceResponseDto'];
 
-// ── Event type catalog ────────────────────────────────────────────────────────
-// Grouped by domain for display. The '*' wildcard is rendered separately.
+/* ── Event catalogue ──────────────────────────────────────────────────────────
+ *
+ * EXACTLY THE EVENTS THAT CAN BE SENT, which is `NOTIFICATION_TEMPLATE_NAMES` in
+ * `libs/platform/src/notifications/notification.templates.ts` — a notification needs a template to be
+ * rendered, so that list is the whole of what the system can deliver.
+ *
+ * This list used to be written by hand and had drifted a long way from it. Thirteen of its nineteen
+ * toggles named an event with no template — `workforce.leave_requested`, `asset.retired`,
+ * `compliance.finding_resolved` and ten more — so they could never fire whatever the user chose, and
+ * the API happily stored a preference row for each, which is what made the screen convincing. Nine
+ * events that DO fire had no toggle at all, among them `contract.expiring_soon`, `review.due` and
+ * `request.step_ready`: the notifications people actually receive were the ones they could not turn
+ * off.
+ *
+ * `test/notification-preference-contract.spec.ts` now fails if this list and that one disagree in
+ * EITHER direction. A new notification has to appear here to ship, which is the point — the settings
+ * screen is part of adding a notification, not something to remember afterwards.
+ *
+ * The labels and the grouping stay here rather than in the backend catalogue: how a notification is
+ * described to a person, and which heading it sits under, are editorial choices about this screen.
+ */
 
 interface EventEntry {
   type: string;
   label: string;
+  /** What actually triggers it, when the label alone would leave a reader guessing. */
+  hint?: string;
 }
 
 interface EventGroup {
@@ -42,47 +63,71 @@ interface EventGroup {
 
 const EVENT_GROUPS: EventGroup[] = [
   {
-    group: 'Requests',
+    group: 'Approvals',
     events: [
-      { type: 'request.approved', label: 'Request approved' },
-      { type: 'request.rejected', label: 'Request rejected' },
-      { type: 'request.cancelled', label: 'Request cancelled' },
-      { type: 'request.comment_added', label: 'Comment added on request' },
+      {
+        type: 'request.submitted',
+        label: 'A request needs your decision',
+        hint: 'Sent to the first approver when a request enters the queue.',
+      },
+      {
+        type: 'request.step_ready',
+        label: 'A request has reached your step',
+        hint: 'Multi-step approvals only — an earlier approver has signed off and it is now with you.',
+      },
+      { type: 'request.approved', label: 'Your request was approved' },
+      { type: 'request.rejected', label: 'Your request was rejected' },
+      {
+        type: 'request.sla_breach',
+        label: 'A request has breached its SLA',
+        hint: 'Sent when a decision is overdue against the target the request type sets.',
+      },
+      {
+        type: 'request.delegation_created',
+        label: 'Someone delegated their approvals to you',
+        hint: 'You can decide on their behalf until the delegation expires.',
+      },
     ],
   },
   {
     group: 'Access',
     events: [
-      { type: 'access_request.submitted', label: 'Access request submitted' },
-      { type: 'access_request.approved', label: 'Access request approved' },
-      { type: 'access_request.rejected', label: 'Access request rejected' },
-      { type: 'access_grant.revoked', label: 'Access grant revoked' },
+      { type: 'access_request.submitted', label: 'An access request needs review' },
+      { type: 'access_request.approved', label: 'Your access request was approved' },
+      { type: 'access_request.denied', label: 'Your access request was denied' },
     ],
   },
   {
     group: 'Assets',
     events: [
-      { type: 'asset.assigned', label: 'Asset assigned to you' },
-      { type: 'asset.unassigned', label: 'Asset unassigned from you' },
-      { type: 'asset.retired', label: 'Asset retired' },
+      { type: 'asset.assigned', label: 'An asset was assigned to you' },
+      { type: 'asset.unassigned', label: 'An asset was taken back' },
     ],
   },
   {
-    group: 'Compliance',
+    group: 'Contracts and reviews',
     events: [
-      { type: 'compliance.finding_acknowledged', label: 'Finding acknowledged' },
-      { type: 'compliance.finding_resolved', label: 'Finding resolved' },
-      { type: 'compliance.software_added', label: 'Software added' },
+      {
+        type: 'contract.expiring_soon',
+        label: 'A contract is expiring soon',
+        hint: 'Sent ahead of the renewal date so there is time to act on it.',
+      },
+      { type: 'contract.expired', label: 'A contract has expired' },
+      {
+        type: 'review.due',
+        label: 'A periodic review is due',
+        hint: 'Risk and supplier reviews reaching their review date.',
+      },
     ],
   },
   {
-    group: 'Workforce',
+    group: 'People',
     events: [
-      { type: 'workforce.leave_requested', label: 'Leave requested' },
-      { type: 'workforce.leave_cancelled', label: 'Leave cancelled' },
-      { type: 'workforce.overtime_logged', label: 'Overtime logged' },
-      { type: 'workforce.onboarding_submitted', label: 'Onboarding submitted' },
-      { type: 'workforce.offboarding_submitted', label: 'Offboarding submitted' },
+      {
+        type: 'employee.offboarded',
+        label: 'An employee was offboarded',
+        hint: 'Sent to the people who hold their handover tasks.',
+      },
     ],
   },
 ];
@@ -338,7 +383,7 @@ export function NotificationPreferencesPage() {
 
               {/* Rows */}
               <div className="divide-y divide-border">
-                {grp.events.map(({ type, label }) => {
+                {grp.events.map(({ type, label, hint }) => {
                   const resolved = resolve(type, explicit, wildcard);
                   // Global wildcard disables the per-row toggles
                   const blockedByWildcard = !!wildcard && (!wildcard.inApp || !wildcard.email);
@@ -350,9 +395,17 @@ export function NotificationPreferencesPage() {
                       key={type}
                       className={`grid grid-cols-[1fr_80px_80px_36px] items-center gap-2 px-5 py-3 ${blockedByWildcard ? 'opacity-60' : ''}`}
                     >
+                      {/*
+                       * THE HINT, NOT THE EVENT KEY. This line was `request.step_ready` in a mono
+                       * font — the internal name, on a screen whose whole job is to let somebody
+                       * decide whether they want the thing. It said nothing about what arrives or
+                       * when, which is the only question being asked here. Shown only where the
+                       * label leaves a real gap; a hint under every row is noise that trains people
+                       * to stop reading them.
+                       */}
                       <div>
                         <p className="text-sm text-fg">{label}</p>
-                        <p className="text-2xs font-mono text-fg-subtle">{type}</p>
+                        {hint && <p className="mt-0.5 text-xs text-fg-subtle">{hint}</p>}
                       </div>
                       <div className="flex justify-center">
                         <Toggle
