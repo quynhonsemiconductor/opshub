@@ -445,7 +445,20 @@ export class RequestEngine {
       'request.read',
       'request',
     );
-    return item;
+
+    /*
+     * DECIDABILITY ON THE SINGLE READ TOO, computed here rather than inside `loadUnchecked`. That one
+     * has no actor on purpose — the transitions use it and gate on their own permission — and a
+     * default of `false` would be a lie to an approver reading a request they are perfectly able to
+     * decide.
+     */
+    const decidable = await this.decidability([item], actor.sub);
+    const verdict = decidable.get(item.id);
+    return {
+      ...item,
+      viewerMayDecide: verdict?.may ?? false,
+      viewerCannotDecideReason: verdict?.reason ?? null,
+    };
   }
 
   /** The raw read, with no authorization: for transitions that gate on their own permission. */
@@ -590,6 +603,9 @@ export class RequestEngine {
       ...approverIds,
     ]);
 
+    // Whether this caller may decide each row, from the rule that would enforce it. See `decidability`.
+    const decidable = await this.decidability(rows, actorId);
+
     return {
       rows: rows.map((r) => ({
         ...r,
@@ -606,9 +622,77 @@ export class RequestEngine {
         // Null for an UNASSIGNED request too, which is a normal pending state rather than a fault — any
         // holder of the step's permission may decide it. `assigneeId` still tells the two apart.
         assigneeName: nameOf(names, r.assigneeId),
+        viewerMayDecide: decidable.get(r.id)?.may ?? false,
+        viewerCannotDecideReason: decidable.get(r.id)?.reason ?? null,
       })),
       total: count,
     };
+  }
+
+  /**
+   * Whether the actor may decide each of these requests — the same rule `approve()` enforces, asked
+   * before the click rather than answered with a 403 after it.
+   *
+   * WHY IT LIVES HERE and not in the SPA. The permission depends on the type's `approvalSteps` keyed on
+   * the row's CURRENT step; separation of duties is judged against the DELEGATOR when the caller is
+   * acting under a delegation; and the permission may be satisfied by the caller or by that delegator.
+   * A client-side copy would be a second implementation of the rule, free to drift from the one that
+   * decides — and the inbox's actions were previously gated on nothing but the status, so every
+   * unpermitted holder of `request.read` saw Approve on every pending request in the tenant.
+   *
+   * ONE DELEGATION LOOKUP AND ONE CHECK PER DISTINCT PERMISSION, not per row. A page of fifty leave
+   * requests asks about one permission; the cache below is what keeps this from becoming fifty authz
+   * round trips on a screen that already had to batch its names and its approvals.
+   */
+  private async decidability(
+    rows: RequestItem[],
+    actorId: string,
+  ): Promise<
+    Map<string, { may: boolean; reason: 'own_request' | 'missing_permission' | 'not_open' | null }>
+  > {
+    const out = new Map<
+      string,
+      { may: boolean; reason: 'own_request' | 'missing_permission' | 'not_open' | null }
+    >();
+    if (rows.length === 0) return out;
+
+    const activeDelegation = await this.delegation.findActiveDelegationTo(actorId);
+    const sodSubject = activeDelegation ? activeDelegation.fromUserId : actorId;
+    const allowed = new Map<string, boolean>();
+
+    const mayUse = async (permission: string): Promise<boolean> => {
+      const cached = allowed.get(permission);
+      if (cached !== undefined) return cached;
+      // Union semantics, exactly as `approve()` applies them: the caller, or whoever delegated to them.
+      const actorAllowed = await this.authz.check(actorId, permission);
+      const delegatorAllowed =
+        !actorAllowed && activeDelegation
+          ? await this.authz.check(activeDelegation.fromUserId, permission)
+          : false;
+      const result = actorAllowed || delegatorAllowed;
+      allowed.set(permission, result);
+      return result;
+    };
+
+    for (const row of rows) {
+      if (row.status !== 'pending' && row.status !== 'in_review') {
+        out.set(row.id, { may: false, reason: 'not_open' });
+        continue;
+      }
+      const def = this.registry.get(row.type);
+      if (!def.allowSelfApproval && row.requesterId === sodSubject) {
+        // Separation of duties, and it is worth naming: "ask a colleague" is different advice from
+        // "ask for access", and the engine emits a distinct error code for exactly that reason.
+        out.set(row.id, { may: false, reason: 'own_request' });
+        continue;
+      }
+      const stepDef = def.approvalSteps?.find((step) => step.step === row.currentStep) ?? null;
+      const required = stepDef?.requiredPermission ?? def.requiredApprovalPermission;
+      const may = await mayUse(required);
+      out.set(row.id, { may, reason: may ? null : 'missing_permission' });
+    }
+
+    return out;
   }
 
   /** Fetch IDs of pending requests past their deadline (for the expiry cron). */

@@ -58,6 +58,10 @@ function toDto(r: RequestItemWithApprovals): RequestItemResponseDto {
     type: r.type,
     requesterId: r.requesterId,
     requesterName: r.requesterName ?? null,
+    // Defaults to "no", so a path that forgets to compute it hides the actions rather than offering
+    // one the API will refuse.
+    viewerMayDecide: r.viewerMayDecide ?? false,
+    viewerCannotDecideReason: r.viewerCannotDecideReason ?? null,
     assigneeId: r.assigneeId,
     // Null covers both an unassigned request and an assignee whose employee row is gone; the client shows
     // a dash for either, and `assigneeId` is what tells them apart.

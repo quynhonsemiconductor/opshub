@@ -5688,6 +5688,13 @@ export interface components {
       requesterId: string;
       /** @description The requester’s display name, resolved server-side. Null when the employee row is gone — a request outlives the person who filed it. Sent because an approval queue showing a uuid does not say who is asking. */
       requesterName?: string | null;
+      /** @description Whether YOU may decide this request, answered by the engine that would enforce it. The inbox used to offer Approve and Reject on every open row, so a holder of `request.read` with no approval permission saw them on every pending request in the tenant and every click was a permanent 403 — as was every click on their own request, which separation of duties refuses. */
+      viewerMayDecide?: boolean;
+      /**
+       * @description Why not, so a screen can say something better than nothing: `own_request` reads "ask a colleague", `missing_permission` reads "ask for access", `not_open` means already decided.
+       * @enum {string|null}
+       */
+      viewerCannotDecideReason?: 'own_request' | 'missing_permission' | 'not_open' | null;
       assigneeId?: string | null;
       /** @description The current assignee’s display name, resolved server-side. Null in two cases the caller renders the same way: the request has no assignee at all — normal while pending, since any holder of the step’s permission may decide it — or the assignee’s employee row is gone. Sent because the assignee is who a pending request is WAITING ON, which a uuid does not say; assigneeId still tells the two null cases apart. */
       assigneeName?: string | null;

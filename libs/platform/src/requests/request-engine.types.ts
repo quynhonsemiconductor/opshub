@@ -139,6 +139,30 @@ export interface RequestItemWithApprovals extends RequestItem {
    * the caller renders a dash either way; `assigneeId` is still there to distinguish them.
    */
   assigneeName?: string | null;
+  /**
+   * Whether THIS CALLER may decide THIS request, answered by the engine that would enforce it.
+   *
+   * WHY THE SERVER ANSWERS IT. The inbox rendered Approve and Reject on every open row, so a
+   * `request.read` holder with no approval permission — `helpdesk` and `auditor` hold exactly that —
+   * saw the actions on every pending request in the tenant, and every click was a permanent 403. So
+   * was every click on your own request, which the engine refuses by separation of duties.
+   *
+   * The client cannot work this out. The required permission comes from the type's `approvalSteps`
+   * keyed on the CURRENT step, the separation-of-duties subject is the DELEGATOR when the caller is
+   * acting under a delegation, and the permission may be satisfied by either the caller or that
+   * delegator. Mirroring all of that in the SPA would be a second implementation of the rule, free to
+   * drift from the one that decides.
+   */
+  viewerMayDecide?: boolean;
+  /**
+   * Why not, when they may not — so a screen can say something better than nothing.
+   *
+   * `own_request` is the separation-of-duties refusal and reads "ask a colleague"; `missing_permission`
+   * reads "ask for access"; `not_open` means the request is already decided. The engine emits a
+   * distinct error code for the first precisely so a client can tell those two apart, and the inbox
+   * used to collapse every one of them into "please try again".
+   */
+  viewerCannotDecideReason?: 'own_request' | 'missing_permission' | 'not_open' | null;
 }
 
 export interface SubmitRequestOptions {
