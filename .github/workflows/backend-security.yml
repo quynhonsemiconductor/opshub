@@ -28,7 +28,11 @@ concurrency:
 
 permissions:
   contents: read
-  security-events: write # SARIF upload (no-op on free plan, lights up after GHAS)
+  # Ceiling for the reusable's SARIF-upload job, which declares security-events:write
+  # itself -- a called workflow's job permissions can only be REDUCED, not elevated,
+  # above this caller's top-level grant, and GitHub validates the whole chain at
+  # startup -- so this must stay even though no step in THIS file uses it directly.
+  security-events: write # zizmor: ignore[excessive-permissions] ceiling for reusable's SARIF job
   packages: read # ceiling for the reusable Trivy build to pull private @qnsc-vn/* (packages can only be reduced, not elevated, in the called workflow)
 
 jobs:
