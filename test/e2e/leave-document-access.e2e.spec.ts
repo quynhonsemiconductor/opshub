@@ -50,7 +50,22 @@ afterAll(async () => {
 });
 
 /** A far-future Monday, unique per run: the overlap rule refuses a second request on the same dates. */
-const YEAR = 2060 + (Math.floor(Date.now() / 1000) % 30);
+/*
+ * A YEAR NO OTHER SPEC CAN PICK. The suite shares one database and one set of employee fixtures, and
+ * the overlap rule is per employee across every leave type — so two specs that pick a random year
+ * from overlapping ranges will eventually choose the same one, and if they also use the same month
+ * pattern the windows are identical and the second one to run is refused with LEAVE_OVERLAPPING.
+ *
+ * That is exactly what happened: this spec and `terminal-transitions` both used the first Monday of
+ * months 3, 5, 7, 9, 11 and 12 for the same fixture, from ranges that overlapped by twenty years. It
+ * failed roughly one run in twenty, only ever in a full suite.
+ *
+ * The ranges are therefore DISJOINT and written down here so the next spec picks a free one:
+ *   leave-balance            2040–2079
+ *   terminal-transitions     2080–2099
+ *   leave-document-access    2100–2119
+ */
+const YEAR = 2100 + (Math.floor(Date.now() / 1000) % 20);
 
 function mondayIn(month: number): string {
   for (let day = 1; day <= 14; day++) {

@@ -415,8 +415,12 @@ describe('request visibility', () => {
      */
     const own = await apiRequest(app, admin, 'POST', '/workforce/leave', {
       leaveType: 'annual',
-      startDate: '2029-03-05',
-      endDate: '2029-03-06',
+      // 2035, NOT 2029. `leave-balance.e2e.spec.ts` probes `currentYear + 3` as "the future" and
+      // asserts its `availableDays` is 0 — so four days of leave booked there made it -4, and that
+      // spec failed only in a full run. A year no other spec reasons about is the fix; the leave
+      // itself is incidental here, since this case is about who may decide a request.
+      startDate: '2035-03-05',
+      endDate: '2035-03-06',
       reason: 'e2e: filed by somebody who could otherwise approve it',
     });
     expect(own.status, JSON.stringify(own.body)).toBe(201);
@@ -436,8 +440,8 @@ describe('request visibility', () => {
      */
     const filed = await apiRequest(app, employee, 'POST', '/workforce/leave', {
       leaveType: 'annual',
-      startDate: '2029-04-02',
-      endDate: '2029-04-03',
+      startDate: '2035-04-02',
+      endDate: '2035-04-03',
       reason: 'e2e: somebody else decides this one',
     });
     expect(filed.status, JSON.stringify(filed.body)).toBe(201);
@@ -451,6 +455,68 @@ describe('request visibility', () => {
       'an approver who holds the step permission is not offered the decision',
     ).toBe(true);
     expect(decidable!.viewerCannotDecideReason).toBeNull();
+  });
+
+  it('is a queue of what I can decide, not of everything unassigned', async () => {
+    /*
+     * WHAT "MY QUEUE" USED TO MEAN. The predicate was
+     * `assigneeId = me OR (assigneeId IS NULL AND status = 'pending')`, and nothing in the product ever
+     * sets `assigneeId`: no type defines a `resolverFn` and no caller of `submit` passes one. So the
+     * first half never matched and the second made the tab mean "every unassigned pending request in
+     * the tenant" — the same set as the Pending tab beside it. A request at step 2 was missing
+     * entirely, because advancing a step sets `in_review` and the predicate demanded `pending`.
+     *
+     * It now means: open, not mine, and I hold the permission the current step requires. Asserted from
+     * two sides — HR must see a leave request it can decide, and must NOT see its own.
+     */
+    const filed = await apiRequest(app, employee, 'POST', '/workforce/leave', {
+      leaveType: 'annual',
+      startDate: '2035-06-04',
+      endDate: '2035-06-05',
+      reason: 'e2e: belongs in an approver queue',
+    });
+    expect(filed.status, JSON.stringify(filed.body)).toBe(201);
+
+    const hrOwn = await apiRequest(app, hr, 'POST', '/workforce/leave', {
+      leaveType: 'annual',
+      startDate: '2035-06-11',
+      endDate: '2035-06-12',
+      reason: 'e2e: HRs own request, which HR may not decide',
+    });
+    expect(hrOwn.status, JSON.stringify(hrOwn.body)).toBe(201);
+
+    const queue = await listRequests(hr, '?myQueue=true&limit=100');
+    expect(queue.length, 'the approver queue is empty').toBeGreaterThan(0);
+
+    // Everything in it is decidable BY THIS CALLER — the queue and the decision agree, because both
+    // read the same type definitions.
+    for (const row of queue) {
+      expect(
+        row.viewerMayDecide,
+        `request ${row.id} is in the queue and cannot be decided by the caller`,
+      ).toBe(true);
+    }
+
+    // And HR's own request is not in it, however much permission HR holds.
+    expect(
+      queue.some((r) => r.requesterId === FIXTURE.HR.id),
+      'the queue contains the callers own request, whose only outcome is a refusal',
+    ).toBe(false);
+  });
+
+  it('is empty for somebody who can decide nothing, rather than showing everything', async () => {
+    /*
+     * THE WORST OF THE OLD BEHAVIOUR. For a caller without `request.read` the narrowing collapsed the
+     * queue to their OWN pending requests — listed under the caption "Nothing awaiting your decision",
+     * every row a separation-of-duties refusal. An empty predicate is the honest answer, and it has to
+     * be explicit: an `or()` over no permissions would drop the condition and show the lot.
+     */
+    const queue = await listRequests(employee, '?myQueue=true&limit=100');
+
+    expect(
+      queue,
+      'a caller who holds no approval permission has requests in their decision queue',
+    ).toEqual([]);
   });
 
   it('does not let a requesterId filter widen the narrowing', async () => {

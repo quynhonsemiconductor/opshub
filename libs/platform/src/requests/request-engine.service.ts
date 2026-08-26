@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { MS_PER_HOUR, newId, type Actor, type RequestType } from '@shared-kernel';
 import { InjectDrizzle, type DrizzleDB } from '../database/drizzle.provider';
 import { AuthzService } from '../auth/authz.service';
@@ -524,11 +524,9 @@ export class RequestEngine {
       filters.type ? eq(requestItems.type, filters.type) : undefined,
       filters.requesterId ? eq(requestItems.requesterId, filters.requesterId) : undefined,
       filters.status ? eq(requestItems.status, filters.status) : undefined,
+      // "My queue" = what I can actually decide. See `decidableByPredicate` for what it used to mean.
       filters.myQueue
-        ? or(
-            eq(requestItems.assigneeId, actorId),
-            and(isNull(requestItems.assigneeId), eq(requestItems.status, 'pending')),
-          )
+        ? await this.decidableByPredicate(actorId)
         : filters.assigneeId
           ? eq(requestItems.assigneeId, filters.assigneeId)
           : undefined,
@@ -627,6 +625,76 @@ export class RequestEngine {
       })),
       total: count,
     };
+  }
+
+  /**
+   * The rows this actor may actually decide, as a SQL predicate — what "My queue" ought to mean.
+   *
+   * WHAT IT USED TO MEAN, and why that was not a queue. The filter was
+   * `assigneeId = me OR (assigneeId IS NULL AND status = 'pending')`, and `assigneeId` is never
+   * populated by anything: no `RequestTypeDef` defines a `resolverFn`, and no caller of `submit`
+   * passes `opts.assigneeId`. So the first half never matched, and the second made "My queue" mean
+   * *every unassigned pending request in the tenant* — byte-identical to the Pending tab beside it for
+   * anybody holding `request.read`. For a caller without it, the narrowing collapsed the whole thing
+   * to their OWN pending requests, listed under the caption "Nothing awaiting your decision", every
+   * one of them a separation-of-duties refusal waiting to happen. And a request at step 2 vanished
+   * from it entirely, because advancing sets `in_review` and the predicate demanded `pending` — the
+   * half-approved requests, the ones most needing attention, were the ones it hid.
+   *
+   * WHAT IT MEANS NOW: open, not mine, and I hold the permission its current step requires. Derived
+   * from the same type definitions `approve()` reads, so the queue and the refusal cannot disagree —
+   * which is the whole reason this is expressible without inventing an assignment policy. Assigning
+   * requests to people is a product decision nobody has made; being able to decide one is a fact.
+   *
+   * Expressed as `(type, currentStep)` pairs rather than a permission lookup per row, because the
+   * pairs are few and known up front: one per step of each registered type.
+   */
+  private async decidableByPredicate(actorId: string) {
+    const pairs: { type: string; step: number }[] = [];
+    const selfApprovable: string[] = [];
+    const checked = new Map<string, boolean>();
+
+    const holds = async (permission: string): Promise<boolean> => {
+      const cached = checked.get(permission);
+      if (cached !== undefined) return cached;
+      const result = await this.authz.check(actorId, permission);
+      checked.set(permission, result);
+      return result;
+    };
+
+    for (const def of this.registry.list()) {
+      if (def.allowSelfApproval) selfApprovable.push(def.type);
+      const steps = def.approvalSteps ?? [{ step: 1, requiredPermission: undefined }];
+      for (const step of steps) {
+        const required = step.requiredPermission ?? def.requiredApprovalPermission;
+        if (await holds(required)) pairs.push({ type: def.type, step: step.step });
+      }
+    }
+
+    // Nothing decidable at all: an explicitly false predicate, so the queue is empty rather than
+    // unfiltered. `or()` of an empty list would drop the condition and show everything.
+    if (pairs.length === 0) return sql`false`;
+
+    const decidablePairs = or(
+      ...pairs.map((pair) =>
+        and(eq(requestItems.type, pair.type), eq(requestItems.currentStep, pair.step)),
+      ),
+    );
+
+    return and(
+      // `in_review` belongs here: a multi-step request that has cleared step 1 is exactly what the
+      // next approver's queue is for, and the old predicate excluded it.
+      or(eq(requestItems.status, 'pending'), eq(requestItems.status, 'in_review')),
+      decidablePairs,
+      // Separation of duties, unless the type allows self-approval. Without this the queue would list
+      // requests whose only possible outcome is a refusal.
+      selfApprovable.length > 0
+        ? or(
+            inArray(requestItems.type, selfApprovable),
+            sql`${requestItems.requesterId} <> ${actorId}`,
+          )
+        : sql`${requestItems.requesterId} <> ${actorId}`,
+    );
   }
 
   /**

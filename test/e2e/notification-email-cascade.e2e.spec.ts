@@ -127,11 +127,30 @@ async function deliver(recipientId: string): Promise<{
     return row?.status !== 'pending';
   };
 
-  for (let pass = 0; pass < 30 && !(await settled()); pass += 1) {
+  /*
+   * DRIVEN UNTIL THIS ROW SETTLES, with a cap far above any plausible queue.
+   *
+   * A relay claims at most `batchSize` rows per pass ordered by `scheduled_at`, and this row sits
+   * behind everything the rest of the suite has queued. Thirty passes was enough until it was not: a
+   * few more specs filing leave — each raising a notification — pushed the row past the horizon, and
+   * the failure read "no email_outbox row was created", which sounds like a broken cascade rather than
+   * a deep queue.
+   *
+   * NOT bounded by progress, which I tried first and which is subtly wrong: a pass that moves nothing
+   * does not mean this row will never be claimed, because rows that failed are rescheduled into the
+   * future and leave the head of the queue as they go. The only honest exit conditions are "our row is
+   * no longer pending" and "we have tried far more times than the queue could possibly require".
+   *
+   * A pass over an empty queue is a single SELECT, so the high cap costs nothing when there is nothing
+   * to do.
+   */
+  for (let pass = 0; pass < 400 && !(await settled()); pass += 1) {
     await notificationRelay.relay();
   }
-  // Then the email side. Its row, if any, was enqueued by the pass above.
-  for (let pass = 0; pass < 30; pass += 1) {
+
+  // Then the email side. Its row, if any, was enqueued by the pass above. Same reasoning as above:
+  // the email queue carries every other spec's mail too.
+  for (let pass = 0; pass < 200; pass += 1) {
     await emailRelay.relay();
     const [pending] = await db
       .select({ n: sql<number>`count(*)::int` })

@@ -65,7 +65,10 @@ afterAll(async () => {
  * time: two runs in the same year would collide on the second one and the failure would look like
  * a broken guard rather than a fixture clash.
  */
-const YEAR = 2050 + (Math.floor(Date.now() / 1000) % 30);
+// 2080–2099, disjoint from every other spec's range — see the note in `leave-document-access`. This
+// spec and that one both walk the first Monday of months 3, 5, 7, 9, 11 and 12 for the same employee
+// fixture, so overlapping ranges meant identical windows whenever both picked the same year.
+const YEAR = 2080 + (Math.floor(Date.now() / 1000) % 20);
 
 /** The first Monday of `month` in YEAR, as `YYYY-MM-DD`. Mondays because a weekend window costs
  * zero working days and is refused outright with `LEAVE_NO_WORKING_DAYS`. */
