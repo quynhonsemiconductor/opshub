@@ -73,6 +73,22 @@ export class RequestItemResponseDto {
       'not say who is asking.',
   })
   requesterName!: string | null;
+  @ApiPropertyOptional({
+    description:
+      'Whether YOU may decide this request, answered by the engine that would enforce it. The inbox ' +
+      'used to offer Approve and Reject on every open row, so a holder of `request.read` with no ' +
+      'approval permission saw them on every pending request in the tenant and every click was a ' +
+      'permanent 403 — as was every click on their own request, which separation of duties refuses.',
+  })
+  viewerMayDecide!: boolean;
+  @ApiPropertyOptional({
+    nullable: true,
+    enum: ['own_request', 'missing_permission', 'not_open'],
+    description:
+      'Why not, so a screen can say something better than nothing: `own_request` reads "ask a ' +
+      'colleague", `missing_permission` reads "ask for access", `not_open` means already decided.',
+  })
+  viewerCannotDecideReason!: 'own_request' | 'missing_permission' | 'not_open' | null;
   @ApiPropertyOptional({ nullable: true }) assigneeId!: string | null;
   @ApiPropertyOptional({
     nullable: true,

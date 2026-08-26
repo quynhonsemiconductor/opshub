@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { MS_PER_HOUR, newId, type Actor, type RequestType } from '@shared-kernel';
 import { InjectDrizzle, type DrizzleDB } from '../database/drizzle.provider';
 import { AuthzService } from '../auth/authz.service';
@@ -445,7 +445,20 @@ export class RequestEngine {
       'request.read',
       'request',
     );
-    return item;
+
+    /*
+     * DECIDABILITY ON THE SINGLE READ TOO, computed here rather than inside `loadUnchecked`. That one
+     * has no actor on purpose — the transitions use it and gate on their own permission — and a
+     * default of `false` would be a lie to an approver reading a request they are perfectly able to
+     * decide.
+     */
+    const decidable = await this.decidability([item], actor.sub);
+    const verdict = decidable.get(item.id);
+    return {
+      ...item,
+      viewerMayDecide: verdict?.may ?? false,
+      viewerCannotDecideReason: verdict?.reason ?? null,
+    };
   }
 
   /** The raw read, with no authorization: for transitions that gate on their own permission. */
@@ -511,11 +524,9 @@ export class RequestEngine {
       filters.type ? eq(requestItems.type, filters.type) : undefined,
       filters.requesterId ? eq(requestItems.requesterId, filters.requesterId) : undefined,
       filters.status ? eq(requestItems.status, filters.status) : undefined,
+      // "My queue" = what I can actually decide. See `decidableByPredicate` for what it used to mean.
       filters.myQueue
-        ? or(
-            eq(requestItems.assigneeId, actorId),
-            and(isNull(requestItems.assigneeId), eq(requestItems.status, 'pending')),
-          )
+        ? await this.decidableByPredicate(actorId)
         : filters.assigneeId
           ? eq(requestItems.assigneeId, filters.assigneeId)
           : undefined,
@@ -590,6 +601,9 @@ export class RequestEngine {
       ...approverIds,
     ]);
 
+    // Whether this caller may decide each row, from the rule that would enforce it. See `decidability`.
+    const decidable = await this.decidability(rows, actorId);
+
     return {
       rows: rows.map((r) => ({
         ...r,
@@ -606,9 +620,147 @@ export class RequestEngine {
         // Null for an UNASSIGNED request too, which is a normal pending state rather than a fault — any
         // holder of the step's permission may decide it. `assigneeId` still tells the two apart.
         assigneeName: nameOf(names, r.assigneeId),
+        viewerMayDecide: decidable.get(r.id)?.may ?? false,
+        viewerCannotDecideReason: decidable.get(r.id)?.reason ?? null,
       })),
       total: count,
     };
+  }
+
+  /**
+   * The rows this actor may actually decide, as a SQL predicate — what "My queue" ought to mean.
+   *
+   * WHAT IT USED TO MEAN, and why that was not a queue. The filter was
+   * `assigneeId = me OR (assigneeId IS NULL AND status = 'pending')`, and `assigneeId` is never
+   * populated by anything: no `RequestTypeDef` defines a `resolverFn`, and no caller of `submit`
+   * passes `opts.assigneeId`. So the first half never matched, and the second made "My queue" mean
+   * *every unassigned pending request in the tenant* — byte-identical to the Pending tab beside it for
+   * anybody holding `request.read`. For a caller without it, the narrowing collapsed the whole thing
+   * to their OWN pending requests, listed under the caption "Nothing awaiting your decision", every
+   * one of them a separation-of-duties refusal waiting to happen. And a request at step 2 vanished
+   * from it entirely, because advancing sets `in_review` and the predicate demanded `pending` — the
+   * half-approved requests, the ones most needing attention, were the ones it hid.
+   *
+   * WHAT IT MEANS NOW: open, not mine, and I hold the permission its current step requires. Derived
+   * from the same type definitions `approve()` reads, so the queue and the refusal cannot disagree —
+   * which is the whole reason this is expressible without inventing an assignment policy. Assigning
+   * requests to people is a product decision nobody has made; being able to decide one is a fact.
+   *
+   * Expressed as `(type, currentStep)` pairs rather than a permission lookup per row, because the
+   * pairs are few and known up front: one per step of each registered type.
+   */
+  private async decidableByPredicate(actorId: string) {
+    const pairs: { type: string; step: number }[] = [];
+    const selfApprovable: string[] = [];
+    const checked = new Map<string, boolean>();
+
+    const holds = async (permission: string): Promise<boolean> => {
+      const cached = checked.get(permission);
+      if (cached !== undefined) return cached;
+      const result = await this.authz.check(actorId, permission);
+      checked.set(permission, result);
+      return result;
+    };
+
+    for (const def of this.registry.list()) {
+      if (def.allowSelfApproval) selfApprovable.push(def.type);
+      const steps = def.approvalSteps ?? [{ step: 1, requiredPermission: undefined }];
+      for (const step of steps) {
+        const required = step.requiredPermission ?? def.requiredApprovalPermission;
+        if (await holds(required)) pairs.push({ type: def.type, step: step.step });
+      }
+    }
+
+    // Nothing decidable at all: an explicitly false predicate, so the queue is empty rather than
+    // unfiltered. `or()` of an empty list would drop the condition and show everything.
+    if (pairs.length === 0) return sql`false`;
+
+    const decidablePairs = or(
+      ...pairs.map((pair) =>
+        and(eq(requestItems.type, pair.type), eq(requestItems.currentStep, pair.step)),
+      ),
+    );
+
+    return and(
+      // `in_review` belongs here: a multi-step request that has cleared step 1 is exactly what the
+      // next approver's queue is for, and the old predicate excluded it.
+      or(eq(requestItems.status, 'pending'), eq(requestItems.status, 'in_review')),
+      decidablePairs,
+      // Separation of duties, unless the type allows self-approval. Without this the queue would list
+      // requests whose only possible outcome is a refusal.
+      selfApprovable.length > 0
+        ? or(
+            inArray(requestItems.type, selfApprovable),
+            sql`${requestItems.requesterId} <> ${actorId}`,
+          )
+        : sql`${requestItems.requesterId} <> ${actorId}`,
+    );
+  }
+
+  /**
+   * Whether the actor may decide each of these requests — the same rule `approve()` enforces, asked
+   * before the click rather than answered with a 403 after it.
+   *
+   * WHY IT LIVES HERE and not in the SPA. The permission depends on the type's `approvalSteps` keyed on
+   * the row's CURRENT step; separation of duties is judged against the DELEGATOR when the caller is
+   * acting under a delegation; and the permission may be satisfied by the caller or by that delegator.
+   * A client-side copy would be a second implementation of the rule, free to drift from the one that
+   * decides — and the inbox's actions were previously gated on nothing but the status, so every
+   * unpermitted holder of `request.read` saw Approve on every pending request in the tenant.
+   *
+   * ONE DELEGATION LOOKUP AND ONE CHECK PER DISTINCT PERMISSION, not per row. A page of fifty leave
+   * requests asks about one permission; the cache below is what keeps this from becoming fifty authz
+   * round trips on a screen that already had to batch its names and its approvals.
+   */
+  private async decidability(
+    rows: RequestItem[],
+    actorId: string,
+  ): Promise<
+    Map<string, { may: boolean; reason: 'own_request' | 'missing_permission' | 'not_open' | null }>
+  > {
+    const out = new Map<
+      string,
+      { may: boolean; reason: 'own_request' | 'missing_permission' | 'not_open' | null }
+    >();
+    if (rows.length === 0) return out;
+
+    const activeDelegation = await this.delegation.findActiveDelegationTo(actorId);
+    const sodSubject = activeDelegation ? activeDelegation.fromUserId : actorId;
+    const allowed = new Map<string, boolean>();
+
+    const mayUse = async (permission: string): Promise<boolean> => {
+      const cached = allowed.get(permission);
+      if (cached !== undefined) return cached;
+      // Union semantics, exactly as `approve()` applies them: the caller, or whoever delegated to them.
+      const actorAllowed = await this.authz.check(actorId, permission);
+      const delegatorAllowed =
+        !actorAllowed && activeDelegation
+          ? await this.authz.check(activeDelegation.fromUserId, permission)
+          : false;
+      const result = actorAllowed || delegatorAllowed;
+      allowed.set(permission, result);
+      return result;
+    };
+
+    for (const row of rows) {
+      if (row.status !== 'pending' && row.status !== 'in_review') {
+        out.set(row.id, { may: false, reason: 'not_open' });
+        continue;
+      }
+      const def = this.registry.get(row.type);
+      if (!def.allowSelfApproval && row.requesterId === sodSubject) {
+        // Separation of duties, and it is worth naming: "ask a colleague" is different advice from
+        // "ask for access", and the engine emits a distinct error code for exactly that reason.
+        out.set(row.id, { may: false, reason: 'own_request' });
+        continue;
+      }
+      const stepDef = def.approvalSteps?.find((step) => step.step === row.currentStep) ?? null;
+      const required = stepDef?.requiredPermission ?? def.requiredApprovalPermission;
+      const may = await mayUse(required);
+      out.set(row.id, { may, reason: may ? null : 'missing_permission' });
+    }
+
+    return out;
   }
 
   /** Fetch IDs of pending requests past their deadline (for the expiry cron). */

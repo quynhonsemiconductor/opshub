@@ -51,6 +51,8 @@ interface CycleRow {
   id: string;
   reference: string;
   status: string;
+  /** Nullable, and its absence is a real answer: a cycle with no self-assessment step. */
+  selfAssessmentDue: string | null;
   openedAt: string | null;
   closedAt: string | null;
 }
@@ -284,6 +286,86 @@ describe('creating a review', () => {
       reviewerId: FIXTURE.MANAGER.id,
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('a cycle with no self-assessment step', () => {
+  /*
+   * THE STATE NOBODY COULD LEAVE. `selfAssessmentDue` is nullable and the cycle form offers leaving it
+   * empty in as many words — "for a cycle with no self-assessment step". But a review was created in
+   * `self_assessment` regardless, and the only transition out of that state is the SUBJECT submitting
+   * their own account. So in such a cycle every review was stuck from the moment it was created: the
+   * reviewer got no Rate action because rating requires `manager_review`, and the employee was asked
+   * for something the cycle had declared unnecessary.
+   *
+   * Both branches are asserted, because a fix that started every review in `manager_review` would
+   * also pass the first one — and it would silently delete the self-assessment step from the cycles
+   * that do have it.
+   */
+  async function cycleWithoutSelfAssessment(suffix: string): Promise<{ id: string }> {
+    const created = await apiRequest(app, hr, 'POST', '/performance/cycles', {
+      reference: `PR-${RUN}-${suffix}`,
+      name: `E2E cycle ${suffix}`,
+      periodStart: '2030-01-01',
+      periodEnd: '2030-06-30',
+      // No `selfAssessmentDue` at all — the case the cycle form invites.
+      reviewDue: '2030-07-31',
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const cycle = unwrap<CycleRow>(created.body);
+    expect(cycle.selfAssessmentDue, 'the fixture set a self-assessment date after all').toBeNull();
+
+    const opened = await apiRequest(app, hr, 'POST', `/performance/cycles/${cycle.id}/open`, {});
+    expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+    return cycle;
+  }
+
+  it('opens its reviews ready for the reviewer, not waiting on a self-assessment', async () => {
+    const cycle = await cycleWithoutSelfAssessment('NOSELF');
+    const review = await createReview(cycle.id, FIXTURE.NO_PERMISSIONS.id, FIXTURE.MANAGER.id);
+
+    expect(
+      review.status,
+      'the review is waiting for a self-assessment the cycle says is not required',
+    ).toBe('manager_review');
+
+    /*
+     * And it is genuinely rateable — the assertion that matters, since the status alone could be
+     * right while `recordRating` still refused.
+     */
+    const rated = await apiRequest(
+      app,
+      manager,
+      'POST',
+      `/performance/reviews/${review.id}/rating`,
+      {
+        managerSummary: 'Rated without a self-assessment, which is what this cycle asked for.',
+        overallRating: 'meets',
+      },
+    );
+    expect(rated.status, JSON.stringify(rated.body)).toBe(200);
+  });
+
+  it('still waits for the self-assessment when the cycle has one', async () => {
+    const cycle = await openCycle('WITHSELF');
+    const review = await createReview(cycle.id, FIXTURE.NO_PERMISSIONS.id, FIXTURE.MANAGER.id);
+
+    expect(review.status, 'the self-assessment step was skipped for a cycle that has one').toBe(
+      'self_assessment',
+    );
+
+    // And rating is refused until the subject has had their say.
+    const early = await apiRequest(
+      app,
+      manager,
+      'POST',
+      `/performance/reviews/${review.id}/rating`,
+      {
+        managerSummary: 'Too early: the employee has not written their account yet.',
+        overallRating: 'meets',
+      },
+    );
+    expect(early.status, JSON.stringify(early.body)).toBe(412);
   });
 });
 

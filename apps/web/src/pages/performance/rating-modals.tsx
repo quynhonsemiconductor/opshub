@@ -4,7 +4,8 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import { FormActions, FormError, FormField, Input, Modal, Select, Textarea } from '@/shared/ui';
-import { useRatingScale } from './use-performance';
+import { useRatingScale, useReviewGoals } from './use-performance';
+import { GoalGradingFieldset } from './goal-grading-fieldset';
 import type { Review } from './performance.types';
 
 /**
@@ -103,10 +104,35 @@ export function RateReviewModal({
   onSuccess: () => void;
 }) {
   const scale = useRatingScale();
+  const goals = useReviewGoals(review.id);
   const [managerSummary, setManagerSummary] = useState(review.managerSummary ?? '');
   const [overallRating, setOverallRating] = useState(review.overallRating ?? '');
   const [developmentPlan, setDevelopmentPlan] = useState(review.developmentPlan ?? '');
   const [error, setError] = useState('');
+  /*
+   * A GRADE AND AN OUTCOME PER GOAL, and the reason this form needs them at all: `POST /rating` has
+   * always accepted `goals: [{ id, rating, outcome }]` and this modal never sent the field. Nothing
+   * else can set a goal's grade — `SetGoalSchema` has no rating — so every goal stayed ungraded, and
+   * `assertGoalsComplete` refuses to submit a review with an ungraded goal. A review with one goal on
+   * it could therefore never leave the reviewer's desk, and the confirmation dialog on "Send for
+   * approval" named the rule while offering no way to satisfy it.
+   *
+   * Keyed by goal id and seeded from what is already saved, so reopening the form shows the grades
+   * rather than blanking them.
+   */
+  const [goalGrades, setGoalGrades] = useState<Record<string, { rating: string; outcome: string }>>(
+    {},
+  );
+
+  /*
+   * The values to SEND: the edits merged over what is already saved. Falling back to the saved grade
+   * matters — a reviewer who opens the form, changes the summary and saves must not blank the grades
+   * they set last time.
+   */
+  const graded = (goals.data ?? []).map((goal) => ({
+    goal,
+    value: goalGrades[goal.id] ?? { rating: goal.rating ?? '', outcome: goal.outcome ?? '' },
+  }));
 
   const level = scale.data?.find((l) => l.code === overallRating);
   const planRequired = level?.requiresDevelopmentPlan ?? false;
@@ -119,6 +145,17 @@ export function RateReviewModal({
           managerSummary,
           overallRating: overallRating as never,
           developmentPlan: developmentPlan || null,
+          /*
+           * Only the goals that HAVE a grade. Sending `rating: ''` would fail the enum, and sending
+           * every goal with a null grade would overwrite grades already saved with nothing.
+           */
+          goals: graded
+            .filter((g) => g.value.rating)
+            .map((g) => ({
+              id: g.goal.id,
+              rating: g.value.rating as never,
+              outcome: g.value.outcome || null,
+            })),
         },
       });
       if (err) throw new Error(apiErrorMessage(err, 'Failed to save the rating.'));
@@ -146,6 +183,15 @@ export function RateReviewModal({
         }}
         className="flex flex-col gap-4 p-5"
       >
+        {/* Goals are graded BEFORE the overall, because the overall is meant to be traceable to
+            them — which is why the API refuses to submit a review whose goals are ungraded. */}
+        <GoalGradingFieldset
+          goals={goals.data ?? []}
+          scale={scale.data ?? []}
+          values={goalGrades}
+          onChange={(goalId, next) => setGoalGrades((current) => ({ ...current, [goalId]: next }))}
+        />
+
         <FormField label="Overall rating" htmlFor="rate-overall" required>
           <Select
             id="rate-overall"

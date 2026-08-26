@@ -197,17 +197,42 @@ export function RequestsPage() {
       align: 'right',
       // `RowActions`/`RowAction` from the kit, not two hand-rolled buttons with their own colour classes —
       // which is what these were, and the tones they wanted are variants `Button` already has.
-      cell: (req) =>
-        isOpen(req.status) ? (
-          <RowActions>
-            <RowAction tone="success" onClick={() => setModal({ req, action: 'approve' })}>
-              Approve
-            </RowAction>
-            <RowAction tone="danger" onClick={() => setModal({ req, action: 'reject' })}>
-              Reject
-            </RowAction>
-          </RowActions>
-        ) : null,
+      /*
+       * OFFERED ONLY WHERE THE ENGINE WOULD ALLOW IT. This was gated on the status alone, so every
+       * holder of `request.read` — `helpdesk` and `auditor` hold exactly that and no approval code —
+       * saw Approve and Reject on every pending request in the tenant, and every click was a
+       * permanent 403 shown as "please try again". So did every user on their OWN request, which
+       * separation of duties refuses by design.
+       *
+       * `viewerMayDecide` comes from the engine that enforces it: the step's permission, the
+       * separation-of-duties subject (the delegator, when acting under a delegation), and the union of
+       * the two identities' permissions. None of that is derivable here.
+       *
+       * WHEN THE ANSWER IS NO, SAY WHY rather than showing nothing: "you raised this" and "you do not
+       * hold the permission" lead to different next actions — ask a colleague, or ask for access.
+       */
+      cell: (req) => {
+        if (!isOpen(req.status)) return null;
+        if (req.viewerMayDecide) {
+          return (
+            <RowActions>
+              <RowAction tone="success" onClick={() => setModal({ req, action: 'approve' })}>
+                Approve
+              </RowAction>
+              <RowAction tone="danger" onClick={() => setModal({ req, action: 'reject' })}>
+                Reject
+              </RowAction>
+            </RowActions>
+          );
+        }
+        return (
+          <span className="text-xs text-fg-subtle">
+            {req.viewerCannotDecideReason === 'own_request'
+              ? 'Yours — a colleague decides'
+              : 'Not yours to decide'}
+          </span>
+        );
+      },
     },
   ];
 

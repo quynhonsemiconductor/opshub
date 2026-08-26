@@ -9,9 +9,12 @@ import type { FormModalProps } from '@/shared/ui';
 /**
  * Create a review cycle.
  *
- * A cycle is created as a DRAFT and opened separately, which is why this form has no status field: a
- * draft is where reviews are created and reviewers assigned, and opening it is the act that lets people
- * write. Offering "create as open" would skip the step where somebody checks the coverage.
+ * A cycle is created as a DRAFT and opened separately, which is why this form has no status field.
+ * Opening it is the act that lets reviews be created: `createReview` refuses any cycle that is not
+ * open, and the coverage report on the drawer is how somebody checks who is missing once it is. This
+ * docblock used to say a draft "is where reviews are created and reviewers assigned", which the
+ * service has never allowed — and the cycles table offered the action on drafts on the strength of it,
+ * so the save was refused by a rule no screen mentioned.
  *
  * SELF-ASSESSMENT IS OPTIONAL, and its absence is a real answer — a cycle can go straight to the
  * manager's write-up. The field is left empty rather than defaulted to the review date, because a

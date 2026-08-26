@@ -30,7 +30,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RequestEngine } from '@platform';
 import { REQUEST_TYPE } from '@shared-kernel';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, apiRequest, bearer, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 /** `employee` holds NO permission codes — the tier every narrowing rule must constrain. */
@@ -45,6 +45,8 @@ let hr: Session;
  * with what it is testing.
  */
 let admin: Session;
+/** `request.read` and no approval code anywhere — the tier the inbox used to offer Approve to. */
+let auditor: Session;
 /** A request owned by the employee, so there is something they legitimately may see. */
 let ownRequestId: string;
 /** A request owned by HR — the thing the employee must NOT be able to reach. */
@@ -70,6 +72,10 @@ interface RequestRow {
   /** Resolved server-side. Null when the request is unassigned, or the assignee's row is gone. */
   assigneeName: string | null;
   approvals?: { step: number; approverId: string; approverName: string | null }[];
+  status?: string;
+  /** Answered by the engine that enforces it, so the inbox stops offering refusals. */
+  viewerMayDecide?: boolean;
+  viewerCannotDecideReason?: 'own_request' | 'missing_permission' | 'not_open' | null;
 }
 
 async function getRequest(session: Session, id: string): Promise<RequestRow> {
@@ -103,6 +109,7 @@ beforeAll(async () => {
   app = await createTestApp();
   employee = await login(app, FIXTURE.NO_PERMISSIONS);
   hr = await login(app, FIXTURE.HR);
+  auditor = await login(app, FIXTURE.AUDITOR);
   admin = await login(app, FIXTURE.ADMIN);
 
   // File a leave request as the employee: it enters the generic engine, so it is a request
@@ -370,6 +377,146 @@ describe('request visibility', () => {
       single.approvals?.[0]?.approverName,
       'the by-id read resolves the chain separately from the list, and did not resolve it',
     ).toBe('Admin User');
+  });
+
+  it('tells a read-only role it may not decide, instead of offering it', async () => {
+    /*
+     * THE 403 WALL. The inbox gated Approve and Reject on the request's STATUS alone, so any holder of
+     * `request.read` saw them on every pending request in the tenant. `ROLE.AUDITOR` is exactly that
+     * tier — `request.read` and no approval code anywhere — so every click it made was a permanent
+     * refusal, reported as "please try again".
+     *
+     * The answer now comes from the engine that enforces it, because the client cannot work it out:
+     * the required permission depends on the type's step, separation of duties is judged against the
+     * DELEGATOR when one is active, and either identity's permission satisfies it.
+     */
+    const rows = await listRequests(auditor, '?limit=50');
+    expect(rows.length, 'nothing visible to the auditor, so this proves nothing').toBeGreaterThan(
+      0,
+    );
+
+    const open = rows.filter((r) => r.status === 'pending' || r.status === 'in_review');
+    expect(open.length, 'no open request to ask about').toBeGreaterThan(0);
+    for (const row of open) {
+      expect(
+        row.viewerMayDecide,
+        `request ${row.id} is offered to a role that holds no approval permission`,
+      ).toBe(false);
+      // And the reason is the actionable one: ask for access, not ask a colleague.
+      expect(row.viewerCannotDecideReason).toBe('missing_permission');
+    }
+  });
+
+  it('will not let anyone decide their own request, however much permission they hold', async () => {
+    /*
+     * Separation of duties, from the reader's side. ADMIN holds the wildcard, so this is not about
+     * permission at all — which is the point: the inbox offered an approver their own request and the
+     * engine refused it with a distinct code, and the screen collapsed that into "please try again".
+     */
+    const own = await apiRequest(app, admin, 'POST', '/workforce/leave', {
+      leaveType: 'annual',
+      // 2035, NOT 2029. `leave-balance.e2e.spec.ts` probes `currentYear + 3` as "the future" and
+      // asserts its `availableDays` is 0 — so four days of leave booked there made it -4, and that
+      // spec failed only in a full run. A year no other spec reasons about is the fix; the leave
+      // itself is incidental here, since this case is about who may decide a request.
+      startDate: '2035-03-05',
+      endDate: '2035-03-06',
+      reason: 'e2e: filed by somebody who could otherwise approve it',
+    });
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
+
+    const rows = await listRequests(admin, `?requesterId=${FIXTURE.ADMIN.id}&limit=50`);
+    const mine = rows.find((r) => r.status === 'pending');
+    expect(mine, 'the request just filed is not in the list').toBeDefined();
+
+    expect(mine!.viewerMayDecide, 'the wildcard holder is offered their own request').toBe(false);
+    expect(mine!.viewerCannotDecideReason).toBe('own_request');
+  });
+
+  it('does offer it to somebody who may actually decide', async () => {
+    /*
+     * The other half, and without it the two cases above would pass against a field hard-wired to
+     * false — which would replace a wall of 403s with an inbox nobody can act on at all.
+     */
+    const filed = await apiRequest(app, employee, 'POST', '/workforce/leave', {
+      leaveType: 'annual',
+      startDate: '2035-04-02',
+      endDate: '2035-04-03',
+      reason: 'e2e: somebody else decides this one',
+    });
+    expect(filed.status, JSON.stringify(filed.body)).toBe(201);
+
+    // HR holds `workforce.approve` and `workforce.leave.review`, and did not file it.
+    const rows = await listRequests(hr, `?requesterId=${FIXTURE.NO_PERMISSIONS.id}&limit=50`);
+    const decidable = rows.find((r) => r.status === 'pending');
+    expect(decidable, 'no pending request for the approver to see').toBeDefined();
+    expect(
+      decidable!.viewerMayDecide,
+      'an approver who holds the step permission is not offered the decision',
+    ).toBe(true);
+    expect(decidable!.viewerCannotDecideReason).toBeNull();
+  });
+
+  it('is a queue of what I can decide, not of everything unassigned', async () => {
+    /*
+     * WHAT "MY QUEUE" USED TO MEAN. The predicate was
+     * `assigneeId = me OR (assigneeId IS NULL AND status = 'pending')`, and nothing in the product ever
+     * sets `assigneeId`: no type defines a `resolverFn` and no caller of `submit` passes one. So the
+     * first half never matched and the second made the tab mean "every unassigned pending request in
+     * the tenant" — the same set as the Pending tab beside it. A request at step 2 was missing
+     * entirely, because advancing a step sets `in_review` and the predicate demanded `pending`.
+     *
+     * It now means: open, not mine, and I hold the permission the current step requires. Asserted from
+     * two sides — HR must see a leave request it can decide, and must NOT see its own.
+     */
+    const filed = await apiRequest(app, employee, 'POST', '/workforce/leave', {
+      leaveType: 'annual',
+      startDate: '2035-06-04',
+      endDate: '2035-06-05',
+      reason: 'e2e: belongs in an approver queue',
+    });
+    expect(filed.status, JSON.stringify(filed.body)).toBe(201);
+
+    const hrOwn = await apiRequest(app, hr, 'POST', '/workforce/leave', {
+      leaveType: 'annual',
+      startDate: '2035-06-11',
+      endDate: '2035-06-12',
+      reason: 'e2e: HRs own request, which HR may not decide',
+    });
+    expect(hrOwn.status, JSON.stringify(hrOwn.body)).toBe(201);
+
+    const queue = await listRequests(hr, '?myQueue=true&limit=100');
+    expect(queue.length, 'the approver queue is empty').toBeGreaterThan(0);
+
+    // Everything in it is decidable BY THIS CALLER — the queue and the decision agree, because both
+    // read the same type definitions.
+    for (const row of queue) {
+      expect(
+        row.viewerMayDecide,
+        `request ${row.id} is in the queue and cannot be decided by the caller`,
+      ).toBe(true);
+    }
+
+    // And HR's own request is not in it, however much permission HR holds.
+    expect(
+      queue.some((r) => r.requesterId === FIXTURE.HR.id),
+      'the queue contains the callers own request, whose only outcome is a refusal',
+    ).toBe(false);
+  });
+
+  it('is empty for somebody who can decide nothing, rather than showing everything', async () => {
+    /*
+     * THE WORST OF THE OLD BEHAVIOUR. For a caller without `request.read` the narrowing collapsed the
+     * queue to their OWN pending requests — listed under the caption "Nothing awaiting your decision",
+     * every row a separation-of-duties refusal. An empty predicate is the honest answer, and it has to
+     * be explicit: an `or()` over no permissions would drop the condition and show the lot.
+     */
+    const queue = await listRequests(employee, '?myQueue=true&limit=100');
+
+    expect(
+      queue,
+      'a caller who holds no approval permission has requests in their decision queue',
+    ).toEqual([]);
   });
 
   it('does not let a requesterId filter widen the narrowing', async () => {
