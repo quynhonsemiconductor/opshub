@@ -10,8 +10,7 @@
 # `Analyze (actions)` as the GitHub Actions workflow security gate — Default
 # Setup autobuild is unreliable on bot-authored PRs and on repos with a lone
 # script in a language the repo isn't otherwise built in (see rally's
-# tools/*.py false-red). Non-blocking here on first rollout; flip
-# `blocking: true` after triaging the initial findings.
+# tools/*.py false-red). Blocking — the initial rollout ran clean, no findings.
 # =============================================================================
 name: Security · Scan
 
@@ -51,3 +50,5 @@ jobs:
       contents: read
       security-events: write
     uses: QNSC-VN/qnsc-ci/.github/workflows/actions-security.yml@v1
+    with:
+      blocking: true
