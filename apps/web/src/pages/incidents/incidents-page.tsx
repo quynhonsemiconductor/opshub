@@ -25,7 +25,7 @@ import {
 } from '@/shared/ui';
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
-import { formatDateTime, orDash } from '@/shared/lib/format';
+import { formatDateTime } from '@/shared/lib/format';
 import { DismissIncidentModal } from './incident-record-modals';
 import {
   CloseIncidentModal,
@@ -35,8 +35,14 @@ import {
 } from './incident-transition-modals';
 import { ReportIncidentModal } from './report-incident-modal';
 import { TimelinePanel } from './timeline-panel';
-import { BREACH_NOTIFICATION_HOURS, INCIDENT_STATUS_FILTERS, NEXT_ACTIONS } from './incident.types';
+import {
+  BREACH_NOTIFICATION_HOURS,
+  INCIDENT_STATUS_FILTERS,
+  NEXT_ACTIONS,
+  isTerminalIncidentStatus,
+} from './incident.types';
 import { useIncidents, useOverdueBreaches } from './use-incidents';
+import { incidentDetailItems } from './incident-detail-items';
 import type { Incident } from './incident.types';
 
 /**
@@ -73,6 +79,8 @@ export function IncidentsPage() {
   const [closing, setClosing] = useState<Incident | null>(null);
   const [dismissing, setDismissing] = useState<Incident | null>(null);
   const [notifying, setNotifying] = useState<Incident | null>(null);
+  /** The incident being CORRECTED, as opposed to a new one being reported. Same form, `PATCH` not `POST`. */
+  const [correcting, setCorrecting] = useState<Incident | null>(null);
 
   const incidents = useIncidents({
     status,
@@ -181,6 +189,22 @@ export function IncidentsPage() {
         const next = NEXT_ACTIONS[incident.status] ?? [];
         return (
           <RowActions>
+            {/*
+              CORRECT, on anything still being handled. `PATCH /v1/incidents/:id` has existed since the
+              module was written and no screen called it, so a severity graded in the first ten minutes
+              of a response — the field the queue is ORDERED by — stayed wrong for ever, as did a
+              wrongly-ticked personal-data breach and a missing link to the risk it realised.
+
+              Not on `closed` or `false_positive`: `updateIncident` calls `assertOpen` and answers
+              `INCIDENT_NOT_IN_STATE` with "add a timeline entry instead", so drawing the action there
+              would offer a button whose only outcome is a refusal. `isTerminalIncidentStatus` is the
+              same list the API filters its open queue with, so the two cannot disagree.
+            */}
+            {!isTerminalIncidentStatus(incident.status) && (
+              <RowAction tone="muted" onClick={() => setCorrecting(incident)}>
+                Correct
+              </RowAction>
+            )}
             {next.includes('triage') && (
               <RowAction tone="accent" onClick={() => setTriaging(incident)}>
                 Triage
@@ -219,6 +243,15 @@ export function IncidentsPage() {
         onClose={() => setReporting(false)}
         onSuccess={invalidate}
       />
+      {/* One form, two verbs: `incident` present means correct the record rather than report a new one. */}
+      {correcting && (
+        <ReportIncidentModal
+          open
+          incident={correcting}
+          onClose={() => setCorrecting(null)}
+          onSuccess={invalidate}
+        />
+      )}
       {triaging && (
         <TriageIncidentModal
           incident={triaging}
@@ -362,78 +395,7 @@ export function IncidentsPage() {
             </PanelAction>
           ) : undefined
         }
-        items={
-          selected
-            ? [
-                {
-                  label: 'Status',
-                  value: (
-                    <StatusBadge tone={statusTone(selected.status)}>
-                      {humanizeStatus(selected.status)}
-                    </StatusBadge>
-                  ),
-                },
-                {
-                  label: 'Severity',
-                  value: (
-                    <Badge tone={statusTone(selected.severity)}>
-                      {humanizeStatus(selected.severity)}
-                    </Badge>
-                  ),
-                },
-                { label: 'Category', value: selected.category },
-                { label: 'Detected', value: formatDateTime(selected.detectedAt) },
-                {
-                  label: 'Reported by',
-                  value: <span className="font-mono text-xs">{selected.reportedBy}</span>,
-                },
-                {
-                  label: 'Owner',
-                  value: selected.assignedTo ? (
-                    <span className="font-mono text-xs">{selected.assignedTo}</span>
-                  ) : (
-                    'Unassigned'
-                  ),
-                },
-                { label: 'Contained', value: formatDateTime(selected.containedAt) },
-                { label: 'Resolved', value: formatDateTime(selected.resolvedAt) },
-                { label: 'Closed', value: formatDateTime(selected.closedAt) },
-                {
-                  label: 'Personal data breach',
-                  value: selected.personalDataBreach
-                    ? selected.regulatorNotifiedAt
-                      ? `Regulator notified ${formatDateTime(selected.regulatorNotifiedAt)}`
-                      : `Notification due ${formatDateTime(selected.notificationDueAt)}`
-                    : 'No',
-                },
-                {
-                  label: 'What happened',
-                  wide: true,
-                  value: (
-                    <p className="whitespace-pre-wrap text-sm text-fg-muted">
-                      {selected.description}
-                    </p>
-                  ),
-                },
-                // Only once they exist: an empty "root cause" on a live incident reads as an incident
-                // nobody investigated.
-                ...(selected.rootCause
-                  ? [{ label: 'Root cause', wide: true, value: selected.rootCause }]
-                  : []),
-                ...(selected.lessonsLearned
-                  ? [{ label: 'Lessons learned', wide: true, value: selected.lessonsLearned }]
-                  : []),
-                ...(selected.riskId
-                  ? [
-                      {
-                        label: 'Linked risk',
-                        value: <span className="font-mono text-xs">{selected.riskId}</span>,
-                      },
-                    ]
-                  : [{ label: 'Linked risk', value: orDash(null) }]),
-              ]
-            : []
-        }
+        items={selected ? incidentDetailItems(selected) : []}
         activity={selected ? { resourceId: selected.id, resourceType: 'incident' } : undefined}
       >
         {selected && (

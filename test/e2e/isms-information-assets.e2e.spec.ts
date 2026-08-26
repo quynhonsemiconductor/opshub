@@ -16,6 +16,10 @@
  *     403 at the declassification route it does not hold, and a coded 412 on the route it does.
  *   - THE HISTORY IS COMPLETE AND APPEND-ONLY. Registration writes the first row with a null
  *     `fromLevel`, each change adds one, and the reason travels with it.
+ *   - RE-RATING IS THE WAY OUT OF A LABEL THE ASSESSMENT DOES NOT SUPPORT. `reclassify` judges the
+ *     new label against the rating ALREADY STORED, and `PATCH` is the only route that can move a
+ *     rating — so refused, corrected, then accepted is walked as ONE test. Either half alone passes
+ *     against a build where the destination is simply unreachable.
  *   - COHERENCE OUTRANKS PERMISSION: even `admin`, holding the wildcard, cannot declassify personal
  *     data to `internal`. The permission allows a reduction, not an incoherent one.
  *   - THE LOST-LAPTOP QUESTION. A device linked to two assets reports both, worst first, and an
@@ -528,6 +532,118 @@ describe('re-rating', () => {
         (await apiRequest(app, security, 'GET', `/information-assets/${asset.id}`)).body,
       ).classification,
     ).toBe('confidential');
+  });
+
+  it('leaves the descriptive fields corrected and the classification untouched', async () => {
+    const asset = await register({ name: 'Payrol system', location: 'on-prem' });
+    const res = await apiRequest(app, security, 'PATCH', `/information-assets/${asset.id}`, {
+      name: 'Payroll system',
+      custodianId: FIXTURE.ADMIN.id,
+      location: 'eu-west-1 / RDS',
+      retentionMonths: 84,
+      reviewDueOn: '2027-03-31',
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    /*
+     * THE CLASSIFICATION IS ASSERTED ON A PATCH THAT NEVER MENTIONED IT.
+     *
+     * The 422 above proves the field is rejected when sent. This proves the other half: correcting
+     * the things around it does not move it either. Both matter because the correction form sends a
+     * whole body every time — the day somebody adds `classification` to that body to "keep the two
+     * forms symmetrical", the label starts changing with no history row and no `declassify`
+     * permission, and the register stops being able to account for its own labels.
+     */
+    expect(unwrap<AssetRow>(res.body)).toMatchObject({
+      name: 'Payroll system',
+      classification: 'confidential',
+      custodianId: FIXTURE.ADMIN.id,
+      reviewDueOn: '2027-03-31',
+    });
+    // And no history row was written, because nothing classification-shaped happened. Registration's
+    // row is the only one there.
+    const changes = unwrap<ChangeRow[]>(
+      (
+        await apiRequest(
+          app,
+          security,
+          'GET',
+          `/information-assets/${asset.id}/classification-history`,
+        )
+      ).body,
+    );
+    expect(changes).toHaveLength(1);
+    expect(changes[0].fromLevel).toBeNull();
+  });
+
+  /**
+   * THE DEAD END, WALKED END TO END.
+   *
+   * `reclassify` validates the NEW label against the CIA rating ALREADY STORED, and `assertCoherent`
+   * refuses `restricted` below a confidentiality of 4. `PATCH` is the only route that can move a
+   * rating. So while no screen called that `PATCH`, an asset registered `internal` at 3 could never
+   * become `restricted` from the product at all: the reclassify call 412'd, and there was nothing to
+   * raise the rating with.
+   *
+   * The three steps are one test on purpose. The refusal alone would pass against a build where
+   * `restricted` is simply unreachable; the success alone would pass against a build that never
+   * enforced the coherence rule. Only the pair says "refused for the right reason, and the documented
+   * way out actually works".
+   */
+  it('re-rating is the way out of a reclassification the rating refuses', async () => {
+    const asset = await register({
+      classification: 'internal',
+      confidentiality: 3,
+      // Not personal data: at `internal` the API would refuse that pair for a different reason, and a
+      // test that can fail two ways cannot say which rule it is pinning.
+      personalData: false,
+    });
+
+    // 1. REFUSED — the label outruns the assessment, and the refusal names the number it wanted.
+    const tooLow = await apiRequest(
+      app,
+      security,
+      'POST',
+      `/information-assets/${asset.id}/reclassify`,
+      { classification: 'restricted', reason: WHY },
+    );
+    expect(tooLow.status, JSON.stringify(tooLow.body)).toBe(412);
+    expect(errorCode(tooLow.body)).toBe('INFORMATION_ASSET_CLASSIFICATION_MISMATCH');
+
+    // 2. CORRECT THE RATING. The reassessment that justifies the label, through the only route that
+    // can record it.
+    const rerated = await apiRequest(app, security, 'PATCH', `/information-assets/${asset.id}`, {
+      confidentiality: 5,
+    });
+    expect(rerated.status, JSON.stringify(rerated.body)).toBe(200);
+    expect(unwrap<AssetRow>(rerated.body).confidentiality).toBe(5);
+    // Still `internal`: the re-rating is not a reclassification, and if it were then step 3 would be
+    // proving nothing.
+    expect(unwrap<AssetRow>(rerated.body).classification).toBe('internal');
+
+    // 3. NOW IT GOES THROUGH, and it is recorded as the change it is.
+    const raised = await apiRequest(
+      app,
+      security,
+      'POST',
+      `/information-assets/${asset.id}/reclassify`,
+      { classification: 'restricted', reason: WHY },
+    );
+    expect(raised.status, JSON.stringify(raised.body)).toBe(200);
+    expect(unwrap<AssetRow>(raised.body).classification).toBe('restricted');
+
+    const changes = unwrap<ChangeRow[]>(
+      (
+        await apiRequest(
+          app,
+          security,
+          'GET',
+          `/information-assets/${asset.id}/classification-history`,
+        )
+      ).body,
+    );
+    expect(changes.map((c) => [c.fromLevel, c.toLevel])).toEqual(
+      expect.arrayContaining([['internal', 'restricted']]),
+    );
   });
 });
 

@@ -67,6 +67,33 @@ export function useCriticalityLevels() {
   });
 }
 
+/**
+ * The TITLE of a controlled document the register points at — today only the data-processing agreement.
+ *
+ * WHY THE REGISTER READS THE DOCUMENTS ENDPOINT AT ALL. `dataProcessingAgreementId` is a uuid on the
+ * vendor row and nothing else, so a correction form pre-filled from that row can only show the picker
+ * thirty-six characters identifying nothing — which is the exact defect `EntityPicker.selectedLabel`
+ * exists to prevent. One request, only when a supplier already HAS an agreement recorded.
+ *
+ * A failure is not an error here: `document.read` is a separate code from `vendor.manage`, so a
+ * `null` title falls back to the id rather than breaking the form. `retry: false` because a 403 will
+ * not become a 200.
+ */
+export function useDocumentTitle(documentId: string | null | undefined) {
+  return useQuery<string | null>({
+    queryKey: ['vendors', 'document-title', documentId],
+    enabled: !!documentId,
+    staleTime: STALE.REFERENCE,
+    retry: false,
+    queryFn: async () => {
+      const { data } = await api.GET('/v1/documents/{id}', {
+        params: { path: { id: documentId! } },
+      });
+      return data ? `${data.code} — ${data.title}` : null;
+    },
+  });
+}
+
 export function useVendorAssessments(vendorId: string | null) {
   return useQuery<VendorAssessment[]>({
     queryKey: ['vendors', 'assessments', vendorId],

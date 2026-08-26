@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
-import { activeEmployeeOptions } from '@/shared/api/picker-sources';
+import { activeEmployeeOptions, assetOptions } from '@/shared/api/picker-sources';
 import {
   EntityPicker,
   FormActions,
@@ -32,40 +32,65 @@ export function IdentifyRiskModal({
   open,
   onClose,
   onSuccess,
+  risk,
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  /**
+   * Present to CORRECT an existing entry rather than record a new one.
+   *
+   * WHY THIS MODE EXISTS. `PATCH /v1/risks/:id` has always been there and no screen called it — nor
+   * did any screen call the equivalent on incidents, information assets or vendors. So a register
+   * entry was append-only by accident: a mis-scored risk, a wrong owner, a typo in the description
+   * stayed wrong for ever, and the only way to correct one was to close it and identify a new one,
+   * which loses the history that makes a register worth keeping.
+   *
+   * `UpdateRiskSchema` is the identify schema minus the reference, all optional — so the same form
+   * serves both, and the reference is read-only here because it is what everything else quotes.
+   */
+  risk?: Risk;
 }) {
+  const editing = !!risk;
   const [form, setForm] = useState({
-    reference: '',
-    title: '',
-    description: '',
-    category: '',
-    ownerId: '',
-    likelihood: '',
-    impact: '',
-    reviewDueOn: '',
+    reference: risk?.reference ?? '',
+    title: risk?.title ?? '',
+    description: risk?.description ?? '',
+    category: risk?.category ?? '',
+    ownerId: risk?.ownerId ?? '',
+    assetId: risk?.assetId ?? '',
+    likelihood: risk ? String(risk.inherentLikelihood) : '',
+    impact: risk ? String(risk.inherentImpact) : '',
+    reviewDueOn: risk?.reviewDueOn ?? '',
   });
   const [error, setError] = useState('');
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const { error: err } = await api.POST('/v1/risks', {
-        body: {
-          reference: form.reference,
-          title: form.title,
-          description: form.description,
-          category: form.category,
-          ownerId: form.ownerId,
-          inherent: { likelihood: Number(form.likelihood), impact: Number(form.impact) },
-          reviewDueOn: form.reviewDueOn || null,
-        },
-      });
-      if (err) throw new Error(apiErrorMessage(err, 'Failed to record the risk.'));
+      const body = {
+        title: form.title,
+        description: form.description,
+        category: form.category,
+        ownerId: form.ownerId,
+        // Null when cleared, not omitted: a risk wrongly tied to a device has to be untieable, and an
+        // absent key would leave the old link in place on a PATCH.
+        assetId: form.assetId || null,
+        inherent: { likelihood: Number(form.likelihood), impact: Number(form.impact) },
+        reviewDueOn: form.reviewDueOn || null,
+      };
+      const { error: err } = editing
+        ? await api.PATCH('/v1/risks/{id}', { params: { path: { id: risk.id } }, body })
+        : await api.POST('/v1/risks', { body: { ...body, reference: form.reference } });
+      if (err)
+        throw new Error(
+          apiErrorMessage(
+            err,
+            editing ? 'Failed to update the risk.' : 'Failed to record the risk.',
+          ),
+        );
     },
     onSuccess: () => {
-      toast.success('Risk recorded');
+      toast.success(editing ? 'Risk updated' : 'Risk recorded');
       onSuccess();
       onClose();
     },
@@ -77,7 +102,11 @@ export function IdentifyRiskModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Identify a risk">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={editing ? `Correct ${risk.reference}` : 'Identify a risk'}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -96,6 +125,10 @@ export function IdentifyRiskModal({
             <Input
               id="risk-reference"
               required
+              // Read-only when correcting: the reference is what treatment plans, the SoA and audit
+              // findings quote, so changing it would orphan every citation. `UpdateRiskSchema` omits
+              // it for the same reason.
+              disabled={editing}
               value={form.reference}
               onChange={(e) => set('reference', e.target.value.toUpperCase())}
               placeholder="R-2026-014"
@@ -153,6 +186,31 @@ export function IdentifyRiskModal({
           />
         </FormField>
 
+        <FormField
+          label="Device"
+          htmlFor="risk-asset"
+          hint="The machine this risk is about, if it is about one. Optional — most risks are about a process."
+        >
+          {/*
+            THE FIELD THAT EXISTED AND WAS UNREACHABLE. `assetId` is in both the create and update
+            schemas, is indexed, and appeared in no form — so a risk could never be tied to the device
+            it concerns, and the lost-laptop question ("what was the exposure on that machine") had no
+            answer from the register side.
+
+            A DEVICE, not an information asset: `isms.risks.asset_id` references `assets.assets`, which
+            migration 0022 confirms in as many words when it declines to add a second pointer.
+          */}
+          <EntityPicker
+            id="risk-asset"
+            queryKey="assets"
+            value={form.assetId}
+            onChange={(value) => set('assetId', value)}
+            fetchOptions={assetOptions}
+            placeholder="Search assets…"
+            emptyMessage="No asset matches that."
+          />
+        </FormField>
+
         <MatrixFields
           idPrefix="risk-inherent"
           likelihood={form.likelihood}
@@ -173,7 +231,11 @@ export function IdentifyRiskModal({
 
         <FormError message={error} />
 
-        <FormActions loading={mutation.isPending} onClose={onClose} submitLabel="Record risk" />
+        <FormActions
+          loading={mutation.isPending}
+          onClose={onClose}
+          submitLabel={editing ? 'Save correction' : 'Record risk'}
+        />
       </form>
     </Modal>
   );

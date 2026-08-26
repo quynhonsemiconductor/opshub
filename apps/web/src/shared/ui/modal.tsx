@@ -22,6 +22,19 @@ export interface ModalProps {
   /** Sticky footer area, e.g. Cancel / Save buttons. */
   footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg';
+  /**
+   * The `id` of the control to focus on open, instead of the first focusable one.
+   *
+   * WHY THIS IS THE MODAL'S JOB. A form opened FROM a specific finding should land on the field that
+   * closes it — the supplier register's "No DPA" badge opens the correction form on the agreement
+   * picker. A child cannot do that itself: this component owns focus-on-open and its effect is an
+   * ancestor's, so it runs AFTER any child effect or `autoFocus` and would overwrite it. Fighting that
+   * from the outside means a `setTimeout`; extending the thing that already owns focus does not.
+   *
+   * Silently ignored when nothing matches, so a renamed field degrades to the default rather than
+   * leaving the dialog with focus on the body.
+   */
+  initialFocus?: string;
 }
 
 const SIZE: Record<NonNullable<ModalProps['size']>, string> = {
@@ -42,6 +55,7 @@ export function Modal({
   children,
   footer,
   size = 'md',
+  initialFocus,
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -53,7 +67,12 @@ export function Modal({
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
-    panel?.querySelectorAll<HTMLElement>(FOCUSABLE)[0]?.focus();
+    // The requested field if it is there, else the first focusable — see `initialFocus`. Not
+    // `querySelector(`#${id}`)`: an id is not a guaranteed-valid selector, and a bad one throws.
+    const requested = initialFocus
+      ? (panel?.querySelector<HTMLElement>(`[id="${CSS.escape(initialFocus)}"]`) ?? null)
+      : null;
+    (requested ?? panel?.querySelectorAll<HTMLElement>(FOCUSABLE)[0])?.focus();
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = '';
@@ -61,7 +80,7 @@ export function Modal({
       // action it performed removed it. See `restoreFocus`.
       restoreFocus(previouslyFocused, panel);
     };
-  }, [open]);
+  }, [open, initialFocus]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     // Escape is handled by `useEscapeToClose` on the document, because focus is not reliably inside this

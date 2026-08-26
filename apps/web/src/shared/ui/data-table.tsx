@@ -158,6 +158,18 @@ export function DataTable<Row>({
               return (
                 <tr
                   key={keyOf(row)}
+                  /*
+                   * THE ROW'S IDENTITY, in the DOM.
+                   *
+                   * `keyOf` already computes a stable per-row key for React; exposing it costs nothing
+                   * at runtime and gives a test a handle that does not depend on what the row happens
+                   * to display. That matters here specifically: request ids are uuid v7, so the first
+                   * eight characters are a TIMESTAMP and several rows share them — which is why the
+                   * inbox row shows the requester's name instead, and why the spec that needed a
+                   * particular request had fallen back to "click the first row" and to an assumption
+                   * about ordering that another write can break.
+                   */
+                  data-row-id={keyOf(row)}
                   // A row is only focusable when it actually does something.
                   {...(clickable
                     ? {

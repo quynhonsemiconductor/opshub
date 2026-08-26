@@ -94,11 +94,18 @@ test.describe('requests inbox', () => {
     await page.getByRole('radiogroup').getByRole('radio', { name: 'All' }).click();
 
     /*
-     * THE FIRST ROW IS THE ONE JUST RAISED. The list is `createdAt DESC` and `raiseRequest` was the last
-     * write before this navigation, so position is the reliable handle here — the visible id is not, being
-     * the UUIDv7 millisecond prefix that three rows in this file share.
+     * THE ROW FOR THIS EXACT REQUEST, by id.
+     *
+     * It used to click the FIRST row, on the reasoning that the list is `createdAt DESC` and this was
+     * the last write before the navigation. That assumption broke: a newer request appeared between the
+     * two and the drawer opened on somebody else's document approval. Position is only a handle while
+     * nothing else writes, and in a shared database that is not a property a test can hold.
+     *
+     * The visible id is no good either — uuid v7 puts a timestamp in the first eight characters, so
+     * several rows share the prefix, which is exactly why the row shows the requester's name now. So
+     * `DataTable` exposes `data-row-id`, and this reaches the row it means.
      */
-    await clickFirstRow(page);
+    await page.locator(`tbody tr[data-row-id="${req.id}"]`).click();
     const drawer = page.getByRole('dialog');
     await expect(drawer).toContainText(req.shortId);
     /*

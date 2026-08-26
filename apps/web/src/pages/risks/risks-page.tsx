@@ -61,6 +61,8 @@ export function RisksPage() {
   const [accepting, setAccepting] = useState<Risk | null>(null);
   const [closing, setClosing] = useState<Risk | null>(null);
   const [markingTreated, setMarkingTreated] = useState<Risk | null>(null);
+  /** The entry being CORRECTED, as opposed to a new one being identified. Same form, `PATCH` not `POST`. */
+  const [correcting, setCorrecting] = useState<Risk | null>(null);
   const [selected, setSelected] = useState<Risk | null>(null);
 
   const risks = useRisks({
@@ -171,6 +173,18 @@ export function RisksPage() {
       cell: (risk) =>
         canManage ? (
           <RowActions>
+            {/*
+              CORRECT, on anything not closed. `PATCH /v1/risks/:id` has always existed and no screen
+              called it, so a mis-scored risk or a wrong owner stayed wrong for ever — the only way out
+              was to close the entry and identify a new one, which loses the history that makes a
+              register worth keeping. A closed risk is deliberately excluded: it is the historical
+              record, and the API's own guard says so.
+            */}
+            {risk.status !== 'closed' && (
+              <RowAction tone="muted" onClick={() => setCorrecting(risk)}>
+                Correct
+              </RowAction>
+            )}
             {risk.status === 'identified' && (
               <RowAction tone="accent" onClick={() => setAssessing(risk)}>
                 Assess
@@ -203,6 +217,15 @@ export function RisksPage() {
         onClose={() => setIdentifying(false)}
         onSuccess={invalidate}
       />
+      {/* One form, two verbs: `risk` present means correct the entry rather than record a new one. */}
+      {correcting && (
+        <IdentifyRiskModal
+          open
+          risk={correcting}
+          onClose={() => setCorrecting(null)}
+          onSuccess={invalidate}
+        />
+      )}
       {assessing && (
         <AssessRiskModal
           risk={assessing}
