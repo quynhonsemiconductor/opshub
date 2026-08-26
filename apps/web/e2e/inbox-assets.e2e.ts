@@ -184,7 +184,13 @@ test.describe('service catalog', () => {
 
     await gotoInShell(page, '/catalog');
 
-    const item = page.getByRole('button', { name: new RegExp(name) });
+    /*
+     * ANCHORED. The card, its Edit action and its Remove action all carry the item's name in their
+     * accessible name now that the catalog can be managed from the page — so an unanchored pattern
+     * matches three elements and Playwright's strict mode refuses, correctly. `^` picks the card,
+     * whose accessible name starts with the item's.
+     */
+    const item = page.getByRole('button', { name: new RegExp(`^${name}`) });
     await expect(item).toBeVisible();
     await item.click();
 

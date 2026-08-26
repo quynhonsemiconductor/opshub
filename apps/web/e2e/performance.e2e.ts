@@ -2,7 +2,6 @@ import { test } from './support/test';
 import type { APIRequestContext } from '@playwright/test';
 import {
   FIXTURE,
-  contextAs,
   csrfHeaders,
   expect,
   expectRowSomewhere,
@@ -258,8 +257,14 @@ test.describe('performance', () => {
       headers: await csrfHeaders(request),
     });
 
-    // The seeded fixture, so the SUBJECT can sign in and submit their own self-assessment — a review
-    // is born in `self_assessment` and only its subject can move it on.
+    /*
+     * NO SELF-ASSESSMENT ROUND TRIP. `createCycle` sets no `selfAssessmentDue`, so the review now
+     * OPENS in `manager_review` — a cycle with no self-assessment step no longer produces a review
+     * waiting for one. This test used to submit an assessment as the subject to reach that state; with
+     * the fix in place that submission is refused, correctly, with
+     * `PERFORMANCE_REVIEW_NOT_IN_STATE`. Its presence here was the old defect showing through the
+     * fixture.
+     */
     const employee = await request.get('/v1/employees', {
       params: { search: FIXTURE.EMPLOYEE.email, limit: '1' },
     });
@@ -274,14 +279,6 @@ test.describe('performance', () => {
     const reviewId =
       ((await created.json()) as { id?: string; data?: { id: string } }).data?.id ??
       ((await created.json()) as { id: string }).id;
-
-    const asEmployee = await contextAs(FIXTURE.EMPLOYEE.email);
-    const submitted = await asEmployee.post(`/v1/performance/reviews/${reviewId}/self-assessment`, {
-      headers: await csrfHeaders(asEmployee),
-      data: { selfAssessment: 'Written so the review reaches its reviewer.' },
-    });
-    expect(submitted.status(), await submitted.text()).toBe(200);
-    await asEmployee.dispose();
 
     // ONE GOAL AT 100%, added through the API: the weights rule is not what this test is about, and a
     // second goal would only make the arithmetic incidental.
@@ -392,17 +389,13 @@ test.describe('performance', () => {
       data: { employeeId, reviewerId },
     });
     expect(created.status(), await created.text()).toBe(201);
-    const reviewId =
-      ((await created.json()) as { id?: string; data?: { id: string } }).data?.id ??
-      ((await created.json()) as { id: string }).id;
-
-    const asEmployee = await contextAs(FIXTURE.EMPLOYEE.email);
-    const submitted = await asEmployee.post(`/v1/performance/reviews/${reviewId}/self-assessment`, {
-      headers: await csrfHeaders(asEmployee),
-      data: { selfAssessment: 'Written by the employee so the review reaches its reviewer.' },
-    });
-    expect(submitted.status(), await submitted.text()).toBe(200);
-    await asEmployee.dispose();
+    /*
+     * NO SELF-ASSESSMENT ROUND TRIP, for the reason the sibling test above records: `createCycle` sets
+     * no `selfAssessmentDue`, so the review opens in `manager_review` and submitting an assessment is
+     * now refused with `PERFORMANCE_REVIEW_NOT_IN_STATE`. This fixture was written against a review
+     * that started in `self_assessment` no matter what the cycle said — which is the defect, not the
+     * contract.
+     */
 
     await gotoInShell(page, '/performance');
     await page.getByRole('tab', { name: 'My reviews' }).click();
@@ -410,8 +403,13 @@ test.describe('performance', () => {
     // The reviewer's own queue, which is self-scoped — no permission code involved.
     const owed = page.locator('tbody tr', { hasText: cycle.reference });
     await expect(owed).toBeVisible({ timeout: 15_000 });
-    // The employee has had their say, so the reviewer can write.
-    await expect(owed).toContainText('Submitted');
+    /*
+     * "Manager review", not "Submitted". The cycle has no self-assessment step, so the review opened
+     * ready for the reviewer rather than passing through a state whose only exit is the subject
+     * writing something the cycle never asked for. The old assertion read "Submitted" because the
+     * fixture had to submit one to get here.
+     */
+    await expect(owed).toContainText('Manager review');
     await owed.getByRole('button', { name: /^Rate$/ }).click();
 
     const dialog = page.getByRole('dialog');
