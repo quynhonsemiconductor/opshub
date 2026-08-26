@@ -25,6 +25,7 @@ import {
   type DataTableColumn,
 } from '@/shared/ui';
 import { useListState } from '@/shared/hooks/use-list-state';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash } from '@/shared/lib/format';
 import { FEATURES } from '@/shared/config/features';
 import { ShadowItPanel } from './shadow-it-tab';
@@ -61,11 +62,17 @@ const SEVERITY_FILTERS = [
  *
  * A function rather than a constant because two of them need the row actions, and those close over
  * the tab's handlers. Declared outside the component so the array is not rebuilt per render.
+ *
+ * `canManage` is a parameter and not something the cell asks for, because a column list built outside a
+ * component cannot call a hook — the tab reads the permission once and hands the answer down.
  */
-function findingColumns(actions: {
-  onAcknowledge: (id: string) => void;
-  onResolve: (id: string) => void;
-}): DataTableColumn<FindingResponse>[] {
+function findingColumns(
+  canManage: boolean,
+  actions: {
+    onAcknowledge: (id: string) => void;
+    onResolve: (id: string) => void;
+  },
+): DataTableColumn<FindingResponse>[] {
   return [
     {
       key: 'software',
@@ -105,26 +112,50 @@ function findingColumns(actions: {
       header: 'Actions',
       // Through `RowActions`, which owns the `stopPropagation` these needed: the row itself opens the
       // detail panel, so without it acknowledging a finding would also open the panel for it.
-      cell: (f) => (
-        <RowActions>
-          {f.status === 'open' && (
-            <RowAction tone="accent" onClick={() => actions.onAcknowledge(f.id)}>
-              Acknowledge
-            </RowAction>
-          )}
-          {(f.status === 'open' || f.status === 'acknowledged') && (
-            <RowAction tone="success" onClick={() => actions.onResolve(f.id)}>
-              Resolve
-            </RowAction>
-          )}
-        </RowActions>
-      ),
+      //
+      /*
+       * OFFERED ONLY WHERE THE ROUTE WOULD ALLOW IT. Both of these were gated on the finding's status
+       * alone, and both routes carry `@RequirePermission('compliance.manage')` — so every holder of
+       * `compliance.read` (`auditor` holds exactly that) saw Acknowledge and Resolve on every finding
+       * in the tenant, and every click was a permanent 403 rendered as "please try again".
+       *
+       * WITHHELD SILENTLY, unlike the requests screen's "Yours — a colleague decides". There, the answer
+       * varies per ROW — you raised it, or you lack the step's permission — and the two lead to different
+       * next actions, so the row has something to say. Here it is one tenant-wide fact about the reader,
+       * identical on every row, so a note would repeat itself once per finding and tell nobody anything
+       * the empty column does not. The sibling `software-catalog-tab.tsx` withholds Reclassify on the
+       * same permission the same way; this page should not answer the question two ways.
+       */
+      cell: (f) => {
+        if (!canManage) return null;
+        const mayAcknowledge = f.status === 'open';
+        const mayResolve = f.status === 'open' || f.status === 'acknowledged';
+        // A resolved or risk-accepted finding has neither, and an empty `RowActions` is a flex row of
+        // nothing — return the cell as empty rather than as a wrapper.
+        if (!mayAcknowledge && !mayResolve) return null;
+        return (
+          <RowActions>
+            {mayAcknowledge && (
+              <RowAction tone="accent" onClick={() => actions.onAcknowledge(f.id)}>
+                Acknowledge
+              </RowAction>
+            )}
+            {mayResolve && (
+              <RowAction tone="success" onClick={() => actions.onResolve(f.id)}>
+                Resolve
+              </RowAction>
+            )}
+          </RowActions>
+        );
+      },
     },
   ];
 }
 
 function FindingsTab() {
   const qc = useQueryClient();
+  const { can } = usePermissions();
+  const canManage = can('compliance.manage');
   const [severityFilter, setSeverityFilter] = useState<FindingSeverity | ''>('');
   const [resolveId, setResolveId] = useState<string | null>(null);
   const [selected, setSelected] = useState<FindingResponse | null>(null);
@@ -187,7 +218,10 @@ function FindingsTab() {
         />
 
         <DataTable
-          columns={findingColumns({ onAcknowledge: handleAcknowledge, onResolve: setResolveId })}
+          columns={findingColumns(canManage, {
+            onAcknowledge: handleAcknowledge,
+            onResolve: setResolveId,
+          })}
           rows={findings.data?.data as FindingResponse[] | undefined}
           isLoading={findings.isLoading}
           isError={findings.isError}
@@ -212,8 +246,12 @@ function FindingsTab() {
         title={selected?.softwareName ?? 'Finding detail'}
         description={selected ? `${selected.severity} · ${selected.status}` : undefined}
         width="lg"
+        // The same two writes, so the same gate: withholding them in the table and offering them in the
+        // panel the table opens would leave the 403 exactly one click further away.
         headerActions={
-          selected && (selected.status === 'open' || selected.status === 'acknowledged') ? (
+          selected &&
+          canManage &&
+          (selected.status === 'open' || selected.status === 'acknowledged') ? (
             <div className="flex items-center gap-2">
               {selected.status === 'open' && (
                 <PanelAction

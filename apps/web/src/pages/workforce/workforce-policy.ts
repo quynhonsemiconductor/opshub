@@ -1,4 +1,5 @@
 import type { LeaveResponse, OvertimeResponse, TimesheetResponse } from '@/shared/api/types';
+import { decisionNoteText, type CannotDecideReason } from '@/shared/ui';
 
 /**
  * The workforce approval rules these tabs have to agree with, mirrored from the API that enforces them.
@@ -83,22 +84,41 @@ export type DecisionVerdict =
   | 'own_record';
 
 /**
- * WHEN THE ANSWER IS NO, SAY WHY rather than rendering an empty cell — the same two lines the requests
- * inbox uses, deliberately word for word, because it is the same fact about the same request and a
- * second phrasing would read as a second rule. "Ask a colleague" and "ask for access" are different
- * next actions, and a blank cell suggests neither.
+ * The verdict translated into the reason the requests inbox reports, so both screens answer with one
+ * sentence from one place — see `DecisionNote` in the kit.
  *
- * `not_pending` and `unknown_viewer` have no entry on purpose: there is nothing to explain about a
- * decided record, and a sentence that appears for a third of a second while `/me` lands is noise.
+ * THE ENGINE'S VOCABULARY IS THE TARGET, not a local one: `viewerCannotDecideReason` is a field the
+ * requests API already returns, and these screens compute the same fact themselves only because they
+ * read domain tables instead of the engine. Mapping onto it keeps the two from drifting into two
+ * phrasings of one rule.
+ *
+ * `offer` and `unknown_viewer` map to `undefined` rather than to a reason: there is nothing to explain
+ * about a decision being offered, and a sentence that appears for a third of a second while `/me` lands
+ * is noise. `not_pending` maps to `not_open`, which the kit deliberately renders as nothing.
  */
-const DECISION_NOTE: Partial<Record<DecisionVerdict, string>> = {
-  own_record: 'Yours — a colleague decides',
-  not_permitted: 'Not yours to decide',
-};
+export function decisionReason(verdict: DecisionVerdict): CannotDecideReason {
+  switch (verdict) {
+    case 'own_record':
+      return 'own_request';
+    case 'not_permitted':
+      return 'missing_permission';
+    case 'not_pending':
+      return 'not_open';
+    default:
+      return undefined;
+  }
+}
 
-/** The line to show in place of the buttons, or null when the right answer is to show nothing. */
+/**
+ * Whether a verdict has anything to say, and what.
+ *
+ * Kept as a verdict-shaped wrapper because three call sites ask it as a QUESTION rather than to render:
+ * "is there a note, or is this footer empty?" decides whether a container is drawn at all. The strings
+ * still live in one place — this reads them out of the kit through `decisionReason`, so there is no
+ * second copy to drift.
+ */
 export function decisionNote(verdict: DecisionVerdict): string | null {
-  return DECISION_NOTE[verdict] ?? null;
+  return decisionNoteText(decisionReason(verdict));
 }
 
 /**

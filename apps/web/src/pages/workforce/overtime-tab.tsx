@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import {
+  DecisionNote,
   Button,
   DataTable,
   EntityDetailPanel,
@@ -29,8 +30,7 @@ import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash } from '@/shared/lib/format';
-import { DecisionNote } from './decision-note';
-import { decisionNote, overtimeReviewVerdict } from './workforce-policy';
+import { decisionNote, decisionReason, overtimeReviewVerdict } from './workforce-policy';
 import type { OvertimeResponse, OvertimeStatus } from '@/shared/api/types';
 
 const OT_FILTERS: { value: OvertimeStatus | ''; label: string }[] = [
@@ -185,7 +185,7 @@ export function OvertimeTab() {
                 </RowAction>
               </>
             )}
-            <DecisionNote verdict={verdict} />
+            <DecisionNote reason={decisionReason(verdict)} />
           </RowActions>
         );
       },
@@ -270,7 +270,7 @@ export function OvertimeTab() {
                   </PanelAction>
                 </>
               )}
-              <DecisionNote verdict={selectedVerdict} />
+              <DecisionNote reason={decisionReason(selectedVerdict)} />
             </div>
           ) : undefined
         }

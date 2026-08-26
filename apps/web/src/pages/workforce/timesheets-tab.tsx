@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import {
+  DecisionNote,
   Button,
   DataTable,
   EntityDetailPanel,
@@ -29,8 +30,12 @@ import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash } from '@/shared/lib/format';
-import { DecisionNote } from './decision-note';
-import { canSubmitTimesheet, decisionNote, timesheetReviewVerdict } from './workforce-policy';
+import {
+  canSubmitTimesheet,
+  decisionNote,
+  decisionReason,
+  timesheetReviewVerdict,
+} from './workforce-policy';
 import type { TimesheetResponse, TimesheetStatus } from '@/shared/api/types';
 import { asHoursAndMinutes } from './duration';
 
@@ -216,7 +221,7 @@ export function TimesheetsTab() {
                 </RowAction>
               </>
             )}
-            <DecisionNote verdict={verdict} />
+            <DecisionNote reason={decisionReason(verdict)} />
           </RowActions>
         );
       },
@@ -325,7 +330,7 @@ export function TimesheetsTab() {
                   </PanelAction>
                 </>
               )}
-              <DecisionNote verdict={selectedVerdict} />
+              <DecisionNote reason={decisionReason(selectedVerdict)} />
             </div>
           ) : undefined
         }

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import {
+  DecisionNote,
   Button,
   DataTable,
   EntityDetailPanel,
@@ -33,8 +34,12 @@ import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash } from '@/shared/lib/format';
-import { DecisionNote } from './decision-note';
-import { canCancelLeave, decisionNote, leaveReviewVerdict } from './workforce-policy';
+import {
+  canCancelLeave,
+  decisionNote,
+  decisionReason,
+  leaveReviewVerdict,
+} from './workforce-policy';
 import type { LeaveResponse, LeaveStatus, LeaveType } from '@/shared/api/types';
 
 const LEAVE_FILTERS: { value: LeaveStatus | ''; label: string }[] = [
@@ -250,7 +255,7 @@ export function LeaveTab() {
                 Cancel
               </RowAction>
             )}
-            <DecisionNote verdict={verdict} />
+            <DecisionNote reason={decisionReason(verdict)} />
           </RowActions>
         );
       },
@@ -359,7 +364,7 @@ export function LeaveTab() {
                   Cancel
                 </PanelAction>
               )}
-              <DecisionNote verdict={selectedVerdict} />
+              <DecisionNote reason={decisionReason(selectedVerdict)} />
             </div>
           ) : undefined
         }

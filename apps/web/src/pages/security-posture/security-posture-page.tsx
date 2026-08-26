@@ -6,6 +6,7 @@ import { Shield, ShieldAlert, TrendingUp, TrendingDown, Minus, RefreshCw } from 
 import { toast } from 'sonner';
 import { Button, PageHeader, UpgradeGate, type BadgeTone } from '@/shared/ui';
 import { FEATURES } from '@/shared/config/features';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { cn } from '@/shared/lib/utils';
 import { BaselinePanel } from './baseline-panel';
 
@@ -186,6 +187,21 @@ export function SecurityPosturePage() {
 
 function SecurityPostureContent() {
   const qc = useQueryClient();
+  /*
+   * SYNCING IS THE ONLY WRITE ON THIS SCREEN, AND IT IS NOT THE SCREEN'S READ TIER.
+   *
+   * The three reads carry `@RequirePermission('security.view')`; `POST /v1/security-posture/sync`
+   * carries `@RequirePermission('security.manage')`. The nav admits this page on `security.view`, so
+   * an auditor reached a dashboard whose one button could only ever 403.
+   *
+   * WITHHELD RATHER THAN SHOWN-AND-DISABLED. Everything a viewer comes here for — the score, the
+   * trend, the baseline checks — is still on screen, so removing the button removes a dead end and not
+   * the page; and the kit has no disabled-with-reason control to reuse, only `UpgradeGate`, which
+   * answers a different question (the tenant is not licensed for the feature at all) and would blank
+   * out data this reader is entitled to see. The two "nothing synced yet" messages below say who runs
+   * a sync instead, which is the explanation a disabled button would have been carrying.
+   */
+  const canSync = usePermissions().can('security.manage');
 
   const scoreQ = useSecureScore();
   const historyQ = useScoreHistory(30);
@@ -228,15 +244,17 @@ function SecurityPostureContent() {
         title="Security Posture"
         description="Microsoft Secure Score trends and baseline drift checks"
         actions={
-          <Button
-            variant="outline"
-            onClick={() => syncMut.mutate()}
-            disabled={syncMut.isPending}
-            className="hover:border-border-strong"
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', syncMut.isPending && 'animate-spin')} />
-            Sync now
-          </Button>
+          canSync ? (
+            <Button
+              variant="outline"
+              onClick={() => syncMut.mutate()}
+              disabled={syncMut.isPending}
+              className="hover:border-border-strong"
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', syncMut.isPending && 'animate-spin')} />
+              Sync now
+            </Button>
+          ) : undefined
         }
       />
 
@@ -256,7 +274,10 @@ function SecurityPostureContent() {
               {g && <span className={cn('mb-1 text-2xl font-bold', gradeClass(g))}>{g}</span>}
             </div>
           ) : (
-            <p className="text-sm text-fg-muted">No data yet — run a sync to populate.</p>
+            // "Run a sync" only to somebody who can: the button it refers to is withheld otherwise.
+            <p className="text-sm text-fg-muted">
+              {canSync ? 'No data yet — run a sync to populate.' : 'No data synced yet.'}
+            </p>
           )}
           {latest && (
             <p className="text-xs text-fg-subtle">
