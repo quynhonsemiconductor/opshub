@@ -51,6 +51,8 @@ interface CycleRow {
   id: string;
   reference: string;
   status: string;
+  /** Nullable, and its absence is a real answer: a cycle with no self-assessment step. */
+  selfAssessmentDue: string | null;
   openedAt: string | null;
   closedAt: string | null;
 }
