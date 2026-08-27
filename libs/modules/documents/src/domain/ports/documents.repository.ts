@@ -14,6 +14,18 @@ export interface IDocumentsRepository {
   // ── Documents ──────────────────────────────────────────────────────────────
   create(input: CreateDocumentInput, tx?: DbExecutor): Promise<ControlledDocument>;
   findById(id: string): Promise<ControlledDocument | null>;
+  /**
+   * Which of `ids` name a real controlled document.
+   *
+   * ONE QUERY FOR ALL OF THEM, mirroring `IEmployeeRepository.findExistingIds`: four modules point at
+   * documents across a schema boundary and none of them may carry a foreign key, so the alternative to
+   * this is a lookup per reference and a refusal that names only the first one wrong.
+   *
+   * RETIRED DOCUMENTS COUNT AS EXISTING. Retirement is soft — the agreement or report that was in
+   * force when the evidence was filed is still the evidence, and refusing a reference to it would make
+   * retiring a document silently invalidate every record citing it.
+   */
+  findExistingIds(ids: string[]): Promise<string[]>;
   findByCode(code: string): Promise<ControlledDocument | null>;
   list(
     filters: DocumentFilters,

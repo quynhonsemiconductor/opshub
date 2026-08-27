@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, isNull, notExists, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, notExists, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB, searchAcross } from '@platform';
 import { newId } from '@shared-kernel';
 import { documentAcknowledgements, documentVersions, documents } from '../../../../../../db/schema';
@@ -31,6 +31,16 @@ export class DocumentsDrizzleRepository implements IDocumentsRepository {
       })
       .returning();
     return row;
+  }
+
+  async findExistingIds(ids: string[]): Promise<string[]> {
+    // `inArray(col, [])` is not valid SQL, so an empty list must not reach the database at all.
+    if (ids.length === 0) return [];
+    const rows = await this.db
+      .select({ id: documents.id })
+      .from(documents)
+      .where(inArray(documents.id, ids));
+    return rows.map((row) => row.id);
   }
 
   async findById(id: string): Promise<ControlledDocument | null> {

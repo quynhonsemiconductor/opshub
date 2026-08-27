@@ -88,8 +88,9 @@ export const employmentContracts = contractsSchema.table(
     /**
      * The controlled document holding the signed agreement.
      *
-     * No FK: `documents` is a separate schema and every other cross-schema reference in this
-     * codebase is by id alone, so the service checks it rather than the database.
+     * No FK: `documents` is a separate schema, so `DocumentsService.assertExist` is what makes this
+     * reference real — called from the route that accepts it. A dangling id would be a record that
+     * reads as complete evidence.
      */
     documentId: uuid('document_id'),
     terminatedOn: date('terminated_on'),

@@ -24,6 +24,7 @@ import {
   type PagedResult,
 } from '@platform';
 import { EmployeeService } from '@modules/identity';
+import { DocumentsService } from '@modules/documents';
 import { ControlService } from '../../application/control.service';
 import type {
   Control,
@@ -95,6 +96,7 @@ export class ControlController {
   constructor(
     private readonly service: ControlService,
     private readonly employees: EmployeeService,
+    private readonly documents: DocumentsService,
   ) {}
 
   // ── The Statement of Applicability ───────────────────────────────────────────
@@ -187,6 +189,9 @@ export class ControlController {
   ): Promise<SoaEntryResponseDto> {
     // `owner_id` carries no cross-schema FK, so without this a typo would name nobody.
     await this.employees.assertExist(dto.ownerId);
+    // Same reason as the owner above: `evidence_document_id` carries no cross-schema FK, so a typo
+    // names a document nobody can open while the record reads as complete evidence.
+    await this.documents.assertExist(dto.evidenceDocumentId);
     return toEntryDto(await this.service.setEntry(controlId, dto, user));
   }
 

@@ -18071,6 +18071,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Conflict — duplicate record or state conflict */
       409: {
         headers: {

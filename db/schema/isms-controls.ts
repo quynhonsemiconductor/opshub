@@ -90,8 +90,9 @@ export const soaEntries = ismsSchema.table(
     /**
      * The controlled document that evidences it — a policy, a procedure, a work instruction.
      *
-     * No FK: `documents` is a separate schema and every other cross-schema reference in this
-     * codebase is by id alone, so the service checks it rather than the database.
+     * No FK: `documents` is a separate schema, so `DocumentsService.assertExist` is what makes this
+     * reference real — called from the route that accepts it. A dangling id would be a record that
+     * reads as complete evidence.
      */
     evidenceDocumentId: uuid('evidence_document_id'),
     /** Accountable for the control being in place. Not the person who wrote the SoA entry. */

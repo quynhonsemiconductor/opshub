@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '@modules/audit';
 import { IdentityModule } from '@modules/identity';
+import { DocumentsModule } from '@modules/documents';
 import { RiskService } from './application/risk.service';
 import { ControlService } from './application/control.service';
 import { IncidentService } from './application/incident.service';
@@ -28,7 +29,10 @@ import { VENDOR_REPOSITORY } from './domain/ports/vendor.repository';
   // IdentityModule for EmployeeService: the controller checks an owner exists before writing, since
   // `owner_id` carries no cross-schema FK. `RequestEngine` needs no import — PlatformModule is
   // global, which is also what lets the type-def register itself on boot.
-  imports: [AuditModule, IdentityModule],
+  // DocumentsModule for DocumentsService: the SoA and the vendor assessment both cite a controlled
+  // document across a schema boundary, so nothing but this check stands between a typo and a record
+  // that reads as complete evidence.
+  imports: [AuditModule, IdentityModule, DocumentsModule],
   controllers: [
     RiskController,
     ControlController,
