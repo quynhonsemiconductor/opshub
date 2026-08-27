@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import {
+  DecisionNote,
   Button,
   DataTable,
   EntityDetailPanel,
@@ -25,8 +26,11 @@ import {
   type DataTableColumn,
   type FormModalProps,
 } from '@/shared/ui';
+import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import { useListState } from '@/shared/hooks/use-list-state';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash } from '@/shared/lib/format';
+import { decisionNote, decisionReason, overtimeReviewVerdict } from './workforce-policy';
 import type { OvertimeResponse, OvertimeStatus } from '@/shared/api/types';
 
 const OT_FILTERS: { value: OvertimeStatus | ''; label: string }[] = [
@@ -98,6 +102,13 @@ function LogOvertimeModal({ open, onClose, onSuccess }: FormModalProps) {
 
 export function OvertimeTab() {
   const qc = useQueryClient();
+  /*
+   * WHO IS LOOKING. Logging overtime is `@SelfScoped` and stays open to everybody; deciding it is not,
+   * and this tab asked neither question. `me.data.sub` is the separation-of-duties operand — overtime is
+   * paid work, so approving your own is the decision the engine most needs to refuse.
+   */
+  const me = useCurrentUser();
+  const { can } = usePermissions();
   const [statusFilter, setStatusFilter] = useState<OvertimeStatus | ''>('');
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState<OvertimeResponse | null>(null);
@@ -155,22 +166,36 @@ export function OvertimeTab() {
     {
       key: 'actions',
       header: 'Actions',
-      cell: (o) => (
-        <RowActions>
-          {o.status === 'pending' && (
-            <>
-              <RowAction tone="success" onClick={() => handleReview(o.id, true)}>
-                Approve
-              </RowAction>
-              <RowAction tone="danger" onClick={() => handleReview(o.id, false)}>
-                Reject
-              </RowAction>
-            </>
-          )}
-        </RowActions>
-      ),
+      /*
+       * OFFERED ONLY WHERE THE API WOULD ACCEPT IT. `workforce.approve` gets past the route guard and
+       * `workforce.overtime.review` past the engine, so a holder of one and not the other used to see
+       * these buttons and got a 403 from inside the transaction.
+       */
+      cell: (o) => {
+        const verdict = overtimeReviewVerdict(o, me.data?.sub, can);
+        return (
+          <RowActions>
+            {verdict === 'offer' && (
+              <>
+                <RowAction tone="success" onClick={() => handleReview(o.id, true)}>
+                  Approve
+                </RowAction>
+                <RowAction tone="danger" onClick={() => handleReview(o.id, false)}>
+                  Reject
+                </RowAction>
+              </>
+            )}
+            <DecisionNote reason={decisionReason(verdict)} />
+          </RowActions>
+        );
+      },
     },
   ];
+
+  // The drawer asks the same question about the one open row, so it reads the same answer.
+  const selectedVerdict = selected
+    ? overtimeReviewVerdict(selected, me.data?.sub, can)
+    : 'not_pending';
 
   return (
     <>
@@ -221,26 +246,31 @@ export function OvertimeTab() {
         title="Overtime record"
         description={selected ? `${formatDate(selected.workDate)} · ${selected.hours}h` : undefined}
         headerActions={
-          selected?.status === 'pending' ? (
+          selected && (selectedVerdict === 'offer' || decisionNote(selectedVerdict)) ? (
             <div className="flex items-center gap-2">
-              <PanelAction
-                tone="success"
-                onClick={() => {
-                  handleReview(selected.id, true);
-                  setSelected(null);
-                }}
-              >
-                Approve
-              </PanelAction>
-              <PanelAction
-                tone="danger"
-                onClick={() => {
-                  handleReview(selected.id, false);
-                  setSelected(null);
-                }}
-              >
-                Reject
-              </PanelAction>
+              {selectedVerdict === 'offer' && (
+                <>
+                  <PanelAction
+                    tone="success"
+                    onClick={() => {
+                      handleReview(selected.id, true);
+                      setSelected(null);
+                    }}
+                  >
+                    Approve
+                  </PanelAction>
+                  <PanelAction
+                    tone="danger"
+                    onClick={() => {
+                      handleReview(selected.id, false);
+                      setSelected(null);
+                    }}
+                  >
+                    Reject
+                  </PanelAction>
+                </>
+              )}
+              <DecisionNote reason={decisionReason(selectedVerdict)} />
             </div>
           ) : undefined
         }

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import {
+  DecisionNote,
   Badge,
   ConfirmDialog,
   DataTable,
@@ -225,13 +226,9 @@ export function RequestsPage() {
             </RowActions>
           );
         }
-        return (
-          <span className="text-xs text-fg-subtle">
-            {req.viewerCannotDecideReason === 'own_request'
-              ? 'Yours — a colleague decides'
-              : 'Not yours to decide'}
-          </span>
-        );
+        // Through the kit, which owns both sentences: the workforce leave, overtime and timesheet tabs
+        // report the same fact about the same kind of request, and two copies of one rule drift.
+        return <DecisionNote reason={req.viewerCannotDecideReason} />;
       },
     },
   ];

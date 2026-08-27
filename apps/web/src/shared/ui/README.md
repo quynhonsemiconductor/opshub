@@ -68,6 +68,24 @@ data.** The dashboard was seven components and ~500 lines of near-identical JSX;
 `personas.ts` table, and the drift it was hiding — the same destination described three ways, an
 alert flag on four of five identical tiles — had nowhere left to live.
 
+**11. An action the caller may not take is WITHHELD, and where the reason varies per row, say it.**
+A control gated on nothing is a permanent 403 rendered as "please try again" — twelve tab files
+offered New role, Assign, Verify, Retire and Approve to anyone who could read the screen. Read the
+permission off the route's own `@RequirePermission`, not from memory, and check it with
+`usePermissions().can(...)`; `test/fe-permission-contract.spec.ts` fails the build on a code that is
+not in the catalogue. A route marked `@SelfScoped` needs **no** gate — logging your own shift and
+withdrawing your own leave are the only actions an employee holding nothing can take, and gating
+them removes the screen's whole point for them.
+
+Withhold silently when the answer is one tenant-wide fact about the reader — a note repeated on
+every row tells nobody anything the empty column does not. Use `DecisionNote` when it varies per
+row: "Yours — a colleague decides" and "Not yours to decide" are different next actions, and the
+sentences live in `decision-reason.ts` keyed on the request engine's own `viewerCannotDecideReason`
+so the inbox and the workforce tabs cannot drift into two phrasings of one rule.
+
+And check the EMPTY STATE with the button: "Add your first license to start tracking seats and cost"
+next to a withheld Add button is the same false instruction in slower words.
+
 ## Testing a screen from the browser
 
 Three rules, each learned by a failing run rather than guessed:

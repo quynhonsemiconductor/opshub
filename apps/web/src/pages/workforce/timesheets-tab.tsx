@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import {
+  DecisionNote,
   Button,
   DataTable,
   EntityDetailPanel,
@@ -25,8 +26,16 @@ import {
   type DataTableColumn,
   type FormModalProps,
 } from '@/shared/ui';
+import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import { useListState } from '@/shared/hooks/use-list-state';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash } from '@/shared/lib/format';
+import {
+  canSubmitTimesheet,
+  decisionNote,
+  decisionReason,
+  timesheetReviewVerdict,
+} from './workforce-policy';
 import type { TimesheetResponse, TimesheetStatus } from '@/shared/api/types';
 import { asHoursAndMinutes } from './duration';
 
@@ -107,6 +116,12 @@ function LogTimesheetModal({ open, onClose, onSuccess }: FormModalProps) {
 
 export function TimesheetsTab() {
   const qc = useQueryClient();
+  /*
+   * WHO IS LOOKING. Submitting is the owner's own act and needs no permission; reviewing needs
+   * `workforce.approve`, and this tab offered both to everybody on every row.
+   */
+  const me = useCurrentUser();
+  const { can } = usePermissions();
   const [statusFilter, setStatusFilter] = useState<TimesheetStatus | ''>('');
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState<TimesheetResponse | null>(null);
@@ -181,27 +196,47 @@ export function TimesheetsTab() {
     {
       key: 'actions',
       header: 'Actions',
-      cell: (t) => (
-        <RowActions>
-          {t.status === 'draft' && (
-            <RowAction tone="accent" onClick={() => handleSubmitTs(t.id)}>
-              Submit
-            </RowAction>
-          )}
-          {t.status === 'submitted' && (
-            <>
-              <RowAction tone="success" onClick={() => handleReviewTs(t.id, true)}>
-                Approve
+      /*
+       * TWO DIFFERENT RULES THAT LOOKED LIKE ONE. Submit is `assertOwnerOrApprover` — the owner passes on
+       * identity alone, which is why it must NOT be gated on a permission — and Review is
+       * `workforce.approve`, withheld on the viewer's own sheet. A draft and a submitted sheet are never
+       * both, so only one branch can ever render.
+       */
+      cell: (t) => {
+        const verdict = timesheetReviewVerdict(t, me.data?.sub, can);
+        return (
+          <RowActions>
+            {canSubmitTimesheet(t, me.data?.sub, can) && (
+              <RowAction tone="accent" onClick={() => handleSubmitTs(t.id)}>
+                Submit
               </RowAction>
-              <RowAction tone="danger" onClick={() => handleReviewTs(t.id, false)}>
-                Reject
-              </RowAction>
-            </>
-          )}
-        </RowActions>
-      ),
+            )}
+            {verdict === 'offer' && (
+              <>
+                <RowAction tone="success" onClick={() => handleReviewTs(t.id, true)}>
+                  Approve
+                </RowAction>
+                <RowAction tone="danger" onClick={() => handleReviewTs(t.id, false)}>
+                  Reject
+                </RowAction>
+              </>
+            )}
+            <DecisionNote reason={decisionReason(verdict)} />
+          </RowActions>
+        );
+      },
     },
   ];
+
+  // Read once for the drawer, which asks the same two questions about the one open row.
+  const selectedVerdict = selected
+    ? timesheetReviewVerdict(selected, me.data?.sub, can)
+    : 'not_pending';
+  const selectedSubmittable = selected ? canSubmitTimesheet(selected, me.data?.sub, can) : false;
+  // An empty header row is a visible gap in the drawer, so the wrapper appears only when it holds
+  // something — a button, or the sentence explaining why there is none.
+  const showPanelActions =
+    selectedVerdict === 'offer' || selectedSubmittable || !!decisionNote(selectedVerdict);
 
   return (
     <>
@@ -260,9 +295,9 @@ export function TimesheetsTab() {
             : undefined
         }
         headerActions={
-          selected && (selected.status === 'draft' || selected.status === 'submitted') ? (
+          selected && showPanelActions ? (
             <div className="flex items-center gap-2">
-              {selected.status === 'draft' && (
+              {selectedSubmittable && (
                 <PanelAction
                   tone="accent"
                   onClick={() => {
@@ -273,7 +308,7 @@ export function TimesheetsTab() {
                   Submit
                 </PanelAction>
               )}
-              {selected.status === 'submitted' && (
+              {selectedVerdict === 'offer' && (
                 <>
                   <PanelAction
                     tone="success"
@@ -295,6 +330,7 @@ export function TimesheetsTab() {
                   </PanelAction>
                 </>
               )}
+              <DecisionNote reason={decisionReason(selectedVerdict)} />
             </div>
           ) : undefined
         }

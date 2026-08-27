@@ -23,6 +23,7 @@ import {
   PanelState,
 } from '@/shared/ui';
 import { useListState } from '@/shared/hooks/use-list-state';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate } from '@/shared/lib/format';
 import { CreateCycleModal } from './cycle-modals';
 import { CreateReviewModal } from './review-modals';
@@ -40,10 +41,20 @@ import type { Cycle } from './performance.types';
  * THE COVERAGE REPORT IS THE POINT OF THE DRAWER. "Did everybody get reviewed" cannot be answered from
  * the review list, because the people missing from it are the answer — so the API computes who has no
  * review, or one that never reached `shared`, and this shows it next to the progress counts.
+ *
+ * THE COVERAGE REPORT IS ALSO WHY A READ-ONLY TIER BELONGS HERE. `GET cycles`, `GET cycles/{id}/progress`
+ * and `GET cycles/{id}/coverage` all ask for `performance.read`; the four write controls — `POST cycles`,
+ * `POST cycles/{id}/open`, `POST cycles/{id}/close` and `POST cycles/{id}/reviews` — every one of them
+ * carries `@RequirePermission(PERMISSION.PERFORMANCE_MANAGE)`. `ROLE.MANAGER` holds the read code and
+ * not the manage code, which is the whole persona this screen serves: a People Manager comes here to see
+ * whether their team got reviewed, and was previously shown New cycle, Open, Close and Add a review —
+ * six dead buttons on the one page written for them.
  */
 export function CyclesTab() {
   const qc = useQueryClient();
   const list = useListState();
+  const { can } = usePermissions();
+  const canManage = can('performance.manage');
   const [status, setStatus] = useState('all');
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<Cycle | null>(null);
@@ -128,46 +139,51 @@ export function CyclesTab() {
       key: 'actions',
       header: '',
       align: 'right',
-      cell: (cycle) => (
-        <RowActions>
-          {/*
-            OPEN ONLY. This read `status !== 'closed'` under a comment claiming reviews are added while
-            a cycle is "a DRAFT or OPEN" — and `createReview` refuses anything but open, with a message
-            naming the state. So the action was offered on every draft cycle, the reviewer filled in two
-            employee pickers, and the save was refused by a rule no screen had mentioned. The comment
-            was the wrong side of the disagreement: the API's refusal is pinned by a test.
-          */}
-          {cycle.status === 'open' && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Add a review to ${cycle.reference}`}
-              title="Add a review"
-              onClick={() => setAddingReviewTo(cycle)}
-            >
-              <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
-            </Button>
-          )}
-          {cycle.status === 'draft' && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setTransition({ cycle, to: 'open' })}
-            >
-              Open
-            </Button>
-          )}
-          {cycle.status === 'open' && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setTransition({ cycle, to: 'close' })}
-            >
-              Close
-            </Button>
-          )}
-        </RowActions>
-      ),
+      // PERMISSION OUTSIDE, STATE INSIDE. The status conditions below decide which transition a cycle
+      // has available; `canManage` decides whether this reader may make any transition at all. They are
+      // not the same question and one boolean cannot answer both — a draft cycle a manager may not open
+      // and an open cycle they may not close are two different sentences with the same answer here.
+      cell: (cycle) =>
+        canManage ? (
+          <RowActions>
+            {/*
+              OPEN ONLY. This read `status !== 'closed'` under a comment claiming reviews are added while
+              a cycle is "a DRAFT or OPEN" — and `createReview` refuses anything but open, with a message
+              naming the state. So the action was offered on every draft cycle, the reviewer filled in two
+              employee pickers, and the save was refused by a rule no screen had mentioned. The comment
+              was the wrong side of the disagreement: the API's refusal is pinned by a test.
+            */}
+            {cycle.status === 'open' && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Add a review to ${cycle.reference}`}
+                title="Add a review"
+                onClick={() => setAddingReviewTo(cycle)}
+              >
+                <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
+              </Button>
+            )}
+            {cycle.status === 'draft' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setTransition({ cycle, to: 'open' })}
+              >
+                Open
+              </Button>
+            )}
+            {cycle.status === 'open' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setTransition({ cycle, to: 'close' })}
+              >
+                Close
+              </Button>
+            )}
+          </RowActions>
+        ) : null,
     },
   ];
 
@@ -210,10 +226,12 @@ export function CyclesTab() {
           />
         }
         action={
-          <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-            New cycle
-          </Button>
+          canManage ? (
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+              New cycle
+            </Button>
+          ) : undefined
         }
       />
 
@@ -241,7 +259,12 @@ export function CyclesTab() {
         title={selected?.name ?? 'Cycle'}
         description={selected?.reference}
         headerActions={
-          selected && selected.status !== 'closed' ? (
+          // `=== 'open'`, matching the row action rather than the `!== 'closed'` this used to read. The
+          // row was corrected to the API's actual rule and the drawer was left behind, so the refusal
+          // the comment above describes survived at the second entry point to the same route — which is
+          // exactly how the ungated buttons this commit removes came to exist. The permission joins it
+          // for the same reason: a gate on one of two paths to a route is not a gate.
+          selected && canManage && selected.status === 'open' ? (
             <PanelAction tone="accent" onClick={() => setAddingReviewTo(selected)}>
               Add a review
             </PanelAction>

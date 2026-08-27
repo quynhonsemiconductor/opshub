@@ -15,6 +15,7 @@ import {
   type DataTableColumn,
 } from '@/shared/ui';
 import { useListState } from '@/shared/hooks/use-list-state';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { EM_DASH, formatDate, formatMoney, orDash } from '@/shared/lib/format';
 import { AddLicenseModal } from './add-license-modal';
 import { SeatUtilizationList, SpendByProductChart } from './finops-charts';
@@ -48,6 +49,17 @@ function isExpiringSoon(l: SoftwareLicense): boolean {
 
 export function FinOpsPage() {
   const qc = useQueryClient();
+  /*
+   * WRITING A LICENCE NEEDS `license.manage`; READING THE REGISTER NEEDS `license.read`.
+   *
+   * `POST /v1/licenses` carries `@RequirePermission('license.manage')`, and the nav puts this screen
+   * behind `license.read` — so a finance reader, an auditor, anybody holding only the read code, saw
+   * "Add license" twice and got a 403 from both. The button was not a capability, it was a trap.
+   *
+   * WITHHELD RATHER THAN DISABLED, and the empty state changes with it: telling somebody to "add your
+   * first license" when they cannot is the same false instruction in slower words.
+   */
+  const canManage = usePermissions().can('license.manage');
   const [showAdd, setShowAdd] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const list = useListState(50);
@@ -157,10 +169,12 @@ export function FinOpsPage() {
         title="Software & License FinOps"
         description="What the organisation pays for, how much of it is actually used, and what renews soon."
         actions={
-          <Button variant="primary" onClick={() => setShowAdd(true)}>
-            <Plus className="h-4 w-4" strokeWidth={2} />
-            Add license
-          </Button>
+          canManage ? (
+            <Button variant="primary" onClick={() => setShowAdd(true)}>
+              <Plus className="h-4 w-4" strokeWidth={2} />
+              Add license
+            </Button>
+          ) : undefined
         }
         search={{
           value: list.search,
@@ -240,11 +254,13 @@ export function FinOpsPage() {
             emptyMessage={
               list.search
                 ? 'No licenses match that search'
-                : 'Add your first license to start tracking seats and cost'
+                : canManage
+                  ? 'Add your first license to start tracking seats and cost'
+                  : 'No licenses tracked yet'
             }
             emptyIcon={PackageOpen}
             emptyAction={
-              list.search ? undefined : (
+              list.search || !canManage ? undefined : (
                 <Button variant="primary" size="sm" onClick={() => setShowAdd(true)}>
                   <Plus className="h-3.5 w-3.5" /> Add license
                 </Button>

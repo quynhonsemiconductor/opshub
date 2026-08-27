@@ -17,6 +17,7 @@ import {
   type DataTableColumn,
 } from '@/shared/ui';
 import { useListState } from '@/shared/hooks/use-list-state';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { orDash } from '@/shared/lib/format';
 import { CourseModal } from './course-modals';
 import { useCourses } from './use-training';
@@ -30,6 +31,14 @@ import type { Course } from './training.types';
  * that unanswerable — so retirement only stops it being required or recorded again. The default view
  * hides retired courses because they are not choices any more; the toggle brings them back for exactly
  * the audit question above.
+ *
+ * READING THE CATALOGUE AND CHANGING IT ARE DIFFERENT CODES. Every route behind this tab's three write
+ * controls — `POST /training/courses`, `PATCH /training/courses/{id}`, `POST /training/courses/{id}/retire`
+ * — carries `@RequirePermission('training.manage')`, while the list itself needs only `training.read`.
+ * `ROLE.MANAGER` and `ROLE.AUDITOR` hold the read code and not the manage code, so before this gate both
+ * of them were shown New course, an Edit pencil on every row and a Retire button, and every one of them
+ * answered 403. An auditor in particular was handed what looked like edit rights over the competency
+ * catalogue an audit reads.
  */
 
 const RETIRED_FILTERS = [
@@ -40,6 +49,8 @@ const RETIRED_FILTERS = [
 export function CoursesTab() {
   const qc = useQueryClient();
   const list = useListState();
+  const { can } = usePermissions();
+  const canManage = can('training.manage');
   const [scope, setScope] = useState('active');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Course | null>(null);
@@ -112,30 +123,36 @@ export function CoursesTab() {
       key: 'actions',
       header: '',
       align: 'right',
-      cell: (course) => (
-        <RowActions>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Edit ${course.title}`}
-            title="Edit"
-            onClick={() => setEditing(course)}
-          >
-            <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
-          </Button>
-          {!course.retiredAt && (
+      // Nothing at all rather than disabled icons for a reader: two greyed buttons on every row of a
+      // catalogue somebody is only reading is noise that never becomes actionable, and the reason is
+      // already told once by the absent New course button rather than repeated per row.
+      cell: (course) =>
+        canManage ? (
+          <RowActions>
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`Retire ${course.title}`}
-              title="Retire"
-              onClick={() => setRetiring(course)}
+              aria-label={`Edit ${course.title}`}
+              title="Edit"
+              onClick={() => setEditing(course)}
             >
-              <Archive className="h-3.5 w-3.5" strokeWidth={2} />
+              <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
             </Button>
-          )}
-        </RowActions>
-      ),
+            {/* Retiring is a one-way state transition, so it is offered only while there is a state to
+                leave — an already-retired course has nothing this button could do. */}
+            {!course.retiredAt && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Retire ${course.title}`}
+                title="Retire"
+                onClick={() => setRetiring(course)}
+              >
+                <Archive className="h-3.5 w-3.5" strokeWidth={2} />
+              </Button>
+            )}
+          </RowActions>
+        ) : null,
     },
   ];
 
@@ -178,10 +195,12 @@ export function CoursesTab() {
           />
         }
         action={
-          <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-            New course
-          </Button>
+          canManage ? (
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+              New course
+            </Button>
+          ) : undefined
         }
       />
 

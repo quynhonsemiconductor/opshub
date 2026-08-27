@@ -21,8 +21,9 @@ import {
   type DataTableColumn,
 } from '@/shared/ui';
 import { cn } from '@/shared/lib/utils';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { SectionCard, SectionHeader } from './rbac-shared';
-import { usePermissions, useRoles } from './use-rbac';
+import { usePermissionCatalogue, useRoles } from './use-rbac';
 import type { RoleResponse } from '@/shared/api/types';
 
 function CreateRoleModal({
@@ -108,7 +109,19 @@ function CreateRoleModal({
 export function RolesTab() {
   const qc = useQueryClient();
   const { data: roles, isLoading, isError } = useRoles();
-  const { data: allPerms } = usePermissions();
+  const { data: allPerms } = usePermissionCatalogue();
+  /*
+   * `rbac.manage`, READ OFF THE CONTROLLER rather than inferred from the screen's name. All three
+   * routes behind this tab carry `@RequirePermission('rbac.manage')` in
+   * `libs/modules/authz/src/interface/http/authz.controller.ts`: `POST /authz/roles`,
+   * `PUT /authz/roles/:id/permissions` and `DELETE /authz/roles/:id`. Reading the tab needs only
+   * `rbac.read` — which `it-admin` and `auditor` hold and `rbac.manage` does not follow from — so
+   * without this every control below was offered to two roles the API refuses.
+   *
+   * NOT the same permission as the Assignments tab, which is `role.assign`. Gating both on one flag
+   * would hand role EDITING to whoever may only hand roles OUT, and the API would refuse it.
+   */
+  const canManage = usePermissions().can('rbac.manage');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [addPermKey, setAddPermKey] = useState('');
@@ -182,8 +195,10 @@ export function RolesTab() {
       align: 'right',
       cell: (role) => (
         <div onClick={(e) => e.stopPropagation()}>
-          {/* A system role has no delete: the seed owns it, and removing it would break the guards. */}
-          {!role.system && (
+          {/* A system role has no delete: the seed owns it, and removing it would break the guards.
+              A reader without `rbac.manage` has none either — the row is theirs to inspect, not to
+              destroy, and `DELETE /authz/roles/:id` would answer 403. */}
+          {canManage && !role.system && (
             <IconAction
               label={`Delete ${role.name}`}
               icon={Trash2}
@@ -220,9 +235,11 @@ export function RolesTab() {
           title="Roles"
           description="System roles come from the seed; custom roles are yours to manage."
           action={
-            <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-              <Plus className="h-3.5 w-3.5" /> New role
-            </Button>
+            canManage ? (
+              <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+                <Plus className="h-3.5 w-3.5" /> New role
+              </Button>
+            ) : undefined
           }
         />
         <DataTable
@@ -269,7 +286,10 @@ export function RolesTab() {
                             className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-0.5 font-mono text-xs text-fg-muted"
                           >
                             {p}
-                            {!current.system && (
+                            {/* The chip is read-only for a reader: revoking a permission is the same
+                                `PUT …/permissions` as granting one, so an X here without
+                                `rbac.manage` is a 403 dressed as an affordance. */}
+                            {canManage && !current.system && (
                               <button
                                 type="button"
                                 aria-label={`Remove ${p}`}
@@ -291,8 +311,9 @@ export function RolesTab() {
                         ))}
                       </div>
 
-                      {/* A system role's permissions are fixed by the seed, so no add control at all. */}
-                      {!current.system && allPerms && (
+                      {/* A system role's permissions are fixed by the seed, so no add control at all —
+                          and neither is there one for a caller who cannot write the set. */}
+                      {canManage && !current.system && allPerms && (
                         <div className="flex items-center gap-2">
                           <Select
                             aria-label="Permission to add"

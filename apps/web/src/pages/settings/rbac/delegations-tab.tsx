@@ -122,6 +122,20 @@ function CreateDelegationModal({
  * ACTIVE IS DERIVED, not stored: a delegation is in force when now falls inside its window. Computed
  * per render rather than at mount, because a panel left open across a boundary would otherwise keep
  * claiming a lapsed delegation is live.
+ *
+ * DELIBERATELY UNGATED, and this is the one tab on the screen where that is correct. The other two
+ * tabs' routes carry `@RequirePermission` — `rbac.manage` for roles, `role.assign` for assignments —
+ * and the three delegation routes carry `@SelfScoped` instead: no permission, only a session. The
+ * reason is in the decorator's own note on `POST /authz/delegations` — it "delegates the CALLER's own
+ * approval authority — fromUserId is user.sub". The API takes the grantor from the token and IGNORES
+ * anything the body might say, so there is no way to create a delegation FROM somebody else and
+ * nothing here to gate; `DELETE` is keyed on `(id, user.sub)`, so only the grantor can revoke, and the
+ * list defaults to `direction=from`, so every row shown IS the caller's own to revoke.
+ *
+ * Gating these on `rbac.manage` alongside the rest of the screen would therefore be a REGRESSION: it
+ * would take out-of-office cover away from every `rbac.read` holder for a 403 the API would never
+ * have raised. The spec asserts the New delegation button survives for a reader precisely so that a
+ * later sweep for "ungated write controls on the RBAC screen" cannot quietly remove it.
  */
 export function DelegationsTab() {
   const qc = useQueryClient();
@@ -226,7 +240,7 @@ export function DelegationsTab() {
         onConfirm={doDelete}
         loading={deleting}
         title="Delete delegation?"
-        description="The delegate stops being able to approve in this person's name immediately."
+        description="The delegate stops being able to approve in your name immediately. Only delegations you granted are listed here, so this is always your own."
         confirmLabel="Delete delegation"
         variant="danger"
       />
@@ -234,7 +248,7 @@ export function DelegationsTab() {
       <SectionCard>
         <SectionHeader
           title="Delegations"
-          description="Temporary transfers of approval authority."
+          description="Approval authority you have handed to somebody else, and until when."
           action={
             <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
               <Plus className="h-3.5 w-3.5" /> New delegation

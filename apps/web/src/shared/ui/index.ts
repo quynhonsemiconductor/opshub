@@ -53,3 +53,5 @@ export { ThemeToggle } from './theme-toggle';
 export { UpgradeGate } from './upgrade-gate';
 export * from './checkbox';
 export * from './panel-state';
+export { DecisionNote } from './decision-note';
+export { decisionNoteText, type CannotDecideReason } from './decision-reason';

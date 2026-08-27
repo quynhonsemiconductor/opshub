@@ -24,6 +24,8 @@ import {
   type DataTableColumn,
 } from '@/shared/ui';
 import { useListState } from '@/shared/hooks/use-list-state';
+import { usePermissions } from '@/shared/hooks/use-permissions';
+import { useAuthStore } from '@/shared/api/auth-store';
 import { formatDate, formatDateTime, orDash } from '@/shared/lib/format';
 import { CertificatesPanel } from './certificates-panel';
 import { RecordCompletionModal, RevokeRecordModal } from './record-modals';
@@ -41,10 +43,24 @@ import type { TrainingRecord } from './training.types';
  * EXPIRY IS DERIVED, NOT STORED. A record is expired when `expiresOn` has passed, which is why the filter
  * sends a DATE to the API rather than asking for a status the database would have to keep up to date with
  * a nightly job.
+ *
+ * THREE WRITE CONTROLS, ALL `training.manage`. `POST /training/records`, `POST /training/records/{id}/verify`
+ * and `POST /training/records/{id}/revoke` each carry `@RequirePermission('training.manage')`. `ROLE.AUDITOR`
+ * holds `training.read` and no manage code, so before this gate the one role whose whole job is to read
+ * competency evidence was offered Verify and Revoke on every row — an auditor able to attest to the
+ * evidence they are auditing is the exact separation the verify route's own docblock exists to keep.
+ *
+ * CERTIFICATES ARE GATED DIFFERENTLY, and see the `CertificatesPanel` call at the bottom of this file for
+ * why: their routes are authorized in the service on OWNERSHIP OR the manage code, not on the code alone.
  */
 export function RecordsTab() {
   const qc = useQueryClient();
   const list = useListState();
+  const { can } = usePermissions();
+  const canManage = can('training.manage');
+  // The signed-in principal, for the ownership half of the certificate rule below. `useAuthStore` rather
+  // than a second `/me` query, which is where `reviews-tab.tsx` reads the same fact from.
+  const me = useAuthStore((state) => state.user);
   const [status, setStatus] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [courseId, setCourseId] = useState('');
@@ -154,21 +170,26 @@ export function RecordsTab() {
       key: 'actions',
       header: '',
       align: 'right',
-      cell: (record) => (
-        <RowActions>
-          {/* A revoked record cannot be verified, and a verified one does not need it twice. */}
-          {record.status !== 'revoked' && !record.verifiedAt && (
-            <RowAction tone="success" onClick={() => void verify(record)}>
-              Verify
-            </RowAction>
-          )}
-          {record.status !== 'revoked' && (
-            <RowAction tone="danger" onClick={() => setRevoking(record)}>
-              Revoke
-            </RowAction>
-          )}
-        </RowActions>
-      ),
+      // The PERMISSION wraps the whole cell and the STATUS rules stay inside it. Both are needed and they
+      // answer different questions: `canManage` is whether this person may ever write to a record, and
+      // `status`/`verifiedAt` are whether THIS record has anything left to do. Collapsing them into one
+      // expression is the mistake fixed further down this file.
+      cell: (record) =>
+        canManage ? (
+          <RowActions>
+            {/* A revoked record cannot be verified, and a verified one does not need it twice. */}
+            {record.status !== 'revoked' && !record.verifiedAt && (
+              <RowAction tone="success" onClick={() => void verify(record)}>
+                Verify
+              </RowAction>
+            )}
+            {record.status !== 'revoked' && (
+              <RowAction tone="danger" onClick={() => setRevoking(record)}>
+                Revoke
+              </RowAction>
+            )}
+          </RowActions>
+        ) : null,
     },
   ];
 
@@ -230,10 +251,12 @@ export function RecordsTab() {
           </div>
         }
         action={
-          <Button variant="primary" size="sm" onClick={() => setRecording(true)}>
-            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-            Record completion
-          </Button>
+          canManage ? (
+            <Button variant="primary" size="sm" onClick={() => setRecording(true)}>
+              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+              Record completion
+            </Button>
+          ) : undefined
         }
       />
 
@@ -261,7 +284,9 @@ export function RecordsTab() {
         title={selected ? courseTitle(selected.courseId) : 'Record'}
         description={selected ? courseCode(selected.courseId) : undefined}
         headerActions={
-          selected && selected.status !== 'revoked' && !selected.verifiedAt ? (
+          // Same conjunction as the row cell, for the same reason: the drawer is a second entry point to
+          // the same route, and a gate applied in one place and not the other is not a gate.
+          selected && canManage && selected.status !== 'revoked' && !selected.verifiedAt ? (
             <PanelAction tone="success" onClick={() => void verify(selected)}>
               Verify
             </PanelAction>
@@ -327,7 +352,28 @@ export function RecordsTab() {
       >
         {selected && (
           <SlideOverSection title="Certificates">
-            <CertificatesPanel recordId={selected.id} canManage={selected.status !== 'revoked'} />
+            {/*
+              TWO PROPS, BECAUSE THESE ARE TWO DIFFERENT QUESTIONS. This read
+              `canManage={selected.status !== 'revoked'}` — a status expression handed to a permission
+              prop, which is the same class of bug as the ungated buttons above and worse for being
+              disguised as a check. It meant every holder of `training.read` was shown Attach and Delete
+              on anybody's record, and it meant a record could never be "writable but revoked", because
+              one boolean cannot say two things.
+                · `canPost` is AUTHORIZATION: may this person write to this record's evidence at all?
+                  `assertMayAttach` in the training controller answers "your own record, or
+                  `training.manage`", so the ownership half is real and must not be dropped — an employee
+                  uploading the certificate for a course they took needs no permission code, and gating
+                  this on `canManage` alone would have broken the ordinary flow while fixing the leak.
+                · `frozen` is LIFECYCLE: a revoked record is settled evidence and takes no more of it.
+                  It has nothing to do with who is asking, and it is ours rather than the API's — the
+                  service checks status on verify and revoke but not on a presign, so this is an
+                  editorial rule and is named as one instead of masquerading as authorization.
+            */}
+            <CertificatesPanel
+              recordId={selected.id}
+              canPost={canManage || selected.employeeId === me?.sub}
+              frozen={selected.status === 'revoked'}
+            />
           </SlideOverSection>
         )}
       </EntityDetailPanel>
