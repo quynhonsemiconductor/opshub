@@ -109,6 +109,15 @@ function makeQueryChain(returnValue: unknown) {
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const ACTOR = { sub: 'user-approver', email: 'approver@test.com' };
+/**
+ * Two people who hold the step's permission globally — the set `AuthzService.globalHoldersOf` returns.
+ *
+ * Named rather than inlined because the assertions care WHICH ids are notified: the requester must be
+ * absent from the fan-out (self-approval is refused, so telling them would invite a 403), and each
+ * holder must get their own row.
+ */
+const APPROVER_A = 'user-approver-a';
+const APPROVER_B = 'user-approver-b';
 const REQUESTER = { sub: 'user-requester', email: 'requester@test.com' };
 
 function buildEngine(opts: {
@@ -143,8 +152,18 @@ function buildEngine(opts: {
   // -- Registry mock --
   const registry = { get: vi.fn().mockReturnValue(typeDef) };
 
-  // -- AuthzService mock --
-  const authz = { check: vi.fn().mockResolvedValue(actorHasPermission) };
+  /*
+   * -- AuthzService mock --
+   *
+   * `globalHoldersOf` returns TWO ids, not an empty list. An empty stub would let every assertion
+   * about the approval fan-out pass while covering nothing — the notification loop would simply never
+   * run. Two holders is the smallest set that can show a notification going to each of them with a
+   * distinct idempotency key, which is the property that stops the relay collapsing them into one.
+   */
+  const authz = {
+    check: vi.fn().mockResolvedValue(actorHasPermission),
+    globalHoldersOf: vi.fn().mockResolvedValue([APPROVER_A, APPROVER_B]),
+  };
 
   // -- WebhookEnqueueService mock --
   const webhookEnqueue = { fanout: vi.fn().mockResolvedValue(undefined) };
@@ -187,6 +206,25 @@ function buildEngine(opts: {
 // submit()
 // ═════════════════════════════════════════════════════════════════════════════
 
+/**
+ * The notification inputs the engine handed the scheduler, typed.
+ *
+ * `mock.calls` is `any[][]`, so reading `input.recipientId` off it directly is eighteen
+ * `no-unsafe-member-access` errors and no type safety. One narrowing here gives every assertion a
+ * real shape, and the shape is checked against `ScheduleNotificationInput` by the call sites.
+ */
+interface ScheduledNotification {
+  type: string;
+  recipientId: string;
+  idempotencyKey: string;
+}
+
+function scheduledNotifications(notifScheduler: {
+  schedule: { mock: { calls: unknown[][] } };
+}): ScheduledNotification[] {
+  return notifScheduler.schedule.mock.calls.map(([, input]) => input as ScheduledNotification);
+}
+
 describe('RequestEngine.submit()', () => {
   it('inserts a request row and enqueues webhook events', async () => {
     const submittedRow = makeRequest({ id: 'req-new', requesterId: REQUESTER.sub });
@@ -208,6 +246,137 @@ describe('RequestEngine.submit()', () => {
       expect.objectContaining({ type: 'leave_request', requesterId: REQUESTER.sub }),
     );
     expect(result.requesterId).toBe(REQUESTER.sub);
+  });
+
+  /*
+   * WHO GETS TOLD A REQUEST IS WAITING.
+   *
+   * This whole group exists because the answer used to be "nobody". The notification was guarded by
+   * `if (row.assigneeId)`, and no production path sets an assignee: no `RequestTypeDef` defines a
+   * `resolverFn` and no caller passes `opts.assigneeId`. Measured on a seeded database, 71 request
+   * rows had one assignee between them, written by a test — so every real request was submitted
+   * silently and `request.step_ready` had never been delivered once.
+   */
+  describe('notifying the people who can decide it', () => {
+    it('tells every unconstrained holder of the step permission, one row each', async () => {
+      const submittedRow = makeRequest({ id: 'req-fan', requesterId: REQUESTER.sub });
+      const { engine, db, authz, notifScheduler } = buildEngine({
+        typeDef: makeTypeDef({ onSubmit: undefined }),
+      });
+      db.insert.mockReturnValue(makeQueryChain([submittedRow]));
+
+      await engine.submit('leave_request', { days: 3 }, REQUESTER);
+
+      // The permission asked for is the step's, not a guess.
+      expect(authz.globalHoldersOf).toHaveBeenCalledWith('workforce.approve', expect.anything());
+
+      const recipients = scheduledNotifications(notifScheduler)
+        .filter((input) => input.type === 'request.submitted')
+        .map((input) => input.recipientId);
+      expect(recipients).toEqual([APPROVER_A, APPROVER_B]);
+    });
+
+    it("asks for STEP ONE's permission on a multi-step type, not the type default", async () => {
+      /*
+       * A mutation that replaced `approvalSteps[0].requiredPermission` with the type-level
+       * `requiredApprovalPermission` SURVIVED every other test here, because they all use a type with
+       * no `approvalSteps` — the two expressions are the same value when there are no steps. On a
+       * multi-step type they are not, and asking for the wrong one notifies the wrong people: the
+       * holders of a permission that only matters at the END of the chain.
+       */
+      const submittedRow = makeRequest({ id: 'req-multi', requesterId: REQUESTER.sub });
+      const { engine, db, authz } = buildEngine({
+        typeDef: makeTypeDef({
+          onSubmit: undefined,
+          requiredApprovalPermission: 'onboarding.complete',
+          approvalSteps: [
+            { step: 1, requiredPermission: 'onboarding.approve' },
+            { step: 2, requiredPermission: 'onboarding.provision' },
+          ],
+        }),
+      });
+      db.insert.mockReturnValue(makeQueryChain([submittedRow]));
+
+      await engine.submit('onboarding', { employeeId: 'e1' }, REQUESTER);
+
+      expect(authz.globalHoldersOf).toHaveBeenCalledWith('onboarding.approve', expect.anything());
+      expect(authz.globalHoldersOf).not.toHaveBeenCalledWith(
+        'onboarding.complete',
+        expect.anything(),
+      );
+    });
+
+    it('gives each recipient its own idempotency key', async () => {
+      // The relay dedupes on this key. A shared one delivers to whoever is written first and drops
+      // the rest — which would look exactly like the fan-out working.
+      const submittedRow = makeRequest({ id: 'req-idem', requesterId: REQUESTER.sub });
+      const { engine, db, notifScheduler } = buildEngine({
+        typeDef: makeTypeDef({ onSubmit: undefined }),
+      });
+      db.insert.mockReturnValue(makeQueryChain([submittedRow]));
+
+      await engine.submit('leave_request', { days: 3 }, REQUESTER);
+
+      const keys = scheduledNotifications(notifScheduler)
+        .filter((input) => input.type === 'request.submitted')
+        .map((input) => input.idempotencyKey);
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(keys).toEqual([
+        `request_submitted:req-idem:${APPROVER_A}`,
+        `request_submitted:req-idem:${APPROVER_B}`,
+      ]);
+    });
+
+    it('never asks the requester to decide their own request', async () => {
+      // `approve()` refuses self-approval, so this prompt would only ever collect a 403.
+      const submittedRow = makeRequest({ id: 'req-self', requesterId: REQUESTER.sub });
+      const { engine, db, authz, notifScheduler } = buildEngine({
+        typeDef: makeTypeDef({ onSubmit: undefined }),
+      });
+      authz.globalHoldersOf.mockResolvedValue([APPROVER_A, REQUESTER.sub, APPROVER_B]);
+      db.insert.mockReturnValue(makeQueryChain([submittedRow]));
+
+      await engine.submit('leave_request', { days: 3 }, REQUESTER);
+
+      const recipients = scheduledNotifications(notifScheduler).map((input) => input.recipientId);
+      expect(recipients).not.toContain(REQUESTER.sub);
+      expect(recipients).toEqual([APPROVER_A, APPROVER_B]);
+    });
+
+    it('honours an explicit assignee instead of fanning out', async () => {
+      // Naming an approver is a decision the caller made. Notifying everyone anyway would override it.
+      const submittedRow = makeRequest({ id: 'req-assigned', requesterId: REQUESTER.sub });
+      submittedRow.assigneeId = 'user-named-approver';
+      const { engine, db, authz, notifScheduler } = buildEngine({
+        typeDef: makeTypeDef({ onSubmit: undefined }),
+      });
+      db.insert.mockReturnValue(makeQueryChain([submittedRow]));
+
+      await engine.submit('leave_request', { days: 3 }, REQUESTER, {
+        assigneeId: 'user-named-approver',
+      });
+
+      const recipients = scheduledNotifications(notifScheduler).map((input) => input.recipientId);
+      expect(recipients).toEqual(['user-named-approver']);
+      // And the reverse lookup is not even attempted — there is nothing to resolve.
+      expect(authz.globalHoldersOf).not.toHaveBeenCalled();
+    });
+
+    it('schedules nothing when no one holds the permission globally', async () => {
+      // A step nobody can act on. The request is still created — losing the work because nobody could
+      // be told would be worse — but it must not look like a delivered notification.
+      const submittedRow = makeRequest({ id: 'req-nobody', requesterId: REQUESTER.sub });
+      const { engine, db, authz, notifScheduler } = buildEngine({
+        typeDef: makeTypeDef({ onSubmit: undefined }),
+      });
+      authz.globalHoldersOf.mockResolvedValue([]);
+      db.insert.mockReturnValue(makeQueryChain([submittedRow]));
+
+      const result = await engine.submit('leave_request', { days: 3 }, REQUESTER);
+
+      expect(result.id).toBe('req-nobody');
+      expect(notifScheduler.schedule).not.toHaveBeenCalled();
+    });
   });
 
   it('calls onSubmit hook when defined', async () => {
@@ -413,6 +582,56 @@ describe('RequestEngine.approve() — multi-step (3-step onboarding)', () => {
       'request.step_approved',
       expect.objectContaining({ isFinalStep: false, step: 1 }),
     );
+  });
+
+  it("tells the NEXT step's approvers when a step is cleared", async () => {
+    /*
+     * The branch that had never run in production. `request.step_ready` was guarded by
+     * `if (nextAssigneeId)`, which comes from a `resolverFn` no `RequestTypeDef` defines — zero
+     * deliveries on a database with 71 requests. A half-approved request is the one most needing
+     * attention, and it was the one nobody heard about.
+     *
+     * The permission asserted is step TWO's. Notifying step one's holders again would tell the people
+     * who just finished, and leave the people who now have to act uninformed.
+     */
+    const inReviewRow = makeRequest({ status: 'in_review', currentStep: 2, totalSteps: 3 });
+    const { engine, db, authz, notifScheduler } = buildEngine({
+      requestRow: makeRequest({ currentStep: 1, totalSteps: 3, requesterId: REQUESTER.sub }),
+      typeDef: makeTypeDef({ approvalSteps: steps }),
+    });
+    db.update.mockReturnValue(makeQueryChain([inReviewRow]));
+
+    await engine.approve('req-1', null, ACTOR);
+
+    expect(authz.globalHoldersOf).toHaveBeenCalledWith('onboarding.provision', expect.anything());
+
+    const ready = scheduledNotifications(notifScheduler).filter(
+      (input) => input.type === 'request.step_ready',
+    );
+    expect(ready.map((input) => input.recipientId)).toEqual([APPROVER_A, APPROVER_B]);
+    // Keyed per recipient AND per step, so clearing step 2 later cannot dedupe against step 1.
+    expect(ready.map((input) => input.idempotencyKey)).toEqual([
+      `step_ready:req-1:2:${APPROVER_A}`,
+      `step_ready:req-1:2:${APPROVER_B}`,
+    ]);
+  });
+
+  it('does not ask the requester to approve the next step either', async () => {
+    const inReviewRow = makeRequest({ status: 'in_review', currentStep: 2, totalSteps: 3 });
+    const { engine, db, authz, notifScheduler } = buildEngine({
+      requestRow: makeRequest({ currentStep: 1, totalSteps: 3, requesterId: REQUESTER.sub }),
+      typeDef: makeTypeDef({ approvalSteps: steps }),
+    });
+    authz.globalHoldersOf.mockResolvedValue([REQUESTER.sub, APPROVER_A]);
+    db.update.mockReturnValue(makeQueryChain([inReviewRow]));
+
+    await engine.approve('req-1', null, ACTOR);
+
+    const recipients = scheduledNotifications(notifScheduler)
+      .filter((input) => input.type === 'request.step_ready')
+      .map((input) => input.recipientId);
+    expect(recipients).not.toContain(REQUESTER.sub);
+    expect(recipients).toEqual([APPROVER_A]);
   });
 
   it('sets approved on final step (step 3) and calls onApprove', async () => {

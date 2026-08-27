@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { MS_PER_HOUR, newId, type Actor, type RequestType } from '@shared-kernel';
-import { InjectDrizzle, type DrizzleDB } from '../database/drizzle.provider';
+import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '../database/drizzle.provider';
 import { AuthzService } from '../auth/authz.service';
 import { ActorScope } from '../auth/actor-scope.service';
 import {
@@ -16,6 +16,7 @@ import { RequestRegistry } from './request-registry';
 import { nameOf, resolveEmployeeNames } from '../directory/employee-names';
 import { DelegationService } from '../authz/delegation.service';
 import { NotificationSchedulerService } from '../notifications/notification-scheduler.service';
+import type { NotificationTemplateVars } from '../notifications/notification.templates';
 import type {
   RequestFilters,
   RequestItem,
@@ -40,6 +41,8 @@ import type {
  */
 @Injectable()
 export class RequestEngine {
+  /** Above this many approvers for one step, the fan-out is logged as a signal, never trimmed. */
+  private static readonly WIDE_FANOUT_THRESHOLD = 15;
   private readonly logger = new Logger(RequestEngine.name);
 
   constructor(
@@ -105,17 +108,36 @@ export class RequestEngine {
       };
       await this.webhookEnqueue.fanout(tx, 'request.submitted', submitPayload);
 
-      // Notify the initial assignee (if any) that a new request awaits review.
-      if (row.assigneeId) {
-        await this.notifScheduler.schedule(tx, {
-          type: 'request.submitted',
-          vars: { requestType: type, requestId: row.id, requesterEmail: actor.email },
-          recipientId: row.assigneeId,
-          actorId: actor.sub,
-          resourceId: row.id,
-          idempotencyKey: `request_submitted:${row.id}`,
-        });
-      }
+      /*
+       * TELL WHOEVER CAN DECIDE IT.
+       *
+       * This was `if (row.assigneeId)` and nothing else, and `assigneeId` is set by no production
+       * path: no `RequestTypeDef` defines a `resolverFn`, and no caller of `submit` passes
+       * `opts.assigneeId`. Measured on a seeded database: 71 request rows, one assignee, and that one
+       * written by a test. So raising a request notified NOBODY, and an approver had to think to go
+       * and look. `request.step_ready` has the same shape and had never been delivered once.
+       *
+       * Assigning a request to a person is a product decision nobody has made, and this does not make
+       * it. It notifies the people who could already act: `RequestApprovalStep.resolverFn` documents
+       * `null` as "any holder of requiredPermission can approve", so the approvers ARE whoever holds
+       * the permission, and `decidableByPredicate` builds "My queue" from that same fact. Queue and
+       * prompt therefore cannot disagree — which is why the queue stopped depending on `assigneeId`.
+       *
+       * An explicit assignee still wins: naming one is a decision, and fanning out past it would be
+       * second-guessing the caller.
+       */
+      const firstStepPermission =
+        def.approvalSteps?.[0]?.requiredPermission ?? def.requiredApprovalPermission;
+      await this.notifyDecisionMakers(tx, {
+        notificationType: 'request.submitted',
+        requestId: row.id,
+        assigneeId: row.assigneeId,
+        requiredPermission: firstStepPermission,
+        excludeUserId: actor.sub,
+        actorId: actor.sub,
+        idempotencyPrefix: `request_submitted:${row.id}`,
+        vars: { requestType: type, requestId: row.id, requesterEmail: actor.email },
+      });
 
       return row;
     });
@@ -226,22 +248,30 @@ export class RequestEngine {
           );
         }
 
-        // Notify the next assignee if one is resolved
-        if (nextAssigneeId) {
-          await this.notifScheduler.schedule(tx, {
-            type: 'request.step_ready',
-            vars: {
-              requestType: request.type,
-              requestId,
-              completedStep: currentStep,
-              nextStep,
-              totalSteps: maxStep,
-            },
-            recipientId: nextAssigneeId,
-            resourceId: requestId,
-            idempotencyKey: `step_ready:${requestId}:${nextStep}`,
-          });
-        }
+        /*
+         * Whoever can decide the NEXT step, for the same reason as at submit. `nextAssigneeId` comes
+         * from a `resolverFn` no type defines, so this branch never ran: `request.step_ready` had zero
+         * deliveries on a database with 71 requests. A half-approved request is the one most needing
+         * attention, and it was the one nobody heard about.
+         *
+         * The requester is excluded, as at submit — separation of duties refuses their own approval,
+         * so telling them it is ready to decide would be an invitation to a 403.
+         */
+        await this.notifyDecisionMakers(tx, {
+          notificationType: 'request.step_ready',
+          requestId,
+          assigneeId: nextAssigneeId,
+          requiredPermission: nextStepDef?.requiredPermission ?? def.requiredApprovalPermission,
+          excludeUserId: request.requesterId,
+          idempotencyPrefix: `step_ready:${requestId}:${nextStep}`,
+          vars: {
+            requestType: request.type,
+            requestId,
+            completedStep: currentStep,
+            nextStep,
+            totalSteps: maxStep,
+          },
+        });
       }
 
       const approvalEventType = isFinalStep ? 'request.approved' : 'request.step_approved';
@@ -625,6 +655,85 @@ export class RequestEngine {
       })),
       total: count,
     };
+  }
+
+  /**
+   * Tell the people who can decide a request that it is waiting.
+   *
+   * ONE RECIPIENT IF SOMEBODY WAS NAMED, otherwise everyone the permission admits. `assigneeId` is
+   * honoured first because naming an approver is a decision the caller made; the fan-out is what
+   * happens in its absence, which — since no `resolverFn` exists — is every request in production.
+   *
+   * THE REQUESTER IS EXCLUDED. `approve()` refuses self-approval, so a prompt to decide your own
+   * request is a prompt to collect a 403. An approver who raises a request still sees it in the
+   * inbox as theirs; they are simply not asked to rule on it.
+   *
+   * A RECIPIENT PER ROW, not one row for many people, because `notification_preferences` is per user
+   * and the read state is per user: a shared notification could be muted by one holder for all of
+   * them, and marking it read would clear it from everybody's bell. The idempotency key carries the
+   * recipient for the same reason — the relay dedupes on it, so a shared key would deliver to the
+   * first holder and silently drop the rest.
+   *
+   * NOBODY TO TELL IS LOGGED, not swallowed. A step whose permission no one holds globally is a
+   * request that cannot advance, and silence there looks identical to a working queue.
+   */
+  private async notifyDecisionMakers<K extends 'request.submitted' | 'request.step_ready'>(
+    tx: DbExecutor,
+    opts: {
+      notificationType: K;
+      vars: NotificationTemplateVars[K];
+      requestId: string;
+      assigneeId: string | null;
+      requiredPermission: string;
+      excludeUserId: string;
+      idempotencyPrefix: string;
+      actorId?: string;
+    },
+  ): Promise<void> {
+    const recipients = opts.assigneeId
+      ? [opts.assigneeId]
+      : (await this.authz.globalHoldersOf(opts.requiredPermission, tx as DrizzleDB)).filter(
+          (userId) => userId !== opts.excludeUserId,
+        );
+
+    if (recipients.length === 0) {
+      this.logger.warn(
+        {
+          requestId: opts.requestId,
+          requiredPermission: opts.requiredPermission,
+          notificationType: opts.notificationType,
+        },
+        'No unconstrained holder of this permission — request submitted with nobody to notify',
+      );
+      return;
+    }
+
+    /*
+     * NOT TRUNCATED, but said out loud. Capping the fan-out would silently pick winners among people
+     * equally entitled to decide, and the cap would read as "everyone was told". A tenant where forty
+     * people hold an approval permission has an RBAC problem worth seeing rather than hiding.
+     */
+    if (recipients.length > RequestEngine.WIDE_FANOUT_THRESHOLD) {
+      this.logger.warn(
+        {
+          requestId: opts.requestId,
+          requiredPermission: opts.requiredPermission,
+          recipients: recipients.length,
+        },
+        'Wide approval fan-out — many principals hold this permission globally',
+      );
+    }
+
+    for (const recipientId of recipients) {
+      await this.notifScheduler.schedule(tx, {
+        type: opts.notificationType,
+        vars: opts.vars,
+        recipientId,
+        actorId: opts.actorId,
+        resourceId: opts.requestId,
+        idempotencyKey: `${opts.idempotencyPrefix}:${recipientId}`,
+      });
+    }
   }
 
   /**

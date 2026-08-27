@@ -79,6 +79,68 @@ export class AuthzService {
     }
   }
 
+  /**
+   * Everyone who holds `permission` UNCONSTRAINED — the exact set that {@link check} would pass
+   * when no resource is supplied.
+   *
+   * WHY IT MIRRORS `check` RATHER THAN LISTING EVERY HOLDER. A constrained grant (`self`, `team`,
+   * `dept`, `region`) cannot be evaluated without a resource, and `check` therefore DENIES it. So a
+   * caller holding `request.approve` only on their own team cannot approve an arbitrary request, and
+   * telling them one is waiting would be an invitation to a 403. `scopeType = 'global'` is that rule
+   * expressed as a query.
+   *
+   * Coverage is decided by `permissionGrants`, the same catalogue function `check` uses, so a
+   * module-wide grant (`asset.*`) and the `*` wildcard are honoured here too. Filtering in TypeScript
+   * rather than SQL is deliberate: the catalogue owns what covers what, and a `LIKE` pattern here
+   * would be a second, quietly diverging implementation of it.
+   *
+   * NOT CACHED, unlike `resolve`. This is keyed on a permission rather than a user, so it would need
+   * invalidating on every role edit, assignment and expiry — three more places to get wrong, to save
+   * one indexed join on a path that runs when a request is submitted, not per HTTP call.
+   *
+   * Accepts an executor so it can read inside the caller's transaction and see the same snapshot the
+   * rest of that unit of work sees.
+   */
+  async globalHoldersOf(permission: string, executor?: DrizzleDB): Promise<string[]> {
+    const db = executor ?? this.db;
+    try {
+      const rows = await db
+        .select({
+          userId: userRoleAssignments.userId,
+          permissionKey: rolePermissions.permissionKey,
+        })
+        .from(userRoleAssignments)
+        .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoleAssignments.roleId))
+        .where(
+          and(
+            eq(userRoleAssignments.scopeType, 'global'),
+            or(
+              isNull(userRoleAssignments.expiresAt),
+              gt(userRoleAssignments.expiresAt, new Date()),
+            ),
+          ),
+        );
+
+      const holders = new Set<string>();
+      for (const row of rows) {
+        if (permissionGrants([row.permissionKey], permission)) holders.add(row.userId);
+      }
+      return [...holders];
+    } catch (err) {
+      /*
+       * EMPTY, NOT A THROW. The only caller is notification fan-out, and a request that was
+       * submitted successfully must not be rolled back because nobody could be told about it. The
+       * inbox does not depend on this — `decidableByPredicate` computes the queue from permissions
+       * at read time — so the failure costs a prompt, not the work.
+       */
+      this.logger.error(
+        { err, permission },
+        'Could not resolve permission holders — notifying none',
+      );
+      return [];
+    }
+  }
+
   /** Drop a user's cached permissions after a role/assignment change. */
   async invalidate(userId: string): Promise<void> {
     await this.cache.del(this.cacheKey(userId));
