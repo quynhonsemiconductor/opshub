@@ -79,6 +79,10 @@ export class NotificationPreferencesController {
   @SelfScoped("deletes the caller's own preference row")
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
+  // Documented here too, not only on the upsert: `assertKnownPreferenceType` guards BOTH routes, so a
+  // reset for an event that has no template answers 422 as well. The generated client is built from
+  // this spec, so an undeclared status is a response a caller has no type for.
+  @ApiCommonErrors(422)
   reset(@CurrentUser() user: JwtPayload, @Param('type') type: string): Promise<void> {
     assertKnownPreferenceType(type);
     return this.service.reset(user.sub, type);
