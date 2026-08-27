@@ -3937,7 +3937,7 @@ export interface paths {
     put?: never;
     /**
      * Register a supplier
-     * @description Registered as `prospective`: assessed but not yet relied upon. Going live is a separate act with its own permission and its own preconditions — see `POST /vendors/:id/activate`.
+     * @description Registered as `prospective`: assessed but not yet relied upon. Going live is a separate act with its own permission and its own preconditions — see `POST /vendors/:id/activate`. `dataProcessingAgreementId` must name a controlled document if given (404 otherwise).
      */
     post: operations['VendorController_register'];
     delete?: never;
@@ -3962,7 +3962,7 @@ export interface paths {
     head?: never;
     /**
      * Correct a supplier record
-     * @description The status is NOT settable here — approving through a patch would skip the assessment requirement. `reviewDueOn` is not settable either: it is computed when an assessment is recorded, and a cadence the caller can move is not a cadence.
+     * @description The status is NOT settable here — approving through a patch would skip the assessment requirement. `reviewDueOn` is not settable either: it is computed when an assessment is recorded, and a cadence the caller can move is not a cadence. Correcting `criticality` DOES move it, because the tier is the cadence — it is recomputed from the last assessment and the new interval, so the review-gap report reflects the correction immediately. An unknown `dataProcessingAgreementId` is a 404 naming the field.
      */
     patch: operations['VendorController_update'];
     trace?: never;
