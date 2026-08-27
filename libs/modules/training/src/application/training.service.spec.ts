@@ -406,6 +406,77 @@ describe('certificates', () => {
     expect(attachments.presign).not.toHaveBeenCalled();
   });
 
+  it('refuses to presign against a revoked record', async () => {
+    /*
+     * THE RULE THAT USED TO LIVE ONLY IN THE BROWSER. `CertificatesPanel` hides Attach when its
+     * `frozen` prop is set, and nothing below the component enforced it — `presignCertificate` called
+     * `getRecord` and read no status, so a `curl` against the presign route answered 201 on a record
+     * somebody had revoked with a reason. Refused at presign rather than only at confirm because this
+     * is the cheapest place to say no: no signed PUT is handed out, so no S3 request is spent.
+     */
+    const { service, attachments } = makeService({
+      findRecordById: vi.fn().mockResolvedValue(record({ status: 'revoked', revokedReason: 'x' })),
+    });
+
+    await expect(
+      service.presignCertificate(
+        'rec-1',
+        { fileName: 'c.pdf', mimeType: 'application/pdf', sizeBytes: 10 },
+        ACTOR,
+      ),
+      // The same code and the same exception class `verifyRecord` and `revokeRecord` refuse with. A
+      // fourth training code would have made one lifecycle rule read as two to every client.
+    ).rejects.toMatchObject({ code: 'TRAINING_RECORD_NOT_VERIFIABLE' });
+    await expect(
+      service.presignCertificate(
+        'rec-1',
+        { fileName: 'c.pdf', mimeType: 'application/pdf', sizeBytes: 10 },
+        ACTOR,
+      ),
+    ).rejects.toThrow(PreconditionFailedException);
+    expect(attachments.presign).not.toHaveBeenCalled();
+  });
+
+  it('refuses to confirm against a record revoked while the upload was in flight', async () => {
+    /*
+     * THE HALF THAT CLOSES THE RULE. A presigned PUT is good for five minutes, so a caller who
+     * presigned one second before the revocation still holds a usable URL — and confirm is the point
+     * the file becomes VISIBLE. Guarding presign alone would leave that window open, and the result is
+     * not reachable by any sweep: an unconfirmed upload is purged by the orphan reaper, a confirmed
+     * certificate on a revoked record has to be found by hand.
+     */
+    const { service, attachments, audit } = makeService({
+      findRecordById: vi.fn().mockResolvedValue(record({ status: 'revoked', revokedReason: 'x' })),
+    });
+
+    await expect(service.confirmCertificate('rec-1', 'file-1', ACTOR)).rejects.toMatchObject({
+      code: 'TRAINING_RECORD_NOT_VERIFIABLE',
+    });
+    expect(attachments.confirm).not.toHaveBeenCalled();
+    // And nothing was written: an audit entry saying a certificate was attached to a revoked record
+    // would be a false statement in the one log an ISO competency audit reads.
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('keeps a revoked record’s existing evidence readable', async () => {
+    /*
+     * THE LIMIT OF THE RULE, and the reason it is `assertAcceptsEvidence` rather than a blanket
+     * "revoked records are closed". An audit asks what was on file AT THE TIME, so a revocation that
+     * also hid its own evidence would answer that with nothing — and the panel says as much in words
+     * ("What is already attached is kept"). A guard added to these two paths would satisfy every
+     * assertion above and destroy the history.
+     */
+    const { service, attachments } = makeService({
+      findRecordById: vi.fn().mockResolvedValue(record({ status: 'revoked', revokedReason: 'x' })),
+    });
+
+    await service.listCertificates('rec-1');
+    await service.certificateDownloadUrl('rec-1', 'file-1');
+
+    expect(attachments.list).toHaveBeenCalled();
+    expect(attachments.downloadUrl).toHaveBeenCalled();
+  });
+
   it('names the certificate surface, so the policy governs the upload', async () => {
     const { service, attachments } = makeService();
 

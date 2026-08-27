@@ -41,7 +41,6 @@ import { NotificationPreferencesPage } from './notification-preferences-page';
 const SENDABLE = [
   'access_request.submitted',
   'access_request.approved',
-  'access_request.denied',
   'asset.assigned',
   'asset.unassigned',
   'employee.offboarded',
@@ -153,7 +152,6 @@ function namesFor(type: string): string[] {
   const map: Record<string, string> = {
     'access_request.submitted': 'An access request needs review',
     'access_request.approved': 'Your access request was approved',
-    'access_request.denied': 'Your access request was denied',
     'asset.assigned': 'An asset was assigned to you',
     'asset.unassigned': 'An asset was taken back',
     'employee.offboarded': 'An employee was offboarded',

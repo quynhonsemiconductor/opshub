@@ -454,6 +454,37 @@ export class TrainingService {
     return { entityType: RECORD_ENTITY, entityId: recordId };
   }
 
+  /**
+   * A revoked record is settled evidence and takes no more of it.
+   *
+   * THIS RULE SHIPPED IN THE BROWSER AND NOWHERE ELSE. `CertificatesPanel`'s `frozen` prop hides
+   * Attach on a revoked record, and its own docblock admitted the gap out loud — "ours rather than
+   * the API's — the service does not refuse a presign on a revoked record". A rule enforced by the
+   * component that renders the button is not enforced against anybody holding a shell: the presign
+   * route is `POST`-able directly, and it answered 201.
+   *
+   * It belongs beside `verifyRecord` and `revokeRecord`, which refuse a revoked record BY NAME, and
+   * for the same reason they do: `revoked` is a decision somebody made and recorded with a reason, so
+   * attaching further proof to it either contradicts the decision or backdates the file into a period
+   * the record no longer speaks for. What is ALREADY attached stays readable — `listCertificates` and
+   * `certificateDownloadUrl` are deliberately not guarded, because an audit asks what was on file at
+   * the time and a revocation that erased its own evidence would answer that with nothing.
+   *
+   * SAME CODE AND SAME EXCEPTION AS THOSE TWO, deliberately rather than a fourth training code:
+   * `TRAINING_RECORD_NOT_VERIFIABLE` documents itself as "already verified, already revoked, or
+   * otherwise not in a state that transition allows", and both certificate routes already advertise
+   * 412 in `@ApiCommonErrors`. A new member would have made one lifecycle rule read as two unrelated
+   * ones to every client, and would have to be added to a catalogue this module does not own.
+   */
+  private assertAcceptsEvidence(record: TrainingRecord): void {
+    if (record.status === 'revoked') {
+      throw new PreconditionFailedException(
+        ErrorCodes.TRAINING_RECORD_NOT_VERIFIABLE,
+        'A revoked record takes no further evidence',
+      );
+    }
+  }
+
   async listCertificates(recordId: string): Promise<EntityAttachment[]> {
     await this.getRecord(recordId);
     return this.attachments.list(this.ref(recordId));
@@ -464,7 +495,9 @@ export class TrainingService {
     input: { fileName: string; mimeType: string; sizeBytes: number; checksumSha256?: string },
     actor: Actor,
   ): Promise<{ fileId: string; uploadUrl: string; requiredHeaders: Record<string, string> }> {
-    await this.getRecord(recordId);
+    // Refused BEFORE the presign, so a revoked record never hands out a signed PUT at all — the
+    // cheapest place to say no, and the only one that costs no S3 request to say it.
+    this.assertAcceptsEvidence(await this.getRecord(recordId));
     return this.attachments.presign(this.ref(recordId), CERTIFICATE_SURFACE, input, actor.sub);
   }
 
@@ -474,6 +507,18 @@ export class TrainingService {
     actor: Actor,
   ): Promise<EntityAttachment> {
     const record = await this.getRecord(recordId);
+    /*
+     * GUARDED AGAIN HERE, and this is the guard that actually closes the rule.
+     *
+     * A presigned PUT is good for five minutes, so "revoked while the upload was in flight" is a real
+     * window and not a theoretical one — and confirm is the point the file becomes VISIBLE, which is
+     * why the quota is re-checked here too. Checking only at presign would let a caller who asked one
+     * second before the revocation attach evidence to a settled record, which is precisely the outcome
+     * the rule exists to prevent. Refusing costs nothing recoverable: the bytes are then an
+     * unconfirmed upload, which the orphan reaper already purges, whereas a visible certificate on a
+     * revoked record is not reachable by any sweep and would have to be found by hand.
+     */
+    this.assertAcceptsEvidence(record);
     const attachment = await this.attachments.confirm(
       this.ref(recordId),
       CERTIFICATE_SURFACE,

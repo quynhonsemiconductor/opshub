@@ -6,7 +6,7 @@
  * in what order, not what the timeline renders.
  */
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EntityDetailPanel } from './entity-detail-panel';
 
 vi.mock('./activity-timeline', () => ({
@@ -15,12 +15,29 @@ vi.mock('./activity-timeline', () => ({
   ),
 }));
 
+/*
+ * `usePermissions` reads `/me` through react-query, so it is mocked rather than wrapped in a provider:
+ * what is under test is which sections this composes, and a QueryClient here would make every case
+ * depend on a fetch that has nothing to do with section order.
+ *
+ * A LIST, not `() => true`. `can: () => true` would satisfy the panel whatever key it asked for — so a
+ * regression gating the Activity section on the wrong permission would pass every case below.
+ */
+let held: string[] = ['audit.read'];
+vi.mock('@/shared/hooks/use-permissions', () => ({
+  usePermissions: () => ({ can: (key: string) => held.includes(key) }),
+}));
+
 const ITEMS = [
   { label: 'Work date', value: '4 Mar 2026' },
   { label: 'Status', value: 'Approved' },
 ];
 
 describe('EntityDetailPanel', () => {
+  beforeEach(() => {
+    held = ['audit.read'];
+  });
+
   it('renders the details, then anything specific, then the activity — in that order', () => {
     // The order is the contract: what this is, what is special about it, what happened to it. Six
     // hand-rolled copies each re-decided it.
@@ -101,5 +118,61 @@ describe('EntityDetailPanel', () => {
   it('IS a dialog once open', () => {
     render(<EntityDetailPanel open onClose={vi.fn()} title="Leave" items={ITEMS} />);
     expect(screen.getByRole('dialog', { name: 'Leave' })).toBeInTheDocument();
+  });
+
+  it('OMITS the activity section for a reader who may not read the audit trail', () => {
+    /*
+     * `GET /v1/audit-logs` requires `audit.read`, which manager, helpdesk and employee do not hold —
+     * and four of the drawers mounting this panel are self-service workforce screens an employee with
+     * no permissions at all is meant to use. The timeline already stopped claiming such a record had
+     * never been touched; this stops it announcing a permission problem on every drawer they open.
+     */
+    held = [];
+    render(
+      <EntityDetailPanel
+        open
+        onClose={vi.fn()}
+        title="Leave request"
+        items={ITEMS}
+        activity={{ resourceId: 'leave-1', resourceType: 'leave_request' }}
+      />,
+    );
+
+    expect(screen.queryByTestId('activity')).toBeNull();
+    // The HEADING goes with the body: "Activity" over nothing reads as a record with no history.
+    expect(screen.queryByText('Activity')).toBeNull();
+  });
+
+  it('still shows the activity section to a reader who holds audit.read', () => {
+    // The other direction, so a mutation that hides the section from everybody cannot pass.
+    held = ['audit.read'];
+    render(
+      <EntityDetailPanel
+        open
+        onClose={vi.fn()}
+        title="Leave request"
+        items={ITEMS}
+        activity={{ resourceId: 'leave-1', resourceType: 'leave_request' }}
+      />,
+    );
+
+    expect(screen.getByTestId('activity')).toBeTruthy();
+    expect(screen.getByText('Activity')).toBeTruthy();
+  });
+
+  it('gates on audit.read specifically, not on any permission at all', () => {
+    // Holding something else must not buy the section.
+    held = ['workforce.read', 'asset.read'];
+    render(
+      <EntityDetailPanel
+        open
+        onClose={vi.fn()}
+        title="Leave request"
+        items={ITEMS}
+        activity={{ resourceId: 'leave-1', resourceType: 'leave_request' }}
+      />,
+    );
+
+    expect(screen.queryByTestId('activity')).toBeNull();
   });
 });

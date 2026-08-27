@@ -57,6 +57,10 @@ let admin: Session;
 /** Holds no permission codes at all. */
 let employee: Session;
 
+/** Real controlled documents, created in `beforeAll` — see `controlledDocument`. */
+let dpa: string;
+let otherDpa: string;
+
 const RUN = Date.now().toString(36).toUpperCase().slice(-6);
 let seq = 0;
 const nextRef = (): string => `E2E-VEN-${RUN}-${++seq}`;
@@ -186,6 +190,28 @@ async function registerRow(reference: string): Promise<VendorListRow> {
   return rows[0];
 }
 
+/**
+ * A real controlled document, because `dataProcessingAgreementId` is CHECKED now.
+ *
+ * The stand-in uuids this suite used to pass were the defect in miniature: nothing looked them up, so
+ * a supplier could carry an Article 28 agreement that did not exist while the register rendered the
+ * obligation as met. `VendorService` now refuses an id that names no document, which means the
+ * agreement cases here have to hold real ones — and it is also the only way a refusal can be
+ * distinguished from a document this suite simply never created.
+ *
+ * `documents.manage` already sits on `security`, so this needs no new fixture.
+ */
+async function controlledDocument(suffix: string): Promise<string> {
+  const res = await apiRequest(app, security, 'POST', '/documents', {
+    code: `E2E-VEN-${suffix}-${RUN}`,
+    title: `Data processing agreement (${suffix}) for the supplier e2e`,
+    category: 'contract_template',
+    ownerId: FIXTURE.SECURITY.id,
+  });
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  return unwrap<{ id: string }>(res.body).id;
+}
+
 /** A risk to link, borrowed from the register the vendor module joins to. */
 async function createRisk(): Promise<string> {
   const res = await apiRequest(app, security, 'POST', '/risks', {
@@ -206,6 +232,10 @@ beforeAll(async () => {
   auditor = await login(app, FIXTURE.AUDITOR);
   admin = await login(app, FIXTURE.ADMIN);
   employee = await login(app, FIXTURE.NO_PERMISSIONS);
+  // TWO of them: recording an agreement and REPLACING it with a different one are different writes,
+  // and one document cannot show that the second was rejected rather than ignored.
+  dpa = await controlledDocument('DPA');
+  otherDpa = await controlledDocument('DPB');
 }, 60_000);
 
 afterAll(async () => {
@@ -374,20 +404,14 @@ describe('data processors', () => {
   });
 
   it('goes live once the agreement is recorded', async () => {
-    const vendor = await register({
-      dataProcessor: true,
-      dataProcessingAgreementId: '00000000-0000-7000-8000-0000000d0a01',
-    });
+    const vendor = await register({ dataProcessor: true, dataProcessingAgreementId: dpa });
     await assess(vendor.id);
     const res = await apiRequest(app, admin, 'POST', `/vendors/${vendor.id}/activate`);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
   });
 
   it('cannot have the agreement cleared while live', async () => {
-    const vendor = await liveVendor({
-      dataProcessor: true,
-      dataProcessingAgreementId: '00000000-0000-7000-8000-0000000d0a02',
-    });
+    const vendor = await liveVendor({ dataProcessor: true, dataProcessingAgreementId: dpa });
     const res = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
       dataProcessingAgreementId: null,
     });
@@ -396,10 +420,7 @@ describe('data processors', () => {
   });
 
   it('is listed by the processors filter', async () => {
-    const processor = await register({
-      dataProcessor: true,
-      dataProcessingAgreementId: '00000000-0000-7000-8000-0000000d0a03',
-    });
+    const processor = await register({ dataProcessor: true, dataProcessingAgreementId: dpa });
     const plain = await register({ dataProcessor: false });
     const rows = unwrap<VendorListRow[]>(
       (await apiRequest(app, security, 'GET', '/vendors?processorsOnly=true&limit=100')).body,
@@ -422,10 +443,6 @@ describe('data processors', () => {
  * user-visible behaviour rather than an untouched route.
  */
 describe('correcting the record', () => {
-  /** Stand-ins for controlled documents. There is no FK — see `dataProcessingAgreementId` in the schema. */
-  const DPA = '00000000-0000-7000-8000-0000000d0a04';
-  const OTHER_DPA = '00000000-0000-7000-8000-0000000d0a05';
-
   it('moves the criticality AND the cadence that hangs off it, not just the label', async () => {
     /*
      * THE CORRECTION THAT MATTERS MOST. Criticality is not a label, it is a schedule: the tier carries
@@ -496,13 +513,13 @@ describe('correcting the record', () => {
     ).toBeNull();
 
     const patched = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
-      dataProcessingAgreementId: DPA,
+      dataProcessingAgreementId: dpa,
       ownerId: FIXTURE.SECURITY.id,
     });
     expect(patched.status, JSON.stringify(patched.body)).toBe(200);
 
     const after = await registerRow(vendor.reference);
-    expect(after.dataProcessingAgreementId).toBe(DPA);
+    expect(after.dataProcessingAgreementId).toBe(dpa);
     // The flag it is PAIRED with, still set. `ck_vendor_processor_agreement` couples the two, and a
     // patch that recorded the agreement by quietly clearing `dataProcessor` would also make the badge
     // go green — for the wrong reason, and with the Article 28 obligation dropped off the record.
@@ -531,20 +548,20 @@ describe('correcting the record', () => {
      * reopen a terminated record to edits. The `Correct` row action and the clickable "No DPA" badge are
      * gated on exactly this condition: an action whose only outcome is this refusal is not offered.
      */
-    const vendor = await liveVendor({ dataProcessor: true, dataProcessingAgreementId: DPA });
+    const vendor = await liveVendor({ dataProcessor: true, dataProcessingAgreementId: dpa });
     const terminated = await apiRequest(app, security, 'POST', `/vendors/${vendor.id}/terminate`, {
       reason: WHY,
     });
     expect(terminated.status, JSON.stringify(terminated.body)).toBe(200);
 
     const res = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
-      dataProcessingAgreementId: OTHER_DPA,
+      dataProcessingAgreementId: otherDpa,
     });
     expect(res.status).toBe(412);
     expect(errorCode(res.body)).toBe('VENDOR_TERMINATED');
 
     // Refused, not partially applied: the stored agreement is the one from before the attempt.
-    expect((await registerRow(vendor.reference)).dataProcessingAgreementId).toBe(DPA);
+    expect((await registerRow(vendor.reference)).dataProcessingAgreementId).toBe(dpa);
   });
 
   it('will not accept a corrected reference, which is why the form locks the field', async () => {
@@ -572,7 +589,7 @@ describe('correcting the record', () => {
     // the endpoint requires.
     const vendor = await register({ dataProcessor: true });
     const res = await apiRequest(app, auditor, 'PATCH', `/vendors/${vendor.id}`, {
-      dataProcessingAgreementId: DPA,
+      dataProcessingAgreementId: dpa,
     });
     expect(res.status).toBe(403);
   });
@@ -725,6 +742,85 @@ describe('reports', () => {
       (await apiRequest(app, security, 'GET', '/vendors/reports/review-gaps')).body,
     );
     expect(gaps.map((g) => g.id)).not.toContain(vendor.id);
+  });
+
+  it('brings a supplier ONTO the report when its criticality is raised', async () => {
+    /*
+     * THE DEFECT'S USER-VISIBLE SYMPTOM, and it needs a real database: the report reads the stored
+     * `review_due_on`, so correcting a tier used to leave the old date in place. A supplier promoted to
+     * critical — whose cadence is therefore much shorter — stayed absent from the register a reviewer
+     * reads, which is the one place the promotion was supposed to show up.
+     *
+     * `low` first, assessed far enough back to be overdue under the CRITICAL cadence but not under the
+     * low one. Both halves matter: if the assessment were old enough to be overdue at either tier, the
+     * row would appear without the recomputation and the test would pass against the bug.
+     */
+    /*
+     * ONE assessment, backdated — not a fresh one followed by a backdated second.
+     *
+     * That was this test's first shape and it was wrong: the recompute reads the LATEST assessment by
+     * `assessed_at`, so a fresh assessment plus a backdated one leaves "latest" as the fresh one and
+     * the supplier is overdue at no tier. The test failed against correct code, and chasing it is what
+     * showed the two re-dating paths use different definitions of the governing assessment (see the
+     * note at the end of this describe).
+     */
+    const vendor = await register({ criticality: 'low' });
+    await assess(vendor.id, { assessedAt: '2025-06-01T00:00:00.000Z' });
+    await apiRequest(app, admin, 'POST', `/vendors/${vendor.id}/activate`);
+
+    const before = unwrap<GapRow[]>(
+      (await apiRequest(app, security, 'GET', '/vendors/reports/review-gaps')).body,
+    );
+    expect(
+      before.map((g) => g.id),
+      'a low-criticality supplier assessed in mid-2025 is not yet overdue',
+    ).not.toContain(vendor.id);
+
+    const raised = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
+      criticality: 'critical',
+    });
+    expect(raised.status, JSON.stringify(raised.body)).toBe(200);
+
+    const after = unwrap<GapRow[]>(
+      (await apiRequest(app, security, 'GET', '/vendors/reports/review-gaps')).body,
+    );
+    const mine = after.find((g) => g.id === vendor.id);
+    expect(mine, 'raising the tier must move the schedule, not just the label').toBeDefined();
+    expect(mine!.daysOverdue).toBeGreaterThan(0);
+  });
+
+  it('takes a supplier back OFF the report when its criticality is lowered', async () => {
+    // The other direction, so a mutation that only ever shortens the cadence cannot pass.
+    const vendor = await register({ criticality: 'critical' });
+    await assess(vendor.id, { assessedAt: '2025-06-01T00:00:00.000Z' });
+    await apiRequest(app, admin, 'POST', `/vendors/${vendor.id}/activate`);
+
+    const before = unwrap<GapRow[]>(
+      (await apiRequest(app, security, 'GET', '/vendors/reports/review-gaps')).body,
+    );
+    expect(before.map((g) => g.id)).toContain(vendor.id);
+
+    const lowered = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
+      criticality: 'low',
+    });
+    expect(lowered.status, JSON.stringify(lowered.body)).toBe(200);
+
+    const after = unwrap<GapRow[]>(
+      (await apiRequest(app, security, 'GET', '/vendors/reports/review-gaps')).body,
+    );
+    expect(after.map((g) => g.id)).not.toContain(vendor.id);
+  });
+
+  it('refuses a data processing agreement that names no document', async () => {
+    // Was stored unvalidated, so a supplier could carry a DPA reference to nothing — and under GDPR
+    // Art. 28 the DPA is what makes the processor relationship lawful.
+    const vendor = await liveVendor();
+    const res = await apiRequest(app, security, 'PATCH', `/vendors/${vendor.id}`, {
+      dataProcessingAgreementId: '00000000-0000-4000-8000-000000000996',
+    });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
+    expect(JSON.stringify(res.body)).toContain('dataProcessingAgreementId');
   });
 
   it('leaves prospective suppliers off it too', async () => {

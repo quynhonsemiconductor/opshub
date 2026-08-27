@@ -148,6 +148,15 @@ export const ErrorCodes = {
   INCIDENT_EVIDENCE_MISSING: 'INCIDENT_EVIDENCE_MISSING',
   /** Only a personal-data breach has a regulator to notify. */
   INCIDENT_NOT_A_BREACH: 'INCIDENT_NOT_A_BREACH',
+  /**
+   * The regulator has already been told, so the incident cannot stop being a personal-data breach.
+   *
+   * The mirror of `INCIDENT_NOT_A_BREACH` and deliberately not the same code: that one means "there
+   * is no regulator to notify, mark it as a breach first", this one means "a notification has been
+   * sent and cannot be un-sent". Opposite remediations, so a client branching on `code` needs the
+   * two to differ. `ck_incident_breach_notification_pair` in words.
+   */
+  INCIDENT_BREACH_NOTIFIED: 'INCIDENT_BREACH_NOTIFIED',
 
   // ── ISMS information assets ────────────────────────────────────────────────
   /** A CIA rating outside 1..5, or a retention period of zero months. */

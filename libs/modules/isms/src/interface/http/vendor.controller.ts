@@ -217,7 +217,8 @@ export class VendorController {
     summary: 'Register a supplier',
     description:
       'Registered as `prospective`: assessed but not yet relied upon. Going live is a separate ' +
-      'act with its own permission and its own preconditions — see `POST /vendors/:id/activate`.',
+      'act with its own permission and its own preconditions — see `POST /vendors/:id/activate`. ' +
+      '`dataProcessingAgreementId` must name a controlled document if given (404 otherwise).',
   })
   @ApiCreatedResponse({ type: VendorResponseDto })
   @ApiCommonErrors(400, 401, 403, 404, 409, 412)
@@ -248,7 +249,10 @@ export class VendorController {
     description:
       'The status is NOT settable here — approving through a patch would skip the assessment ' +
       'requirement. `reviewDueOn` is not settable either: it is computed when an assessment is ' +
-      'recorded, and a cadence the caller can move is not a cadence.',
+      'recorded, and a cadence the caller can move is not a cadence. Correcting `criticality` DOES ' +
+      'move it, because the tier is the cadence — it is recomputed from the last assessment and the ' +
+      'new interval, so the review-gap report reflects the correction immediately. An unknown ' +
+      '`dataProcessingAgreementId` is a 404 naming the field.',
   })
   @ApiOkResponse({ type: VendorResponseDto })
   @ApiCommonErrors(400, 401, 403, 404, 412)

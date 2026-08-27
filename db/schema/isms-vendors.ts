@@ -133,7 +133,10 @@ export const vendors = ismsSchema.table(
      * The data processing agreement, as a controlled document.
      *
      * No FK: `documents` is a separate schema and every other cross-schema reference in this
-     * codebase is by id alone, so the service checks it rather than the database.
+     * codebase is by id alone, so `VendorService.assertAgreementExists` refuses an id that names no
+     * document — on both write paths, with a 404 naming the field. Note what
+     * `ck_vendor_processor_agreement` below does NOT do: it asks whether this column is filled in,
+     * never whether what it points at exists, and a wrong uuid satisfies it.
      */
     dataProcessingAgreementId: uuid('data_processing_agreement_id'),
     /** Where the data goes. The column an international-transfer question is answered from. */
@@ -197,7 +200,15 @@ export const vendorAssessments = ismsSchema.table(
      * conditions nobody wrote down has imposed nothing.
      */
     conditions: text('conditions'),
-    /** Supporting evidence as a controlled document. No FK — cross-schema, checked by the service. */
+    /**
+     * Supporting evidence as a controlled document. No FK — cross-schema, like the agreement above.
+     *
+     * NOT CHECKED for existence, unlike `data_processing_agreement_id`: this comment used to claim it
+     * was, and it never has been. Stated rather than quietly fixed because the two are not the same
+     * risk — the agreement is what makes processing lawful under Article 28, while a dangling
+     * evidence id makes one assessment row unverifiable. Closing it belongs with the assessment
+     * path's own review.
+     */
     evidenceDocumentId: uuid('evidence_document_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

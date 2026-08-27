@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { AuditResourceType } from '@/shared/api/types';
 import { ActivityTimeline } from './activity-timeline';
+import { usePermissions } from '@/shared/hooks/use-permissions';
 import { DescriptionList, type DescriptionItem } from './description-list';
 import { SlideOver, SlideOverSection } from './slide-over';
 
@@ -53,6 +54,7 @@ export function EntityDetailPanel({
   children,
   width = 'md',
 }: EntityDetailPanelProps) {
+  const canReadAudit = usePermissions().can('audit.read');
   return (
     <SlideOver
       open={open}
@@ -73,7 +75,27 @@ export function EntityDetailPanel({
         </>
       )}
 
-      {activity && (
+      {/*
+       * THE SECTION IS OMITTED, NOT FAILED, FOR A READER WHO MAY NOT SEE IT.
+       *
+       * `GET /v1/audit-logs` carries a class-level `@RequirePermission('audit.read')`, and three of
+       * the eight seeded roles — manager, helpdesk, employee — do not hold it. This panel is mounted
+       * by roughly two dozen drawers, four of which (leave, overtime, timesheets, shifts) are
+       * SELF-SERVICE screens an employee holding no permissions at all is meant to use. So for those
+       * readers the Activity section could only ever fail.
+       *
+       * `TimelineUnreadable` already stopped it LYING about that — it used to render the empty state,
+       * which asserted in the product's own voice that a record had never been touched. But an honest
+       * `role="alert"` on every drawer a reader opens, about a permission they will never hold and
+       * cannot request, is noise that teaches people to ignore alerts. A section that is not there
+       * says the same thing more quietly.
+       *
+       * Checked HERE and not in ~24 call sites: one place cannot be forgotten by the next drawer, and
+       * the header goes with the body — a "Activity" heading over nothing is its own small lie.
+       * `ActivityTimeline` keeps its error state for the case that remains real: a reader who HOLDS
+       * `audit.read` and whose request failed anyway.
+       */}
+      {activity && canReadAudit && (
         <>
           <Hairline />
           <SlideOverSection title="Activity">

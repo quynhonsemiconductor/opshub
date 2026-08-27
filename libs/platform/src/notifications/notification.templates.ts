@@ -20,11 +20,18 @@
  * the point: the settings screen is part of shipping a notification, not a thing to remember later.
  *
  * Ordered by domain rather than alphabetically so a reader can see which areas notify at all.
+ *
+ * `access_request.denied` WAS REMOVED rather than wired. It had a template, a variable shape, a
+ * renderer and — after the settings screen was made truthful — a toggle, and no sender anywhere. It
+ * was also redundant: every rejection already schedules `request.rejected` to the requester from
+ * `RequestEngine.reject`, access requests included, and that one is delivered (15 approvals and 3
+ * rejections on a seeded database). Wiring it would have sent two notifications for one event and
+ * given the requester two switches for the same fact. A template nobody sends is not a feature
+ * waiting to be finished; it is a claim the catalogue makes and cannot honour.
  */
 export const NOTIFICATION_TEMPLATE_NAMES = [
   'access_request.submitted',
   'access_request.approved',
-  'access_request.denied',
   'asset.assigned',
   'asset.unassigned',
   'employee.offboarded',
@@ -54,11 +61,6 @@ export interface NotificationTemplateVars {
   'access_request.approved': {
     resourceName: string;
     approverName: string;
-  };
-  'access_request.denied': {
-    resourceName: string;
-    approverName: string;
-    reason?: string;
   };
   'asset.assigned': {
     assetName: string;
@@ -149,13 +151,6 @@ const templates: {
     return {
       title: 'Access request approved ✓',
       body: `${v.approverName} approved your request for "${v.resourceName}".`,
-    };
-  },
-  'access_request.denied'(v) {
-    const extra = v.reason ? ` Reason: ${v.reason}` : '';
-    return {
-      title: 'Access request denied',
-      body: `${v.approverName} denied your request for "${v.resourceName}".${extra}`,
     };
   },
   'asset.assigned'(v) {

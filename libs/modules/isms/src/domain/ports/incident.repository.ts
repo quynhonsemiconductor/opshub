@@ -49,6 +49,20 @@ export interface IIncidentRepository {
   /** Record the regulator notification. Guarded so it cannot be stamped twice. */
   markRegulatorNotified(id: string, notifiedAt: Date, tx?: DbExecutor): Promise<Incident | null>;
 
+  // ── Reference guards ───────────────────────────────────────────────────────
+  /*
+   * `risk_id` and `asset_id` DO carry foreign keys — unlike the cross-schema employee references,
+   * which deliberately carry none — so these two do not exist to keep the data consistent. Postgres
+   * already does that. They exist so the service can REFUSE a dangling reference with a code and a
+   * field name, because the FK arrives as SQLSTATE 23503 and reaches the caller as a 500 with no
+   * indication of which field was wrong.
+   *
+   * Existence rather than the row: nothing reads a risk or an asset here, and fetching one to throw
+   * it away is the shape `EmployeeService.assertExist` was written to retire.
+   */
+  riskExists(id: string): Promise<boolean>;
+  assetExists(id: string): Promise<boolean>;
+
   // ── Timeline ───────────────────────────────────────────────────────────────
   /**
    * Append one timeline entry. There is deliberately no update and no delete.

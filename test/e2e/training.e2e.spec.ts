@@ -788,6 +788,101 @@ describe('authorization', () => {
   });
 });
 
+/**
+ * A revoked record takes no further evidence — enforced by the SERVER, not only the drawer.
+ *
+ * PR #251 split the certificates panel into `canPost` (may this reader post at all) and `frozen` (does
+ * this record still accept evidence), so a revoked record stops offering the uploader. That rule was
+ * BROWSER-ONLY: `presignCertificate` called `getRecord` and checked no status, unlike `verifyRecord`
+ * and `revokeRecord` which refuse by name. Anyone with `curl` walked straight past it.
+ *
+ * OUTSIDE `describe.runIf(HAS_S3)`, deliberately and unlike every other certificate case in this file:
+ * both routes refuse BEFORE they touch storage, so these assertions are exactly the ones that do not
+ * need a bucket — and gating them on S3 would mean the rule went unverified wherever S3 is absent,
+ * which is most local runs and the reason it shipped unenforced in the first place.
+ */
+describe('a revoked record refuses new evidence', () => {
+  async function revokedRecord(): Promise<string> {
+    const course = await createCourse({});
+    const created = await apiRequest(app, hr, 'POST', '/training/records', {
+      employeeId: FIXTURE.SECURITY.id,
+      courseId: course.id,
+      completedOn: '2026-01-10',
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const recordId = unwrap<RecordRow>(created.body).id;
+
+    const revoked = await apiRequest(app, hr, 'POST', `/training/records/${recordId}/revoke`, {
+      reason: 'Certificate was issued against the wrong course.',
+    });
+    expect(revoked.status, JSON.stringify(revoked.body)).toBe(200);
+    return recordId;
+  }
+
+  it('refuses a presign with a code, not a 500 or a signed URL', async () => {
+    const recordId = await revokedRecord();
+    const res = await apiRequest(
+      app,
+      hr,
+      'POST',
+      `/training/records/${recordId}/certificates/presign`,
+      { fileName: 'certificate.pdf', mimeType: 'application/pdf', sizeBytes: 1024 },
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(412);
+    expect(errorCode(res.body)).toBe('TRAINING_RECORD_NOT_VERIFIABLE');
+    // No signed URL may come back with the refusal — that would be the bypass, politely worded.
+    expect(JSON.stringify(res.body)).not.toContain('http');
+  });
+
+  it('refuses a confirm too, so a presign taken before revocation cannot be redeemed after', async () => {
+    /*
+     * The race the presign guard alone does not close: a URL obtained while the record was valid, used
+     * after it was revoked. `confirm` is the write that makes the file part of the record, so it has to
+     * refuse independently.
+     */
+    const recordId = await revokedRecord();
+    const res = await apiRequest(
+      app,
+      hr,
+      'POST',
+      `/training/records/${recordId}/certificates/00000000-0000-4000-8000-0000000000aa/confirm`,
+      {},
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(412);
+    expect(errorCode(res.body)).toBe('TRAINING_RECORD_NOT_VERIFIABLE');
+  });
+
+  it('still lets a VALID record be presigned, so the guard is about status and not the route', async () => {
+    // The other direction. Without it, a guard that refused everything would pass both cases above.
+    const course = await createCourse({});
+    const created = await apiRequest(app, hr, 'POST', '/training/records', {
+      employeeId: FIXTURE.SECURITY.id,
+      courseId: course.id,
+      completedOn: '2026-01-10',
+    });
+    expect(created.status).toBe(201);
+    const recordId = unwrap<RecordRow>(created.body).id;
+
+    const res = await apiRequest(
+      app,
+      hr,
+      'POST',
+      `/training/records/${recordId}/certificates/presign`,
+      { fileName: 'certificate.pdf', mimeType: 'application/pdf', sizeBytes: 1024 },
+    );
+    /*
+     * 201 with a bucket configured, 5xx without one — either way NOT a refusal. Both 412 (the status
+     * guard) and 422 (schema validation) are excluded: an earlier draft sent `contentType` instead of
+     * `mimeType` and this case passed on the resulting 422, which would have hidden a guard that
+     * refused every record regardless of status.
+     */
+    expect(res.status, JSON.stringify(res.body)).not.toBe(412);
+    expect(res.status, JSON.stringify(res.body)).not.toBe(422);
+  });
+});
+
 describe.runIf(HAS_S3)('certificates, against real S3', () => {
   const bytes = Buffer.from('%PDF-1.4 e2e certificate payload');
   const digest = createHash('sha256').update(bytes).digest('base64');

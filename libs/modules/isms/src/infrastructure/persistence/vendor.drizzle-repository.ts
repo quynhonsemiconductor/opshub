@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'driz
 import { InjectDrizzle, type DbExecutor, type DrizzleDB, searchAcross } from '@platform';
 import { newId } from '@shared-kernel';
 import {
+  documents,
   risks,
   softwareLicenses,
   vendorAssessments,
@@ -104,6 +105,21 @@ export class VendorDrizzleRepository implements IVendorRepository {
       .where(eq(vendors.reference, reference))
       .limit(1);
     return row ?? null;
+  }
+
+  /**
+   * Whether a controlled document exists — see the port for why this lives here.
+   *
+   * `select 1 ... limit 1` on the primary key: the caller wants a boolean, and projecting the row
+   * would invite somebody to start reading fields off a document through the vendor repository.
+   */
+  async documentExists(id: string, tx?: DbExecutor): Promise<boolean> {
+    const [row] = await (tx ?? this.db)
+      .select({ one: sql<number>`1` })
+      .from(documents)
+      .where(eq(documents.id, id))
+      .limit(1);
+    return row !== undefined;
   }
 
   async list(
