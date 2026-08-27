@@ -102,3 +102,86 @@ describe('AuthzService.check', () => {
     expect(await service.check('user-1', 'security.manage')).toBe(true);
   });
 });
+
+/**
+ * `globalHoldersOf` — who gets told a request is waiting.
+ *
+ * WHAT IT IS FOR. The request engine used to notify `assigneeId`, which no production path sets, so
+ * raising a request told nobody. It now asks this for the people the step's permission admits.
+ *
+ * WHAT THESE TESTS CAN AND CANNOT REACH. The `scopeType = 'global'` and expiry rules are SQL, and a
+ * mocked executor returns whatever rows it is handed — so a mutation deleting the scope filter passes
+ * here no matter what is asserted. That half is pinned in
+ * `test/e2e/request-approver-notification.e2e.spec.ts` against a real database, and saying so here
+ * matters: the coverage looks complete otherwise.
+ *
+ * What IS reachable is the TypeScript half — that coverage is decided by the catalogue's
+ * `permissionGrants` rather than a string compare, so `*` and a module-wide `asset.*` both count, and
+ * that one person holding a permission through two roles is notified once.
+ */
+function serviceWithRows(rows: { userId: string; permissionKey: string }[]) {
+  const chain = { where: vi.fn().mockResolvedValue(rows) };
+  const db = {
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({ innerJoin: vi.fn().mockReturnValue(chain) }),
+    }),
+  };
+  const cache = {
+    getJson: vi.fn().mockResolvedValue(null),
+    setJson: vi.fn().mockResolvedValue(undefined),
+    del: vi.fn().mockResolvedValue(undefined),
+  };
+  return new AuthzService(db as never, cache as never, new ScopeEvaluator());
+}
+
+describe('AuthzService.globalHoldersOf', () => {
+  it('returns the holders of an exact permission', async () => {
+    const service = serviceWithRows([
+      { userId: 'user-a', permissionKey: 'workforce.approve' },
+      { userId: 'user-b', permissionKey: 'asset.read' },
+    ]);
+    expect(await service.globalHoldersOf('workforce.approve')).toEqual(['user-a']);
+  });
+
+  it('counts the `*` wildcard, so an administrator is notified', async () => {
+    // Read through `permissionGrants`, not a string compare. An admin holds `*` and nothing else.
+    const service = serviceWithRows([{ userId: 'user-admin', permissionKey: '*' }]);
+    expect(await service.globalHoldersOf('workforce.approve')).toEqual(['user-admin']);
+  });
+
+  it('counts a module-wide grant', async () => {
+    // `check()` honours `asset.*` for `asset.write`; a second implementation here that only matched
+    // exact codes would silently leave those holders uninformed.
+    const service = serviceWithRows([{ userId: 'user-mod', permissionKey: 'workforce.*' }]);
+    expect(await service.globalHoldersOf('workforce.approve')).toEqual(['user-mod']);
+  });
+
+  it('names a person once even when two roles grant the permission', async () => {
+    // Two rows, one human. Twice would be two notifications for one request.
+    const service = serviceWithRows([
+      { userId: 'user-a', permissionKey: 'workforce.approve' },
+      { userId: 'user-a', permissionKey: '*' },
+    ]);
+    expect(await service.globalHoldersOf('workforce.approve')).toEqual(['user-a']);
+  });
+
+  it('returns nobody rather than throwing when the query fails', async () => {
+    /*
+     * The caller is notification fan-out inside the submit transaction. A request that was submitted
+     * successfully must not roll back because nobody could be told about it — the inbox does not
+     * depend on this, since the queue is computed from permissions at read time.
+     */
+    const db = {
+      select: vi.fn().mockImplementation(() => {
+        throw new Error('connection reset');
+      }),
+    };
+    const cache = {
+      getJson: vi.fn().mockResolvedValue(null),
+      setJson: vi.fn(),
+      del: vi.fn(),
+    };
+    const service = new AuthzService(db as never, cache as never, new ScopeEvaluator());
+    await expect(service.globalHoldersOf('workforce.approve')).resolves.toEqual([]);
+  });
+});
