@@ -110,7 +110,10 @@ export function ConfirmDialog({
         className={cn(
           'fixed left-1/2 top-1/2 z-[60] w-full max-w-sm -translate-x-1/2 -translate-y-1/2',
           'rounded-xl bg-surface shadow-2xl ring-1 ring-border',
-          'animate-in fade-in-0 zoom-in-95 duration-150',
+          // One token, defined in `app/styles/globals.css` — which is also where reduced motion turns it
+          // off. It replaces `animate-in fade-in-0 zoom-in-95 duration-150`: tailwindcss-animate's
+          // vocabulary, a plugin this repo does not depend on, so those four classes emitted no CSS.
+          'animate-dialog-in',
         )}
         onKeyDown={(e) => e.key === 'Escape' && onCancel()}
       >

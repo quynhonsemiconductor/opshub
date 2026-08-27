@@ -86,6 +86,68 @@ so the inbox and the workforce tabs cannot drift into two phrasings of one rule.
 And check the EMPTY STATE with the button: "Add your first license to start tracking seats and cost"
 next to a withheld Add button is the same false instruction in slower words.
 
+**12. Supportive guidance on a control is `Tooltip`. It is never the native `title`, and it is never
+where a LABEL or a HINT belongs.**
+`title` was the only tooltip this kit had, and **26 places** used it — it is invisible on a touch
+device, unstyleable, about a second slow, and read out or not depending on whose screen reader it is.
+Worse, almost all 26 restate the verb already in the `aria-label` beside them: `aria-label={`Retire
+${control.title}`} title="Retire"`, in eleven files. That is a slow duplicate of the NAME and no
+description at all, which is the one thing a tooltip is for. `Tooltip` opens on **focus** as well as
+hover — with no delay on focus, because `aria-describedby` only points at the bubble while the bubble
+exists, so a delay there does not make the announcement late, it removes it — and Escape dismisses it,
+per WCAG 1.4.13. Escape is taken in the CAPTURE phase and stopped there, so a tooltip open inside a
+`Modal` does not answer one keypress twice.
+
+Two sites are converted and **24 remain**, including `IconAction`'s own `title={label}`, which is
+every icon action in the product. Most of those want the attribute simply DELETED rather than replaced:
+a duplicate of the accessible name is not guidance, and there is nothing to move into a bubble.
+
+Reach for it when the control is already named and the reader still has to GUESS a consequence: what
+"Sync now" syncs and in which direction, that removing a goal blocks the review it belongs to, that
+"No DPA" is a GDPR Article 28(3) gap and that the badge is the way to close it. Those are the three
+adoptions; there are deliberately not thirty.
+
+**When it is the WRONG answer.** A sentence that is always relevant is a `FormField` hint or a
+`StatCard` hint — visible, no interaction, and no one has to find it. A derivation short enough to
+print should be printed: `11 / 16 checks` beats a tooltip on `69%`, and a bare number is not focusable
+anyway, so a tooltip on one is mouse-only help. Truncated content is not a tooltip either — the
+`title={r.reviewNote}` and `title={r.notes}` spans on the access and software-catalog screens want a
+wider column or the drawer, because a tooltip cannot be selected, copied or reached by touch. And
+nothing that must be read to complete a task goes in here at all.
+
+It renders **in place, not through a portal**: inside a `Modal` or a `SlideOver` the bubble is above
+the panel because it is INSIDE its stacking context, so there is no z-index to keep in agreement with
+`OVERLAY_LAYER`. The cost is clipping by an `overflow-hidden` panel or a `DataTable`'s
+`overflow-x-auto`; `placement="bottom"` is the escape hatch, and a tooltip that needs to break out of
+a scroll box to be legible was probably a column.
+
+**13. Motion is a TOKEN in `globals.css`, never a class name borrowed from a plugin.**
+`Modal`, `ConfirmDialog`, the command palette and `Tooltip` all carried `animate-in fade-in-0
+zoom-in-95 duration-150`. That is `tailwindcss-animate` vocabulary, the plugin is not a dependency,
+and there were no `@keyframes` in the repo — so four surfaces generated NO CSS and every dialog in
+the product appeared instantly. `duration-150` is the tell: it compiles, but to
+`transition-duration`, which an animation never reads. Nothing about the class string looked wrong,
+which is why it survived review; only the stylesheet was wrong.
+
+Tailwind v4 needs no plugin. An `--animate-<name>` token plus its `@keyframes` IS the mechanism, and
+it generates the `animate-<name>` utility. Name the token after the SURFACE, not the property —
+`animate-dialog-in`, `animate-tooltip-in` — so the timing and easing live in one place and a call
+site cannot half-specify them the way four classes did. Reuse an existing token before adding one; a
+second token needs a reason a reader can see (the tooltip fades and does not scale, because a bubble
+growing beside the cursor reads as arrival rather than explanation).
+
+**Reduced motion is handled once, at the token.** Every `--animate-*` is set to `none` inside
+`@media (prefers-reduced-motion: reduce)` in `globals.css`, which is why the tokens sit in a plain
+`@theme` and not `@theme inline`: `inline` bakes the value into the utility and leaves nothing to
+override. A `motion-reduce:` variant at a call site is a second opinion about a rule the sheet
+already owns. A zooming dialog can trigger vestibular symptoms, so this is not a preference.
+
+`app/styles/motion.spec.ts` compiles `globals.css` with Tailwind itself and fails on any animation
+class in `src/` that produces no rule, on a token whose `@keyframes` nothing defines, and on a new
+token with no reduced-motion override. It runs in **node**, not jsdom: jsdom implements neither
+`@media` matching nor `@keyframes`, so this is not assertable from a rendered component — and an
+assertion on `className` would have passed against the bug it exists for.
+
 ## Testing a screen from the browser
 
 Three rules, each learned by a failing run rather than guessed:

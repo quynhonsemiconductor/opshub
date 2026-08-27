@@ -8209,6 +8209,13 @@ export interface operations {
           'application/json': components['schemas']['PreferenceResponseDto'];
         };
       };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   NotificationPreferencesController_reset: {
@@ -8223,6 +8230,13 @@ export interface operations {
     requestBody?: never;
     responses: {
       204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
         headers: {
           [name: string]: unknown;
         };

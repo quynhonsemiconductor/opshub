@@ -4,7 +4,7 @@ import { Plus, Target, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
-import { Badge, Button, ConfirmDialog, PanelState, RowActions } from '@/shared/ui';
+import { Badge, Button, ConfirmDialog, PanelState, RowActions, Tooltip } from '@/shared/ui';
 import { orDash } from '@/shared/lib/format';
 import { SetGoalModal } from './rating-modals';
 import { REQUIRED_WEIGHT_TOTAL } from './performance.types';
@@ -100,15 +100,25 @@ export function GoalsPanel({
             {goal.rating && <Badge tone="blue">{goal.rating}</Badge>}
             {canEdit && (
               <RowActions>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Remove ${goal.title}`}
-                  title="Remove"
-                  onClick={() => setDeleting(goal)}
+                {/*
+                 * THE CONSEQUENCE, BEFORE THE CLICK. This icon said `title="Remove"` — the same word as
+                 * its `aria-label`, so a slow duplicate of the name and nothing else. What a reader
+                 * cannot see is that removing a goal takes its weight out of the running total below and
+                 * therefore blocks the whole review from being submitted; the confirmation says so, but
+                 * only after the trash can has been pressed.
+                 */}
+                <Tooltip
+                  content={`Frees this goal's ${Number(goal.weight)}% — the review cannot go for approval until the weights total ${REQUIRED_WEIGHT_TOTAL} again.`}
                 >
-                  <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-                </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Remove ${goal.title}`}
+                    onClick={() => setDeleting(goal)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                  </Button>
+                </Tooltip>
               </RowActions>
             )}
           </div>
