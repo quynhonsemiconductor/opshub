@@ -24,6 +24,7 @@ import {
   type PagedResult,
 } from '@platform';
 import { EmployeeService } from '@modules/identity';
+import { DocumentsService } from '@modules/documents';
 import { toRiskDto } from './risk.controller';
 import { RiskResponseDto } from './dto/risk.dto';
 import { VendorService } from '../../application/vendor.service';
@@ -101,6 +102,7 @@ export class VendorController {
   constructor(
     private readonly service: VendorService,
     private readonly employees: EmployeeService,
+    private readonly documents: DocumentsService,
   ) {}
 
   // ── Static paths first ───────────────────────────────────────────────────────
@@ -363,6 +365,10 @@ export class VendorController {
     @Body() dto: RecordAssessmentDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<VendorAssessmentResponseDto> {
+    // The assessment's evidence is the substance of the assessment. Its schema comment claimed the
+    // service checked it and nothing did — the last of the five cross-schema document references
+    // that said so.
+    await this.documents.assertExist(dto.evidenceDocumentId);
     return toAssessmentDto(await this.service.assess(id, dto, user));
   }
 

@@ -25,6 +25,7 @@ import {
 } from '@platform';
 import { PERMISSION } from '@db/permissions.catalog';
 import { EmployeeService } from '@modules/identity';
+import { DocumentsService } from '@modules/documents';
 import { ContractsService } from '../../application/contracts.service';
 import type { EmploymentContract } from '../../domain/contracts.types';
 import {
@@ -84,6 +85,7 @@ export class ContractsController {
   constructor(
     private readonly service: ContractsService,
     private readonly employees: EmployeeService,
+    private readonly documents: DocumentsService,
     private readonly authz: AuthzService,
   ) {}
 
@@ -195,6 +197,9 @@ export class ContractsController {
     // `employee_id` carries no cross-schema FK, matching every other module, so without this a typo
     // would become a contract for somebody who does not exist.
     await this.employees.assertExist(dto.employeeId);
+    // `document_id` carries no cross-schema FK. A contract row naming a document nobody can open
+    // is the compliance record that reads as complete and is not.
+    await this.documents.assertExist(dto.documentId);
     return toContractDto(await this.service.draftContract(dto, user), true);
   }
 
@@ -213,6 +218,9 @@ export class ContractsController {
     @Body() dto: UpdateContractDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<ContractResponseDto> {
+    // The PATCH accepts `documentId` too, so the draft route's check alone would leave the correction
+    // path open — which is the one somebody uses after mistyping it the first time.
+    await this.documents.assertExist(dto.documentId);
     return toContractDto(await this.service.updateContract(id, dto, user), true);
   }
 

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '@modules/audit';
 import { IdentityModule } from '@modules/identity';
+import { DocumentsModule } from '@modules/documents';
 import { IsmsModule } from '@modules/isms';
 import { NonconformanceService } from './application/nonconformance.service';
 import { CapaService } from './application/capa.service';
@@ -32,7 +33,9 @@ import {
   // of external providers and the effectiveness of actions on risks, which the vendor and control
   // services own. Composed rather than copied — a second copy of those numbers disagrees with the
   // register within a day. No cycle: IsmsModule imports only AuditModule and IdentityModule.
-  imports: [AuditModule, IdentityModule, IsmsModule],
+  // DocumentsModule for DocumentsService: an internal audit's report is a controlled document,
+  // and the reference to it carries no cross-schema FK.
+  imports: [AuditModule, IdentityModule, IsmsModule, DocumentsModule],
   controllers: [
     NonconformanceController,
     CapaController,

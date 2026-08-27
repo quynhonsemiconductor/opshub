@@ -76,6 +76,43 @@ export class DocumentsService {
     });
   }
 
+  /**
+   * Refuse unless every id given names a real controlled document.
+   *
+   * WHY IT EXISTS. Five columns across four modules point at `documents.documents` across a schema
+   * boundary — the supplier DPA, the SoA control's evidence, a contract's signed document, a
+   * non-conformance's evidence and an internal audit's report. None may carry a foreign key, and every
+   * one of them was documented as "checked by the service" while nothing checked anything. A dangling
+   * reference is the worst kind of compliance record: it reads as complete. An SoA citing evidence
+   * that does not exist is an ISO 27001 finding; a contract row naming a document nobody can open is a
+   * signed contract on paper only.
+   *
+   * MIRRORS `EmployeeService.assertExist` deliberately, down to the shape of the message. That is the
+   * house pattern for a cross-schema reference, and five ad-hoc `documentExists` helpers — one per
+   * caller — is what this replaces. Variadic and nullish-skipping so a caller can hand it whichever
+   * optional fields a patch happened to touch without filtering first.
+   *
+   * NAMES EVERY MISSING ID, not the first: which reference is wrong is the entire content of the
+   * failure, and a caller correcting one typo only to meet the next is a worse experience than one
+   * refusal listing both.
+   *
+   * RETIRED DOCUMENTS PASS. Retirement is soft, and the document that was in force when the evidence
+   * was filed is still the evidence — see `findExistingIds` on the port.
+   */
+  async assertExist(...ids: (string | null | undefined)[]): Promise<void> {
+    const wanted = [...new Set(ids.filter((id): id is string => Boolean(id)))];
+    if (wanted.length === 0) return;
+
+    const found = new Set(await this.repo.findExistingIds(wanted));
+    const missing = wanted.filter((id) => !found.has(id));
+    if (missing.length > 0) {
+      throw new NotFoundException(
+        ErrorCodes.NOT_FOUND,
+        `Controlled document not found: ${missing.join(', ')}`,
+      );
+    }
+  }
+
   async getDocument(id: string): Promise<ControlledDocument> {
     const doc = await this.repo.findById(id);
     if (!doc) throw new NotFoundException(ErrorCodes.NOT_FOUND, `Document ${id} not found`);

@@ -128,7 +128,9 @@ export class IncidentController {
       'from there, including the 72-hour breach-notification clock.',
   })
   @ApiCreatedResponse({ type: IncidentResponseDto })
-  @ApiCommonErrors(401, 409, 412, 422)
+  // 404 joins the list: an unknown `riskId`/`assetId` is refused by name now rather than surfacing as
+  // a foreign-key violation the caller reads as a server fault.
+  @ApiCommonErrors(401, 404, 409, 412, 422)
   async report(
     @Body() dto: ReportIncidentDto,
     @CurrentUser() user: JwtPayload,

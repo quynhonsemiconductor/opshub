@@ -62,8 +62,16 @@ const PLAN = 'Make the branch rule blocking and add a gate that fails on one app
 const EVIDENCE = 'Re-audited ten releases after the change; the gate blocked two single approvals.';
 const REASON = 'The site closed for refurbishment before fieldwork could begin.';
 
-/** A document id stands in for the controlled report — no cross-schema FK, so any uuid is accepted. */
-const REPORT_DOC = '00000000-0000-7000-8000-00000000d0c1';
+/**
+ * The controlled report, created for real in `beforeAll`.
+ *
+ * IT USED TO BE A STAND-IN UUID, with the comment "no cross-schema FK, so any uuid is accepted" — true
+ * when written, and the defect: `report_document_id` was documented as "checked by the service" while
+ * nothing checked it, so this fixture was relying on the missing validation. Now that
+ * `POST /internal-audits/:id/report` calls `DocumentsService.assertExist`, a fake id is a 404, and two
+ * cases here failed the moment the guard landed. That is the fixture being wrong, not the guard.
+ */
+let reportDoc: string;
 
 interface AuditRow {
   id: string;
@@ -179,6 +187,15 @@ beforeAll(async () => {
   auditor = await login(app, FIXTURE.AUDITOR);
   admin = await login(app, FIXTURE.ADMIN);
   employee = await login(app, FIXTURE.NO_PERMISSIONS);
+
+  const doc = await apiRequest(app, security, 'POST', '/documents', {
+    code: `E2E-AUDREP-${Date.now().toString(36).toUpperCase()}`,
+    title: 'Internal audit report',
+    category: 'qms_procedure',
+    ownerId: FIXTURE.SECURITY.id,
+  });
+  expect(doc.status, JSON.stringify(doc.body)).toBe(201);
+  reportDoc = unwrap<{ id: string }>(doc.body).id;
 }, 60_000);
 
 afterAll(async () => {
@@ -463,14 +480,14 @@ describe('the lifecycle', () => {
       `/internal-audits/${audit.id}/report`,
       {
         conclusion: CONCLUSION,
-        reportDocumentId: REPORT_DOC,
+        reportDocumentId: reportDoc,
       },
     );
     expect(reported.status, JSON.stringify(reported.body)).toBe(200);
     expect(unwrap<AuditRow>(reported.body)).toMatchObject({
       status: 'reported',
       conclusion: CONCLUSION,
-      reportDocumentId: REPORT_DOC,
+      reportDocumentId: reportDoc,
     });
 
     const closed = await apiRequest(app, security, 'POST', `/internal-audits/${audit.id}/close`);
@@ -492,7 +509,7 @@ describe('the lifecycle', () => {
     const audit = await planAudit();
     await apiRequest(app, security, 'POST', `/internal-audits/${audit.id}/start`, {});
     const res = await apiRequest(app, security, 'POST', `/internal-audits/${audit.id}/report`, {
-      reportDocumentId: REPORT_DOC,
+      reportDocumentId: reportDoc,
     });
     expect(res.status).toBe(422);
   });
@@ -519,7 +536,7 @@ describe('the lifecycle', () => {
     await apiRequest(app, security, 'POST', `/internal-audits/${reported.id}/start`, {});
     await apiRequest(app, security, 'POST', `/internal-audits/${reported.id}/report`, {
       conclusion: CONCLUSION,
-      reportDocumentId: REPORT_DOC,
+      reportDocumentId: reportDoc,
     });
     const refused = await apiRequest(
       app,

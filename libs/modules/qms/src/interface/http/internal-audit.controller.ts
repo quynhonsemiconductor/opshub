@@ -24,6 +24,7 @@ import {
   type PagedResult,
 } from '@platform';
 import { EmployeeService } from '@modules/identity';
+import { DocumentsService } from '@modules/documents';
 import { InternalAuditService } from '../../application/internal-audit.service';
 import type { InternalAudit, InternalAuditRow } from '../../domain/internal-audit.types';
 import {
@@ -86,6 +87,7 @@ export class InternalAuditController {
   constructor(
     private readonly service: InternalAuditService,
     private readonly employees: EmployeeService,
+    private readonly documents: DocumentsService,
   ) {}
 
   // ── Static paths first, before `:id` ─────────────────────────────────────────
@@ -229,6 +231,9 @@ export class InternalAuditController {
     @Body() dto: ReportAuditDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<InternalAuditResponseDto> {
+    // ISO 9001 §9.2 keeps the audit RESULT as the record, and `report_document_id` is the only
+    // pointer to it. A dangling one is an audit whose report cannot be produced.
+    await this.documents.assertExist(dto.reportDocumentId);
     return toDto(await this.service.report(id, dto.conclusion, dto.reportDocumentId, user));
   }
 

@@ -55,6 +55,9 @@ function makeService(repoOver: Record<string, unknown> = {}) {
   const repo = {
     create: vi.fn().mockResolvedValue(DOC),
     findById: vi.fn().mockResolvedValue(DOC),
+    // Echoes back every id it is asked about, so a case that does not care about references is not
+    // silently exercising the not-found path.
+    findExistingIds: vi.fn().mockImplementation((ids: string[]) => Promise.resolve(ids)),
     findByCode: vi.fn().mockResolvedValue(null),
     list: vi.fn().mockResolvedValue({ rows: [DOC], total: 1 }),
     retire: vi.fn().mockResolvedValue(true),
@@ -302,5 +305,45 @@ describe('retireDocument', () => {
     const { service } = makeService({ retire: vi.fn().mockResolvedValue(false) });
 
     await expect(service.retireDocument('doc-1', ACTOR)).rejects.toThrow(/already retired/);
+  });
+});
+
+describe('DocumentsService.assertExist', () => {
+  /*
+   * THE PLURAL PATH HAS NO ROUTE, which is why it is tested here and not in an e2e. Every caller has a
+   * single document field, so `missing.join(', ')` can only be reached by calling this directly — and a
+   * mutation reducing it to `missing[0]` SURVIVED the e2e for exactly that reason. It stays plural
+   * because the method is variadic and the next caller may well pass two.
+   */
+  it('names EVERY missing id, not just the first', async () => {
+    const { service, repo } = makeService();
+    repo.findExistingIds.mockResolvedValue([]);
+
+    await expect(service.assertExist('doc-a', 'doc-b')).rejects.toThrow(/doc-a.*doc-b/s);
+  });
+
+  it('asks about each id once, however many times it is given', async () => {
+    // Deduplicated before the query: two references to the same document are one lookup.
+    const { service, repo } = makeService();
+    repo.findExistingIds.mockResolvedValue(['doc-a']);
+
+    await service.assertExist('doc-a', 'doc-a', null, undefined);
+    expect(repo.findExistingIds).toHaveBeenCalledWith(['doc-a']);
+  });
+
+  it('does not touch the database when every reference is absent', async () => {
+    /*
+     * `inArray(col, [])` is not valid SQL, and a patch that mentions no document at all is the common
+     * case — it must not cost a query.
+     */
+    const { service, repo } = makeService();
+    await service.assertExist(null, undefined);
+    expect(repo.findExistingIds).not.toHaveBeenCalled();
+  });
+
+  it('passes when the reference resolves', async () => {
+    const { service, repo } = makeService();
+    repo.findExistingIds.mockResolvedValue(['doc-a']);
+    await expect(service.assertExist('doc-a')).resolves.toBeUndefined();
   });
 });

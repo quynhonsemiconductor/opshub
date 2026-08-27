@@ -158,7 +158,13 @@ export const nonconformances = qmsSchema.table(
      * referenced it, because the finding and its CAPA are the audit evidence.
      */
     incidentId: uuid('incident_id').references(() => incidents.id, { onDelete: 'set null' }),
-    /** Supporting evidence as a controlled document. No FK — cross-schema, checked by the service. */
+    /**
+     * Supporting evidence as a controlled document.
+     *
+     * No FK — cross-schema. NOT settable through the API: no DTO exposes it, so there is no route to
+     * validate. If one is ever added it must call `DocumentsService.assertExist`, as the other four
+     * document references now do.
+     */
     evidenceDocumentId: uuid('evidence_document_id'),
 
     /**
@@ -325,7 +331,13 @@ export const internalAudits = qmsSchema.table(
     /** When management were told, and what they were told. Both required to reach `reported`. */
     reportedAt: timestamp('reported_at', { withTimezone: true }),
     conclusion: text('conclusion'),
-    /** The audit report as a controlled document. No FK — cross-schema, checked by the service. */
+    /**
+     * The audit report as a controlled document.
+     *
+     * No FK — cross-schema. `DocumentsService.assertExist` on `POST /internal-audits/:id/report` is
+     * what makes it real: ISO 9001 §9.2 keeps the audit RESULT as the record, and this is the only
+     * pointer to it.
+     */
     reportDocumentId: uuid('report_document_id'),
 
     closedAt: timestamp('closed_at', { withTimezone: true }),

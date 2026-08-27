@@ -143,6 +143,8 @@ export class IncidentService {
         'An incident cannot be detected in the future',
       );
     }
+    // Everything given, since nothing is "unchanged" on a row that does not exist yet.
+    await this.assertReferencesResolve(input.riskId ?? null, input.assetId ?? null);
 
     return this.db.transaction(async (tx) => {
       const incident = await this.repo.create({ ...input, reportedBy: actor.sub }, tx);
@@ -196,7 +198,12 @@ export class IncidentService {
       }
     }
 
-    await this.assertReferencesResolve(before, input);
+    // Only what the patch actually MOVES: re-resolving an unchanged reference would spend a query per
+    // correction, and resolving an explicit `null` would refuse the only way to unlink one.
+    await this.assertReferencesResolve(
+      input.riskId && input.riskId !== before.riskId ? input.riskId : null,
+      input.assetId && input.assetId !== before.assetId ? input.assetId : null,
+    );
 
     return this.db.transaction(async (tx) => {
       const after = await this.repo.update(id, input, tx);
@@ -520,12 +527,23 @@ export class IncidentService {
    * `NOT_FOUND` with the entity named in the message (`Risk … not found`). The GENERIC code, because
    * one refusal can name both fields at once — the field names are the content of the message.
    */
+  /**
+   * Refuse unless the ids given name real rows.
+   *
+   * TAKES THE IDS, NOT A PATCH. It used to take `(before, input)` and work out which references had
+   * changed, which made it unusable from `reportIncident` — there is no `before` when the incident is
+   * being created, and the alternative offered was to fabricate a zero-valued one. Deciding WHICH ids
+   * are worth a query belongs with the caller that has the old row; deciding whether an id resolves
+   * belongs here.
+   *
+   * `report` was the remaining hole: it inserted `riskId`/`assetId` unvalidated, so the same bogus uuid
+   * that now gets a 404 from the PATCH still produced a raw 500 from the POST — a foreign-key violation
+   * with no field name, on the one route in this module that needs no permission at all.
+   */
   private async assertReferencesResolve(
-    before: Incident,
-    input: UpdateIncidentInput,
+    riskId: string | null,
+    assetId: string | null,
   ): Promise<void> {
-    const riskId = input.riskId && input.riskId !== before.riskId ? input.riskId : null;
-    const assetId = input.assetId && input.assetId !== before.assetId ? input.assetId : null;
     if (!riskId && !assetId) return;
 
     const [riskFound, assetFound] = await Promise.all([
