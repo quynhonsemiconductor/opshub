@@ -94,7 +94,6 @@ const EVENT_GROUPS: EventGroup[] = [
     events: [
       { type: 'access_request.submitted', label: 'An access request needs review' },
       { type: 'access_request.approved', label: 'Your access request was approved' },
-      { type: 'access_request.denied', label: 'Your access request was denied' },
     ],
   },
   {

@@ -77,6 +77,8 @@ const PASSING_OUTCOMES: readonly VendorAssessmentOutcome[] = ['pass', 'pass_with
  * 3. THE REVIEW DATE IS COMPUTED, NEVER SUPPLIED. `review_due_on` is the assessment date plus the
  *    tier's `review_interval_months`, read from `isms.vendor_criticality_levels`. No API accepts it,
  *    for the same reason no API accepts a risk score: a cadence a caller can set is not a cadence.
+ *    And because the TIER IS the cadence, correcting the criticality re-dates it from the last
+ *    assessment — see `update`.
  *
  * 4. EVERY CHECK IS RESTATED AS A CODED REFUSAL, because a raw constraint violation reaches the
  *    caller as a 500 with no error code. The contract window reuses the shared `assertDateOrder`
@@ -84,6 +86,12 @@ const PASSING_OUTCOMES: readonly VendorAssessmentOutcome[] = ['pass', 'pass_with
  *
  * 5. A TERMINATED VENDOR ACCEPTS NOTHING NEW — no update, no assessment, no risk link. The row stays
  *    because last year's assessments and the risks linked to them are the audit evidence.
+ *
+ * 6. THE CROSS-SCHEMA REFERENCE IS CHECKED HERE OR NOWHERE. `data_processing_agreement_id` points at
+ *    `documents.documents` and carries no foreign key, like every other cross-schema reference in
+ *    this codebase. `ck_vendor_processor_agreement` asks only whether the column is FILLED IN, which
+ *    a mistyped uuid satisfies exactly as well as a real one — so without this the register shows an
+ *    Article 28 agreement on file that nobody can open.
  */
 @Injectable()
 export class VendorService {
@@ -115,6 +123,7 @@ export class VendorService {
       );
     }
     this.assertContractWindow(input.contractStartsOn, input.contractEndsOn);
+    await this.assertAgreementExists(input.dataProcessingAgreementId);
 
     return this.db.transaction(async (tx) => {
       const vendor = await this.repo.create(input, tx);
@@ -196,24 +205,62 @@ export class VendorService {
           'data processing agreement — GDPR Article 28(3)',
       );
     }
+    // The id the patch SUPPLIES. Nullish is skipped, so clearing the agreement still reaches the
+    // rule above rather than being answered as an unknown document.
+    await this.assertAgreementExists(input.dataProcessingAgreementId);
+
+    /*
+     * A CRITICALITY CORRECTION IS A CADENCE CORRECTION.
+     *
+     * `review_due_on` was computed from the OLD tier's `review_interval_months`, and everything that
+     * means "overdue" reads that stored column — the review-gap report, the `reviewDueOnOrBefore`
+     * list filter, the drawer, the reminder sweep. Raising a supplier from `low` (36 months) to
+     * `critical` (6) without moving the date leaves them looking current until their next assessment,
+     * which is exactly the assessment the shorter cadence existed to pull forward.
+     *
+     * RECOMPUTED HERE rather than derived in the report: deriving it in the report would leave the
+     * other three readers on the stale date, and the column is indexed (`ix_vendor_review_due`) for
+     * precisely those filters. Overwriting it costs nothing, because a hand-set due date is not a
+     * supported concept anywhere — no API accepts `reviewDueOn` (see `UpdateVendorInput`), so there
+     * is no override in that column to preserve.
+     *
+     * FROM THE LAST ASSESSMENT, never from today: the clock belongs to the assessment. Re-dating from
+     * now would turn a tier correction into a way to buy another cycle without being assessed. A
+     * supplier nobody has assessed keeps a null due date — there is nothing to count months from, and
+     * the review-gap report finds those rows by that null.
+     */
+    const redate =
+      input.criticality !== undefined && input.criticality !== before.criticality
+        ? await this.reviewDateInputsFor(id, input.criticality)
+        : null;
 
     return this.db.transaction(async (tx) => {
       const after = await this.repo.update(id, input, tx);
+      // Two statements, one transaction — the pairing `assess` uses. The correction and the cadence
+      // that hangs off it are one change, so no reader can see the new tier beside the old date.
+      const current = redate
+        ? ((await this.repo.setReviewDueOn(id, redate.assessedAt, redate.intervalMonths, tx)) ??
+          after!)
+        : after!;
       await this.trail.record(AUDIT_ACTION.VENDOR_UPDATED, id, actor, tx, {
         before: {
           name: before.name,
           criticality: before.criticality,
           ownerId: before.ownerId,
           dataProcessor: before.dataProcessor,
+          // Recorded on both sides because the date MOVED as a consequence of the tier. A trail that
+          // shows the criticality changing and not the cadence hides the half that has an effect.
+          reviewDueOn: before.reviewDueOn,
         },
         after: {
-          name: after!.name,
-          criticality: after!.criticality,
-          ownerId: after!.ownerId,
-          dataProcessor: after!.dataProcessor,
+          name: current.name,
+          criticality: current.criticality,
+          ownerId: current.ownerId,
+          dataProcessor: current.dataProcessor,
+          reviewDueOn: current.reviewDueOn,
         },
       });
-      return after!;
+      return current;
     });
   }
 
@@ -480,6 +527,52 @@ export class VendorService {
     if (from && to) {
       assertDateOrder(from, to, ErrorCodes.VENDOR_INVALID_CONTRACT_WINDOW, 'Contract window');
     }
+  }
+
+  /**
+   * Refuse a data processing agreement that names no controlled document.
+   *
+   * The database cannot: `data_processing_agreement_id` reaches into the `documents` schema with no
+   * foreign key, and `ck_vendor_processor_agreement` only asks whether the column is filled in. So a
+   * mistyped uuid produces the worst kind of record — a supplier whose Article 28 lawful basis reads
+   * as recorded and cannot be opened, on a screen that renders it as satisfied.
+   *
+   * NULLISH IS NOT AN ERROR, on the same reasoning as `EmployeeService.assertExist`: clearing the
+   * agreement is legitimate for anyone who is not an active processor, and the case where it is not
+   * legitimate is already refused with `VENDOR_AGREEMENT_REQUIRED`. Nothing to check is not a failed
+   * check.
+   *
+   * 404 WITH THE FIELD NAMED, matching how an unknown reference is reported elsewhere (`Risk ${id}
+   * not found`, `Employee not found: ...`): these routes carry two ids, so which one fails to
+   * resolve is the entire content of the answer.
+   */
+  private async assertAgreementExists(id: string | null | undefined): Promise<void> {
+    if (!id) return;
+    if (!(await this.repo.documentExists(id))) {
+      throw new NotFoundException(
+        ErrorCodes.NOT_FOUND,
+        `dataProcessingAgreementId ${id} names no controlled document`,
+      );
+    }
+  }
+
+  /**
+   * What the review date would be computed from for a tier the vendor is being MOVED to.
+   *
+   * Null when nobody has assessed them: the due date is an offset from an assessment, so with no
+   * assessment there is nothing to offset — and a null `review_due_on` is how the review-gap report
+   * recognises a supplier nobody has ever checked.
+   */
+  private async reviewDateInputsFor(
+    id: string,
+    criticality: Vendor['criticality'],
+  ): Promise<{ assessedAt: Date; intervalMonths: number } | null> {
+    const latest = await this.repo.latestAssessment(id);
+    if (!latest) return null;
+    return {
+      assessedAt: latest.assessedAt,
+      intervalMonths: await this.reviewIntervalFor(criticality),
+    };
   }
 
   private assertNotTerminated(vendor: Vendor): void {

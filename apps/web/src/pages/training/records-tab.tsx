@@ -365,9 +365,12 @@ export function RecordsTab() {
                   uploading the certificate for a course they took needs no permission code, and gating
                   this on `canManage` alone would have broken the ordinary flow while fixing the leak.
                 · `frozen` is LIFECYCLE: a revoked record is settled evidence and takes no more of it.
-                  It has nothing to do with who is asking, and it is ours rather than the API's — the
-                  service checks status on verify and revoke but not on a presign, so this is an
-                  editorial rule and is named as one instead of masquerading as authorization.
+                  It has nothing to do with who is asking. This used to add "and it is ours rather than
+                  the API's — the service checks status on verify and revoke but not on a presign", which
+                  was an accurate description of a hole: the rule was enforced by the component drawing
+                  the button and by nothing else. `presignCertificate` and `confirmCertificate` now both
+                  refuse a revoked record. The prop remains because a withheld control with a stated
+                  reason beats a 412 discovered after choosing a file.
             */}
             <CertificatesPanel
               recordId={selected.id}

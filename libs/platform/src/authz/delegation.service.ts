@@ -4,6 +4,8 @@ import { newId } from '@shared-kernel';
 import { InjectDrizzle, type DrizzleDB } from '../database/drizzle.provider';
 import { approvalDelegations } from '../../../../db/schema';
 import { NotFoundException, PreconditionFailedException } from '../errors/exceptions';
+import { NotificationSchedulerService } from '../notifications/notification-scheduler.service';
+import { nameOf, resolveEmployeeNames } from '../directory/employee-names';
 
 export interface ApprovalDelegation {
   id: string;
@@ -38,7 +40,10 @@ export interface CreateDelegationInput {
  */
 @Injectable()
 export class DelegationService {
-  constructor(@InjectDrizzle() private readonly db: DrizzleDB) {}
+  constructor(
+    @InjectDrizzle() private readonly db: DrizzleDB,
+    private readonly notifScheduler: NotificationSchedulerService,
+  ) {}
 
   /**
    * Create a new approval delegation. The window must start before it ends
@@ -57,18 +62,53 @@ export class DelegationService {
         'Delegation start must be before end',
       );
     }
-    const [row] = await this.db
-      .insert(approvalDelegations)
-      .values({
-        id: newId(),
-        fromUserId: input.fromUserId,
-        toUserId: input.toUserId,
-        startsAt: input.startsAt,
-        endsAt: input.endsAt,
-        reason: input.reason ?? null,
-      })
-      .returning();
-    return row;
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(approvalDelegations)
+        .values({
+          id: newId(),
+          fromUserId: input.fromUserId,
+          toUserId: input.toUserId,
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+          reason: input.reason ?? null,
+        })
+        .returning();
+
+      /*
+       * TELL THE DELEGATE. You cannot use authority you do not know you have.
+       *
+       * `request.delegation_created` had a template and a variable shape and NO SENDER — nothing
+       * anywhere scheduled it, so a delegation appeared silently and the only way to discover it was
+       * to notice extra rows in your queue. The delegator knows; they made the grant. The person who
+       * now has to act on somebody else's behalf, during a window that expires, was the one nobody
+       * told.
+       *
+       * INSIDE THE INSERT'S TRANSACTION, so a delegation cannot exist without its notification
+       * enqueued: the scheduler writes to an outbox row that the relay picks up, and rolling both
+       * back together is the only way the two cannot disagree.
+       *
+       * The delegator's NAME, not their id — the whole point of the sentence is which colleague
+       * handed this over, and a uuid identifies nobody. `resolveEmployeeNames` is the batched
+       * resolver the rest of the codebase uses; `nameOf` returns null rather than the id when the
+       * lookup misses, so an unresolvable delegator degrades to a nameless sentence instead of
+       * thirty-six hex characters.
+       */
+      const names = await resolveEmployeeNames(tx, [input.fromUserId]);
+      await this.notifScheduler.schedule(tx, {
+        type: 'request.delegation_created',
+        vars: {
+          delegatorName: nameOf(names, input.fromUserId) ?? 'A colleague',
+          endsAt: input.endsAt.toISOString(),
+        },
+        recipientId: input.toUserId,
+        actorId: input.fromUserId,
+        resourceId: row.id,
+        idempotencyKey: `delegation_created:${row.id}`,
+      });
+
+      return row;
+    });
   }
 
   /**
@@ -132,7 +172,7 @@ export class DelegationService {
         ),
       )
       .limit(1);
-    return row ? (row) : null;
+    return row ? row : null;
   }
 
   /** Purge delegations whose window ended before `before`. Called by the expiry cron. */

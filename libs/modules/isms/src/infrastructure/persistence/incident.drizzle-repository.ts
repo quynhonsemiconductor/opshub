@@ -2,7 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, isNull, notInArray, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { newId } from '@shared-kernel';
-import { incidentEvents, incidents } from '../../../../../../db/schema';
+// `assets` and `risks` are read here for one reason only: the reference guards below, which restate
+// `incidents`' own foreign keys as an answer a client can act on.
+import { assets, incidentEvents, incidents, risks } from '../../../../../../db/schema';
 import type { IIncidentRepository } from '../../domain/ports/incident.repository';
 import type {
   Incident,
@@ -167,6 +169,32 @@ export class IncidentDrizzleRepository implements IIncidentRepository {
       )
       .returning();
     return row ?? null;
+  }
+
+  // ── Reference guards ─────────────────────────────────────────────────────────
+
+  /**
+   * Whether the referenced rows exist, so the service can name the offending FIELD.
+   *
+   * Both select the primary key only. The question is existence, and a `SELECT *` here would carry a
+   * whole risk or asset row across the wire for a `!== undefined`.
+   */
+  async riskExists(id: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: risks.id })
+      .from(risks)
+      .where(eq(risks.id, id))
+      .limit(1);
+    return row !== undefined;
+  }
+
+  async assetExists(id: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: assets.id })
+      .from(assets)
+      .where(eq(assets.id, id))
+      .limit(1);
+    return row !== undefined;
   }
 
   // ── Timeline ─────────────────────────────────────────────────────────────────

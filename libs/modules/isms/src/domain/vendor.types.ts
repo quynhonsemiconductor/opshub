@@ -29,6 +29,10 @@ export interface RegisterVendorInput {
  * belong to the lifecycle methods, which check preconditions a patch would bypass; `reviewDueOn` is
  * computed from the criticality tier when an assessment is recorded, and accepting it here would let
  * a caller push their own next review date out indefinitely.
+ *
+ * Which is also why `criticality` being HERE re-dates the review: the tier carries the cadence, so a
+ * correction to it is a correction to the due date, computed the same way from the same last
+ * assessment. There is no hand-set due date for that to overwrite — this type is the reason.
  */
 export type UpdateVendorInput = Partial<{
   name: string;
@@ -82,8 +86,10 @@ export interface VendorRow extends Vendor {
 /**
  * A supplier who has never been assessed, or whose assessment is past its cadence.
  *
- * `dueOn` is derived in SQL from the last assessment and the tier's interval, so nothing downstream
- * recomputes it — the same reasoning as the incident module's 72-hour deadline.
+ * `dueOn` is the STORED `review_due_on`, not a value this report derives — so the report, the
+ * register screen and the `reviewDueOnOrBefore` filter cannot disagree about who is overdue. The
+ * column is written in SQL from the last assessment and the tier's interval, by the two paths that
+ * can change either input: recording an assessment, and correcting the criticality.
  */
 export interface VendorReviewGap {
   id: string;

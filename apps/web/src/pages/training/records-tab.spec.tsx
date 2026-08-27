@@ -270,9 +270,12 @@ describe('RecordsTab', () => {
     /*
      * THE OTHER HALF OF THE OLD BOOLEAN, now able to speak for itself. `frozen` is lifecycle, not
      * authorization: this caller holds `training.manage` and may certainly write to this record, and
-     * the reason Attach is gone has nothing to do with who they are. The API does NOT enforce this —
-     * the service refuses a verify or a revoke on a revoked record but not a presign — so it is an
-     * editorial rule, and drop the `frozen` prop and this is the assertion that catches it.
+     * the reason Attach is gone has nothing to do with who they are. This comment used to say "the API
+     * does NOT enforce this", which was correct and was the bug — a rule enforced only by the component
+     * that draws the button. `presignCertificate` and `confirmCertificate` now refuse a revoked record
+     * with `TRAINING_RECORD_NOT_VERIFIABLE` (`training.service.spec.ts` pins both). This case is still
+     * the one that catches a dropped `frozen` prop, and it is now about not sending a doomed request
+     * rather than about being the only guard.
      */
     const { container } = renderAs(['training.read', 'training.manage'], {
       ...RECORD,
@@ -291,5 +294,35 @@ describe('RecordsTab', () => {
      */
     expect(await screen.findByText(CERTIFICATE.fileName)).toBeTruthy();
     expect(screen.getByRole('button', { name: `Download ${CERTIFICATE.fileName}` })).toBeTruthy();
+
+    /*
+     * AND IT CAN STILL BE REMOVED. `frozen` gates ACCEPTANCE, not erasure, and this is the assertion
+     * that keeps the two apart.
+     *
+     * Revocation settles what the evidence proves; it says nothing about whether a particular file may
+     * exist. A certificate can hold personal data subject to an Art. 17 erasure request, or be a
+     * mis-upload — somebody else's passport scan on the wrong record — and neither becomes less urgent
+     * because the record was revoked afterwards. `removeCertificate` permits it and writes
+     * `TRAINING_CERTIFICATE_REMOVED` to the audit trail, so the deletion answers to the same audit that
+     * asks what was on file.
+     *
+     * Withholding the button did not make the file immutable. It made the only route to erasing it an S3
+     * console or a SQL statement, which leaves no trail at all — a constraint whose only compliant
+     * workaround is to leave the product.
+     */
+    expect(
+      screen.getByRole('button', { name: `Delete ${CERTIFICATE.fileName}` }),
+      'a revoked record must still allow erasure, which is audited',
+    ).toBeTruthy();
+  });
+
+  it('withholds Delete from a reader who may not write the record at all', async () => {
+    // The other direction: removal is gated on AUTHORIZATION, which `frozen` never was. Without this,
+    // dropping the gate entirely would pass the case above.
+    const { container } = renderAs(['training.read'], { ...RECORD, status: 'revoked' });
+    await openDrawer(container);
+
+    // `canPost` false hides the whole list, so there is no Delete to find and no request fired.
+    expect(screen.queryByRole('button', { name: /^Delete / })).toBeNull();
   });
 });

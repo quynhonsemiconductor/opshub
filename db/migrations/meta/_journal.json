@@ -232,6 +232,20 @@
       "when": 1787324703374,
       "tag": "0032_email_bounce_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787411103374,
+      "tag": "0033_incident_breach_notification_pair",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787411163374,
+      "tag": "0034_vendor_review_due_backfill",
+      "breakpoints": true
     }
   ]
 }

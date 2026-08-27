@@ -50,8 +50,19 @@ export function CertificatesPanel({
    */
   canPost: boolean;
   /**
-   * LIFECYCLE: a revoked record is settled and takes no further evidence. Independent of who is asking,
-   * and ours rather than the API's — the service does not refuse a presign on a revoked record.
+   * LIFECYCLE: a revoked record is settled and takes no further evidence. Independent of who is asking.
+   *
+   * This once said "ours rather than the API's — the service does not refuse a presign on a revoked
+   * record", and that was true and was the defect: the rule shipped in the browser only, so anybody
+   * with a shell had a different product. `presignCertificate` and `confirmCertificate` now both refuse
+   * with `TRAINING_RECORD_NOT_VERIFIABLE`. The prop stays because withholding the control and giving
+   * the reason is better than letting somebody choose a file and meet a 412 — not because it is the
+   * only thing standing in the way.
+   *
+   * IT GATES ACCEPTANCE, NOT REMOVAL. Attaching is refused; deleting is not. Revocation settles what the
+   * evidence PROVES, and says nothing about whether a particular file may exist — an erasure request or a
+   * mis-uploaded document is no less urgent afterwards, `removeCertificate` permits it, and the audit
+   * trail records it. See the booleans in the body for why withholding it would have been worse.
    */
   frozen: boolean;
 }) {
@@ -113,11 +124,27 @@ export function CertificatesPanel({
 
   const rows = certificates.data ?? [];
   /*
-   * Attaching and deleting need BOTH halves. Named once, because two controls reading the same rule
-   * out of two hand-written expressions is how they drift apart — and the one that drifts is the one
-   * nobody clicks.
+   * ATTACHING AND REMOVING ARE NOT THE SAME PERMISSION QUESTION, and folding them into one boolean got
+   * the second one wrong.
+   *
+   * `frozen` is about ACCEPTANCE: a revoked record no longer supports the claim its evidence was filed
+   * for, so it takes nothing new — and `presignCertificate`/`confirmCertificate` refuse it server-side
+   * with `TRAINING_RECORD_NOT_VERIFIABLE`.
+   *
+   * REMOVAL IS ERASURE, and revocation does not extinguish the reasons for it. A certificate can hold
+   * personal data subject to an Art. 17 request, or be a mis-upload — somebody else's passport scan
+   * attached to the wrong record. Neither becomes less urgent because the record was later revoked.
+   * `removeCertificate` allows it and records `TRAINING_CERTIFICATE_REMOVED` in the audit trail, so the
+   * deletion is answerable to the same audit that asks what was on file.
+   *
+   * WITHHOLDING IT HERE DID NOT MAKE THE FILE IMMUTABLE — it made the only route to erasing it an S3
+   * console or a SQL statement, which leaves no trail at all. A constraint whose only compliant
+   * workaround is to leave the product is worse than the thing it prevents.
+   *
+   * Only lifecycle is left in this expression: authorization was decided by the early return above, so
+   * repeating `canPost` here would be a guard that guards nothing.
    */
-  const writable = canPost && !frozen;
+  const acceptsNewEvidence = !frozen;
 
   /*
    * SAID, NOT SHOWN AS AN EMPTY SECTION. A reader looking at somebody else's record cannot otherwise
@@ -125,6 +152,19 @@ export function CertificatesPanel({
    * is the dangerous one: it looks like a compliance gap that is not there. The reason is also
    * actionable — a training administrator can grant the code — which is why it is a sentence rather
    * than a disabled button.
+   */
+  /*
+   * AUTHORIZATION IS SPENT HERE, and nowhere below.
+   *
+   * Everything after this line runs only for a reader who may write this record, so a second `canPost`
+   * further down guards nothing. Both existed in the first version of this split and mutation testing
+   * killed them as dead logic — setting either to `true` changed no observable behaviour. They read as
+   * guards, which in this panel is the exact bug being fixed: the original single `canManage` looked
+   * like an authorization check and was a status expression.
+   *
+   * So the structure is deliberate and worth keeping intact: ONE authorization decision at the top,
+   * LIFECYCLE decisions below it. `records-tab.spec.tsx` pins this return, so a later change that
+   * renders a read-only list for non-posters fails a test rather than silently handing them the buttons.
    */
   if (!canPost) {
     return (
@@ -177,22 +217,31 @@ export function CertificatesPanel({
             </Button>
             {/* Download stays for anybody who got this far — reading your own evidence, or evidence you
                 administer, is the whole point of the list. Deleting is a write. */}
-            {writable && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Delete ${certificate.fileName}`}
-                title="Delete"
-                onClick={() => setDeleting(certificate)}
-              >
-                <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-              </Button>
-            )}
+            {/*
+                UNGATED HERE, AND THAT IS NOT AN OVERSIGHT. Authorization is already spent: `!canPost`
+                returns above, so nothing below it renders for a reader who may not write this record —
+                which is why the list itself is behind the same check. A `mayRemove = canPost` here was
+                the first version of this, and mutation testing killed it as dead logic: setting it to
+                `true` changed no observable behaviour, because the early return had already decided.
+                A boolean that reads as a guard and guards nothing is the shape of bug this panel was
+                built to remove.
+
+                Lifecycle deliberately does NOT appear: `frozen` gates acceptance, not erasure.
+            */}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Delete ${certificate.fileName}`}
+              title="Delete"
+              onClick={() => setDeleting(certificate)}
+            >
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+            </Button>
           </RowActions>
         </div>
       ))}
 
-      {writable && (
+      {acceptsNewEvidence && (
         <>
           <Button
             variant="outline"
@@ -224,8 +273,9 @@ export function CertificatesPanel({
           removed — and it distinguishes "no evidence was ever attached" from "this record is closed". */}
       {canPost && frozen && (
         <p className="text-xs text-fg-subtle">
-          This record was revoked, so it takes no further evidence. What is already attached is
-          kept, because an audit asks what was on file at the time.
+          This record was revoked, so it takes no further evidence. What is already attached stays
+          readable, because an audit asks what was on file at the time — and can still be removed if
+          it must be, which is recorded.
         </p>
       )}
 

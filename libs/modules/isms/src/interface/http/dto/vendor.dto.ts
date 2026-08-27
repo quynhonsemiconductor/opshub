@@ -38,7 +38,13 @@ export const RegisterVendorSchema = z.object({
   criticality,
   ownerId: z.string().uuid(),
   dataProcessor: z.boolean().optional(),
-  /** The DPA as a controlled document. Required before an active processor — see the service. */
+  /**
+   * The DPA as a controlled document. Required before an active processor — see the service.
+   *
+   * `uuid()` only proves the SHAPE. That it names a real document is checked by the service, because
+   * there is no foreign key across schemas and a well-formed wrong uuid is the failure that looks
+   * like a complete Article 28 record.
+   */
   dataProcessingAgreementId: z.string().uuid().nullable().optional(),
   dataLocation: z.string().max(200).nullable().optional(),
   contractStartsOn: isoDate.nullable().optional(),
@@ -55,6 +61,9 @@ export class RegisterVendorDto extends createZodDto(RegisterVendorSchema) {}
  * is computed from the criticality tier when an assessment is recorded; accepting it here would let a
  * caller push their own next review out indefinitely, which is the one thing the cadence exists to
  * prevent.
+ *
+ * `criticality` IS accepted, and moves the due date with it — the tier is the cadence, so correcting
+ * the tier without recomputing the date would leave a supplier reported on the old schedule.
  */
 export const UpdateVendorSchema = RegisterVendorSchema.omit({ reference: true })
   .partial()

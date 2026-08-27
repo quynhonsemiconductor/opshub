@@ -90,6 +90,10 @@ function makeService(over: Record<string, unknown> = {}) {
         Promise.resolve(event({ incidentId, ...(input as Partial<IncidentEvent>) })),
       ),
     listEvents: vi.fn().mockResolvedValue([]),
+    // The reference guards default to "it resolves", so a test that says nothing about them is
+    // testing the rest of the patch rather than silently exercising a refusal.
+    riskExists: vi.fn().mockResolvedValue(true),
+    assetExists: vi.fn().mockResolvedValue(true),
     overdueBreaches: vi.fn().mockResolvedValue([]),
     unlinkedToRisk: vi.fn().mockResolvedValue([]),
     ...over,
@@ -101,6 +105,27 @@ function makeService(over: Record<string, unknown> = {}) {
 
   const service = new IncidentService(repo, db, audit as never);
   return { service, repo, transaction, audit, TX };
+}
+
+/**
+ * The refusal a call produced, so its CODE, STATUS and MESSAGE can each be asserted.
+ *
+ * `rejects.toMatchObject` is the house style and stays that way for a code-only assertion. It is the
+ * wrong tool for a message: `Error.message` is a non-enumerable own property, so what a subset match
+ * does with it depends on the matcher's internals rather than on the message. These refusals are
+ * remediation instructions — "record it as a timeline entry", "riskId <uuid>" — and a test that
+ * cannot see the text cannot pin the part a caller reads. It also FAILS on a success, so a guard
+ * that stopped throwing cannot pass as "no message to check".
+ */
+async function refusalOf(
+  call: Promise<unknown>,
+): Promise<Error & { code?: string; httpStatus?: number }> {
+  const outcome = await call.then(
+    () => null,
+    (thrown: Error & { code?: string; httpStatus?: number }) => thrown,
+  );
+  if (!outcome) throw new Error('expected the call to be refused, and it resolved');
+  return outcome;
 }
 
 /** A `reported` incident staged at the given status with the timestamps it must have passed. */
@@ -418,6 +443,170 @@ describe('updateIncident', () => {
       ),
     ).rejects.toMatchObject({ code: 'INCIDENT_TIMELINE_ORDER' });
     expect(repo.update).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A regulator notification cannot be un-said.
+ *
+ * The row this refusal prevents denies being a personal-data breach while carrying the timestamp
+ * proving one was reported — and neither half can be put back: `markRegulatorNotified` matches only
+ * an un-notified breach, and there is no un-notify route. It also drops out of the overdue-breach
+ * report, which filters on that same pair.
+ *
+ * `ck_incident_breach_notification_pair` refuses the row as well; that half needs a real database and
+ * is asserted in the e2e suite. These pin the ANSWER — a 412 with a code and a way out, rather than
+ * the CHECK violation's 500.
+ */
+describe('retracting a notified breach', () => {
+  const notified = () =>
+    incident({
+      personalDataBreach: true,
+      regulatorNotifiedAt: new Date('2026-03-02T09:00:00.000Z'),
+    });
+
+  it('refuses clearing personalDataBreach once the regulator has been notified', async () => {
+    const { service, repo } = makeService({ findById: vi.fn().mockResolvedValue(notified()) });
+
+    await expect(
+      service.updateIncident('inc-1', { personalDataBreach: false }, ACTOR),
+    ).rejects.toMatchObject({ code: 'INCIDENT_BREACH_NOTIFIED' });
+    // Before the write, not after: the update is unconditional on id, so a refusal that arrived
+    // later would already have cleared the flag.
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  it('names the notification date and what to do instead', async () => {
+    // The message is the whole remediation. A bare "precondition failed" leaves a responder who has
+    // just reassessed the incident with no legal next action.
+    const { service } = makeService({ findById: vi.fn().mockResolvedValue(notified()) });
+
+    const error = await refusalOf(
+      service.updateIncident('inc-1', { personalDataBreach: false }, ACTOR),
+    );
+
+    expect(error.message).toContain('2026-03-02T09:00:00.000Z');
+    expect(error.message).toContain('timeline entry');
+  });
+
+  it('still allows clearing it when no regulator was notified', async () => {
+    // The correction the flag exists for: an incident first logged as a breach and then reassessed,
+    // before anybody filed anything. Refusing this would be a worse bug than the one being fixed.
+    const { service, repo } = makeService({
+      findById: vi.fn().mockResolvedValue(incident({ personalDataBreach: true })),
+    });
+
+    await expect(
+      service.updateIncident('inc-1', { personalDataBreach: false }, ACTOR),
+    ).resolves.toMatchObject({ personalDataBreach: false });
+    expect(repo.update).toHaveBeenCalledWith(
+      'inc-1',
+      { personalDataBreach: false },
+      expect.anything(),
+    );
+  });
+
+  it('still allows marking it as a breach after a notification exists', async () => {
+    // Setting the flag adds an obligation; only clearing it erases the evidence one was met.
+    const { service, repo } = makeService({ findById: vi.fn().mockResolvedValue(notified()) });
+
+    await expect(
+      service.updateIncident('inc-1', { personalDataBreach: true }, ACTOR),
+    ).resolves.toBeTruthy();
+    expect(repo.update).toHaveBeenCalled();
+  });
+
+  it('leaves a patch that never mentions the flag alone', async () => {
+    // Pins `=== false` rather than a falsy test: an absent field is not a retraction, and reading it
+    // as one would refuse every severity correction on every notified breach.
+    const { service, repo } = makeService({ findById: vi.fn().mockResolvedValue(notified()) });
+
+    await expect(service.updateIncident('inc-1', { severity: 'low' }, ACTOR)).resolves.toBeTruthy();
+    expect(repo.update).toHaveBeenCalled();
+  });
+});
+
+/**
+ * `riskId` and `assetId` name rows in other tables, and both columns carry a foreign key.
+ *
+ * So the database already refuses a dangling reference — as SQLSTATE 23503, which reached the caller
+ * as `500 INTERNAL_ERROR` with no indication of which field was wrong. These pin the restatement.
+ */
+describe('references that name nothing', () => {
+  const RISK = '00000000-0000-4000-8000-000000000999';
+  const ASSET = '00000000-0000-4000-8000-000000000aaa';
+
+  it('refuses an unknown riskId as a 404 that names the field', async () => {
+    const { service, repo } = makeService({ riskExists: vi.fn().mockResolvedValue(false) });
+
+    const error = await refusalOf(service.updateIncident('inc-1', { riskId: RISK }, ACTOR));
+
+    // 404 and not 500 is the defect; `riskId` in the message is what makes the 404 actionable.
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.httpStatus).toBe(404);
+    expect(error.message).toContain(`riskId ${RISK}`);
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unknown assetId as a 404 that names the field', async () => {
+    const { service, repo } = makeService({ assetExists: vi.fn().mockResolvedValue(false) });
+
+    const error = await refusalOf(service.updateIncident('inc-1', { assetId: ASSET }, ACTOR));
+
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.httpStatus).toBe(404);
+    expect(error.message).toContain(`assetId ${ASSET}`);
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  it('reports BOTH bad references in one refusal', async () => {
+    // Told about one, the caller fixes it, resubmits and is told about the other. That round trip is
+    // why `assertExist` resolves every id before throwing, and why this does the same.
+    const { service } = makeService({
+      riskExists: vi.fn().mockResolvedValue(false),
+      assetExists: vi.fn().mockResolvedValue(false),
+    });
+
+    const error = await refusalOf(
+      service.updateIncident('inc-1', { riskId: RISK, assetId: ASSET }, ACTOR),
+    );
+
+    expect(error.message).toContain(`riskId ${RISK}`);
+    expect(error.message).toContain(`assetId ${ASSET}`);
+  });
+
+  it('accepts references that resolve', async () => {
+    const { service, repo } = makeService();
+
+    await expect(
+      service.updateIncident('inc-1', { riskId: RISK, assetId: ASSET }, ACTOR),
+    ).resolves.toMatchObject({ riskId: RISK, assetId: ASSET });
+    expect(repo.riskExists).toHaveBeenCalledWith(RISK);
+    expect(repo.assetExists).toHaveBeenCalledWith(ASSET);
+  });
+
+  it('asks nothing when the reference is unchanged or being cleared', async () => {
+    // What is stored already satisfies the foreign key, and a null is an UNLINK — neither has a
+    // target to resolve, so neither is worth a round trip.
+    const echoed = makeService({ findById: vi.fn().mockResolvedValue(incident({ riskId: RISK })) });
+    await expect(
+      echoed.service.updateIncident('inc-1', { riskId: RISK }, ACTOR),
+    ).resolves.toBeTruthy();
+    expect(echoed.repo.riskExists).not.toHaveBeenCalled();
+
+    const cleared = makeService({
+      findById: vi.fn().mockResolvedValue(incident({ riskId: RISK })),
+    });
+    await expect(
+      cleared.service.updateIncident('inc-1', { riskId: null, assetId: null }, ACTOR),
+    ).resolves.toBeTruthy();
+    expect(cleared.repo.riskExists).not.toHaveBeenCalled();
+    expect(cleared.repo.assetExists).not.toHaveBeenCalled();
+    expect(cleared.repo.update).toHaveBeenCalledWith(
+      'inc-1',
+      { riskId: null, assetId: null },
+      expect.anything(),
+    );
   });
 });
 

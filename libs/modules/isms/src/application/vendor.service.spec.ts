@@ -9,6 +9,12 @@
  *
  * The repository, the transaction and the audit are stubs, so what is under test is this service's
  * decisions.
+ *
+ * TWO OF THESE CANNOT BE WRITTEN ANY OTHER WAY. That a mistyped `dataProcessingAgreementId` is looked
+ * up AT ALL is a statement about a call, not about a row — an e2e sees only the 404, and a 404 is
+ * also what an unknown vendor gives. And that correcting the criticality re-dates the review from the
+ * LAST ASSESSMENT rather than from today is read off the arguments; the resulting DATE is Postgres's
+ * arithmetic, which is the e2e's job.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { ConflictException, type DrizzleDB } from '@platform';
@@ -113,6 +119,9 @@ function makeService(over: Record<string, unknown> = {}) {
     create: vi.fn().mockResolvedValue(vendor()),
     findById: vi.fn().mockResolvedValue(vendor()),
     findByReference: vi.fn().mockResolvedValue(null),
+    // Default: the document exists. Every refusal below overrides it, so a test that forgets to is
+    // exercising the allowed path rather than passing on a stub that refuses everything.
+    documentExists: vi.fn().mockResolvedValue(true),
     list: vi.fn().mockResolvedValue({ rows: [], total: 0 }),
     update: vi
       .fn()
@@ -494,6 +503,207 @@ describe('update', () => {
       code: 'VENDOR_TERMINATED',
     });
     expect(repo.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('the data processing agreement reference', () => {
+  const DPA = 'doc-1';
+
+  it('refuses to register against a document that does not exist', async () => {
+    // `data_processing_agreement_id` has no foreign key — `documents` is another schema — and
+    // `ck_vendor_processor_agreement` only asks whether the column is filled in. A well-formed wrong
+    // uuid therefore produces a supplier whose Article 28 basis reads as recorded and cannot be
+    // opened, which is worse than an empty column: the empty one is refused on the way live.
+    const { service, repo } = makeService({ documentExists: vi.fn().mockResolvedValue(false) });
+    await expect(
+      service.register({ ...REGISTER, dataProcessor: true, dataProcessingAgreementId: DPA }, ACTOR),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it('names the field in the refusal, because the route carries two ids', async () => {
+    // `ownerId` and `dataProcessingAgreementId` are both cross-schema references on this body and
+    // both answer 404. Which one failed to resolve is the entire content of the message.
+    const { service } = makeService({ documentExists: vi.fn().mockResolvedValue(false) });
+    await expect(
+      service.register({ ...REGISTER, dataProcessingAgreementId: DPA }, ACTOR),
+    ).rejects.toThrow(/dataProcessingAgreementId/);
+  });
+
+  it('checks the id it was given, not some other one', async () => {
+    const { service, repo } = makeService();
+    await service.register({ ...REGISTER, dataProcessingAgreementId: DPA }, ACTOR);
+    expect(repo.documentExists).toHaveBeenCalledWith(DPA);
+  });
+
+  it('does not look anything up when no agreement is given', async () => {
+    // Nothing to check is not a failed check — the rule `EmployeeService.assertExist` states, and
+    // what lets an optional reference be passed without an `if` around the guard.
+    const { service, repo } = makeService();
+    await service.register(REGISTER, ACTOR);
+    expect(repo.documentExists).not.toHaveBeenCalled();
+  });
+
+  it('refuses a correction that points the agreement at nothing', async () => {
+    const { service, repo } = makeService({ documentExists: vi.fn().mockResolvedValue(false) });
+    await expect(
+      service.update('ven-1', { dataProcessingAgreementId: DPA }, ACTOR),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  it('still allows the agreement to be cleared where that is legitimate', async () => {
+    /*
+     * MUST KEEP WORKING. A prospective supplier marked as a processor by mistake has to be able to
+     * drop the agreement, and null is not an unknown document. The case where clearing is NOT
+     * legitimate — an active processor — is refused with `VENDOR_AGREEMENT_REQUIRED` and its own
+     * message; answering that with a 404 would tell the user their document is missing when their
+     * actual problem is that the supplier is live.
+     */
+    const { service, repo } = makeService({
+      findById: vi.fn().mockResolvedValue(vendor({ dataProcessingAgreementId: 'doc-old' })),
+    });
+    await expect(
+      service.update('ven-1', { dataProcessingAgreementId: null }, ACTOR),
+    ).resolves.toMatchObject({ dataProcessingAgreementId: null });
+    expect(repo.documentExists).not.toHaveBeenCalled();
+  });
+
+  it('leaves an untouched agreement alone rather than re-reading it', async () => {
+    // The stored id was checked when it was written. Re-reading it would put a documents query on
+    // every unrelated correction — a rename, a notice period — for an answer nothing acts on.
+    const { service, repo } = makeService({
+      findById: vi.fn().mockResolvedValue(vendor({ dataProcessingAgreementId: 'doc-old' })),
+    });
+    await service.update('ven-1', { name: 'Renamed' }, ACTOR);
+    expect(repo.documentExists).not.toHaveBeenCalled();
+  });
+});
+
+describe('correcting the criticality moves the cadence with it', () => {
+  /** `low` is 36 months in the stub and `critical` 6, so the direction is visible in the number. */
+  const lowVendor = () => vendor({ criticality: 'low', reviewDueOn: '2029-03-01' });
+
+  it('re-dates the review from the last assessment and the NEW tier', async () => {
+    /*
+     * THE DEFECT. `review_due_on` is what the review-gap report, the `reviewDueOnOrBefore` filter and
+     * the reminder sweep all read. Raised from `low` (36 months) to `critical` (6) and left alone, a
+     * supplier who is overdue by the tier they are now in appears in none of the three.
+     */
+    const { service, repo } = makeService({ findById: vi.fn().mockResolvedValue(lowVendor()) });
+    await service.update('ven-1', { criticality: 'critical' }, ACTOR);
+    expect(repo.setReviewDueOn).toHaveBeenCalledWith(
+      'ven-1',
+      new Date('2026-03-01T00:00:00.000Z'),
+      6,
+      expect.anything(),
+    );
+  });
+
+  it('re-dates downwards too, using the tier moved TO', async () => {
+    // The mirror case, and the one that catches a fix that only ever shortens: a supplier corrected
+    // down to `low` is entitled to the 36-month cadence rather than being held at 6.
+    const { service, repo } = makeService();
+    await service.update('ven-1', { criticality: 'low' }, ACTOR);
+    expect(repo.setReviewDueOn).toHaveBeenCalledWith(
+      'ven-1',
+      expect.any(Date),
+      36,
+      expect.anything(),
+    );
+  });
+
+  it('counts from the assessment, never from today', async () => {
+    /*
+     * Re-dating from `now` would make a tier correction a way to buy a fresh cycle without being
+     * assessed — for anybody holding `vendor.manage`, on a route whose stated purpose is fixing
+     * typos. The timestamp asserted is the assessment's own, and it is in the past.
+     */
+    const assessedAt = new Date('2025-11-15T08:30:00.000Z');
+    const { service, repo } = makeService({
+      findById: vi.fn().mockResolvedValue(lowVendor()),
+      latestAssessment: vi.fn().mockResolvedValue(assessment({ assessedAt })),
+    });
+    await service.update('ven-1', { criticality: 'critical' }, ACTOR);
+    expect(repo.setReviewDueOn).toHaveBeenCalledWith('ven-1', assessedAt, 6, expect.anything());
+  });
+
+  it('reads the interval from the tiers table rather than assuming one', async () => {
+    // Asserting the CALL: a service that never asked must be hard-coding the cadence.
+    const { service, repo } = makeService({ findById: vi.fn().mockResolvedValue(lowVendor()) });
+    await service.update('ven-1', { criticality: 'critical' }, ACTOR);
+    expect(repo.listLevels).toHaveBeenCalled();
+  });
+
+  it('applies the correction and the new date in ONE transaction', async () => {
+    // Two statements, and no reader may see the new tier beside the old date.
+    const { service, repo, TX } = makeService({ findById: vi.fn().mockResolvedValue(lowVendor()) });
+    await service.update('ven-1', { criticality: 'critical' }, ACTOR);
+    expect(repo.update).toHaveBeenCalledWith('ven-1', { criticality: 'critical' }, TX);
+    expect(repo.setReviewDueOn).toHaveBeenCalledWith('ven-1', expect.any(Date), 6, TX);
+  });
+
+  it('answers with the re-dated row, not the one written before it', async () => {
+    // The screen renders what comes back. Returning the pre-date row would show the corrected tier
+    // above the old due date — the exact disagreement this fix exists to remove.
+    const { service } = makeService({
+      findById: vi.fn().mockResolvedValue(lowVendor()),
+      setReviewDueOn: vi
+        .fn()
+        .mockResolvedValue(vendor({ criticality: 'critical', reviewDueOn: '2026-09-01' })),
+    });
+    const result = await service.update('ven-1', { criticality: 'critical' }, ACTOR);
+    expect(result.reviewDueOn).toBe('2026-09-01');
+  });
+
+  it('leaves the date alone when the criticality is not being changed', async () => {
+    // A rename is not a cadence change. Re-dating on every patch would rewrite the column — and the
+    // `updated_at` beside it — for corrections that have nothing to do with the review schedule.
+    const { service, repo } = makeService({ findById: vi.fn().mockResolvedValue(lowVendor()) });
+    await service.update('ven-1', { name: 'Renamed' }, ACTOR);
+    expect(repo.setReviewDueOn).not.toHaveBeenCalled();
+  });
+
+  it('leaves the date alone when the patch restates the criticality it already has', async () => {
+    // The register form sends the WHOLE record, not a diff, so an unchanged tier arrives on every
+    // save. Comparing against the stored value is what keeps those saves off the cadence.
+    const { service, repo } = makeService({ findById: vi.fn().mockResolvedValue(lowVendor()) });
+    await service.update('ven-1', { criticality: 'low', name: 'Renamed' }, ACTOR);
+    expect(repo.setReviewDueOn).not.toHaveBeenCalled();
+  });
+
+  it('leaves a never-assessed supplier with no due date at all', async () => {
+    /*
+     * There is nothing to count months from, and inventing a date from today would hide the worst
+     * case the review-gap report exists to surface: it recognises a supplier nobody has ever checked
+     * by the NULL `review_due_on`, and any date at all moves them into the merely-overdue pile.
+     */
+    const { service, repo } = makeService({
+      findById: vi.fn().mockResolvedValue(lowVendor()),
+      latestAssessment: vi.fn().mockResolvedValue(null),
+    });
+    await service.update('ven-1', { criticality: 'critical' }, ACTOR);
+    expect(repo.setReviewDueOn).not.toHaveBeenCalled();
+    expect(repo.update).toHaveBeenCalled();
+  });
+
+  it('re-dates nothing on a terminated supplier, which accepts no correction either', async () => {
+    const { service, repo } = makeService({
+      findById: vi.fn().mockResolvedValue(
+        vendor({
+          status: 'terminated',
+          criticality: 'low',
+          terminatedAt: new Date(),
+          terminationReason: REASON,
+        }),
+      ),
+    });
+    await expect(service.update('ven-1', { criticality: 'critical' }, ACTOR)).rejects.toMatchObject(
+      {
+        code: 'VENDOR_TERMINATED',
+      },
+    );
+    expect(repo.setReviewDueOn).not.toHaveBeenCalled();
   });
 });
 

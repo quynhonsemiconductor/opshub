@@ -67,8 +67,9 @@ const ALLOWED_TRANSITIONS: Record<IncidentStatus, readonly IncidentStatus[]> = {
  *    change appends a `status_change` entry in the SAME transaction, so a timeline can never be
  *    missing the step the status column claims happened.
  *
- * 3. TRANSLATING CONSTRAINTS INTO ANSWERS. Each CHECK is restated as a coded refusal in front of
- *    the write, because a raw violation reaches the caller as a 500 with no error code.
+ * 3. TRANSLATING CONSTRAINTS INTO ANSWERS. Each CHECK — and each foreign key — is restated as a
+ *    coded refusal in front of the write, because a raw violation reaches the caller as a 500 with
+ *    no error code and no indication of which field was wrong.
  *
  * REPORTING NEEDS NO PERMISSION. Anybody who notices something must be able to raise it; handling
  * is what `incident.manage` governs. That asymmetry is deliberate and is enforced at the routes.
@@ -170,6 +171,7 @@ export class IncidentService {
   async updateIncident(id: string, input: UpdateIncidentInput, actor: Actor): Promise<Incident> {
     const before = await this.getIncident(id);
     this.assertOpen(before);
+    this.assertBreachNotRetracted(before, input);
 
     if (input.detectedAt) {
       const detected = new Date(input.detectedAt);
@@ -193,6 +195,8 @@ export class IncidentService {
         }
       }
     }
+
+    await this.assertReferencesResolve(before, input);
 
     return this.db.transaction(async (tx) => {
       const after = await this.repo.update(id, input, tx);
@@ -457,6 +461,87 @@ export class IncidentService {
         ErrorCodes.INCIDENT_NOT_IN_STATE,
         `Incident ${incident.reference} is '${incident.status}' and can no longer be changed. ` +
           'Add a timeline entry instead.',
+      );
+    }
+  }
+
+  /**
+   * A regulator notification cannot be un-said, so the flag it depended on cannot be cleared.
+   *
+   * WHAT THIS ROW LOOKED LIKE WITHOUT THE GUARD: `personal_data_breach = false` alongside a
+   * `regulator_notified_at` proving a supervisory authority was told. The record then asserts two
+   * contradictory things, and the contradiction is not recoverable — `markRegulatorNotified` matches
+   * only `personalDataBreach = true AND regulatorNotifiedAt IS NULL`, and there is no un-notify
+   * route, so nothing can restore either half. The incident also drops silently out of
+   * `overdueBreaches` and out of `ix_incident_breach_detected`, which filter on exactly that pair:
+   * the register a DPO reads stops mentioning an incident that was reported to a regulator.
+   *
+   * `=== false` rather than a falsy test, because `undefined` means the patch did not mention the
+   * field — most patches do not — and treating that as a retraction would refuse a severity change.
+   *
+   * SETTING IT TO TRUE IS STILL FINE, notified or not: that direction adds an obligation rather than
+   * erasing the evidence one was met.
+   *
+   * `ck_incident_breach_notification_pair` (migration 0033) says the same thing to anything that
+   * writes the table without coming through here; this is the half that answers with a code.
+   */
+  private assertBreachNotRetracted(before: Incident, input: UpdateIncidentInput): void {
+    if (input.personalDataBreach === false && before.regulatorNotifiedAt) {
+      throw new PreconditionFailedException(
+        ErrorCodes.INCIDENT_BREACH_NOTIFIED,
+        `Incident ${before.reference} was notified to the supervisory authority on ` +
+          `${before.regulatorNotifiedAt.toISOString()}, so it can no longer stop being a ` +
+          'personal-data breach. Record the reassessment as a timeline entry instead, which is ' +
+          'what a regulator reads.',
+      );
+    }
+  }
+
+  /**
+   * Refuse a `riskId` or `assetId` that names no row, saying WHICH field was wrong.
+   *
+   * Both columns carry real foreign keys (migration 0021), so the database already refuses a
+   * dangling reference — but it refuses it as SQLSTATE 23503, which the filter reports as a 500
+   * `INTERNAL_ERROR`. A client is then told the server broke, when what happened is that one field
+   * of its request pointed at nothing. This is the same restatement every CHECK gets above, applied
+   * to the two foreign keys.
+   *
+   * ONLY THE VALUES THE PATCH CHANGES are resolved. What is already stored satisfies the foreign
+   * key by construction, so re-checking an id the caller merely echoed back is a round trip whose
+   * answer is known. A `null` is a caller UNLINKING, which needs no target to exist.
+   *
+   * BOTH ANSWERS ARE COLLECTED BEFORE ANYTHING IS THROWN, and both queries go out together. A patch
+   * naming a bad risk and a bad asset must report both: told about one, the caller fixes it,
+   * resubmits, and is told about the other — the exact failure `EmployeeService.assertExist` was
+   * written to stop repeating.
+   *
+   * 404 rather than 422, following that helper and the call sites it serves in every module: an
+   * unknown reference is a thing that is not there, and the ISMS services already report one as
+   * `NOT_FOUND` with the entity named in the message (`Risk … not found`). The GENERIC code, because
+   * one refusal can name both fields at once — the field names are the content of the message.
+   */
+  private async assertReferencesResolve(
+    before: Incident,
+    input: UpdateIncidentInput,
+  ): Promise<void> {
+    const riskId = input.riskId && input.riskId !== before.riskId ? input.riskId : null;
+    const assetId = input.assetId && input.assetId !== before.assetId ? input.assetId : null;
+    if (!riskId && !assetId) return;
+
+    const [riskFound, assetFound] = await Promise.all([
+      riskId ? this.repo.riskExists(riskId) : true,
+      assetId ? this.repo.assetExists(assetId) : true,
+    ]);
+
+    const missing = [
+      ...(riskFound ? [] : [`riskId ${riskId}`]),
+      ...(assetFound ? [] : [`assetId ${assetId}`]),
+    ];
+    if (missing.length > 0) {
+      throw new NotFoundException(
+        ErrorCodes.NOT_FOUND,
+        // The FIELD, not only the id: which reference is wrong is the whole content of this failure.
+        `Reference not found: ${missing.join(', ')}`,
       );
     }
   }

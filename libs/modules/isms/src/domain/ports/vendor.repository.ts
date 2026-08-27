@@ -30,6 +30,20 @@ export interface IVendorRepository {
   create(input: RegisterVendorInput, tx?: DbExecutor): Promise<Vendor>;
   findById(id: string, tx?: DbExecutor): Promise<Vendor | null>;
   findByReference(reference: string): Promise<Vendor | null>;
+  /**
+   * Whether a controlled document with this id exists — the `documents` schema, read from here.
+   *
+   * `vendors.data_processing_agreement_id` carries NO foreign key, deliberately and like every other
+   * cross-schema reference in this codebase, so nothing but a lookup can tell a real agreement from
+   * a mistyped uuid. Answered in this repository rather than by injecting `DocumentsService` into the
+   * register: the vendor queries already cross a schema for the spend report, and a module edge from
+   * ISMS to documents would exist to answer a single boolean.
+   *
+   * A RETIRED DOCUMENT COUNTS. Retirement in `documents` is soft — the row stays readable so a
+   * superseded control is still explainable years later — and an agreement that was in force when the
+   * supplier was assessed is exactly the evidence an auditor asks for.
+   */
+  documentExists(id: string, tx?: DbExecutor): Promise<boolean>;
   list(
     filters: VendorFilters,
     limit: number,
@@ -97,9 +111,13 @@ export interface IVendorRepository {
    * same thing by "overdue". Re-deriving here would make the report disagree with the column the
    * user is looking at whenever the two arithmetics differ, which they do at month ends.
    *
-   * The trade, stated: changing a tier's interval does not re-date suppliers already assessed. It
-   * applies from their next assessment, and a policy change that must apply immediately is a
-   * migration.
+   * The trade, stated: changing a TIER'S INTERVAL — the reference-data row, which applies to every
+   * supplier at that tier — does not re-date suppliers already assessed. It applies from their next
+   * assessment, and a policy change that must apply immediately is a migration.
+   *
+   * Correcting ONE SUPPLIER'S TIER is the other case and is not that trade: `VendorService.update`
+   * recomputes `review_due_on` from the last assessment and the new tier, so this report moves with
+   * the correction instead of waiting for an assessment that the new cadence says is already overdue.
    */
   reviewGaps(limit: number): Promise<VendorReviewGap[]>;
   /**
