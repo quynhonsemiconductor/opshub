@@ -76,7 +76,7 @@
     "@opentelemetry/sdk-trace-base": "^2.9.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "@qnsc-vn/identity": "^6.0.0",
-    "@qnsc-vn/observability": "^0.1.4",
+    "@qnsc-vn/observability": "^0.1.5",
     "@qnsc-vn/platform-cache": "^2.1.0",
     "@qnsc-vn/platform-http": "^3.1.1",
     "cockatiel": "^4.0.0",

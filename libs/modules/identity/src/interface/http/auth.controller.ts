@@ -14,6 +14,7 @@ import {
 } from '@platform';
 import type { JwtPayload } from '@platform';
 import { AuthService } from '@qnsc-vn/identity';
+import { AuthMetrics } from '@qnsc-vn/observability';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import '@fastify/cookie';
 import { EntraLoginDto, DevLoginDto, AuthResponseDto, MeResponseDto } from './dto/auth.dto';
@@ -38,6 +39,7 @@ export class AuthController {
     @Inject(AuthService) private readonly authService: AuthService,
     private readonly config: AppConfigService,
     private readonly authz: AuthzService,
+    private readonly authMetrics: AuthMetrics,
   ) {
     this.#refreshMaxAge = config.get('JWT_REFRESH_EXPIRY_DAYS') * SEC_PER_DAY;
   }
@@ -93,7 +95,14 @@ export class AuthController {
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<AuthResponseDto> {
-    const result = await this.authService.ssoLogin(dto.idToken, request.ip);
+    let result: Awaited<ReturnType<AuthService['ssoLogin']>>;
+    try {
+      result = await this.authService.ssoLogin(dto.idToken, request.ip);
+    } catch (err) {
+      this.authMetrics.recordLogin('sso', 'failure');
+      throw err;
+    }
+    this.authMetrics.recordLogin('sso', 'success');
     reply.setCookie(
       REFRESH_COOKIE,
       result.refreshToken,
@@ -123,7 +132,14 @@ export class AuthController {
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<AuthResponseDto> {
-    const result = await this.authService.devLogin(dto.email, request.ip);
+    let result: Awaited<ReturnType<AuthService['devLogin']>>;
+    try {
+      result = await this.authService.devLogin(dto.email, request.ip);
+    } catch (err) {
+      this.authMetrics.recordLogin('dev', 'failure');
+      throw err;
+    }
+    this.authMetrics.recordLogin('dev', 'success');
     reply.setCookie(
       REFRESH_COOKIE,
       result.refreshToken,
