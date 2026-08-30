@@ -151,11 +151,16 @@ jobs:
         working-directory: infra/live/develop
         run: tofu apply -input=false -auto-approve
         env:
-          # The only TF_VAR left. The Entra ids and the Cloudflare account id are public
-          # identifiers held in infra/live/develop/variables.tf, so plan and apply now
-          # read the same values (see infra-plan.yml); develop's image_tag is `latest`
-          # in the caller; and acm_cert_arn was a required variable no resource read.
+          # The Entra ids and the Cloudflare account id are public identifiers held in
+          # infra/live/develop/variables.tf, so plan and apply now read the same values
+          # (see infra-plan.yml); develop's image_tag is `latest` in the caller; and
+          # acm_cert_arn was a required variable no resource read.
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Org-level secret, same one rally already maps. Without this,
+          # grafana_alerting_auth stays empty and module.alerts/grafana_slo/
+          # grafana_dashboard all count-gate to zero — apply "succeeds" but creates
+          # no Grafana resources at all, silently.
+          TF_VAR_grafana_alerting_auth: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
 
       # Mint a short-lived installation token from the RELEASE_BOT GitHub App
       # (same app release.yml uses) so we never need a long-lived user PAT.
@@ -246,6 +251,11 @@ jobs:
         run: tofu apply -input=false -auto-approve
         env:
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Org-level secret, same one rally already maps. Without this,
+          # grafana_alerting_auth stays empty and module.alerts/grafana_slo/
+          # grafana_dashboard all count-gate to zero — apply "succeeds" but creates
+          # no Grafana resources at all, silently.
+          TF_VAR_grafana_alerting_auth: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
           # Pin production to the exact release tag that triggered this apply (e.g.
           # v1.4.2), so an infra apply can never move production onto a different image
           # than the release it belongs to.
