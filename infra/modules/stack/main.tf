@@ -219,6 +219,12 @@ module "secrets" {
 
   recovery_window_days = var.secrets_recovery_window_days
 
+  # Cost: collapse the set into one JSON secret. Staged across several applies — see
+  # `secrets_bundle_name` in variables.tf for the ordering and why it is staged.
+  bundle_name       = var.secrets_bundle_name
+  use_bundle        = var.secrets_use_bundle
+  create_standalone = var.secrets_create_standalone
+
   # Three secrets, not five. `db-url` is gone — the credential is read live from the
   # RDS-managed secret AWS rotates (see local.app_secrets) — and so is `jwt-public-key`,
   # which the app derives from the private half at boot.

@@ -384,6 +384,39 @@ variable "secrets_recovery_window_days" {
   default     = 30
 }
 
+variable "secrets_bundle_name" {
+  description = <<-EOT
+    Name of the bundled secret, created as "<product>/<env>/<name>". Empty (default)
+    keeps one Secrets Manager secret per entry. Setting this creates the bundle but
+    does NOT switch anything onto it — see `secrets_use_bundle`.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "secrets_use_bundle" {
+  description = <<-EOT
+    Read secrets from the bundle instead of the standalone containers. Requires
+    `secrets_bundle_name`, and requires the bundle to already hold every key — a
+    reference to an absent key fails the task at boot.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "secrets_create_standalone" {
+  description = <<-EOT
+    Whether the per-entry standalone secrets still exist. Defaults to
+    `!secrets_use_bundle`, which is correct outside a migration.
+
+    Set TRUE alongside `secrets_use_bundle` for the retained-rollback step: both exist,
+    references point at the bundle, and reverting one line rolls back without needing
+    the destroyed values. Drop it once the bundle is proven to realise the saving.
+  EOT
+  type        = bool
+  default     = null
+}
+
 variable "container_insights" {
   description = <<-EOT
     ECS Container Insights mode: "enhanced", "enabled" or "disabled".
