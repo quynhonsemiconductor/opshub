@@ -1,6 +1,6 @@
 // Re-exported by each live caller, so CI's output-sync (which reads ECS/RDS/
 // networking names from the stack outputs) keeps working unchanged.
-output "alb_dns_name" { value = data.terraform_remote_state.runtime.outputs.alb_dns_name }
+output "alb_dns_name" { value = try(data.terraform_remote_state.runtime.outputs.alb_dns_name, null) }
 output "ecs_cluster_name" { value = module.ecs_cluster.cluster_name }
 output "ecs_api_service" { value = module.api.service_name }
 output "ecs_worker_service" { value = module.worker.service_name }
