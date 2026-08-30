@@ -10,6 +10,7 @@ terraform {
   required_providers {
     aws        = { source = "hashicorp/aws", version = "~> 5.0" }
     cloudflare = { source = "cloudflare/cloudflare", version = "~> 4.0" }
+    grafana    = { source = "grafana/grafana", version = "~> 3.0" }
   }
 
   backend "s3" {
@@ -51,6 +52,15 @@ provider "aws" {
 
 provider "cloudflare" {
   api_token = var.cloudflare_api_token != "" ? var.cloudflare_api_token : null
+}
+
+// Configured UNCONDITIONALLY, like the cloudflare provider above — providers can't
+// be conditional — but touches nothing at all while grafana_alerting_auth is empty:
+// module.alerts (inside module.stack) is count-gated to zero in that state. See
+// modules/stack/variables.tf's grafana_alerting_auth for the full reasoning.
+provider "grafana" {
+  url  = var.grafana_alerting_url
+  auth = var.grafana_alerting_auth
 }
 
 locals {
@@ -203,4 +213,15 @@ module "stack" {
   monitor_target_health = false
 
   alarm_emails = var.alarm_emails
+
+  grafana_alerting_auth = var.grafana_alerting_auth
+  grafana_alerting = {
+    url                           = var.grafana_alerting_url
+    prometheus_datasource_name    = var.grafana_alerting_prometheus_datasource_name
+    logs_datasource_name          = var.grafana_logs_datasource_name
+    alerts_folder_uid             = var.grafana_alerting_folder_uid
+    dashboards_folder_uid         = var.grafana_dashboards_folder_uid
+    product_dashboards_folder_uid = var.grafana_opshub_dashboards_folder_uid
+    slos_folder_uid               = var.grafana_slos_folder_uid
+  }
 }
