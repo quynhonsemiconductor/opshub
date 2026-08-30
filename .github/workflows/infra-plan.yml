@@ -47,9 +47,12 @@ jobs:
       # task-definition revision bump in a prod plan is expected.
     secrets:
       AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
-      # The only genuinely secret TF_VAR (masked inside the reusable). Without it the
+      # Secret TF_VARs (masked inside the reusable). Without cloudflare_api_token the
       # Cloudflare provider cannot refresh the API's DNS record and the plan errors.
+      # Without grafana_alerting_auth the plan disagrees with apply about whether
+      # module.alerts/grafana_slo/grafana_dashboard exist at all (see infra-apply.yml).
       tf_secret_vars_json: |
         {
-          "cloudflare_api_token": "${{ secrets.CLOUDFLARE_API_TOKEN }}"
+          "cloudflare_api_token": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+          "grafana_alerting_auth": "${{ secrets.GRAFANA_ALERTS_TOKEN }}"
         }
