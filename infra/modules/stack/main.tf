@@ -373,7 +373,7 @@ module "ecs_cluster" {
 
 # ── ECS service — API ─────────────────────────────────────────────────────────
 module "api" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.1"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
 
   use_firelens = module.firelens_agent_api.enabled
 
@@ -472,7 +472,7 @@ module "api" {
 
 # ── ECS service — worker ──────────────────────────────────────────────────────
 module "worker" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.1"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
 
   use_firelens = module.firelens_agent_worker.enabled
 
