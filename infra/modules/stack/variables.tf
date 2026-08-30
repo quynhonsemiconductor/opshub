@@ -745,15 +745,3 @@ variable "mail_reply_to" {
   type        = string
   default     = ""
 }
-
-variable "ses_configuration_set" {
-  description = <<-EOT
-    SES configuration set to tag every send with. Optional.
-
-    What it buys is attribution, not delivery: without one, a bounce or complaint arrives as an event
-    nothing can tie back to the message that caused it. Sends work either way, which is why this is
-    easy to leave unset and regret later.
-  EOT
-  type        = string
-  default     = ""
-}

@@ -43,6 +43,9 @@ locals {
   app_url  = "https://${var.app_domain}"
   ecr_base = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com"
 
+  api_log_group    = "/ecs/${local.name}-api"
+  worker_log_group = "/ecs/${local.name}-worker"
+
   kms_key_arn        = data.terraform_remote_state.shared.outputs.kms_key_arn
   cloudflare_zone_id = try(data.terraform_remote_state.shared.outputs.cloudflare_zone_id, "")
 
@@ -200,7 +203,7 @@ locals {
     { name = "MAIL_FROM_NAME", value = var.mail_from_name },
     { name = "MAIL_FROM_EMAIL", value = var.mail_from_email },
     { name = "MAIL_REPLY_TO", value = var.mail_reply_to },
-    { name = "SES_CONFIGURATION_SET", value = var.ses_configuration_set },
+    { name = "SES_CONFIGURATION_SET", value = aws_sesv2_configuration_set.email_feedback.configuration_set_name },
   ]
 }
 
@@ -619,7 +622,7 @@ module "tunnel_api" {
 
   tunnel_token_secret_arn = var.tunnel_enabled ? aws_secretsmanager_secret.tunnel_token[0].arn : ""
   app_port                = 3000
-  log_group               = "/ecs/${local.name}-api"
+  log_group               = local.api_log_group
   region                  = var.region
 }
 
@@ -641,7 +644,7 @@ module "otel_agent_api" {
   # try(): the secret is not created while the OTel path is dormant, and the module is a no-op
   # in that state anyway — so an absent ARN is the correct input here, not an error.
   token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
-  log_group        = "/ecs/${local.name}-api"
+  log_group        = local.api_log_group
   region           = var.region
 }
 
@@ -652,7 +655,7 @@ module "otel_agent_worker" {
   env              = var.env
   otlp_endpoint    = var.observability.otlp_endpoint
   token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
-  log_group        = "/ecs/${local.name}-worker"
+  log_group        = local.worker_log_group
   region           = var.region
 }
 
@@ -668,7 +671,7 @@ module "firelens_agent_api" {
   env              = var.env
   otlp_endpoint    = var.observability.otlp_endpoint
   token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
-  router_log_group = "/ecs/${local.name}-api"
+  router_log_group = local.api_log_group
   region           = var.region
   kms_key_arn      = local.kms_key_arn
 }
@@ -681,7 +684,7 @@ module "firelens_agent_worker" {
   env              = var.env
   otlp_endpoint    = var.observability.otlp_endpoint
   token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
-  router_log_group = "/ecs/${local.name}-worker"
+  router_log_group = local.worker_log_group
   region           = var.region
   kms_key_arn      = local.kms_key_arn
 }
@@ -736,6 +739,36 @@ module "dns_api" {
   content = var.tunnel_enabled ? one(module.tunnel[*].cname) : try(data.terraform_remote_state.runtime.outputs.alb_dns_name, "")
   proxied = true
   comment = "${local.name} API → ALB via Cloudflare proxy (managed by ${var.product}-infra ${var.env})"
+}
+
+# ── Guard: the OTel/FireLens sidecars must watch the log group the app actually
+# writes to ────────────────────────────────────────────────────────────────────
+# Mirrors rally's stack module exactly. ENFORCED as a resource precondition, not a
+# `check` block — a violated check emits a warning and the plan exits 0, which
+# would leave a collector silently pointed at the wrong log group, exactly what
+# this guard exists to prevent.
+#
+# `terraform_data` rather than a variable validation, because the condition reads
+# `local.*` and a module output, which a validation block cannot. `input` is bound
+# to the guarded values so the precondition re-evaluates whenever they change,
+# not only on first create.
+resource "terraform_data" "otel_agent_log_groups_match_services" {
+  input = {
+    api    = local.api_log_group
+    worker = local.worker_log_group
+  }
+
+  lifecycle {
+    precondition {
+      condition     = local.api_log_group == module.api.log_group_name
+      error_message = "api sidecar log group '${local.api_log_group}' != '${module.api.log_group_name}'. ecs-service changed its log-group naming; update local.api_log_group."
+    }
+
+    precondition {
+      condition     = local.worker_log_group == module.worker.log_group_name
+      error_message = "worker sidecar log group '${local.worker_log_group}' != '${module.worker.log_group_name}'. ecs-service changed its log-group naming; update local.worker_log_group."
+    }
+  }
 }
 
 # ── Guard: the pool arithmetic must fit the instance ──────────────────────────
@@ -1381,6 +1414,122 @@ resource "aws_iam_role_policy" "worker_ses_send" {
   name   = "${local.name}-worker-ses-send"
   role   = split("/", module.worker.task_role_arn)[1]
   policy = local.ses_send_policy
+}
+
+# ── SES bounce/complaint feedback loop ──────────────────────────────────────────
+# Mirrors rally's stack module exactly. Unconditional, like rally — a configuration
+# set, its SNS topic and its SQS queue cost nothing idle and don't depend on
+# mail_from_email being set yet, unlike the send grants above.
+#
+# Without this, a bounce or complaint SES reports arrives as an event nothing can
+# tie back to the message that caused it, and the app keeps sending mail to
+# addresses SES already told us are bad — a compliance-relevant failure mode, not
+# just a delivery one.
+resource "aws_sesv2_configuration_set" "email_feedback" {
+  # `configuration_set_name`, not `name`: matches the pinned provider version rally uses.
+  configuration_set_name = "${local.name}-email-feedback"
+}
+
+resource "aws_sns_topic" "ses_bounce_events" {
+  name = "${local.name}-ses-bounce-events"
+}
+
+resource "aws_sesv2_configuration_set_event_destination" "bounces" {
+  configuration_set_name = aws_sesv2_configuration_set.email_feedback.configuration_set_name
+  event_destination_name = "bounce-complaints-to-sqs"
+
+  event_destination {
+    enabled              = true
+    matching_event_types = ["BOUNCE", "COMPLAINT"]
+    sns_destination {
+      topic_arn = aws_sns_topic.ses_bounce_events.arn
+    }
+  }
+}
+
+resource "aws_sqs_queue" "ses_bounce_feedback" {
+  name = "${local.name}-ses-bounce-feedback"
+}
+
+resource "aws_sqs_queue_policy" "ses_bounce_feedback" {
+  queue_url = aws_sqs_queue.ses_bounce_feedback.url
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "sns.amazonaws.com" }
+        Action    = "sqs:SendMessage"
+        Resource  = aws_sqs_queue.ses_bounce_feedback.arn
+        Condition = {
+          ArnEquals = { "aws:SourceArn" = aws_sns_topic.ses_bounce_events.arn }
+        }
+      },
+    ]
+  })
+}
+
+resource "aws_sns_topic_subscription" "ses_bounce_to_sqs" {
+  topic_arn = aws_sns_topic.ses_bounce_events.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.ses_bounce_feedback.arn
+}
+
+# If the worker's bounce-feedback consumer stalls (a bug, a permission change, a
+# deploy that drops the consumer), events pile up silently: no failed health check,
+# no 5xx — the app keeps sending mail to addresses SES already flagged.
+resource "aws_cloudwatch_metric_alarm" "ses_bounce_queue_depth" {
+  alarm_name          = "${local.name}-ses-bounce-queue-depth-high"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  dimensions          = { QueueName = aws_sqs_queue.ses_bounce_feedback.name }
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 3
+  threshold           = 100
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [module.observability.alarm_topic_arn]
+  tags                = local.tags
+}
+
+# The direct "is anyone draining this" signal — depth alone can spike from a real
+# burst and clear on its own; age only grows when nothing is consuming.
+resource "aws_cloudwatch_metric_alarm" "ses_bounce_queue_stalled" {
+  alarm_name          = "${local.name}-ses-bounce-queue-stalled"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateAgeOfOldestMessage"
+  dimensions          = { QueueName = aws_sqs_queue.ses_bounce_feedback.name }
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 3600
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [module.observability.alarm_topic_arn]
+  tags                = local.tags
+}
+
+# The feedback half of the loop: whichever worker service consumes it long-polls this
+# queue. Scoped to the one queue and the three calls a drain makes — Receive, Delete
+# (the consumer acks whether or not the event matched a row, so an unmatched event
+# can never poison the queue into an unresolvable retry), and GetQueueAttributes for
+# the SDK's standard startup probe. No wildcard.
+resource "aws_iam_role_policy" "worker_sqs_bounce_feedback" {
+  name = "${local.name}-worker-sqs-bounce-feedback"
+  role = split("/", module.worker.task_role_arn)[1]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Resource = aws_sqs_queue.ses_bounce_feedback.arn
+      },
+    ]
+  })
 }
 
 # ── Grafana Alerting + Dashboards ──────────────────────────────────────────────
