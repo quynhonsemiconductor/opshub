@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { TerminusModule } from '@nestjs/terminus';
 import { CacheModule } from '@qnsc-vn/platform-cache';
 import { AuthTokenCache } from '@qnsc-vn/identity';
+import { AuthMetrics } from '@qnsc-vn/observability';
 import { AppConfigModule } from './config/config.module';
 import { AppConfigService } from './config/app-config.service';
 import { DatabaseModule } from './database/database.module';
@@ -101,6 +102,7 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     RequestEngine,
     HttpLoggingInterceptor,
     AuthTokenCache,
+    AuthMetrics,
     ResilienceService,
     GraphClientService,
     {
@@ -159,6 +161,7 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     RequestEngine,
     HttpLoggingInterceptor,
     AuthTokenCache,
+    AuthMetrics,
     ResilienceService,
     EmailService,
     EmailSchedulerService,

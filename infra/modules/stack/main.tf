@@ -292,7 +292,7 @@ module "rds" {
 # the URL above is `rediss://`.
 module "cache" {
   count  = var.cache.enabled ? 1 : 0
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/cache?ref=cache-v1.0.0"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/cache?ref=cache-v1.1.0"
 
   name              = "${local.name}-valkey"
   subnet_ids        = data.terraform_remote_state.runtime.outputs.data_subnet_ids
@@ -364,7 +364,9 @@ module "ecs_cluster" {
 
 # ── ECS service — API ─────────────────────────────────────────────────────────
 module "api" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.1.1"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.1"
+
+  use_firelens = module.firelens_agent_api.enabled
 
   service_name = "api"
   cluster_name = module.ecs_cluster.cluster_name
@@ -440,14 +442,16 @@ module "api" {
     { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = module.otel_agent_api.endpoint },
   ])
 
-  s3_bucket_arns = [module.app_bucket.arn]
+  s3_bucket_arns = concat([module.app_bucket.arn], module.firelens_agent_api.task_s3_bucket_arns)
 
   tags = merge(local.tags, { Service = "api" })
 }
 
 # ── ECS service — worker ──────────────────────────────────────────────────────
 module "worker" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.1.1"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.1"
+
+  use_firelens = module.firelens_agent_worker.enabled
 
   service_name = "worker"
   cluster_name = module.ecs_cluster.cluster_name
@@ -494,7 +498,7 @@ module "worker" {
     { name = "OTEL_EXPORTER_OTLP_ENDPOINT", value = module.otel_agent_worker.endpoint },
   ])
 
-  s3_bucket_arns = [module.app_bucket.arn]
+  s3_bucket_arns = concat([module.app_bucket.arn], module.firelens_agent_worker.task_s3_bucket_arns)
 
   tags = merge(local.tags, { Service = "worker" })
 }
@@ -608,6 +612,36 @@ module "otel_agent_worker" {
   token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
   log_group        = "/ecs/${local.name}-worker"
   region           = var.region
+}
+
+# Ships each service's router (task-level, non-app) logs to Loki, same shared stack the
+# OTel sidecars push metrics/traces to. Adopted from rally — opshub previously had no log
+# shipping at all, so an incident meant reading CloudWatch Logs Insights by hand instead
+# of Grafana Explore alongside the metrics and traces for the same request.
+module "firelens_agent_api" {
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.1"
+
+  service_name     = "${var.product}-api"
+  product          = var.product
+  env              = var.env
+  otlp_endpoint    = var.observability.otlp_endpoint
+  token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
+  router_log_group = "/ecs/${local.name}-api"
+  region           = var.region
+  kms_key_arn      = local.kms_key_arn
+}
+
+module "firelens_agent_worker" {
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.1"
+
+  service_name     = "${var.product}-worker"
+  product          = var.product
+  env              = var.env
+  otlp_endpoint    = var.observability.otlp_endpoint
+  token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
+  router_log_group = "/ecs/${local.name}-worker"
+  region           = var.region
+  kms_key_arn      = local.kms_key_arn
 }
 
 # ── Web SPA — Cloudflare Pages ────────────────────────────────────────────────
@@ -1089,7 +1123,7 @@ resource "aws_scheduler_schedule" "ecs_scale_up" {
 # Adopted from rally. opshub had no alarms at all, which is the state where an outage is
 # discovered by a person rather than by a page.
 module "observability" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability?ref=observability-v4.1.0"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability?ref=observability-v4.2.0"
 
   create_dashboard = var.create_dashboard
 
@@ -1097,6 +1131,12 @@ module "observability" {
   region            = var.region
   ecs_cluster_name  = module.ecs_cluster.cluster_name
   ecs_service_names = [module.api.service_name, module.worker.service_name]
+
+  # Node mode only (var.cache.mode default), null for serverless — same guard
+  # rally's stack uses. opshub's cache is always its own dedicated node/instance
+  # per environment (no shared-node concept here), so this is always safe to
+  # wire when the cache is enabled at all.
+  cache_cluster_id = var.cache.enabled && var.cache.mode == "node" ? module.cache[0].cluster_id : ""
 
   # Empty while the api is tunnelled: the shared ALBs were deleted when both products moved to
   # tunnels, so `runtime.outputs.alb_arn` is absent and the two ALB alarms have nothing to read.

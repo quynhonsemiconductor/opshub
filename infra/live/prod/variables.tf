@@ -67,16 +67,21 @@ variable "cloudflare_account_id" {
 
 variable "otlp_endpoint" {
   description = <<-EOT
-    OTLP/HTTP base URL of the telemetry backend, e.g.
-    `https://otlp-gateway-prod-ap-southeast-1.grafana.net/otlp`.
+    OTLP/HTTP base URL of the telemetry backend — qnsc-infra's live/observability
+    stack, region prod-ap-southeast-0 (the SAME shared Grafana Cloud stack rally
+    already pushes to — one stack, every product, tenancy is the
+    product/environment resource attributes each sidecar sets), with the `/otlp`
+    suffix the otlphttp exporter needs.
 
-    Empty (the default) keeps telemetry DORMANT: no collector sidecar is created, no
-    `observability-token` secret exists, and OTEL_ENABLED stays false. Populate that secret
-    with the Authorization header BEFORE setting this, or the collector starts and cannot
-    authenticate.
+    Setting this creates the `observability-token` Secrets Manager secret (empty)
+    and flips the sidecar on in the task definition — but the secret's VALUE must
+    be populated by hand (Basic base64(stack_id:token), the SAME shared
+    write-only otlp-sidecar-push token rally uses, never through Terraform — see
+    modules/stack/main.tf) and the service must be DEPLOYED before telemetry
+    actually flows.
   EOT
   type        = string
-  default     = ""
+  default     = "https://otlp-gateway-prod-ap-southeast-0.grafana.net/otlp"
 }
 
 variable "alarm_emails" {
