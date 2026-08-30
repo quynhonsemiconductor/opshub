@@ -435,7 +435,20 @@ module "api" {
   # to inject DATABASE_USER/PASSWORD. Omit it and the task cannot start at all ("unable
   # to pull secrets") — a boot failure, not a runtime error. The migrator reuses the
   # api's roles, so it is covered by the api's copy of this list too.
-  secret_arns = concat(values(module.secrets.secret_arns), [module.rds.master_secret_arn])
+  #
+  # aws_secretsmanager_secret.tunnel_token[*].arn (not [0].arn): matches rally's own
+  # fix for a real prod outage — tunnel_token's ARN is unknown-until-apply on an
+  # environment where the secret doesn't exist yet, so a `[0]` index or a `length()`
+  # call on it makes this whole expression's count unknown. `[*].arn` takes its
+  # length from `count`, which is known from config regardless of the ARN's value.
+  # module.firelens_agent_api.secret_arns is the router's own observability-token
+  # read grant — missing it left the execution role unable to pull that secret too.
+  secret_arns = concat(
+    values(module.secrets.secret_arns),
+    [module.rds.master_secret_arn],
+    aws_secretsmanager_secret.tunnel_token[*].arn,
+    module.firelens_agent_api.secret_arns,
+  )
   kms_key_arn = local.kms_key_arn
   secrets     = concat(local.app_secrets, local.api_db_secrets)
 
@@ -498,7 +511,15 @@ module "worker" {
   # to inject DATABASE_USER/PASSWORD. Omit it and the task cannot start at all ("unable
   # to pull secrets") — a boot failure, not a runtime error. The migrator reuses the
   # api's roles, so it is covered by the api's copy of this list too.
-  secret_arns = concat(values(module.secrets.secret_arns), [module.rds.master_secret_arn])
+  #
+  # module.firelens_agent_worker.secret_arns is the worker's own router's
+  # observability-token read grant — no tunnel_token here, the worker has no tunnel
+  # sidecar (it serves no HTTP surface).
+  secret_arns = concat(
+    values(module.secrets.secret_arns),
+    [module.rds.master_secret_arn],
+    module.firelens_agent_worker.secret_arns,
+  )
   kms_key_arn = local.kms_key_arn
   secrets     = concat(local.app_secrets, local.worker_db_secrets)
 
