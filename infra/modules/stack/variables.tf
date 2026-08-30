@@ -650,6 +650,64 @@ variable "alarm_emails" {
   default     = []
 }
 
+variable "grafana_alerting_auth" {
+  description = <<-EOT
+    Stack service account token — qnsc-infra/live/observability's
+    `alerting_service_account_token` output. A SEPARATE variable from
+    `grafana_alerting` below, same reason as rally's own copy of this
+    variable: it carries a raw secret value directly through Terraform, and
+    `sensitive = true` only masks plan/apply output for a variable as a
+    whole — nesting it into the config object would either blunt-hide the
+    harmless fields alongside it or not mask this one at all.
+
+    The master switch: while empty, `module.alerts` and the Grafana
+    dashboards/SLO below are not created at all — count, not a dormant
+    no-op module. CloudWatch Alarms (create_dashboard, above) are
+    unaffected either way.
+
+    Reaches Terraform via TF_VAR_grafana_alerting_auth in CI
+    (GRAFANA_ALERTS_TOKEN secret) — NEVER through AWS Secrets Manager,
+    unlike the OTLP token: this credential is needed at PLAN/APPLY time
+    only, nothing running in a task ever calls the Grafana instance API.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "grafana_alerting" {
+  description = <<-EOT
+    Grafana Alerting + Dashboards config, ALONGSIDE CloudWatch Alarms, not
+    replacing them — CloudWatch stays on infra-level signals it can see
+    directly; this covers only what CloudWatch cannot (HTTP error rate,
+    latency, worker job failure rate, login failure rate) plus opshub's own
+    dashboards. None of these fields are secret — see
+    `grafana_alerting_auth` for the one that is.
+
+    `alerts_folder_uid`, `dashboards_folder_uid` and
+    `product_dashboards_folder_uid` are THREE DIFFERENT folders in the same
+    shared Grafana stack — do not collapse them, and do not repeat rally's
+    own real bug of reusing `alerts_folder_uid` for the dashboard resource.
+    `product_dashboards_folder_uid` is qnsc-infra/live/observability's
+    `opshub_dashboards_folder_uid` output — created ONCE, centrally, exactly
+    like rally's own subfolder, not re-derived per environment (rally hit a
+    real duplicate-folder bug doing that: develop and prod are separate
+    Terraform root modules with separate state, so a `grafana_folder`
+    resource created HERE would create two separate "Opshub" folders).
+  EOT
+  type = object({
+    url                           = optional(string, "https://qnsc.grafana.net")
+    prometheus_datasource_name    = optional(string, "grafanacloud-qnsc-prom")
+    logs_datasource_name          = optional(string, "grafanacloud-qnsc-logs")
+    traces_datasource_name        = optional(string, "grafanacloud-qnsc-traces")
+    alerts_folder_uid             = optional(string, "")
+    dashboards_folder_uid         = optional(string, "")
+    product_dashboards_folder_uid = optional(string, "")
+    slos_folder_uid               = optional(string, "")
+  })
+  default = {}
+}
+
 # ── Outbound email ────────────────────────────────────────────────────────────
 
 variable "email_provider" {

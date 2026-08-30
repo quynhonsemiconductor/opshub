@@ -1330,3 +1330,590 @@ resource "aws_iam_role_policy" "worker_ses_send" {
   role   = split("/", module.worker.task_role_arn)[1]
   policy = local.ses_send_policy
 }
+
+# ── Grafana Alerting + Dashboards ──────────────────────────────────────────────
+# Mirrors rally's stack module exactly — same thresholds philosophy (per-env, single
+# source of truth shared between the alert condition and the dashboard's threshold
+# line), same `or vector(0)`/absent-vector fix on every ratio query (confirmed live
+# in rally's own prod: a zero-failure series is ABSENT, not present-at-zero, and
+# dividing by an absent vector renders as "No data" instead of the honest 0%).
+#
+# `db-pool-contention` and its dashboard panel are included for structural parity
+# with rally, but stay DARK until `DbPoolMetrics` is wired into opshub's own
+# `DatabaseModule` — not done as part of this change (application code, not infra).
+# `db_pool_in_use`/`db_pool_waiting` are simply absent metrics until then, so the
+# panel shows "No data" and the alert's `no_data_state` (see the module's own
+# default) keeps it from paging on that absence.
+locals {
+  alert_thresholds_by_env = {
+    develop = {
+      http_error_rate         = 0.05
+      http_p99_latency_ms     = 2000
+      db_pool_waiting         = 0
+      worker_failure_rate     = 0.10
+      auth_login_failure_rate = 0.30
+    }
+    production = {
+      http_error_rate         = 0.02
+      http_p99_latency_ms     = 1000
+      db_pool_waiting         = 0
+      worker_failure_rate     = 0.05
+      auth_login_failure_rate = 0.15
+    }
+  }
+  alert_thresholds = lookup(local.alert_thresholds_by_env, var.env, local.alert_thresholds_by_env.develop)
+
+  runbook_base_url = "https://github.com/QNSC-VN/opshub/blob/main/docs/runbooks/alerts"
+
+  slo_success_objective_by_env = {
+    develop    = 0.99
+    production = 0.995
+  }
+  slo_success_objective = lookup(local.slo_success_objective_by_env, var.env, local.slo_success_objective_by_env.develop)
+}
+
+module "alerts" {
+  count  = var.grafana_alerting_auth != "" ? 1 : 0
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability-alerts?ref=observability-alerts-v1.1.1"
+
+  product                    = var.product
+  env                        = var.env
+  prometheus_datasource_name = var.grafana_alerting.prometheus_datasource_name
+  folder_uid                 = var.grafana_alerting.alerts_folder_uid
+
+  rules = [
+    {
+      name        = "db-pool-contention"
+      promql      = "db_pool_waiting{deployment_environment_name=\"${var.env}\"}"
+      for         = "5m"
+      op          = "gt"
+      threshold   = local.alert_thresholds.db_pool_waiting
+      severity    = "warning"
+      summary     = "Connections are queueing for the DB pool in ${var.env} — pool is undersized or a query is holding connections too long."
+      runbook_url = "${local.runbook_base_url}/db-pool-contention.md"
+    },
+    {
+      name        = "http-5xx-rate"
+      promql      = "(sum(rate(http_server_errors_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+      for         = "5m"
+      op          = "gt"
+      threshold   = local.alert_thresholds.http_error_rate
+      severity    = "critical"
+      summary     = "HTTP 5xx rate above 5% in ${var.env} for 5m."
+      runbook_url = "${local.runbook_base_url}/http-5xx-rate.md"
+    },
+    {
+      name        = "http-p99-latency"
+      promql      = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+      for         = "5m"
+      op          = "gt"
+      threshold   = local.alert_thresholds.http_p99_latency_ms
+      severity    = "warning"
+      summary     = "HTTP p99 latency above 2s in ${var.env} for 5m."
+      runbook_url = "${local.runbook_base_url}/http-p99-latency.md"
+    },
+    {
+      name        = "worker-job-failure-rate"
+      promql      = "(sum(rate(job_failures_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(job_runs_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+      for         = "5m"
+      op          = "gt"
+      threshold   = local.alert_thresholds.worker_failure_rate
+      severity    = "warning"
+      summary     = "Worker job failure rate above 10% in ${var.env} for 5m."
+      runbook_url = "${local.runbook_base_url}/worker-job-failure-rate.md"
+    },
+    {
+      name        = "auth-login-failure-rate"
+      promql      = "(sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\", outcome=\"failure\"}[15m])) or vector(0)) / sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m]))"
+      for         = "15m"
+      op          = "gt"
+      threshold   = local.alert_thresholds.auth_login_failure_rate
+      severity    = "warning"
+      summary     = "Login failure rate above ${local.alert_thresholds.auth_login_failure_rate * 100}% in ${var.env} for 15m — entra-login/dev-login both collapse their failure detail before it reaches the caller, check Recent errors / Logs Explorer for the actual cause."
+      runbook_url = "${local.runbook_base_url}/auth-login-failure-rate.md"
+    },
+  ]
+}
+
+resource "grafana_slo" "http_availability" {
+  count       = var.grafana_alerting_auth != "" ? 1 : 0
+  provider    = grafana
+  name        = "HTTP availability (${var.env})"
+  description = "Fraction of HTTP requests that do not return a 5xx, over a rolling 30-day window."
+  folder_uid  = var.grafana_alerting.slos_folder_uid
+
+  query {
+    type = "ratio"
+    ratio {
+      success_metric = "http_server_requests_total{deployment_environment_name=\"${var.env}\", status_class!=\"5xx\"}"
+      total_metric   = "http_server_requests_total{deployment_environment_name=\"${var.env}\"}"
+    }
+  }
+
+  objectives {
+    value  = local.slo_success_objective
+    window = "30d"
+  }
+
+  destination_datasource {
+    uid = data.grafana_data_source.prometheus[0].uid
+  }
+
+  label {
+    key   = "product"
+    value = var.product
+  }
+  label {
+    key   = "env"
+    value = var.env
+  }
+
+  alerting {
+    fastburn {
+      annotation {
+        key   = "name"
+        value = "SLO fast burn: HTTP availability (${var.env})"
+      }
+      annotation {
+        key   = "description"
+        value = "Error budget for HTTP availability in ${var.env} is burning fast enough to exhaust the 30-day budget in hours, not days."
+      }
+    }
+    slowburn {
+      annotation {
+        key   = "name"
+        value = "SLO slow burn: HTTP availability (${var.env})"
+      }
+      annotation {
+        key   = "description"
+        value = "Error budget for HTTP availability in ${var.env} is burning steadily — on pace to exhaust the 30-day budget before the window resets."
+      }
+    }
+  }
+}
+
+data "grafana_data_source" "prometheus" {
+  count    = var.grafana_alerting_auth != "" ? 1 : 0
+  provider = grafana
+  name     = var.grafana_alerting.prometheus_datasource_name
+}
+
+data "grafana_data_source" "loki" {
+  count    = var.grafana_alerting_auth != "" ? 1 : 0
+  provider = grafana
+  name     = var.grafana_alerting.logs_datasource_name
+}
+
+data "grafana_data_source" "tempo" {
+  count    = var.grafana_alerting_auth != "" ? 1 : 0
+  provider = grafana
+  name     = var.grafana_alerting.traces_datasource_name
+}
+
+# TWO dashboards, not one growing page — same RED/USE split as rally: "is something
+# wrong" (Overview) is a different question from "why" (Runtime & Dependencies).
+resource "grafana_dashboard" "overview" {
+  count     = var.grafana_alerting_auth != "" ? 1 : 0
+  provider  = grafana
+  folder    = var.grafana_alerting.product_dashboards_folder_uid
+  overwrite = true
+
+  config_json = jsonencode({
+    title         = "Overview (${var.env})"
+    uid           = "opshub-overview-${var.env}"
+    timezone      = "browser"
+    editable      = false
+    schemaVersion = 39
+    time          = { from = "now-6h", to = "now" }
+    refresh       = "1m"
+    tags          = ["opshub", var.env, "provisioned"]
+
+    templating = {
+      list = [
+        {
+          name    = "level"
+          type    = "custom"
+          label   = "Level"
+          query   = "All : .*,error : error,warn : warn,info : info,debug : debug"
+          current = { text = "All", value = ".*" }
+          options = [
+            { text = "All", value = ".*", selected = true },
+            { text = "error", value = "error", selected = false },
+            { text = "warn", value = "warn", selected = false },
+            { text = "info", value = "info", selected = false },
+            { text = "debug", value = "debug", selected = false },
+          ]
+        }
+      ]
+    }
+
+    links = [
+      {
+        title       = "Search traces (Tempo Explore)"
+        url         = "/explore?left=%7B%22datasource%22:%22${data.grafana_data_source.tempo[0].uid}%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22queryType%22:%22traceqlSearch%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D%7D"
+        type        = "link"
+        icon        = "search"
+        targetBlank = true
+      }
+    ]
+
+    annotations = {
+      list = [
+        {
+          name       = "Deploys"
+          datasource = { type = "grafana", uid = "-- Grafana --" }
+          enable     = true
+          iconColor  = "blue"
+          tags       = ["deploy", "opshub", var.env]
+          type       = "tags"
+        }
+      ]
+    }
+
+    panels = [
+      {
+        id         = 1
+        title      = "HTTP request rate, by route"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 0, y = 0 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        targets = [{
+          expr         = "sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) by (route)"
+          legendFormat = "{{route}}"
+          refId        = "A"
+        }]
+      },
+      {
+        id         = 2
+        title      = "HTTP error rate"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 12, y = 0 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        fieldConfig = {
+          defaults = {
+            unit   = "percentunit"
+            custom = { thresholdsStyle = { mode = "line" } }
+            thresholds = {
+              steps = [
+                { color = "green", value = null },
+                { color = "yellow", value = local.alert_thresholds.http_error_rate / 2 },
+                { color = "red", value = local.alert_thresholds.http_error_rate },
+              ]
+            }
+          }
+        }
+        targets = [{
+          expr         = "(sum(rate(http_server_errors_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+          legendFormat = "error rate"
+          refId        = "A"
+        }]
+      },
+      {
+        id         = 3
+        title      = "HTTP status code distribution"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 0, y = 8 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        targets = [{
+          expr         = "sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) by (status_class)"
+          legendFormat = "{{status_class}}"
+          refId        = "A"
+        }]
+      },
+      {
+        id         = 4
+        title      = "HTTP p50/p95/p99 latency"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 12, y = 8 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        fieldConfig = {
+          defaults = {
+            unit   = "ms"
+            custom = { thresholdsStyle = { mode = "line" } }
+            thresholds = {
+              steps = [
+                { color = "green", value = null },
+                { color = "red", value = local.alert_thresholds.http_p99_latency_ms },
+              ]
+            }
+          }
+        }
+        targets = [
+          {
+            expr         = "histogram_quantile(0.50, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            legendFormat = "p50"
+            refId        = "A"
+          },
+          {
+            expr         = "histogram_quantile(0.95, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            legendFormat = "p95"
+            refId        = "B"
+          },
+          {
+            expr         = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            legendFormat = "p99"
+            refId        = "C"
+          },
+        ]
+      },
+      # "Is login itself working" — moved ABOVE DB pool/worker rate, same reordering
+      # rally applied: this and the HTTP error rate above are the two golden-signal
+      # panels most worth seeing without scrolling.
+      {
+        id         = 5
+        title      = "Login success vs failure rate"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 0, y = 16 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        fieldConfig = {
+          defaults = {
+            unit   = "percentunit"
+            custom = { thresholdsStyle = { mode = "line" } }
+            thresholds = {
+              steps = [
+                { color = "green", value = null },
+                { color = "red", value = local.alert_thresholds.auth_login_failure_rate },
+              ]
+            }
+          }
+        }
+        targets = [{
+          expr         = "(sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\", outcome=\"failure\"}[15m])) or vector(0)) / sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m]))"
+          legendFormat = "failure rate"
+          refId        = "A"
+        }]
+      },
+      # DARK until DbPoolMetrics is wired app-side — see this block's own header
+      # comment. Kept for structural/layout parity with rally.
+      {
+        id         = 6
+        title      = "DB pool: in use vs waiting"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 0, y = 24 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        fieldConfig = {
+          defaults = {
+            custom = { thresholdsStyle = { mode = "line" } }
+            thresholds = {
+              steps = [
+                { color = "green", value = null },
+                { color = "red", value = local.alert_thresholds.db_pool_waiting },
+              ]
+            }
+          }
+        }
+        targets = [
+          {
+            expr         = "sum(db_pool_in_use{deployment_environment_name=\"${var.env}\"}) by (service_name)"
+            legendFormat = "{{service_name}} in_use"
+            refId        = "A"
+          },
+          {
+            expr         = "sum(db_pool_waiting{deployment_environment_name=\"${var.env}\"}) by (service_name)"
+            legendFormat = "{{service_name}} waiting"
+            refId        = "B"
+          },
+        ]
+      },
+      {
+        id         = 7
+        title      = "Worker job success vs failure rate"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 12, y = 24 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        targets = [
+          {
+            expr         = "sum(rate(job_runs_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+            legendFormat = "runs"
+            refId        = "A"
+          },
+          {
+            expr         = "sum(rate(job_failures_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+            legendFormat = "failures"
+            refId        = "B"
+          },
+        ]
+      },
+      {
+        id         = 8
+        title      = "Recent errors"
+        type       = "logs"
+        gridPos    = { h = 8, w = 24, x = 0, y = 32 }
+        datasource = { type = "loki", uid = data.grafana_data_source.loki[0].uid }
+        options = {
+          dedupStrategy      = "none"
+          enableLogDetails   = true
+          prettifyLogMessage = false
+          showCommonLabels   = false
+          showLabels         = false
+          showTime           = true
+          sortOrder          = "Descending"
+          wrapLogMessage     = false
+        }
+        targets = [{
+          datasource = { type = "loki", uid = data.grafana_data_source.loki[0].uid }
+          expr       = "{service_name=~\"${var.product}-api|${var.product}-worker\", deployment_environment_name=\"${var.env}\"} | detected_level=\"error\""
+          refId      = "A"
+        }]
+      },
+      {
+        id         = 9
+        title      = "Logs Explorer"
+        type       = "logs"
+        gridPos    = { h = 10, w = 24, x = 0, y = 42 }
+        datasource = { type = "loki", uid = data.grafana_data_source.loki[0].uid }
+        options = {
+          dedupStrategy      = "none"
+          enableLogDetails   = true
+          prettifyLogMessage = false
+          showCommonLabels   = false
+          showLabels         = true
+          showTime           = true
+          sortOrder          = "Descending"
+          wrapLogMessage     = false
+        }
+        targets = [{
+          datasource = { type = "loki", uid = data.grafana_data_source.loki[0].uid }
+          expr       = "{service_name=~\"${var.product}-api|${var.product}-worker\", deployment_environment_name=\"${var.env}\"} | detected_level=~\"$level\""
+          refId      = "A"
+        }]
+      },
+    ]
+  })
+}
+
+resource "grafana_dashboard" "runtime" {
+  count     = var.grafana_alerting_auth != "" ? 1 : 0
+  provider  = grafana
+  folder    = var.grafana_alerting.product_dashboards_folder_uid
+  overwrite = true
+
+  config_json = jsonencode({
+    title         = "Runtime & Dependencies (${var.env})"
+    uid           = "opshub-runtime-${var.env}"
+    timezone      = "browser"
+    editable      = false
+    schemaVersion = 39
+    time          = { from = "now-6h", to = "now" }
+    refresh       = "1m"
+    tags          = ["opshub", var.env, "provisioned"]
+
+    annotations = {
+      list = [
+        {
+          name       = "Deploys"
+          datasource = { type = "grafana", uid = "-- Grafana --" }
+          enable     = true
+          iconColor  = "blue"
+          tags       = ["deploy", "opshub", var.env]
+          type       = "tags"
+        }
+      ]
+    }
+
+    panels = [
+      {
+        id          = 1
+        title       = "DB client operation latency (p99, by operation)"
+        type        = "timeseries"
+        gridPos     = { h = 8, w = 12, x = 0, y = 0 }
+        datasource  = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        fieldConfig = { defaults = { unit = "s" } }
+        targets = [{
+          expr         = "histogram_quantile(0.99, sum(rate(db_client_operation_duration_seconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le, db_operation_name))"
+          legendFormat = "{{db_operation_name}}"
+          refId        = "A"
+        }]
+      },
+      {
+        id         = 2
+        title      = "DB client connections: by state, vs pending requests"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 12, y = 0 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        targets = [
+          {
+            expr         = "sum(db_client_connection_count{deployment_environment_name=\"${var.env}\"}) by (service_name, db_client_connection_state)"
+            legendFormat = "{{service_name}} {{db_client_connection_state}}"
+            refId        = "A"
+          },
+          {
+            expr         = "sum(db_client_connection_pending_requests{deployment_environment_name=\"${var.env}\"}) by (service_name)"
+            legendFormat = "{{service_name}} pending"
+            refId        = "B"
+          },
+        ]
+      },
+      {
+        id         = 3
+        title      = "Outbound HTTP client calls: rate + p99 latency"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 0, y = 8 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        targets = [{
+          expr         = "sum(rate(http_client_duration_milliseconds_count{deployment_environment_name=\"${var.env}\"}[5m])) by (net_peer_name)"
+          legendFormat = "{{net_peer_name}}"
+          refId        = "A"
+        }]
+      },
+      {
+        id         = 4
+        title      = "Queue processed rate + lag (p99)"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 12, x = 12, y = 8 }
+        datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        targets = [
+          {
+            expr         = "sum(rate(queue_processed_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+            legendFormat = "processed/s"
+            refId        = "A"
+          },
+          {
+            expr         = "histogram_quantile(0.99, sum(rate(queue_lag_seconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            legendFormat = "lag p99 (s)"
+            refId        = "B"
+          },
+        ]
+      },
+      {
+        id          = 5
+        title       = "Node.js event loop lag (p99, by service)"
+        type        = "timeseries"
+        gridPos     = { h = 8, w = 12, x = 0, y = 16 }
+        datasource  = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        fieldConfig = { defaults = { unit = "s" } }
+        targets = [{
+          expr         = "nodejs_eventloop_delay_p99_seconds{deployment_environment_name=\"${var.env}\"}"
+          legendFormat = "{{service_name}}"
+          refId        = "A"
+        }]
+      },
+      {
+        id          = 6
+        title       = "V8 heap used, by service"
+        type        = "timeseries"
+        gridPos     = { h = 8, w = 12, x = 12, y = 16 }
+        datasource  = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
+        fieldConfig = { defaults = { unit = "bytes" } }
+        targets = [{
+          expr         = "sum(v8js_memory_heap_used_bytes{deployment_environment_name=\"${var.env}\"}) by (service_name)"
+          legendFormat = "{{service_name}}"
+          refId        = "A"
+        }]
+      },
+      {
+        id         = 7
+        title      = "Log volume (lines/5m)"
+        type       = "timeseries"
+        gridPos    = { h = 8, w = 24, x = 0, y = 24 }
+        datasource = { type = "loki", uid = data.grafana_data_source.loki[0].uid }
+        targets = [{
+          datasource   = { type = "loki", uid = data.grafana_data_source.loki[0].uid }
+          expr         = "sum(count_over_time({service_name=~\"${var.product}-api|${var.product}-worker\", deployment_environment_name=\"${var.env}\"}[5m])) by (service_name)"
+          legendFormat = "{{service_name}}"
+          refId        = "A"
+        }]
+      },
+    ]
+  })
+}
