@@ -110,17 +110,12 @@ module "stack" {
   // ── Ingress: no ALB exists any more ─────────────────────────────────────────
   // The shared ALBs in qnsc-infra/live/runtime-{dev,prod} were DELETED once both
   // products moved to Cloudflare Tunnels, so `https_listener_arn` is null and there is
-  // nothing to attach to. The stack supports the tunnel path; turning it on needs three
-  // things done out of band first, in this order:
-  //
-  //   1. create the tunnel:  cloudflared tunnel create opshub-develop
-  //   2. put its connector token in opshub/develop/tunnel-token
-  //   3. set tunnel_id below and flip tunnel_enabled = true
-  //
-  // Until then this environment has NO ingress and must not be applied expecting one.
-  // The alternative is `enable_alb = true` in runtime-dev, at $18.40/mo + $3.65 per AZ.
-  tunnel_enabled = false
-  tunnel_id      = "" // set with tunnel_enabled
+  // nothing to attach to. Unlike rally (which had to ADOPT two tunnels already created
+  // by hand in the dashboard), opshub has never had one — module.tunnel (the shared
+  // cf-tunnel module) creates it, its connector token and its routing rule outright, so
+  // turning this on is the only step needed. The alternative is `enable_alb = true` in
+  // runtime-dev, at $18.40/mo + $3.65 per AZ.
+  tunnel_enabled = true
 
   // ── Parked between deploys ──────────────────────────────────────────────────
   // Twice daily, matching rally. Develop is exercised by CI deploys and the occasional
@@ -224,4 +219,15 @@ module "stack" {
     product_dashboards_folder_uid = var.grafana_opshub_dashboards_folder_uid
     slos_folder_uid               = var.grafana_slos_folder_uid
   }
+}
+
+# Adopts the real "opshub-develop-web" Cloudflare Pages project — created by wrangler
+# during an earlier web-deploy CI run (before this Terraform config ever applied
+# successfully), not by hand like the stray project cloudflare_account_id's own
+# description mentions. It is genuinely serving the SPA, so it is imported rather
+# than deleted-and-recreated, which would orphan its deployment history and briefly
+# 404 the live site.
+import {
+  to = module.stack.module.web[0].cloudflare_pages_project.this
+  id = "${var.cloudflare_account_id}/opshub-develop-web"
 }

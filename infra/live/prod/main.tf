@@ -132,11 +132,11 @@ module "stack" {
   // snapshot restore cannot land smaller, so coming back down needs the instance
   // replaced.
   // ── Ingress: no ALB exists any more ─────────────────────────────────────────
-  // Same as develop — see ../develop/main.tf for the three out-of-band steps. Production
-  // has never been applied, so there is nothing to migrate: whenever it first runs, it
-  // runs tunnelled or not at all.
+  // Same as develop — see ../develop/main.tf. Left OFF here deliberately: develop's
+  // apply (the same module.tunnel code path) needs to be verified working before
+  // production adopts it. Flip to true once develop's tunnel is confirmed serving
+  // real traffic.
   tunnel_enabled = false
-  tunnel_id      = ""
 
   // ── Provisioned but idle, until go-live ─────────────────────────────────────
   // Weekly, comfortably inside the window that matters: AWS FORCE-STARTS a stopped RDS

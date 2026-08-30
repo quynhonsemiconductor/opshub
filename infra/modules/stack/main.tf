@@ -419,6 +419,7 @@ module "api" {
   additional_containers = concat(
     module.otel_agent_api.container_definitions,
     module.tunnel_api.container_definitions,
+    module.firelens_agent_api.container_definitions,
   )
 
   # Includes the AWS-managed RDS secret: the execution role needs GetSecretValue on it
@@ -479,7 +480,10 @@ module "worker" {
   # No tunnel sidecar here — the worker is a relay with no HTTP surface. The collector is
   # still wanted: the outbox and webhook relays are exactly the code whose latency and
   # failures are invisible from a request trace.
-  additional_containers = module.otel_agent_worker.container_definitions
+  additional_containers = concat(
+    module.otel_agent_worker.container_definitions,
+    module.firelens_agent_worker.container_definitions,
+  )
 
   # Includes the AWS-managed RDS secret: the execution role needs GetSecretValue on it
   # to inject DATABASE_USER/PASSWORD. Omit it and the task cannot start at all ("unable
@@ -572,10 +576,48 @@ module "migrator" {
 # inert until a tunnel and its token exist for the environment.
 #
 # The WORKER gets none — it is a relay with no HTTP surface.
+#
+# Created and owned by Terraform, unlike rally's two tunnels (created by hand, then
+# adopted) — opshub has never had one, so there is nothing existing to preserve and no
+# adopt-then-manage two-step needed. `hostname` is set from creation, so this tunnel
+# is never inert (rally production once went live with an ingress-rule-less tunnel
+# that connected, reported healthy, and 503'd every request).
+module "tunnel" {
+  count  = var.tunnel_enabled && var.cloudflare_account_id != "" ? 1 : 0
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/cf-tunnel?ref=cf-tunnel-v0.2.1"
+
+  account_id = var.cloudflare_account_id
+  name       = local.name
+
+  hostname = var.api_domain
+  service  = "http://localhost:3000"
+}
+
+# The connector token, Terraform-managed — separate from the shared secrets bundle
+# (an operator-populated JSON object) rather than a key inside it, so Terraform never
+# clobbers the rest of that bundle by writing one field of it.
+resource "aws_secretsmanager_secret" "tunnel_token" {
+  count = var.tunnel_enabled && var.cloudflare_account_id != "" ? 1 : 0
+
+  name                    = "${var.product}/${var.env}/tunnel-token-tf"
+  description             = "Cloudflare Tunnel connector token (TUNNEL_TOKEN). Managed by Terraform — do not edit by hand."
+  kms_key_id              = local.kms_key_arn
+  recovery_window_in_days = var.secrets_recovery_window_days
+
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "tunnel_token" {
+  count = var.tunnel_enabled && var.cloudflare_account_id != "" ? 1 : 0
+
+  secret_id     = aws_secretsmanager_secret.tunnel_token[0].id
+  secret_string = module.tunnel[0].token
+}
+
 module "tunnel_api" {
   source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/tunnel-agent?ref=tunnel-agent-v1.0.0"
 
-  tunnel_token_secret_arn = var.tunnel_enabled ? module.secrets.secret_arns["tunnel-token"] : ""
+  tunnel_token_secret_arn = var.tunnel_enabled ? aws_secretsmanager_secret.tunnel_token[0].arn : ""
   app_port                = 3000
   log_group               = "/ecs/${local.name}-api"
   region                  = var.region
@@ -687,9 +729,11 @@ module "dns_api" {
   # Tunnel or ALB, and the CNAME target is the whole difference:
   #   tunnel — <tunnel-id>.cfargotunnel.com, a Cloudflare-internal name that resolves
   #            only through the edge. It CANNOT be grey-clouded: an orange-cloud record
-  #            is the only way traffic reaches a connector.
+  #            is the only way traffic reaches a connector. Read from module.tunnel's
+  #            own output rather than built from a manually-tracked id, since Terraform
+  #            now owns the tunnel outright.
   #   ALB    — the load balancer's public DNS name (null today; see module.tunnel_api).
-  content = var.tunnel_enabled ? "${var.tunnel_id}.cfargotunnel.com" : try(data.terraform_remote_state.runtime.outputs.alb_dns_name, "")
+  content = var.tunnel_enabled ? one(module.tunnel[*].cname) : try(data.terraform_remote_state.runtime.outputs.alb_dns_name, "")
   proxied = true
   comment = "${local.name} API → ALB via Cloudflare proxy (managed by ${var.product}-infra ${var.env})"
 }
