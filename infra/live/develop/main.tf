@@ -103,6 +103,12 @@ module "stack" {
   log_retention_days           = 7
   secrets_recovery_window_days = 0
 
+  // Step 1 of the staged migration to a bundled secret (see
+  // infra/modules/stack/variables.tf's secrets_bundle_name for why it's staged):
+  // creates opshub/develop/app, empty, alongside the existing standalone secrets.
+  // secrets_use_bundle stays unset (false) — nothing reads from it yet.
+  secrets_bundle_name = "app"
+
   // OFF here and in production alike — see ../prod/main.tf. Per-task metrics are
   // billed as custom CloudWatch metrics and nothing in this product queries them.
   container_insights = "disabled"
