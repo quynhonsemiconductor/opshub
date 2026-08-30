@@ -231,3 +231,11 @@ import {
   to = module.stack.module.web[0].cloudflare_pages_project.this
   id = "${var.cloudflare_account_id}/opshub-develop-web"
 }
+
+# Same drift as the project itself: the custom domain attachment already exists too
+# ("You have already added this custom domain"), so it needs the identical
+# import-rather-than-recreate treatment.
+import {
+  to = module.stack.module.web[0].cloudflare_pages_domain.this[0]
+  id = "${var.cloudflare_account_id}/opshub-develop-web/opshub-dev.qnsc.vn"
+}
