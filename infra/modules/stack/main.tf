@@ -591,7 +591,7 @@ module "tunnel_api" {
 # turning telemetry on a one-line change per environment rather than a migration, and it is
 # why adopting this costs nothing while it is off.
 module "otel_agent_api" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.0"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
 
   product       = var.product
   env           = var.env
@@ -604,7 +604,7 @@ module "otel_agent_api" {
 }
 
 module "otel_agent_worker" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.0"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
 
   product          = var.product
   env              = var.env
@@ -619,7 +619,7 @@ module "otel_agent_worker" {
 # shipping at all, so an incident meant reading CloudWatch Logs Insights by hand instead
 # of Grafana Explore alongside the metrics and traces for the same request.
 module "firelens_agent_api" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.1"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.2"
 
   service_name     = "${var.product}-api"
   product          = var.product
@@ -632,7 +632,7 @@ module "firelens_agent_api" {
 }
 
 module "firelens_agent_worker" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.1"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.2"
 
   service_name     = "${var.product}-worker"
   product          = var.product
@@ -1123,7 +1123,7 @@ resource "aws_scheduler_schedule" "ecs_scale_up" {
 # Adopted from rally. opshub had no alarms at all, which is the state where an outage is
 # discovered by a person rather than by a page.
 module "observability" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability?ref=observability-v4.2.0"
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability?ref=observability-v4.2.1"
 
   create_dashboard = var.create_dashboard
 
@@ -1136,7 +1136,15 @@ module "observability" {
   # rally's stack uses. opshub's cache is always its own dedicated node/instance
   # per environment (no shared-node concept here), so this is always safe to
   # wire when the cache is enabled at all.
-  cache_cluster_id = var.cache.enabled && var.cache.mode == "node" ? module.cache[0].cluster_id : ""
+  #
+  # enable_cache_alarms is a SEPARATE, plan-time-known condition from
+  # cache_cluster_id's value: on this environment's first-ever apply the cache
+  # node doesn't exist yet, so module.cache[0].cluster_id is unknown-until-apply,
+  # and a count gated on that directly is a hard OpenTofu error, not a deferred
+  # plan (see observability-v4.2.1's own changelog). This condition is known at
+  # plan time regardless.
+  enable_cache_alarms = var.cache.enabled && var.cache.mode == "node"
+  cache_cluster_id    = var.cache.enabled && var.cache.mode == "node" ? module.cache[0].cluster_id : ""
 
   # Empty while the api is tunnelled: the shared ALBs were deleted when both products moved to
   # tunnels, so `runtime.outputs.alb_arn` is absent and the two ALB alarms have nothing to read.
