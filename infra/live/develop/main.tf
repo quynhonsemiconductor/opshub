@@ -239,3 +239,28 @@ import {
   to = module.stack.module.web[0].cloudflare_pages_domain.this[0]
   id = "${var.cloudflare_account_id}/opshub-develop-web/opshub-dev.qnsc.vn"
 }
+
+# Third piece of the same drift: the CNAME record the pages-web module's own
+# cloudflare_record.this would create for opshub-dev.qnsc.vn already exists too
+# ("expected DNS record to not already be present but already exists") — same root
+# cause (wrangler created the whole SPA hosting setup before this Terraform config
+# ever applied). Looked up rather than hand-typed: a DNS record's Cloudflare id is
+# an opaque hash with no natural key, unlike the Pages project/domain above.
+data "terraform_remote_state" "shared_for_dns_import" {
+  backend = "s3"
+  config = {
+    bucket = "qnsc-tofu-state"
+    key    = "opshub/shared/terraform.tfstate"
+    region = "ap-southeast-1"
+  }
+}
+
+data "cloudflare_record" "existing_web" {
+  zone_id  = data.terraform_remote_state.shared_for_dns_import.outputs.cloudflare_zone_id
+  hostname = "opshub-dev.qnsc.vn"
+}
+
+import {
+  to = module.stack.module.web[0].cloudflare_record.this[0]
+  id = "${data.terraform_remote_state.shared_for_dns_import.outputs.cloudflare_zone_id}/${data.cloudflare_record.existing_web.id}"
+}
