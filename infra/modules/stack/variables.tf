@@ -223,8 +223,11 @@ variable "tunnel_enabled" {
     must not also be an ALB target — the target group would health-check a port the
     connector owns, and traffic could arrive by two paths with different TLS termination.
 
-    REQUIRES `tunnel-token` to hold a value and `tunnel_id` to be set. Absent the token,
-    no sidecar is produced and the api has NO ingress at all, so those move together.
+    The tunnel itself, its connector token and the routing rule are all created and
+    owned BY TERRAFORM (`module.tunnel`, the shared `cf-tunnel` module) — unlike rally,
+    which had to ADOPT two tunnels already created by hand in the dashboard, opshub has
+    never had one, so there is nothing to preserve and no adopt-then-manage two-step
+    needed. Turning this on with `cloudflare_account_id` set is enough on its own.
 
     WHAT IS GIVEN UP: ALB access logs, the option of an origin-side AWS WAF, and
     per-target-group CloudWatch alarms. Cloudflare's own analytics and a synthetic probe
@@ -232,25 +235,6 @@ variable "tunnel_enabled" {
   EOT
   type        = bool
   default     = false
-}
-
-variable "tunnel_id" {
-  description = <<-EOT
-    Cloudflare Tunnel UUID, used to build the CNAME target `<id>.cfargotunnel.com`.
-
-    Not discoverable from the connector token — a tunnel and its token are separate reads
-    on the Cloudflare API — so it is passed in rather than derived. The tunnel itself is
-    created out of band, because Terraform cannot mint a token without also owning the
-    tunnel's lifecycle, and destroying a tunnel to recreate it invalidates every deployed
-    connector.
-  EOT
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = !var.tunnel_enabled || var.tunnel_id != ""
-    error_message = "tunnel_enabled = true requires tunnel_id — the CNAME has no target without it."
-  }
 }
 
 variable "idle_schedule" {
