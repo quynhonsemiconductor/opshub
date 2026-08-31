@@ -98,6 +98,13 @@ module "stack" {
   entra_tenant_id = var.entra_tenant_id
   entra_client_id = var.entra_client_id
 
+  // Both secrets are populated in Secrets Manager (opshub/develop/entra-client-secret,
+  // opshub/develop/graph-client-secret) — this is the second, ordered step that actually
+  // wires them into api/worker. See the two variables' descriptions in modules/stack for
+  // why this is staged rather than unconditional.
+  entra_client_secret_set = true
+  graph_client_secret_set = true
+
   // qnsc.vn is a verified SES domain identity in this account (rally already sends from
   // it). A distinct local-part from rally's own noreply@qnsc.vn keeps bounce/reply
   // routing distinguishable per product, though the domain-level identity would permit
