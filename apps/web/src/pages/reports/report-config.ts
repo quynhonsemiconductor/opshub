@@ -1,3 +1,12 @@
+import type {
+  CycleTimeResponse,
+  QueueDepthResponse,
+  RequestSummaryResponse,
+  SlaComplianceResponse,
+  ThroughputResponse,
+} from '@/shared/api/types';
+import type { CsvColumn } from './export-csv';
+
 /*
  * CHART COLOURS AS CSS VARIABLES, not hex.
  *
@@ -89,6 +98,96 @@ export function shortDay(iso: string) {
  */
 export function capitalize(s: string) {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// ── CSV export columns ────────────────────────────────────────────────────────
+
+/**
+ * What each report's export writes, one `CsvColumn` per spreadsheet column.
+ *
+ * HERE, WITH THE FORMATTERS, not beside the charts: the panels should read as rendering only, and these
+ * are definitions — the same species as `DAYS_OPTIONS`, bound to the same display helpers (`capitalize`,
+ * ISO dates) so the CSV agrees with the panel instead of growing a second opinion. `request-reports.tsx`
+ * sat against the line ceiling; the definitions moving out is what buys the next panel room.
+ */
+
+/** The raw ISO day, not the chart's `4 Mar` tick label — a spreadsheet wants a date. */
+export const THROUGHPUT_CSV_COLUMNS: CsvColumn<ThroughputResponse['points'][number]>[] = [
+  { header: 'Day', value: (p) => p.day },
+  { header: 'Submitted', value: (p) => p.submitted },
+  { header: 'Resolved', value: (p) => p.resolved },
+];
+
+export const SLA_CSV_COLUMNS: CsvColumn<SlaComplianceResponse['rows'][number]>[] = [
+  { header: 'Type', value: (r) => capitalize(r.type) },
+  { header: 'Within SLA', value: (r) => r.withinSla },
+  { header: 'Breached', value: (r) => r.breached },
+  // A null rate exports as an empty cell — the chart's 0 is a drawing convenience, not a measurement.
+  { header: 'Compliance rate (%)', value: (r) => r.complianceRatePct },
+];
+
+export const CYCLE_TIME_CSV_COLUMNS: CsvColumn<CycleTimeResponse['rows'][number]>[] = [
+  { header: 'Type', value: (r) => capitalize(r.type) },
+  { header: 'p50 (h)', value: (r) => Math.round(r.p50Hours) },
+  { header: 'p90 (h)', value: (r) => Math.round(r.p90Hours) },
+];
+
+export const QUEUE_CSV_COLUMNS: CsvColumn<QueueDepthResponse['rows'][number]>[] = [
+  { header: 'Type', value: (r) => capitalize(r.type) },
+  { header: 'Pending', value: (r) => r.pending },
+  { header: 'In Review', value: (r) => r.inReview },
+  { header: 'At Risk', value: (r) => r.atRisk },
+  { header: 'Total', value: (r) => r.total },
+];
+
+// ── The mix grid ──────────────────────────────────────────────────────────────
+
+/** One row of the type × status grid: a display type, a cell per status, and the row total. */
+export interface MixGridRow {
+  type: string;
+  cells: number[];
+  total: number;
+}
+
+/**
+ * The type × status grid, shared by the stacked chart, the on-screen table and the export.
+ *
+ * ONE GRID, not three mappings. The chart folds `cancelled` and `expired` into one segment (see
+ * `REQUEST_STATUS_STACK`), but this grid keeps every raw status distinct — the table and the CSV are the
+ * place those two stay separable. Busiest type first, the order somebody scans for.
+ */
+export function buildMixGrid(rows: RequestSummaryResponse['rows']): {
+  statuses: string[];
+  chartRows: Record<string, string | number>[];
+  tableRows: MixGridRow[];
+} {
+  // One row per TYPE, one key per stack segment; `cancelled` and `expired` both land on `closed`.
+  const byType = new Map<string, Record<string, number>>();
+  for (const row of rows) {
+    const bucket = byType.get(row.type) ?? {};
+    const key = (CLOSED_STATUSES as readonly string[]).includes(row.status) ? 'closed' : row.status;
+    bucket[key] = (bucket[key] ?? 0) + row.count;
+    byType.set(row.type, bucket);
+  }
+
+  const ordered = [...byType.entries()]
+    .map(([type, counts]) => ({
+      type,
+      counts,
+      total: Object.values(counts).reduce((a, b) => a + b, 0),
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const statuses = [...new Set(rows.map((r) => r.status))].sort();
+  const chartRows = ordered.map(({ type, counts }) => ({ type: capitalize(type), ...counts }));
+  const tableRows = ordered.map(({ type }) => {
+    const cells = statuses.map(
+      (status) => rows.find((r) => r.type === type && r.status === status)?.count ?? 0,
+    );
+    return { type: capitalize(type), cells, total: cells.reduce((a, b) => a + b, 0) };
+  });
+
+  return { statuses, chartRows, tableRows };
 }
 
 // ── Shared card shell ─────────────────────────────────────────────────────────

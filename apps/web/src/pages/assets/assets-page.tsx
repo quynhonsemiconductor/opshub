@@ -215,6 +215,13 @@ export function AssetsPage() {
           errorMessage="Failed to load assets."
           emptyMessage={list.search ? 'No assets match that search' : 'No assets yet'}
           emptyIcon={Laptop}
+          emptyAction={
+            list.search ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setShowAdd(true)}>
+                <Plus className="h-3.5 w-3.5" /> Add asset
+              </Button>
+            )
+          }
           onRowClick={(a) => setSelectedId(a.id)}
           isRowActive={(a) => a.id === selectedId}
         />

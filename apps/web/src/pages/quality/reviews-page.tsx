@@ -253,6 +253,13 @@ export function ReviewsPage() {
           errorMessage="Failed to load the review programme."
           emptyMessage="No reviews match these filters"
           emptyIcon={CalendarCheck}
+          emptyAction={
+            list.search || !canManage ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setScheduling(true)}>
+                <Plus className="h-3.5 w-3.5" /> Schedule a review
+              </Button>
+            )
+          }
           onRowClick={setClicked}
           isRowActive={(review) => review.id === selected?.id}
         />

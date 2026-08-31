@@ -257,6 +257,13 @@ export function ContractsPage() {
             renewalsOnly ? 'Nothing renewing in that window' : 'No contracts match this filter'
           }
           emptyIcon={FileText}
+          emptyAction={
+            renewalsOnly || !canManage ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setDrafting(true)}>
+                <Plus className="h-3.5 w-3.5" /> Draft contract
+              </Button>
+            )
+          }
           onRowClick={setSelected}
           isRowActive={(c) => c.id === selected?.id}
         />

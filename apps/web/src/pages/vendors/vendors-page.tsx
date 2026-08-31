@@ -346,6 +346,13 @@ export function VendorsPage() {
           errorMessage="Failed to load the supplier register."
           emptyMessage="No suppliers match these filters"
           emptyIcon={Building2}
+          emptyAction={
+            list.search || !canManage ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setRegistering(true)}>
+                <Plus className="h-3.5 w-3.5" /> Register a supplier
+              </Button>
+            )
+          }
           onRowClick={(vendor) => setSelectedId(vendor.id)}
           isRowActive={(vendor) => vendor.id === selectedId}
         />

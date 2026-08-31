@@ -1,18 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Clock } from 'lucide-react';
+import { Clock, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import {
-  DecisionNote,
   Button,
   DataTable,
+  DateRangePicker,
+  DecisionNote,
   EntityDetailPanel,
-  FormActions,
   FormField,
-  Input,
-  Modal,
   PaginationFooter,
   PanelAction,
   RowAction,
@@ -20,11 +18,10 @@ import {
   SegmentedControl,
   StatusBadge,
   TabToolbar,
-  Textarea,
   humanizeStatus,
   statusTone,
   type DataTableColumn,
-  type FormModalProps,
+  type DateRange,
 } from '@/shared/ui';
 import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import { useListState } from '@/shared/hooks/use-list-state';
@@ -34,10 +31,13 @@ import {
   canSubmitTimesheet,
   decisionNote,
   decisionReason,
+  TIMESHEET_REVIEW_PERMISSIONS,
   timesheetReviewVerdict,
 } from './workforce-policy';
 import type { TimesheetResponse, TimesheetStatus } from '@/shared/api/types';
+import { LogTimesheetModal } from './log-timesheet-modal';
 import { asHoursAndMinutes } from './duration';
+import { useBulkReview } from './use-bulk-review';
 
 const TS_FILTERS: { value: TimesheetStatus | ''; label: string }[] = [
   { value: '', label: 'All' },
@@ -46,73 +46,6 @@ const TS_FILTERS: { value: TimesheetStatus | ''; label: string }[] = [
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },
 ];
-
-function LogTimesheetModal({ open, onClose, onSuccess }: FormModalProps) {
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ workDate: '', minutesWorked: 480, note: '' });
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    const { error } = await api.POST('/v1/workforce/timesheets', {
-      body: {
-        workDate: form.workDate,
-        minutesWorked: form.minutesWorked,
-        note: form.note || undefined,
-      },
-    });
-    setLoading(false);
-    if (error) {
-      toast.error(apiErrorMessage(error, 'Failed to log timesheet.'));
-      return;
-    }
-    toast.success('Timesheet logged');
-    onSuccess();
-    onClose();
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Log timesheet" size="sm">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
-        <FormField label="Work date" htmlFor="ts-date" required>
-          <Input
-            id="ts-date"
-            type="date"
-            required
-            value={form.workDate}
-            onChange={(e) => setForm((f) => ({ ...f, workDate: e.target.value }))}
-          />
-        </FormField>
-        <FormField
-          label="Minutes worked"
-          htmlFor="ts-minutes"
-          required
-          hint={asHoursAndMinutes(form.minutesWorked)}
-        >
-          <Input
-            id="ts-minutes"
-            type="number"
-            required
-            min={1}
-            max={1440}
-            value={form.minutesWorked}
-            onChange={(e) => setForm((f) => ({ ...f, minutesWorked: Number(e.target.value) }))}
-          />
-        </FormField>
-        <FormField label="Note" htmlFor="ts-note">
-          <Textarea
-            id="ts-note"
-            rows={2}
-            value={form.note}
-            onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-            placeholder="Optional notes…"
-          />
-        </FormField>
-        <FormActions loading={loading} onClose={onClose} submitLabel="Log" />
-      </form>
-    </Modal>
-  );
-}
 
 export function TimesheetsTab() {
   const qc = useQueryClient();
@@ -123,18 +56,35 @@ export function TimesheetsTab() {
   const me = useCurrentUser();
   const { can } = usePermissions();
   const [statusFilter, setStatusFilter] = useState<TimesheetStatus | ''>('');
+  const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState<TimesheetResponse | null>(null);
+  // Bulk selection exists to review, and only a reviewer can review: wiring it up for somebody who
+  // cannot act on a selection is a checkbox column leading to a bar of 403s (rule 11).
+  const canReview = TIMESHEET_REVIEW_PERMISSIONS.every((permission) => can(permission));
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const list = useListState();
 
   const { data, isLoading, isError } = useQuery({
-    // The offset belongs in the key: without it React Query serves page 1 for every page.
-    queryKey: ['workforce', 'timesheets', statusFilter, list.offset, list.limit],
+    // The offset belongs in the key: without it React Query serves page 1 for every page. The date
+    // window rides along for the same reason — and as `null`s when cleared, so a cleared filter and
+    // a never-set one share a cache entry instead of forking one.
+    queryKey: [
+      'workforce',
+      'timesheets',
+      statusFilter,
+      dateRange?.from ?? null,
+      dateRange?.to ?? null,
+      list.offset,
+      list.limit,
+    ],
     queryFn: async () => {
       const { data, error } = await api.GET('/v1/workforce/timesheets', {
         params: {
           query: {
             status: (statusFilter || undefined) as never,
+            dateFrom: dateRange?.from,
+            dateTo: dateRange?.to,
             limit: list.limit,
             offset: list.offset,
           },
@@ -159,11 +109,17 @@ export function TimesheetsTab() {
     invalidate();
   }
 
-  async function handleReviewTs(id: string, approve: boolean) {
+  /** The per-row review call both the row action and the bulk loop go through. */
+  async function reviewTs(id: string, approve: boolean): Promise<unknown> {
     const { error } = await api.POST('/v1/workforce/timesheets/{id}/review', {
       params: { path: { id } },
       body: { approve },
     });
+    return error;
+  }
+
+  async function handleReviewTs(id: string, approve: boolean) {
+    const error = await reviewTs(id, approve);
     if (error) {
       toast.error(apiErrorMessage(error, `Failed to ${approve ? 'approve' : 'reject'} timesheet.`));
       return;
@@ -171,6 +127,16 @@ export function TimesheetsTab() {
     toast.success(`Timesheet ${approve ? 'approved' : 'rejected'}`);
     invalidate();
   }
+
+  const { reviewing, handleBulkReview } = useBulkReview({
+    rows: data?.data as TimesheetResponse[] | undefined,
+    selectedIds,
+    setSelectedIds,
+    verdict: (t) => timesheetReviewVerdict(t, me.data?.sub, can),
+    review: reviewTs,
+    invalidate,
+    entityLabel: 'a timesheet',
+  });
 
   const columns: DataTableColumn<TimesheetResponse>[] = [
     { key: 'workDate', header: 'Work date', cell: (t) => formatDate(t.workDate) },
@@ -249,15 +215,32 @@ export function TimesheetsTab() {
       <div className="flex flex-col gap-4">
         <TabToolbar
           filter={
-            <SegmentedControl
-              label="Filter timesheets by status"
-              options={TS_FILTERS}
-              value={statusFilter}
-              onChange={(value) => {
-                setStatusFilter(value);
-                list.resetPaging();
-              }}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <SegmentedControl
+                label="Filter timesheets by status"
+                options={TS_FILTERS}
+                value={statusFilter}
+                onChange={(value) => {
+                  setStatusFilter(value);
+                  list.resetPaging();
+                }}
+              />
+              {/*
+               * The pay-period question, asked in the query's own vocabulary (`dateFrom`/`dateTo`).
+               * The picker IS the active-filter affordance: a set window reads in its two fields and
+               * carries the clear button, exactly as the status strip's active segment reads.
+               */}
+              <FormField label="Worked between" htmlFor="ts-filter-range">
+                <DateRangePicker
+                  id="ts-filter-range"
+                  value={dateRange}
+                  onChange={(value) => {
+                    setDateRange(value);
+                    list.resetPaging();
+                  }}
+                />
+              </FormField>
+            </div>
           }
           action={
             <Button variant="primary" onClick={() => setShowForm(true)}>
@@ -274,8 +257,42 @@ export function TimesheetsTab() {
           errorMessage="Failed to load timesheets."
           emptyMessage="No timesheets found"
           emptyIcon={Clock}
+          emptyAction={
+            statusFilter || dateRange ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
+                <Plus className="h-3.5 w-3.5" /> Log your first timesheet
+              </Button>
+            )
+          }
           onRowClick={setSelected}
           isRowActive={(t) => t.id === selected?.id}
+          selectedIds={canReview ? selectedIds : undefined}
+          onSelectionChange={canReview ? setSelectedIds : undefined}
+          bulkActions={
+            canReview
+              ? (count) => (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-fg-muted">{count} selected</span>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={reviewing}
+                      onClick={() => handleBulkReview(true)}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={reviewing}
+                      onClick={() => handleBulkReview(false)}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                )
+              : undefined
+          }
         />
 
         <PaginationFooter

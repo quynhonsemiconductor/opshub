@@ -210,6 +210,18 @@ export function ShiftsTab() {
           errorMessage="Failed to load shift records."
           emptyMessage="No shift records found"
           emptyIcon={Moon}
+          emptyAction={
+            /*
+             * The toolbar action, repeated where an empty table leaves the eyes — and withdrawn once
+             * the type filter is on, because "log one" is not the answer to "where are the night
+             * shifts". Ungated like the toolbar button: logging a shift is `@SelfScoped`.
+             */
+            typeFilter ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
+                <Plus className="h-3.5 w-3.5" /> Log shift
+              </Button>
+            )
+          }
           onRowClick={setSelected}
           isRowActive={(s) => s.id === selected?.id}
         />

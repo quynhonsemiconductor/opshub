@@ -411,6 +411,13 @@ export function InformationAssetsPage() {
             errorMessage="Failed to load the information-asset register."
             emptyMessage="No assets match these filters"
             emptyIcon={Database}
+            emptyAction={
+              list.search || !canManage ? undefined : (
+                <Button variant="primary" size="sm" onClick={() => setRegistering(true)}>
+                  <Plus className="h-3.5 w-3.5" /> Register an asset
+                </Button>
+              )
+            }
             onRowClick={(asset) => setSelectedId(asset.id)}
             isRowActive={(asset) => asset.id === selectedId}
           />

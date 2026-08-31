@@ -15,6 +15,16 @@ A clickable row is focusable and answers Enter/Space, but it is **not** `role="b
 accessible name is computed from its contents, so the row swallowed every cell's text and collided
 with the buttons inside it. Find a row by its text, and the controls in it by name.
 
+**Bulk selection is opt-in and caller-owned.** Pass `onSelectionChange` plus `selectedIds`
+(`Set<string>` or `string[]`) and a leading checkbox column appears — pass neither and the table is
+exactly what it always was, so no existing page changes a line. Row identity is the table's own
+`rowKey` (default `row.id`). The component holds no selection state: it fires back the complete id
+array plus its size, so the caller's update is one `setState` of a plain replacement. Select-all is
+scoped to the CURRENT page and never touches ids from other pages, and selections survive paging by
+construction — nothing in the table clears them, because nothing in it knows what a page turn means
+to the caller's query. `bulkActions={(n) => …}` renders a slim bar above the table only while the
+selection is non-empty, and `n` is the count for its label ("3 selected").
+
 **2. A status is a TONE, never a class string.**
 `<StatusBadge tone={statusTone(x)}>{humanizeStatus(x)}</StatusBadge>`. `statusTone` says what a word
 means, `Badge` says what a tone looks like. Raw Tailwind pairs (`bg-orange-50 text-orange-700`) do
@@ -147,6 +157,30 @@ class in `src/` that produces no rule, on a token whose `@keyframes` nothing def
 token with no reduced-motion override. It runs in **node**, not jsdom: jsdom implements neither
 `@media` matching nor `@keyframes`, so this is not assertable from a rendered component — and an
 assertion on `className` would have passed against the bug it exists for.
+
+**14. A date window is `DateRangePicker`. A length of time is `DurationInput`.**
+A pair of `type="date"` inputs is not a range picker: each opens its own platform calendar, nothing
+orders them, and "to before from" reaches the API as a 422 — or worse, as data. `DateRangePicker`
+emits an ORDERED `{ from, to }` of `YYYY-MM-DD` or `null`, and the ordering rule is **auto-swap,
+not an error**: a second pick before the first meant "back to that Monday", so the pair is emitted
+ordered and the field being typed into keeps its draft until blur. Nothing is committed until both
+ends are complete and real (Feb 31 fails a parse round-trip, not a regex) — a caller never stores a
+half-typed date. The calendar is one `role="dialog"` grid under both fields, arrow/Page keys move
+the roving focus, Escape closes onto the field that opened it, and a `YYYY-MM-DD` is parsed and
+printed BY PARTS — `new Date('2026-03-04')` is UTC midnight, the exact bug `format.ts` exists for.
+
+`DurationInput` holds MINUTES — the unit the API stores — and shows hours + minutes, because "90"
+beside a "Duration" label reads as ninety minutes to half the room and 1h30 to the rest, and the
+split fields settle it. `onChange` fires with minutes **or not at all**: typing that does not parse
+or breaks `min`/`max` is HELD in the field, flagged `aria-invalid`, and explained by a
+`role="alert"` line — never clamped, because a control that quietly rewrites "90" into "1" while
+somebody is typing teaches them the field lies. Presets (`{ label: '4h', minutes: 240 }`) are
+`aria-pressed` buttons; `formatDuration` in `@/shared/lib/format` is the one spelling of a length,
+so a hint and an error cannot disagree.
+
+Neither one opens a dependency. No date or duration library was installed, and two components are
+not the price of admission for one — the calendar grid is ninety lines of local `Date` arithmetic,
+which is also the only way it stays timezone-honest by parts.
 
 ## Testing a screen from the browser
 

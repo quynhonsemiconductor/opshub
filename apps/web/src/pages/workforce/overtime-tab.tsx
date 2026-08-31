@@ -8,6 +8,7 @@ import {
   DecisionNote,
   Button,
   DataTable,
+  DateRangePicker,
   EntityDetailPanel,
   FormActions,
   FormField,
@@ -24,13 +25,20 @@ import {
   humanizeStatus,
   statusTone,
   type DataTableColumn,
+  type DateRange,
   type FormModalProps,
 } from '@/shared/ui';
 import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
-import { formatDate, orDash } from '@/shared/lib/format';
-import { decisionNote, decisionReason, overtimeReviewVerdict } from './workforce-policy';
+import { formatDate, orDash, todayIso } from '@/shared/lib/format';
+import {
+  decisionNote,
+  decisionReason,
+  overtimeReviewVerdict,
+  OVERTIME_REVIEW_PERMISSIONS,
+} from './workforce-policy';
+import { useBulkReview } from './use-bulk-review';
 import type { OvertimeResponse, OvertimeStatus } from '@/shared/api/types';
 
 const OT_FILTERS: { value: OvertimeStatus | ''; label: string }[] = [
@@ -42,7 +50,7 @@ const OT_FILTERS: { value: OvertimeStatus | ''; label: string }[] = [
 
 function LogOvertimeModal({ open, onClose, onSuccess }: FormModalProps) {
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ workDate: '', hours: 2, reason: '' });
+  const [form, setForm] = useState({ workDate: todayIso(), hours: 2, reason: '' });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -109,18 +117,36 @@ export function OvertimeTab() {
    */
   const me = useCurrentUser();
   const { can } = usePermissions();
+  const canReview = OVERTIME_REVIEW_PERMISSIONS.every((permission) => can(permission));
   const [statusFilter, setStatusFilter] = useState<OvertimeStatus | ''>('');
+  const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState<OvertimeResponse | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const list = useListState();
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['workforce', 'overtime', statusFilter, list.offset, list.limit],
+    // The offset belongs in the key: without it React Query serves page 1 for every page. The date
+    // window rides along for the same reason — and as `null`s when cleared, so a cleared filter and
+    // a never-set one share a cache entry instead of forking one.
+    queryKey: [
+      'workforce',
+      'overtime',
+      statusFilter,
+      dateRange?.from ?? null,
+      dateRange?.to ?? null,
+      list.offset,
+      list.limit,
+    ],
     queryFn: async () => {
       const { data, error } = await api.GET('/v1/workforce/overtime', {
         params: {
           query: {
             status: (statusFilter || undefined) as never,
+            // Inclusive bounds on `workDate` — the same "this pay period" question the timesheets
+            // tab asks of the same column.
+            dateFrom: dateRange?.from,
+            dateTo: dateRange?.to,
             limit: list.limit,
             offset: list.offset,
           },
@@ -133,11 +159,16 @@ export function OvertimeTab() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['workforce', 'overtime'] });
 
-  async function handleReview(id: string, approve: boolean) {
+  async function reviewOt(id: string, approve: boolean) {
     const { error } = await api.POST('/v1/workforce/overtime/{id}/review', {
       params: { path: { id } },
       body: { approve },
     });
+    return error;
+  }
+
+  async function handleReview(id: string, approve: boolean) {
+    const error = await reviewOt(id, approve);
     if (error) {
       toast.error(apiErrorMessage(error, `Failed to ${approve ? 'approve' : 'reject'} overtime.`));
       return;
@@ -145,6 +176,16 @@ export function OvertimeTab() {
     toast.success(`Overtime ${approve ? 'approved' : 'rejected'}`);
     invalidate();
   }
+
+  const { reviewing, handleBulkReview } = useBulkReview({
+    rows: data?.data as OvertimeResponse[] | undefined,
+    selectedIds,
+    setSelectedIds,
+    verdict: (o) => overtimeReviewVerdict(o, me.data?.sub, can),
+    review: reviewOt,
+    invalidate,
+    entityLabel: 'overtime',
+  });
 
   const columns: DataTableColumn<OvertimeResponse>[] = [
     { key: 'workDate', header: 'Work date', cell: (o) => formatDate(o.workDate) },
@@ -204,15 +245,32 @@ export function OvertimeTab() {
       <div className="flex flex-col gap-4">
         <TabToolbar
           filter={
-            <SegmentedControl
-              label="Filter overtime by status"
-              options={OT_FILTERS}
-              value={statusFilter}
-              onChange={(value) => {
-                setStatusFilter(value);
-                list.resetPaging();
-              }}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <SegmentedControl
+                label="Filter overtime by status"
+                options={OT_FILTERS}
+                value={statusFilter}
+                onChange={(value) => {
+                  setStatusFilter(value);
+                  list.resetPaging();
+                }}
+              />
+              {/*
+               * The pay-period question, asked of `workDate` exactly as the timesheets tab asks it —
+               * same column, same label. The picker IS the active-filter affordance: a set window
+               * reads in its two fields and carries the clear button.
+               */}
+              <FormField label="Worked between" htmlFor="ot-filter-range">
+                <DateRangePicker
+                  id="ot-filter-range"
+                  value={dateRange}
+                  onChange={(value) => {
+                    setDateRange(value);
+                    list.resetPaging();
+                  }}
+                />
+              </FormField>
+            </div>
           }
           action={
             <Button variant="primary" onClick={() => setShowForm(true)}>
@@ -229,8 +287,47 @@ export function OvertimeTab() {
           errorMessage="Failed to load overtime records."
           emptyMessage="No overtime records found"
           emptyIcon={Zap}
+          emptyAction={
+            /*
+             * The toolbar action, repeated where an empty table leaves the eyes — and withdrawn once
+             * a filter is on, because "log some" is not the answer to "where are the ones matching
+             * this". Ungated like the toolbar button: logging overtime is `@SelfScoped`.
+             */
+            statusFilter || dateRange ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
+                <Plus className="h-3.5 w-3.5" /> Log overtime
+              </Button>
+            )
+          }
           onRowClick={setSelected}
           isRowActive={(o) => o.id === selected?.id}
+          selectedIds={canReview ? selectedIds : undefined}
+          onSelectionChange={canReview ? setSelectedIds : undefined}
+          bulkActions={
+            canReview
+              ? (count) => (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-fg-muted">{count} selected</span>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={reviewing}
+                      onClick={() => handleBulkReview(true)}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={reviewing}
+                      onClick={() => handleBulkReview(false)}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                )
+              : undefined
+          }
         />
 
         <PaginationFooter

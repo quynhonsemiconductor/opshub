@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import { useUpload } from '@/shared/api/use-upload';
-import { Button, ConfirmDialog, FormError, PanelState, RowActions } from '@/shared/ui';
+import { Button, ConfirmDialog, FormError, PanelState, RowActions, Tooltip } from '@/shared/ui';
 import { formatDateTime } from '@/shared/lib/format';
 import { CERTIFICATE_ACCEPT } from './training.types';
 import { useCertificates } from './use-training';
@@ -206,15 +206,16 @@ export function CertificatesPanel({
             </p>
           </div>
           <RowActions>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Download ${certificate.fileName}`}
-              title="Download"
-              onClick={() => download(certificate)}
-            >
-              <Download className="h-3.5 w-3.5" strokeWidth={2} />
-            </Button>
+            <Tooltip content="Download">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Download ${certificate.fileName}`}
+                onClick={() => download(certificate)}
+              >
+                <Download className="h-3.5 w-3.5" strokeWidth={2} />
+              </Button>
+            </Tooltip>
             {/* Download stays for anybody who got this far — reading your own evidence, or evidence you
                 administer, is the whole point of the list. Deleting is a write. */}
             {/*
@@ -228,15 +229,16 @@ export function CertificatesPanel({
 
                 Lifecycle deliberately does NOT appear: `frozen` gates acceptance, not erasure.
             */}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Delete ${certificate.fileName}`}
-              title="Delete"
-              onClick={() => setDeleting(certificate)}
-            >
-              <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-            </Button>
+            <Tooltip content="Delete">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Delete ${certificate.fileName}`}
+                onClick={() => setDeleting(certificate)}
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+              </Button>
+            </Tooltip>
           </RowActions>
         </div>
       ))}

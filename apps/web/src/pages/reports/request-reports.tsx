@@ -34,20 +34,26 @@ import type {
   QueueDepthResponse,
   RequestSummaryResponse,
 } from '@/shared/api/types';
-import { ChartSkeleton, ErrorMsg } from './report-parts';
+import { Card, ChartSkeleton, ErrorMsg, ExportCsvButton } from './report-parts';
+import type { CsvColumn } from './export-csv';
 import {
   BLUE,
-  CLOSED_STATUSES,
+  CYCLE_TIME_CSV_COLUMNS,
   GREEN,
+  QUEUE_CSV_COLUMNS,
   RED,
   REQUEST_STATUS_STACK,
+  SLA_CSV_COLUMNS,
+  THROUGHPUT_CSV_COLUMNS,
   VIOLET,
+  buildMixGrid,
   capitalize,
   dateRange,
   shortDay,
+  type MixGridRow,
 } from './report-config';
 
-export function ThroughputChart({ days }: { days: number }) {
+export function ThroughputChart({ days, className }: { days: number; className?: string }) {
   const { from, to } = dateRange(days);
   const { data, isLoading, isError } = useQuery<ThroughputResponse>({
     queryKey: ['reports', 'throughput', days],
@@ -71,54 +77,66 @@ export function ThroughputChart({ days }: { days: number }) {
   }));
 
   return (
-    <ResponsiveContainer width="100%" height={200}>
-      <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-        <defs>
-          <linearGradient id="gradSubmitted" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={BLUE} stopOpacity={0.15} />
-            <stop offset="95%" stopColor={BLUE} stopOpacity={0} />
-          </linearGradient>
-          <linearGradient id="gradResolved" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={GREEN} stopOpacity={0.15} />
-            <stop offset="95%" stopColor={GREEN} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" />
-        <XAxis
-          dataKey="day"
-          tick={{ fontSize: 10, fill: '#a1a1aa' }}
-          tickLine={false}
-          axisLine={false}
-          interval="preserveStartEnd"
+    <Card
+      title="Request Throughput"
+      className={className}
+      actions={
+        <ExportCsvButton
+          name="Request Throughput"
+          columns={THROUGHPUT_CSV_COLUMNS}
+          rows={data.points}
         />
-        <YAxis
-          tick={{ fontSize: 10, fill: '#a1a1aa' }}
-          tickLine={false}
-          axisLine={false}
-          allowDecimals={false}
-        />
-        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e4e4e7' }} />
-        <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Area
-          type="monotone"
-          dataKey="submitted"
-          name="Submitted"
-          stroke={BLUE}
-          fill="url(#gradSubmitted)"
-          strokeWidth={2}
-          dot={false}
-        />
-        <Area
-          type="monotone"
-          dataKey="resolved"
-          name="Resolved"
-          stroke={GREEN}
-          fill="url(#gradResolved)"
-          strokeWidth={2}
-          dot={false}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
+      }
+    >
+      <ResponsiveContainer width="100%" height={200}>
+        <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <defs>
+            <linearGradient id="gradSubmitted" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={BLUE} stopOpacity={0.15} />
+              <stop offset="95%" stopColor={BLUE} stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="gradResolved" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={GREEN} stopOpacity={0.15} />
+              <stop offset="95%" stopColor={GREEN} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" />
+          <XAxis
+            dataKey="day"
+            tick={{ fontSize: 10, fill: '#a1a1aa' }}
+            tickLine={false}
+            axisLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            tick={{ fontSize: 10, fill: '#a1a1aa' }}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+          />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e4e4e7' }} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Area
+            type="monotone"
+            dataKey="submitted"
+            name="Submitted"
+            stroke={BLUE}
+            fill="url(#gradSubmitted)"
+            strokeWidth={2}
+            dot={false}
+          />
+          <Area
+            type="monotone"
+            dataKey="resolved"
+            name="Resolved"
+            stroke={GREEN}
+            fill="url(#gradResolved)"
+            strokeWidth={2}
+            dot={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </Card>
   );
 }
 
@@ -148,31 +166,42 @@ export function SlaChart({ days }: { days: number }) {
     Rate: r.complianceRatePct ?? 0,
   }));
 
-  if (!chartData.length)
-    return <p className="py-4 text-center text-xs text-fg-subtle">No SLA data for this period</p>;
+  // The empty window stays INSIDE the panel, so its export button sits disabled beside the title
+  // rather than vanishing with the chart.
+  const chart =
+    chartData.length > 0 ? (
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" vertical={false} />
+          <XAxis
+            dataKey="type"
+            tick={{ fontSize: 10, fill: '#a1a1aa' }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            tick={{ fontSize: 10, fill: '#a1a1aa' }}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+          />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e4e4e7' }} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Bar dataKey="Within SLA" fill={GREEN} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="Breached" fill={RED} radius={[3, 3, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    ) : (
+      <p className="py-4 text-center text-xs text-fg-subtle">No SLA data for this period</p>
+    );
 
   return (
-    <ResponsiveContainer width="100%" height={200}>
-      <BarChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" vertical={false} />
-        <XAxis
-          dataKey="type"
-          tick={{ fontSize: 10, fill: '#a1a1aa' }}
-          tickLine={false}
-          axisLine={false}
-        />
-        <YAxis
-          tick={{ fontSize: 10, fill: '#a1a1aa' }}
-          tickLine={false}
-          axisLine={false}
-          allowDecimals={false}
-        />
-        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e4e4e7' }} />
-        <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="Within SLA" fill={GREEN} radius={[3, 3, 0, 0]} />
-        <Bar dataKey="Breached" fill={RED} radius={[3, 3, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
+    <Card
+      title="SLA Compliance"
+      actions={<ExportCsvButton name="SLA Compliance" columns={SLA_CSV_COLUMNS} rows={data.rows} />}
+    >
+      {chart}
+    </Card>
   );
 }
 
@@ -201,33 +230,46 @@ export function CycleTimeChart({ days }: { days: number }) {
     'p90 (h)': Math.round(r.p90Hours),
   }));
 
-  if (!chartData.length)
-    return (
+  const chart =
+    chartData.length > 0 ? (
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" vertical={false} />
+          <XAxis
+            dataKey="type"
+            tick={{ fontSize: 10, fill: '#a1a1aa' }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            tick={{ fontSize: 10, fill: '#a1a1aa' }}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+          />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e4e4e7' }} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          <Bar dataKey="p50 (h)" fill={BLUE} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="p90 (h)" fill={VIOLET} radius={[3, 3, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    ) : (
       <p className="py-4 text-center text-xs text-fg-subtle">No cycle time data for this period</p>
     );
 
   return (
-    <ResponsiveContainer width="100%" height={200}>
-      <BarChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" vertical={false} />
-        <XAxis
-          dataKey="type"
-          tick={{ fontSize: 10, fill: '#a1a1aa' }}
-          tickLine={false}
-          axisLine={false}
+    <Card
+      title="Cycle Time (p50 / p90)"
+      actions={
+        <ExportCsvButton
+          name="Cycle Time (p50 / p90)"
+          columns={CYCLE_TIME_CSV_COLUMNS}
+          rows={data.rows}
         />
-        <YAxis
-          tick={{ fontSize: 10, fill: '#a1a1aa' }}
-          tickLine={false}
-          axisLine={false}
-          allowDecimals={false}
-        />
-        <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e4e4e7' }} />
-        <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="p50 (h)" fill={BLUE} radius={[3, 3, 0, 0]} />
-        <Bar dataKey="p90 (h)" fill={VIOLET} radius={[3, 3, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
+      }
+    >
+      {chart}
+    </Card>
   );
 }
 
@@ -249,39 +291,46 @@ export function QueueTable() {
   if (isError || !data) return <ErrorMsg />;
 
   return (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="border-b border-border">
-          <th className="pb-2 text-left font-medium text-fg-muted">Type</th>
-          <th className="pb-2 text-right font-medium text-fg-muted">Pending</th>
-          <th className="pb-2 text-right font-medium text-fg-muted">In Review</th>
-          <th className="pb-2 text-right font-medium text-warning">At Risk</th>
-          <th className="pb-2 text-right font-medium text-fg-muted">Total</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-border">
-        {data.rows.map((r) => (
-          <tr key={r.type}>
-            <td className="py-2 text-fg-muted">{capitalize(r.type)}</td>
-            <td className="py-2 text-right tabular-nums text-fg-muted">{r.pending}</td>
-            <td className="py-2 text-right tabular-nums text-fg-muted">{r.inReview}</td>
-            <td
-              className={`py-2 text-right tabular-nums font-medium ${r.atRisk > 0 ? 'text-warning' : 'text-fg-subtle'}`}
-            >
-              {r.atRisk}
-            </td>
-            <td className="py-2 text-right tabular-nums font-semibold text-fg">{r.total}</td>
+    <Card
+      title="Live Queue Depth"
+      actions={
+        <ExportCsvButton name="Live Queue Depth" columns={QUEUE_CSV_COLUMNS} rows={data.rows} />
+      }
+    >
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b border-border">
+            <th className="pb-2 text-left font-medium text-fg-muted">Type</th>
+            <th className="pb-2 text-right font-medium text-fg-muted">Pending</th>
+            <th className="pb-2 text-right font-medium text-fg-muted">In Review</th>
+            <th className="pb-2 text-right font-medium text-warning">At Risk</th>
+            <th className="pb-2 text-right font-medium text-fg-muted">Total</th>
           </tr>
-        ))}
-        {data.rows.length === 0 && (
-          <tr>
-            <td colSpan={5} className="py-4 text-center text-fg-subtle">
-              Queue is empty
-            </td>
-          </tr>
-        )}
-      </tbody>
-    </table>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {data.rows.map((r) => (
+            <tr key={r.type}>
+              <td className="py-2 text-fg-muted">{capitalize(r.type)}</td>
+              <td className="py-2 text-right tabular-nums text-fg-muted">{r.pending}</td>
+              <td className="py-2 text-right tabular-nums text-fg-muted">{r.inReview}</td>
+              <td
+                className={`py-2 text-right tabular-nums font-medium ${r.atRisk > 0 ? 'text-warning' : 'text-fg-subtle'}`}
+              >
+                {r.atRisk}
+              </td>
+              <td className="py-2 text-right tabular-nums font-semibold text-fg">{r.total}</td>
+            </tr>
+          ))}
+          {data.rows.length === 0 && (
+            <tr>
+              <td colSpan={5} className="py-4 text-center text-fg-subtle">
+                Queue is empty
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </Card>
   );
 }
 
@@ -318,117 +367,115 @@ export function RequestMixChart({ days }: { days: number }) {
 
   if (isLoading) return <ChartSkeleton />;
   if (isError || !data) return <ErrorMsg />;
-  if (!data.rows.length)
-    return <p className="py-8 text-center text-xs text-fg-subtle">No requests in this window</p>;
+
+  const { statuses, chartRows, tableRows } = buildMixGrid(data.rows);
+
+  // One column per raw status — the CSV is the grid the table shows, where `cancelled` and `expired`
+  // stay separable, unlike the stack above them.
+  const exportColumns: CsvColumn<MixGridRow>[] = [
+    { header: 'Type', value: (r) => r.type },
+    ...statuses.map((status, i) => ({
+      header: capitalize(status),
+      value: (r: MixGridRow) => r.cells[i],
+    })),
+    { header: 'Total', value: (r) => r.total },
+  ];
 
   /*
-   * One row per TYPE, one key per stack segment. `cancelled` and `expired` both land on `closed` — see
-   * `REQUEST_STATUS_STACK` for why the chart folds them and the table below does not.
+   * A BLOCK wrapper, not `flex flex-col`. `ResponsiveContainer width="100%"` measures its parent, and
+   * inside a flex column it resolved to zero — so the chart silently drew nothing while the table beside it
+   * rendered fine. Measured in a real browser; jsdom cannot see it, and the panel looked complete because
+   * the table carried the numbers. The other charts on this page return the container as their root and
+   * never hit it.
+   *
+   * An empty window stays INSIDE the panel — the export button sits disabled beside the title rather than
+   * vanishing with the content.
    */
-  const byType = new Map<string, Record<string, number>>();
-  for (const row of data.rows) {
-    const bucket = byType.get(row.type) ?? {};
-    const key = (CLOSED_STATUSES as readonly string[]).includes(row.status) ? 'closed' : row.status;
-    bucket[key] = (bucket[key] ?? 0) + row.count;
-    byType.set(row.type, bucket);
-  }
-  /*
-   * ONE ORDER, BUSIEST FIRST, shared by the chart and the table below it. Deriving them separately is how
-   * the two came to disagree — the chart sorted and the table kept insertion order, so the same panel
-   * listed its types two ways. Caught by the spec, which is why it asserts the order at all.
-   */
-  const ordered = [...byType.entries()]
-    .map(([type, counts]) => ({
-      type,
-      counts,
-      total: Object.values(counts).reduce((a, b) => a + b, 0),
-    }))
-    .sort((a, b) => b.total - a.total);
-
-  const chartRows = ordered.map(({ type, counts }) => ({ type: capitalize(type), ...counts }));
-  const statuses = [...new Set(data.rows.map((r) => r.status))].sort();
-
-  return (
-    /*
-     * A BLOCK wrapper, not `flex flex-col`. `ResponsiveContainer width="100%"` measures its parent, and
-     * inside a flex column it resolved to zero — so the chart silently drew nothing while the table beside it
-     * rendered fine. Measured in a real browser; jsdom cannot see it, and the panel looked complete because
-     * the table carried the numbers. The other charts on this page return the container as their root and
-     * never hit it.
-     */
-    <div className="space-y-4">
-      <ResponsiveContainer width="100%" height={240}>
-        <BarChart data={chartRows} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
-          <XAxis dataKey="type" tick={{ fontSize: 11 }} stroke="var(--color-fg-subtle)" />
-          <YAxis tick={{ fontSize: 11 }} stroke="var(--color-fg-subtle)" allowDecimals={false} />
-          <Tooltip
-            contentStyle={{
-              fontSize: 12,
-              borderRadius: 8,
-              border: '1px solid var(--color-border)',
-            }}
-          />
-          {/* Present because there is more than one series — identity is never colour alone. */}
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-          {REQUEST_STATUS_STACK.map((segment, i) => (
-            <Bar
-              key={segment.key}
-              dataKey={segment.key}
-              name={segment.label}
-              stackId="mix"
-              fill={segment.color}
-              // The spacer: a surface-coloured hairline so adjacent fills stay countable.
-              stroke="var(--color-surface)"
-              strokeWidth={2}
-              // Only the top segment gets the rounded data-end, so the stack reads as one bar.
-              radius={i === REQUEST_STATUS_STACK.length - 1 ? [4, 4, 0, 0] : undefined}
+  const body =
+    data.rows.length > 0 ? (
+      <div className="space-y-4">
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={chartRows} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+            <XAxis dataKey="type" tick={{ fontSize: 11 }} stroke="var(--color-fg-subtle)" />
+            <YAxis tick={{ fontSize: 11 }} stroke="var(--color-fg-subtle)" allowDecimals={false} />
+            <Tooltip
+              contentStyle={{
+                fontSize: 12,
+                borderRadius: 8,
+                border: '1px solid var(--color-border)',
+              }}
             />
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
-
-      {/* The same grid as text. Also the only place `cancelled` and `expired` are separable. */}
-      <table className="w-full text-xs">
-        <caption className="sr-only">Request counts by type and status</caption>
-        <thead>
-          <tr className="border-b border-border text-fg-subtle">
-            <th scope="col" className="py-1.5 text-left font-medium">
-              Type
-            </th>
-            {statuses.map((status) => (
-              <th key={status} scope="col" className="py-1.5 text-right font-medium">
-                {capitalize(status)}
-              </th>
+            {/* Present because there is more than one series — identity is never colour alone. */}
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            {REQUEST_STATUS_STACK.map((segment, i) => (
+              <Bar
+                key={segment.key}
+                dataKey={segment.key}
+                name={segment.label}
+                stackId="mix"
+                fill={segment.color}
+                // The spacer: a surface-coloured hairline so adjacent fills stay countable.
+                stroke="var(--color-surface)"
+                strokeWidth={2}
+                // Only the top segment gets the rounded data-end, so the stack reads as one bar.
+                radius={i === REQUEST_STATUS_STACK.length - 1 ? [4, 4, 0, 0] : undefined}
+              />
             ))}
-            <th scope="col" className="py-1.5 text-right font-medium">
-              Total
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {ordered.map(({ type }) => {
-            const cells = statuses.map(
-              (status) => data.rows.find((r) => r.type === type && r.status === status)?.count ?? 0,
-            );
-            return (
+          </BarChart>
+        </ResponsiveContainer>
+
+        {/* The same grid as text. Also the only place `cancelled` and `expired` are separable. */}
+        <table className="w-full text-xs">
+          <caption className="sr-only">Request counts by type and status</caption>
+          <thead>
+            <tr className="border-b border-border text-fg-subtle">
+              <th scope="col" className="py-1.5 text-left font-medium">
+                Type
+              </th>
+              {statuses.map((status) => (
+                <th key={status} scope="col" className="py-1.5 text-right font-medium">
+                  {capitalize(status)}
+                </th>
+              ))}
+              <th scope="col" className="py-1.5 text-right font-medium">
+                Total
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {tableRows.map(({ type, cells, total }) => (
               <tr key={type} className="border-b border-border/60">
                 <th scope="row" className="py-1.5 text-left font-medium text-fg">
-                  {capitalize(type)}
+                  {type}
                 </th>
                 {cells.map((count, i) => (
                   <td key={statuses[i]} className="py-1.5 text-right tabular-nums text-fg-muted">
                     {count}
                   </td>
                 ))}
-                <td className="py-1.5 text-right font-semibold tabular-nums text-fg">
-                  {cells.reduce((a, b) => a + b, 0)}
-                </td>
+                <td className="py-1.5 text-right font-semibold tabular-nums text-fg">{total}</td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <p className="py-8 text-center text-xs text-fg-subtle">No requests in this window</p>
+    );
+
+  return (
+    <Card
+      title="Requests by Type and Status"
+      actions={
+        <ExportCsvButton
+          name="Requests by Type and Status"
+          columns={exportColumns}
+          rows={tableRows}
+        />
+      }
+    >
+      {body}
+    </Card>
   );
 }

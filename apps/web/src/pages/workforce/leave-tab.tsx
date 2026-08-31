@@ -8,26 +8,22 @@ import {
   DecisionNote,
   Button,
   DataTable,
+  DateRangePicker,
   EntityDetailPanel,
   FileUploadWidget,
-  FormActions,
   FormField,
-  Input,
-  Modal,
   PaginationFooter,
   PanelAction,
   RowAction,
   RowActions,
   SegmentedControl,
-  Select,
   SlideOverSection,
   StatusBadge,
   TabToolbar,
-  Textarea,
   humanizeStatus,
   statusTone,
   type DataTableColumn,
-  type FormModalProps,
+  type DateRange,
 } from '@/shared/ui';
 import { useLeaveDocumentUrl } from '@/shared/api/attachment-urls';
 import { useCurrentUser } from '@/shared/hooks/use-current-user';
@@ -39,8 +35,11 @@ import {
   decisionNote,
   decisionReason,
   leaveReviewVerdict,
+  LEAVE_REVIEW_PERMISSIONS,
 } from './workforce-policy';
-import type { LeaveResponse, LeaveStatus, LeaveType } from '@/shared/api/types';
+import { useBulkReview } from './use-bulk-review';
+import { RequestLeaveModal } from './request-leave-modal';
+import type { LeaveResponse, LeaveStatus } from '@/shared/api/types';
 
 const LEAVE_FILTERS: { value: LeaveStatus | ''; label: string }[] = [
   { value: '', label: 'All' },
@@ -49,89 +48,6 @@ const LEAVE_FILTERS: { value: LeaveStatus | ''; label: string }[] = [
   { value: 'rejected', label: 'Rejected' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
-
-const LEAVE_TYPES: LeaveType[] = ['annual', 'sick', 'unpaid', 'parental', 'other'];
-
-function RequestLeaveModal({ open, onClose, onSuccess }: FormModalProps) {
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    leaveType: 'annual' as LeaveType,
-    startDate: '',
-    endDate: '',
-    reason: '',
-  });
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    const { error } = await api.POST('/v1/workforce/leave', {
-      body: {
-        leaveType: form.leaveType as 'annual' | 'sick' | 'unpaid' | 'parental' | 'other',
-        startDate: form.startDate,
-        endDate: form.endDate,
-        reason: form.reason || undefined,
-      },
-    });
-    setLoading(false);
-    if (error) {
-      toast.error(apiErrorMessage(error, 'Failed to submit leave request.'));
-      return;
-    }
-    toast.success('Leave request submitted');
-    onSuccess();
-    onClose();
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Request leave" size="sm">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
-        <FormField label="Leave type" htmlFor="leave-type" required>
-          <Select
-            id="leave-type"
-            value={form.leaveType}
-            onChange={(e) => setForm((f) => ({ ...f, leaveType: e.target.value as LeaveType }))}
-          >
-            {LEAVE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {humanizeStatus(t)}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label="Start date" htmlFor="leave-start" required>
-            <Input
-              id="leave-start"
-              type="date"
-              required
-              value={form.startDate}
-              onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="End date" htmlFor="leave-end" required>
-            <Input
-              id="leave-end"
-              type="date"
-              required
-              value={form.endDate}
-              onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
-            />
-          </FormField>
-        </div>
-        <FormField label="Reason" htmlFor="leave-reason">
-          <Textarea
-            id="leave-reason"
-            rows={2}
-            value={form.reason}
-            onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
-            placeholder="Optional reason…"
-          />
-        </FormField>
-        <FormActions loading={loading} onClose={onClose} submitLabel="Request" />
-      </form>
-    </Modal>
-  );
-}
 
 export function LeaveTab() {
   const qc = useQueryClient();
@@ -143,9 +59,12 @@ export function LeaveTab() {
    */
   const me = useCurrentUser();
   const { can } = usePermissions();
+  const canReview = LEAVE_REVIEW_PERMISSIONS.every((permission) => can(permission));
   const [statusFilter, setStatusFilter] = useState<LeaveStatus | ''>('');
+  const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState<LeaveResponse | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const list = useListState();
 
   /*
@@ -157,12 +76,27 @@ export function LeaveTab() {
   const supportingDoc = useLeaveDocumentUrl(selected?.id ?? null);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['workforce', 'leave', statusFilter, list.offset, list.limit],
+    // The offset belongs in the key: without it React Query serves page 1 for every page. The date
+    // window rides along for the same reason — and as `null`s when cleared, so a cleared filter and
+    // a never-set one share a cache entry instead of forking one.
+    queryKey: [
+      'workforce',
+      'leave',
+      statusFilter,
+      dateRange?.from ?? null,
+      dateRange?.to ?? null,
+      list.offset,
+      list.limit,
+    ],
     queryFn: async () => {
       const { data, error } = await api.GET('/v1/workforce/leave', {
         params: {
           query: {
             status: (statusFilter || undefined) as never,
+            // Inclusive bounds on the START date: a window that BEGINS in the range, not an overlap
+            // test — the API leaves a straddling window to the conflict check, not the list.
+            dateFrom: dateRange?.from,
+            dateTo: dateRange?.to,
             limit: list.limit,
             offset: list.offset,
           },
@@ -175,11 +109,16 @@ export function LeaveTab() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['workforce', 'leave'] });
 
-  async function handleReview(id: string, approve: boolean) {
+  async function reviewLeave(id: string, approve: boolean) {
     const { error } = await api.POST('/v1/workforce/leave/{id}/review', {
       params: { path: { id } },
       body: { approve },
     });
+    return error;
+  }
+
+  async function handleReview(id: string, approve: boolean) {
+    const error = await reviewLeave(id, approve);
     if (error) {
       toast.error(apiErrorMessage(error, `Failed to ${approve ? 'approve' : 'reject'} leave.`));
       return;
@@ -187,6 +126,16 @@ export function LeaveTab() {
     toast.success(`Leave ${approve ? 'approved' : 'rejected'}`);
     invalidate();
   }
+
+  const { reviewing, handleBulkReview } = useBulkReview({
+    rows: data?.data as LeaveResponse[] | undefined,
+    selectedIds,
+    setSelectedIds,
+    verdict: (l) => leaveReviewVerdict(l, me.data?.sub, can),
+    review: reviewLeave,
+    invalidate,
+    entityLabel: 'leave',
+  });
 
   async function handleCancel(id: string) {
     const { error } = await api.POST('/v1/workforce/leave/{id}/cancel', {
@@ -283,15 +232,32 @@ export function LeaveTab() {
       <div className="flex flex-col gap-4">
         <TabToolbar
           filter={
-            <SegmentedControl
-              label="Filter leave by status"
-              options={LEAVE_FILTERS}
-              value={statusFilter}
-              onChange={(value) => {
-                setStatusFilter(value);
-                list.resetPaging();
-              }}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <SegmentedControl
+                label="Filter leave by status"
+                options={LEAVE_FILTERS}
+                value={statusFilter}
+                onChange={(value) => {
+                  setStatusFilter(value);
+                  list.resetPaging();
+                }}
+              />
+              {/*
+               * "Starting between", not "between": the API matches requests whose window BEGINS in the
+               * range, so a trip straddling the boundary is deliberately not matched — the picker is
+               * the active-filter affordance, reading in its two fields as the status strip does.
+               */}
+              <FormField label="Starting between" htmlFor="leave-filter-range">
+                <DateRangePicker
+                  id="leave-filter-range"
+                  value={dateRange}
+                  onChange={(value) => {
+                    setDateRange(value);
+                    list.resetPaging();
+                  }}
+                />
+              </FormField>
+            </div>
           }
           action={
             <Button variant="primary" onClick={() => setShowForm(true)}>
@@ -308,8 +274,48 @@ export function LeaveTab() {
           errorMessage="Failed to load leave records."
           emptyMessage="No leave records found"
           emptyIcon={Calendar}
+          emptyAction={
+            /*
+             * The toolbar action, repeated where an empty table leaves the eyes — and withdrawn once
+             * a filter is on, because "add one" is not the answer to "where are the ones matching
+             * this". Ungated like the toolbar button: filing leave is `@SelfScoped`, so a permission
+             * check here would gate self-service away from most of the organisation.
+             */
+            statusFilter || dateRange ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
+                <Plus className="h-3.5 w-3.5" /> Request leave
+              </Button>
+            )
+          }
           onRowClick={(l) => setSelected(l)}
           isRowActive={(l) => l.id === selected?.id}
+          selectedIds={canReview ? selectedIds : undefined}
+          onSelectionChange={canReview ? setSelectedIds : undefined}
+          bulkActions={
+            canReview
+              ? (count) => (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-fg-muted">{count} selected</span>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={reviewing}
+                      onClick={() => handleBulkReview(true)}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={reviewing}
+                      onClick={() => handleBulkReview(false)}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                )
+              : undefined
+          }
         />
 
         <PaginationFooter

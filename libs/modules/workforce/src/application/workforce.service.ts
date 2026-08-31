@@ -154,6 +154,22 @@ export class WorkforceService {
     return this.repo.createTimesheet({ ...input, employeeId: actor.sub });
   }
 
+  /**
+   * Bulk draft creation, all-or-nothing: the repository writes every entry in ONE insert, so a
+   * failure anywhere rolls the whole batch back — a half-imported week of timesheets is worse
+   * than an unimported one, because the caller cannot tell which rows landed. Validation has
+   * already happened upstream, so the only failures left here are database ones.
+   *
+   * Same self-scoping as {@link createTimesheet}: every entry is filed BY the caller, there is no
+   * employeeId in the payload to trust.
+   */
+  async createTimesheetsBulk(
+    inputs: Omit<CreateTimesheetInput, 'employeeId'>[],
+    actor: Actor,
+  ): Promise<Timesheet[]> {
+    return this.repo.createTimesheets(inputs.map((input) => ({ ...input, employeeId: actor.sub })));
+  }
+
   async getTimesheet(id: string): Promise<Timesheet> {
     const t = await this.repo.findTimesheetById(id);
     if (!t) throw new NotFoundException(ErrorCodes.TIMESHEET_NOT_FOUND, 'Timesheet not found');

@@ -17,6 +17,7 @@ import {
   SlideOverSection,
   StatusBadge,
   TabToolbar,
+  Tooltip,
   humanizeStatus,
   type DataTableColumn,
   PanelState,
@@ -138,26 +139,28 @@ export function CatalogueTab() {
               Decide
             </Button>
             {control.source === 'custom' && !control.retiredAt && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Edit ${control.title}`}
-                title="Edit"
-                onClick={() => setEditing(control)}
-              >
-                <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
-              </Button>
+              <Tooltip content="Edit">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Edit ${control.title}`}
+                  onClick={() => setEditing(control)}
+                >
+                  <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
+                </Button>
+              </Tooltip>
             )}
             {!control.retiredAt && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Retire ${control.title}`}
-                title="Retire"
-                onClick={() => setRetiring(control)}
-              >
-                <Archive className="h-3.5 w-3.5" strokeWidth={2} />
-              </Button>
+              <Tooltip content="Retire">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Retire ${control.title}`}
+                  onClick={() => setRetiring(control)}
+                >
+                  <Archive className="h-3.5 w-3.5" strokeWidth={2} />
+                </Button>
+              </Tooltip>
             )}
           </RowActions>
         ) : null,
@@ -248,6 +251,13 @@ export function CatalogueTab() {
         errorMessage="Failed to load the control catalogue."
         emptyMessage="No controls match these filters"
         emptyIcon={ShieldCheck}
+        emptyAction={
+          list.search || !canManage ? undefined : (
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-3.5 w-3.5" /> New control
+            </Button>
+          )
+        }
         onRowClick={setSelected}
         isRowActive={(control) => control.id === selected?.id}
       />

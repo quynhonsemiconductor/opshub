@@ -31,13 +31,12 @@ export function FormField({
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
-      <label
-        htmlFor={htmlFor}
-        className="text-xs font-medium text-fg-muted"
-      >
+      <label htmlFor={htmlFor} className="text-xs font-medium text-fg-muted">
         {label}
         {required && (
-          <span className="ml-0.5 text-red-500" aria-hidden="true">*</span>
+          <span className="ml-0.5 text-danger" aria-hidden="true">
+            *
+          </span>
         )}
       </label>
 
@@ -50,11 +49,7 @@ export function FormField({
       {children}
 
       {error && (
-        <p
-          id={errorId}
-          role="alert"
-          className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400"
-        >
+        <p id={errorId} role="alert" className="flex items-center gap-1 text-xs text-danger">
           <span aria-hidden="true">✕</span>
           {error}
         </p>
@@ -73,7 +68,11 @@ export function FieldLabel({ children, required, className, ...props }: FieldLab
   return (
     <label className={cn('text-xs font-medium text-fg-muted', className)} {...props}>
       {children}
-      {required && <span className="ml-0.5 text-red-500" aria-hidden="true">*</span>}
+      {required && (
+        <span className="ml-0.5 text-danger" aria-hidden="true">
+          *
+        </span>
+      )}
     </label>
   );
 }
@@ -83,7 +82,7 @@ export function FieldLabel({ children, required, className, ...props }: FieldLab
 export function FieldError({ id, message }: { id?: string; message: string | undefined }) {
   if (!message) return null;
   return (
-    <p id={id} role="alert" className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+    <p id={id} role="alert" className="flex items-center gap-1 text-xs text-danger">
       <span aria-hidden="true">✕</span>
       {message}
     </p>

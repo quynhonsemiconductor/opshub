@@ -130,7 +130,7 @@ export function Modal({
         data-overlay-layer={OVERLAY_LAYER.dialog}
         onKeyDown={handleKeyDown}
         className={cn(
-          'relative z-10 w-full overflow-hidden rounded-xl bg-surface shadow-2xl ring-1 ring-border',
+          'relative z-10 w-full overflow-hidden rounded-xl bg-surface shadow-lg ring-1 ring-border',
           // One token, defined in `app/styles/globals.css` — which is also where reduced motion turns it
           // off. It replaces `animate-in fade-in-0 zoom-in-95 duration-150`: tailwindcss-animate's
           // vocabulary, a plugin this repo does not depend on, so those four classes emitted no CSS.

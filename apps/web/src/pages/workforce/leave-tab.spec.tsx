@@ -22,7 +22,7 @@
  * the claim that was false.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const GET = vi.fn();
@@ -32,6 +32,15 @@ vi.mock('@/shared/api/client', () => ({
   api: { GET: (...a: unknown[]) => GET(...a), POST: (...a: unknown[]) => POST(...a) },
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+/*
+ * THE CLOCK IS FAKE, and it is not ceremony — see `shared/ui/date-range-picker.spec.tsx`. The date
+ * filter's calendar opens on the month holding TODAY, and the day the filter test clicks (`4 March
+ * 2026`) exists only in March. `setSystemTime` alone mocks the Date — the real timers keep running,
+ * which is what React Query's queries and Testing Library's `findBy*` polling need; faking the
+ * timers would stall both.
+ */
+vi.setSystemTime(new Date('2026-03-10T12:00:00'));
 
 /**
  * The viewer, mutated per test: their id decides ownership and their permission list decides everything
@@ -96,6 +105,21 @@ function renderTab(rows: unknown[]) {
 function openDrawer(rowText: string) {
   fireEvent.click(screen.getByText(rowText));
   return screen.getByRole('dialog');
+}
+
+/**
+ * Sets a range through the picker the way a keyboard does it: the first pick is a calendar click
+ * (nothing has been committed yet, so typing cannot work — see the picker's own spec), the second
+ * end is typed into the To field, which commits the ordered pair. Same helper as
+ * `timesheets-tab.spec.tsx`; not shared because the picker interaction is not the thing under test.
+ */
+async function pickRange(scope: HTMLElement, from: string, to: string) {
+  const fromField = within(scope).getByLabelText('From date') as HTMLInputElement;
+  fromField.focus();
+  fireEvent.focus(fromField);
+  const calendar = within(scope).getByRole('dialog', { name: 'Choose date range' });
+  fireEvent.click(within(calendar).getByRole('button', { name: from }));
+  fireEvent.change(within(scope).getByLabelText('To date'), { target: { value: to } });
 }
 
 beforeEach(() => {
@@ -272,5 +296,53 @@ describe('the Leave tab, before /me has resolved', () => {
 
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
     expect(screen.queryByText(/colleague decides|Not yours/)).toBeNull();
+  });
+});
+
+describe('the list date-range filter', () => {
+  it('asks "starting between", the API’s own semantics, and sends the window as dateFrom/dateTo', async () => {
+    /*
+     * The leave list filters on `startDate` — a request whose window BEGINS in the range — and not as
+     * an overlap test, so a trip straddling the boundary is deliberately not matched. The label says
+     * that out loud, because a generic "between" would promise the overlap reading the API does not
+     * give. Clearing goes back to `undefined`s, which share one cache entry with a never-set filter.
+     */
+    renderTab([]);
+    await screen.findByText('No leave records found');
+
+    expect(screen.getByText('Starting between')).toBeTruthy();
+
+    await pickRange(document.body, '4 March 2026', '2026-03-11');
+
+    await waitFor(() => {
+      const query = GET.mock.calls.at(-1)![1].params.query;
+      expect(query.dateFrom).toBe('2026-03-04');
+      expect(query.dateTo).toBe('2026-03-11');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear dates' }));
+    await waitFor(() => {
+      const query = GET.mock.calls.at(-1)![1].params.query;
+      expect(query.dateFrom).toBeUndefined();
+      expect(query.dateTo).toBeUndefined();
+    });
+  });
+});
+
+describe('the empty state', () => {
+  it('repeats the toolbar CTA, and withdraws it once a filter narrows the list', async () => {
+    /*
+     * An empty table under no filter is "nothing filed yet" — the moment to offer the one action the
+     * toolbar already carries. Under a filter the same blank means "nothing matches this", and
+     * "request leave" stops being the answer, so the toolbar button is left as the only offer.
+     */
+    renderTab([]);
+    await screen.findByText('No leave records found');
+    expect(screen.getAllByRole('button', { name: /request leave/i })).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Pending' }));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: /request leave/i })).toHaveLength(1),
+    );
   });
 });

@@ -237,6 +237,13 @@ export function DocumentsPage() {
           errorMessage="Failed to load the document library."
           emptyMessage="No documents match these filters"
           emptyIcon={FileText}
+          emptyAction={
+            list.search || !canManage ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setRegistering(true)}>
+                <Plus className="h-3.5 w-3.5" /> Register a document
+              </Button>
+            )
+          }
           onRowClick={(doc) => setSelectedId(doc.id)}
           isRowActive={(doc) => doc.id === selectedId}
         />

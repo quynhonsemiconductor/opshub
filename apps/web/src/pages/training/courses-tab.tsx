@@ -14,6 +14,7 @@ import {
   SegmentedControl,
   StatusBadge,
   TabToolbar,
+  Tooltip,
   type DataTableColumn,
 } from '@/shared/ui';
 import { useListState } from '@/shared/hooks/use-list-state';
@@ -129,27 +130,29 @@ export function CoursesTab() {
       cell: (course) =>
         canManage ? (
           <RowActions>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Edit ${course.title}`}
-              title="Edit"
-              onClick={() => setEditing(course)}
-            >
-              <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
-            </Button>
-            {/* Retiring is a one-way state transition, so it is offered only while there is a state to
-                leave — an already-retired course has nothing this button could do. */}
-            {!course.retiredAt && (
+            <Tooltip content="Edit">
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`Retire ${course.title}`}
-                title="Retire"
-                onClick={() => setRetiring(course)}
+                aria-label={`Edit ${course.title}`}
+                onClick={() => setEditing(course)}
               >
-                <Archive className="h-3.5 w-3.5" strokeWidth={2} />
+                <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
               </Button>
+            </Tooltip>
+            {/* Retiring is a one-way state transition, so it is offered only while there is a state to
+                leave — an already-retired course has nothing this button could do. */}
+            {!course.retiredAt && (
+              <Tooltip content="Retire">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Retire ${course.title}`}
+                  onClick={() => setRetiring(course)}
+                >
+                  <Archive className="h-3.5 w-3.5" strokeWidth={2} />
+                </Button>
+              </Tooltip>
             )}
           </RowActions>
         ) : null,
@@ -212,6 +215,13 @@ export function CoursesTab() {
         errorMessage="Failed to load courses."
         emptyMessage="No courses yet"
         emptyIcon={BookOpen}
+        emptyAction={
+          !canManage ? undefined : (
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-3.5 w-3.5" /> New course
+            </Button>
+          )
+        }
       />
 
       <PaginationFooter

@@ -250,6 +250,13 @@ export function RolesTab() {
           errorMessage="Failed to load roles."
           emptyMessage="No roles yet"
           emptyIcon={ShieldCheck}
+          emptyAction={
+            !canManage ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+                <Plus className="h-3.5 w-3.5" /> New role
+              </Button>
+            )
+          }
           onRowClick={(role) => {
             setSelectedId(role.id);
             setAddPermKey('');

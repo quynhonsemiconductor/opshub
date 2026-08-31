@@ -168,7 +168,7 @@ export function SlideOver({
         onKeyDown={handleKeyDown}
         className={cn(
           'fixed inset-y-0 right-0 z-50 flex flex-col',
-          'bg-surface shadow-2xl ring-1 ring-border',
+          'bg-surface shadow-lg ring-1 ring-border',
           'transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
           WIDTH[width],
           open ? 'translate-x-0' : 'translate-x-full',

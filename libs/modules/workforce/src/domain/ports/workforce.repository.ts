@@ -23,6 +23,11 @@ export const WORKFORCE_REPOSITORY = Symbol('WORKFORCE_REPOSITORY');
 export interface IWorkforceRepository {
   // Timesheets
   createTimesheet(input: CreateTimesheetInput): Promise<Timesheet>;
+  /**
+   * Every entry in ONE insert, inside a transaction — all rows land or none do. The bulk
+   * endpoint's whole-batch guarantee rests on this, not on anything the service does.
+   */
+  createTimesheets(inputs: CreateTimesheetInput[]): Promise<Timesheet[]>;
   findTimesheetById(id: string): Promise<Timesheet | null>;
   listTimesheets(
     filters: TimesheetFilters,

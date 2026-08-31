@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import { controlOptions } from '@/shared/api/picker-sources';
-import { Badge, Button, EntityPicker, RowActions, humanizeStatus } from '@/shared/ui';
+import { Badge, Button, EntityPicker, RowActions, Tooltip, humanizeStatus } from '@/shared/ui';
 import { useRiskControls } from './use-risks';
 import type { Risk } from './risk.types';
 
@@ -80,15 +80,16 @@ export function LinkedControlsPanel({ risk, canManage }: { risk: Risk; canManage
           {control.status && <Badge>{humanizeStatus(control.status)}</Badge>}
           {canManage && (
             <RowActions>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Unlink ${control.title}`}
-                title="Unlink"
-                onClick={() => void unlink(control.id, control.title)}
-              >
-                <X className="h-3.5 w-3.5" strokeWidth={2} />
-              </Button>
+              <Tooltip content="Unlink">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Unlink ${control.title}`}
+                  onClick={() => void unlink(control.id, control.title)}
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                </Button>
+              </Tooltip>
             </RowActions>
           )}
         </div>
