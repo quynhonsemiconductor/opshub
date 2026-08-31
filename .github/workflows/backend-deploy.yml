@@ -151,29 +151,61 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   # CI gate — a red main must not deploy.
   #
-  #   - tag push → CI does not run on tags, and prod is gated by the "production"
-  #     Environment reviewer inside the reusable → nothing to await, proceed.
   #   - push to main → wait for Backend · CI on this sha; `gh run watch
   #     --exit-status` propagates its conclusion, so a failed CI blocks deploy.
+  #   - tag push → wait for the DEVELOP deploy of this sha instead. See below.
   #
   # Fails CLOSED: if no CI run is found for the sha, block rather than ship blind.
+  #
+  # WHY THE TAG BRANCH WAITS ON THE DEVELOP DEPLOY, AND NO LONGER EXITS 0.
+  # It used to `exit 0` with "Backend · CI gate not applicable", which is true on its own
+  # terms — Backend · CI runs on main, not on tags, so there is no CI run to await. But it
+  # left prod with no gate at all, and a prod deploy does not build: it PROMOTES the
+  # sha-<sha> image the develop deploy pushed. So the tag run's real precondition is not
+  # CI, it is "develop already built and deployed this sha" — exactly what the promote
+  # action's own failure message states ("The commit must be merged to main and deployed to
+  # develop before tagging a release").
+  #
+  # With no gate the two runs race. This is PORTED FROM RALLY, where prod lost that race
+  # on v0.7.13 (2026-08-31): a release merge fires both runs on the same commit, the tag
+  # run cleared this gate in 3 seconds while the main run sat here for 15m16s waiting on
+  # Backend · CI, and prod then exhausted the promote step's poll budget waiting for an
+  # image that did not exist yet — failing 21 seconds before this gate cleared on the main
+  # run. Nothing half-deployed (promote runs before the deploy job, and it is idempotent),
+  # but the release needed a manual re-run. opshub shares the reusable workflow, the
+  # promote action and this gate verbatim, so it had the same defect and simply had not
+  # cut a release slow enough to expose it.
+  #
+  # Waiting on the whole develop RUN, not just its build jobs, is deliberate: it is the
+  # documented contract, it is one `gh run watch` rather than per-job polling, and it means
+  # prod can never ship an image develop itself failed to deploy.
+  #
+  # NOT-FOUND WARNS RATHER THAN BLOCKING, unlike the main branch below. A release tag
+  # always produces a develop run (package.json and the manifest are never in
+  # paths-ignore), so absence means something unusual — a hand-cut tag on a docs-only
+  # commit, or a deleted run — and the promote step's ECR poll is still the backstop.
+  # Blocking would turn this gate into a new way to make a release un-shippable. Same
+  # warn-and-proceed shape as wait-for-infra above. A develop run that EXISTS and FAILED
+  # does block, which is the diagnostic this adds: prod now says "develop deploy failed"
+  # in seconds instead of "not found in ECR" in ~17 min.
   # ───────────────────────────────────────────────────────────────────────────
   wait-for-ci:
     name: Wait for Backend · CI
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45, not 30: the tag branch now awaits the develop deploy, whose own slowest input is
+    # a Docker build that a lockfile change forces to rebuild from scratch. Rally measured
+    # 24m24s for that run on the release this fix comes from.
+    timeout-minutes: 45
     permissions:
       contents: read
       actions: read
     steps:
       - name: Wait for Backend · CI on this commit
+        if: github.ref_type != 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "Tag deploy — Backend · CI gate not applicable."; exit 0
-          fi
           # This job does not check out the repo, so `gh` cannot infer it from a
           # local remote — pass it explicitly.
           for _ in $(seq 1 12); do
@@ -190,6 +222,42 @@ jobs:
           echo "Waiting on Backend · CI run $ID …"
           gh run watch --repo "$GITHUB_REPOSITORY" "$ID" --exit-status
           echo "Backend · CI succeeded; deploy may proceed."
+
+      # Prod promotes the image the develop deploy pushed, so this is the tag run's real
+      # precondition. See the block comment above this job for the race it closes.
+      - name: Wait for the develop deploy of this commit
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # `--branch main` is what excludes THIS run: the develop deploy's headBranch is
+          # `main` while the tag run's is the tag ref, so the two never match each other
+          # despite sharing a workflow file and a commit. Without it this would find
+          # itself and wait forever.
+          #
+          # `|| ID=""` on the assignment, matching wait-for-infra above and for the same
+          # reason: runners use `set -e`, an assignment takes its command substitution's
+          # exit status, so a rate-limited `gh run list` would skip the retry loop.
+          for _ in $(seq 1 12); do
+            ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow backend-deploy.yml \
+                   --branch main --commit "$GITHUB_SHA" \
+                   --limit 1 --json databaseId --jq '.[0].databaseId // empty') || ID=""
+            [ -n "$ID" ] && break
+            sleep 10
+          done
+
+          if [ -z "${ID:-}" ]; then
+            echo "::warning::No develop Backend · Deploy run found for $GITHUB_SHA — proceeding, the promote step's ECR poll is the backstop."
+            exit 0
+          fi
+
+          echo "Waiting on develop Backend · Deploy run $ID …"
+          if ! gh run watch --repo "$GITHUB_REPOSITORY" "$ID" --exit-status; then
+            echo "::error::The develop deploy of $GITHUB_SHA did not succeed (run $ID). Prod promotes the image that run pushes, so there is nothing to promote. Fix develop, then re-run this deploy."
+            exit 1
+          fi
+          echo "Develop deployed this commit; the sha image exists and prod may promote it."
 
   deploy:
     needs: [wait-for-infra, wait-for-ci]
@@ -209,7 +277,73 @@ jobs:
       product: opshub
       has_worker: true
       has_migrator: true
+      # ARM64 (Graviton) Fargate, ~20% cheaper per vCPU-hour and GB-hour for identical
+      # sizing. These two move TOGETHER with `cpu_architecture = "ARM64"` in
+      # infra/live/*/main.tf, in one commit: qnsc-ci's own note on these inputs is that
+      # setting only one produces "image Manifest does not contain descriptor matching
+      # platform" at task start — after a clean apply and a build that reported success.
+      #
+      # One commit is safe because `wait-for-infra` above holds this deploy until the
+      # Infrastructure · Apply for the same sha finishes, so the ARM64 task definition
+      # exists before the deploy that builds arm64 images rolls onto it. And the
+      # ecs-service module runs `deployment_circuit_breaker` with rollback enabled, so a
+      # task that cannot start returns the service to its previous x86 revision by itself.
+      #
+      # NATIVE ARM RUNNER, not QEMU: emulating an arm64 pnpm + Nest compile on an x86
+      # runner multiplies build minutes by enough to outweigh the Fargate saving, which is
+      # the reusable workflow's own stated reason for having a separate runner input.
+      build_runner: ubuntu-24.04-arm
+      image_platforms: linux/arm64
     # Least-privilege: pass only what the reusable declares (no `secrets: inherit`).
     secrets:
       AWS_ACCOUNT_ID:       ${{ vars.AWS_ACCOUNT_ID }}
       SLACK_DEPLOY_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Grafana deploy annotation — ported from rally.
+  #
+  # WHY THIS IS NOT COSMETIC. opshub's Grafana alert rules fire on symptoms that a
+  # deploy is one of the likeliest causes of, and without a deploy marker on the
+  # dashboard there is nothing on screen that distinguishes "the service regressed"
+  # from "a task was replaced 40 seconds ago". rally's `http-p99-latency` page on
+  # 2026-08-31 was exactly that: the slow request was a cold start after a task
+  # replacement, and establishing it took reading workflow job timestamps by hand
+  # because the latency panel carried no deploy markers to line the spike up against.
+  #
+  # `continue-on-error: true` on purpose, and it is the whole safety argument: an
+  # annotation is an observability nicety, and a Grafana outage or a rotated token must
+  # never turn a SUCCESSFUL deploy into a red pipeline. The failure mode of this step is
+  # a missing marker, never a blocked release.
+  #
+  # `if: always() && needs.deploy.result == 'success'` rather than a bare success():
+  # `always()` is what lets this job run at all when an earlier job in the graph was
+  # skipped, and the explicit result check is what keeps it from annotating a deploy
+  # that did not happen. A marker for a deploy that never shipped is worse than none —
+  # it sends the next reader looking for a cause in the wrong place.
+  #
+  # GRAFANA_ALERTS_TOKEN is an ORGANISATION secret with ALL-repository visibility, so
+  # opshub needs no repo-level secret for this. Verified rather than assumed.
+  #
+  # The env label follows the same tag-versus-branch rule the deploy itself uses, so the
+  # annotation lands on the environment that was actually deployed.
+  # ───────────────────────────────────────────────────────────────────────────
+  annotate-deploy:
+    needs: [deploy]
+    if: always() && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Post deploy annotation to Grafana
+        continue-on-error: true
+        env:
+          GRAFANA_ALERTS_TOKEN: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
+          DEPLOY_ENV: ${{ github.ref_type == 'tag' && 'production' || 'develop' }}
+        run: |
+          curl -sf -X POST "https://qnsc.grafana.net/api/annotations" \
+            -H "Authorization: Bearer ${GRAFANA_ALERTS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                  --arg text "opshub deployed ${GITHUB_SHA:0:7} to ${DEPLOY_ENV}" \
+                  --arg env "$DEPLOY_ENV" \
+                  '{tags: ["deploy", "opshub", $env], text: $text}')"
