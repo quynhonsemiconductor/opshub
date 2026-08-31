@@ -98,6 +98,14 @@ module "stack" {
   entra_tenant_id = var.entra_tenant_id
   entra_client_id = var.entra_client_id
 
+  // qnsc.vn is a verified SES domain identity in this account (rally already sends from
+  // it). A distinct local-part from rally's own noreply@qnsc.vn keeps bounce/reply
+  // routing distinguishable per product, though the domain-level identity would permit
+  // either. SES_CONFIGURATION_SET is NOT set here — it's derived automatically from the
+  // real aws_sesv2_configuration_set.email_feedback resource this module now creates.
+  email_provider  = "ses"
+  mail_from_email = "opshub-noreply@qnsc.vn"
+
   // Cost-leaning: short retention, immediate secret deletion so a destroy+redeploy
   // cycle does not trip "secret scheduled for deletion".
   log_retention_days           = 7
