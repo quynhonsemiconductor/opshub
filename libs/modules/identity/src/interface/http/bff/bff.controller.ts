@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   Inject,
+  Logger,
   NotFoundException,
   Post,
   Query,
@@ -58,6 +59,8 @@ import {
 @ApiExcludeController()
 @Controller('bff')
 export class BffController {
+  private readonly logger = new Logger(BffController.name);
+
   constructor(@Inject(BffService) private readonly bff: BffService) {}
 
   // ── POST /bff/login ────────────────────────────────────────────────────────
@@ -106,11 +109,13 @@ export class BffController {
     let result: { sid: string; returnTo: string };
     try {
       result = await this.bff.completeLogin({ code, state, cookieState, ip: req.ip });
-    } catch {
+    } catch (err) {
       // Never surface OIDC or internal detail on the login path: the browser is an
       // unauthenticated caller here, and the failure reason (bad state, expired auth
       // request, token-exchange rejection) is exactly what an attacker probing the
-      // callback wants to learn. The real cause is logged inside the shared service.
+      // callback wants to learn. Logged server-side only, at error level, so it still
+      // shows up in Loki without ever reaching the response.
+      this.logger.error({ err }, 'BFF callback failed to complete login');
       throw new UnauthorizedException(
         ErrorCodes.AUTH_TOKEN_INVALID,
         'Login could not be completed',
