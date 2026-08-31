@@ -68,9 +68,11 @@ export function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface">
+    <div className="rounded-lg border border-border bg-surface shadow-sm">
       <div className="flex items-center gap-2 border-b border-border px-5 py-3.5">
-        <Icon className="h-4 w-4 text-fg-subtle" strokeWidth={1.75} aria-hidden="true" />
+        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-accent-secondary-muted text-accent-secondary-muted-fg">
+          <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+        </div>
         <span className="text-sm font-medium text-fg">{title}</span>
       </div>
       <div className="divide-y divide-border">{children}</div>
