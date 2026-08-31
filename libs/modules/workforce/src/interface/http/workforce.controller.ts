@@ -46,6 +46,7 @@ import {
   RunCarryOverDto,
   SetLeaveEntitlementDto,
   CreateTimesheetDto,
+  BulkCreateTimesheetsDto,
   ListTimesheetsQueryDto,
   TimesheetResponseDto,
   CreateLeaveDto,
@@ -161,7 +162,12 @@ export class WorkforceController {
     @CurrentUser() user: JwtPayload,
   ): Promise<PagedResult<TimesheetResponseDto>> {
     const { rows, total } = await this.service.listTimesheets(
-      { employeeId: query.employeeId, status: query.status },
+      {
+        employeeId: query.employeeId,
+        status: query.status,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+      },
       query.limit,
       query.offset,
       user,
@@ -187,6 +193,27 @@ export class WorkforceController {
       metadata: { workDate: dto.workDate, minutesWorked: dto.minutesWorked },
     });
     return toTimesheetDto(ts);
+  }
+
+  /**
+   * Up to 50 drafts in one call. Every entry is validated by the SAME schema as a single create —
+   * start/end derivation included — and the batch is ALL-OR-NOTHING: one bad entry fails all of
+   * them (422 at validation, a rolled-back insert at persistence), never a partial week the
+   * caller would have to diff against their source to discover.
+   */
+  @Post('timesheets/bulk')
+  @SelfScoped('creates timesheets FOR the caller — employeeId is actor.sub on every entry')
+  @ApiOperation({ summary: 'Create draft timesheets in bulk (max 50, all-or-nothing)' })
+  @ApiCreatedResponse({ type: [TimesheetResponseDto] })
+  @ApiCommonErrors(401, 422)
+  async createTimesheetsBulk(
+    @Body() dto: BulkCreateTimesheetsDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<TimesheetResponseDto[]> {
+    // The audit entry per row is written inside the service's own transaction — see
+    // WorkforceService.createTimesheetsBulk — so a rolled-back batch leaves no orphaned trail.
+    const created = await this.service.createTimesheetsBulk(dto.entries, user);
+    return created.map(toTimesheetDto);
   }
 
   @Post('timesheets/:id/submit')
@@ -248,7 +275,12 @@ export class WorkforceController {
     @CurrentUser() user: JwtPayload,
   ): Promise<PagedResult<LeaveResponseDto>> {
     const { rows, total } = await this.service.listLeave(
-      { employeeId: query.employeeId, status: query.status },
+      {
+        employeeId: query.employeeId,
+        status: query.status,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+      },
       query.limit,
       query.offset,
       user,
@@ -337,7 +369,12 @@ export class WorkforceController {
     @CurrentUser() user: JwtPayload,
   ): Promise<PagedResult<OvertimeResponseDto>> {
     const { rows, total } = await this.service.listOvertime(
-      { employeeId: query.employeeId, status: query.status },
+      {
+        employeeId: query.employeeId,
+        status: query.status,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+      },
       query.limit,
       query.offset,
       user,

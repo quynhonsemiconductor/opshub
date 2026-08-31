@@ -306,6 +306,13 @@ export function RisksPage() {
           errorMessage="Failed to load the risk register."
           emptyMessage="No risks match these filters"
           emptyIcon={ShieldAlert}
+          emptyAction={
+            !canManage ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setIdentifying(true)}>
+                <Plus className="h-3.5 w-3.5" /> Identify a risk
+              </Button>
+            )
+          }
           onRowClick={setSelected}
           isRowActive={(risk) => risk.id === selected?.id}
         />

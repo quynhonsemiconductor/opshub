@@ -159,7 +159,9 @@ export class ResilienceService {
   );
 
   /** @deprecated use named preset or execute() — kept for backward compat */
-  get internal(): IPolicy { return this.database; }
+  get internal(): IPolicy {
+    return this.database;
+  }
 
   // ── Instrumented executor ─────────────────────────────────────────────────
 

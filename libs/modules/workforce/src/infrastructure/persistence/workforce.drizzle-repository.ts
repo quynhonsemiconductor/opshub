@@ -42,6 +42,27 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
     return row;
   }
 
+  async createTimesheets(inputs: CreateTimesheetInput[], tx?: DbExecutor): Promise<Timesheet[]> {
+    // ONE multi-row insert — a partial batch is not a state this method can reach: any failure
+    // rolls every row back together. Runs inside the caller's transaction when given one (the
+    // service passes one so the batch's audit trail commits with it); opens its own otherwise, so
+    // the all-or-nothing promise holds either way.
+    const run = (executor: DbExecutor) =>
+      executor
+        .insert(timesheets)
+        .values(
+          inputs.map((input) => ({
+            id: newId(),
+            employeeId: input.employeeId,
+            workDate: input.workDate,
+            minutesWorked: input.minutesWorked,
+            note: input.note ?? null,
+          })),
+        )
+        .returning();
+    return tx ? run(tx) : this.db.transaction((inner) => run(inner));
+  }
+
   async findTimesheetById(id: string): Promise<Timesheet | null> {
     const [row] = await this.db.select().from(timesheets).where(eq(timesheets.id, id)).limit(1);
     return row ?? null;
@@ -55,6 +76,9 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
     const conditions = [
       filters.employeeId ? eq(timesheets.employeeId, filters.employeeId) : undefined,
       filters.status ? eq(timesheets.status, filters.status) : undefined,
+      // Inclusive bounds on workDate — the same condition shape the leave overlap query uses.
+      filters.dateFrom ? gte(timesheets.workDate, filters.dateFrom) : undefined,
+      filters.dateTo ? lte(timesheets.workDate, filters.dateTo) : undefined,
     ].filter(Boolean);
     const where = conditions.length ? and(...conditions) : undefined;
 
@@ -132,6 +156,10 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
     const conditions = [
       filters.employeeId ? eq(leaveRequests.employeeId, filters.employeeId) : undefined,
       filters.status ? eq(leaveRequests.status, filters.status) : undefined,
+      // Inclusive bounds on startDate — the day the window begins, the column the list is ordered
+      // by and the index serves, and the same condition shape listTimesheets uses on workDate.
+      filters.dateFrom ? gte(leaveRequests.startDate, filters.dateFrom) : undefined,
+      filters.dateTo ? lte(leaveRequests.startDate, filters.dateTo) : undefined,
     ].filter(Boolean);
     const where = conditions.length ? and(...conditions) : undefined;
 
@@ -240,6 +268,9 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
     const conditions = [
       filters.employeeId ? eq(overtimeEntries.employeeId, filters.employeeId) : undefined,
       filters.status ? eq(overtimeEntries.status, filters.status) : undefined,
+      // Inclusive bounds on workDate — the same condition shape listTimesheets uses.
+      filters.dateFrom ? gte(overtimeEntries.workDate, filters.dateFrom) : undefined,
+      filters.dateTo ? lte(overtimeEntries.workDate, filters.dateTo) : undefined,
     ].filter(Boolean);
     const where = conditions.length ? and(...conditions) : undefined;
 

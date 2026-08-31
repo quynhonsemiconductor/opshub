@@ -245,6 +245,13 @@ export function WebhooksPage() {
           errorMessage="Failed to load subscriptions."
           emptyMessage="No endpoints subscribed yet"
           emptyIcon={Webhook}
+          emptyAction={
+            !canManage ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+                <Plus className="h-3.5 w-3.5" /> New subscription
+              </Button>
+            )
+          }
           onRowClick={setSelected}
           isRowActive={(sub) => sub.id === selected?.id}
         />

@@ -12,7 +12,7 @@ import { api } from '@/shared/api/client';
 import { STALE } from '@/shared/api/cache';
 import type { LeaveSummaryResponse, OvertimeSummaryResponse } from '@/shared/api/types';
 import { dateRange } from './report-config';
-import { ChartSkeleton, ErrorMsg } from './report-parts';
+import { Card, ChartSkeleton, ErrorMsg } from './report-parts';
 
 export function WorkforceSummary({ days }: { days: number }) {
   const { from, to } = dateRange(days);
@@ -58,31 +58,38 @@ export function WorkforceSummary({ days }: { days: number }) {
   const approvedOT = otQ.data.rows.find((r) => r.status === 'approved');
 
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <div className="rounded-lg bg-surface-muted p-3">
-        <p className="text-xs text-fg-subtle">Leave requests</p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-fg">{totalLeave}</p>
-        <p className="mt-0.5 text-2xs text-fg-subtle">this period</p>
+    /*
+     * NO EXPORT BUTTON, unlike its seven siblings: four stat tiles are not a row grid, and the two
+     * queries behind them (leave by type and status, overtime by status) have different shapes — there
+     * is no one table this panel shows to export.
+     */
+    <Card title="Workforce Summary">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-lg bg-surface-muted p-3">
+          <p className="text-xs text-fg-subtle">Leave requests</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-fg">{totalLeave}</p>
+          <p className="mt-0.5 text-2xs text-fg-subtle">this period</p>
+        </div>
+        <div className="rounded-lg bg-surface-muted p-3">
+          <p className="text-xs text-fg-subtle">Overtime hours</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-fg">{Math.round(totalOTHours)}</p>
+          <p className="mt-0.5 text-2xs text-fg-subtle">total submitted</p>
+        </div>
+        <div className="rounded-lg bg-surface-muted p-3">
+          <p className="text-xs text-fg-subtle">Approved OT hours</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-fg">
+            {Math.round(approvedOT?.totalHours ?? 0)}
+          </p>
+          <p className="mt-0.5 text-2xs text-fg-subtle">
+            avg {Math.round(approvedOT?.avgHours ?? 0)}h / request
+          </p>
+        </div>
+        <div className="rounded-lg bg-surface-muted p-3">
+          <p className="text-xs text-fg-subtle">Approved OT requests</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-fg">{approvedOT?.count ?? 0}</p>
+          <p className="mt-0.5 text-2xs text-fg-subtle">approved this period</p>
+        </div>
       </div>
-      <div className="rounded-lg bg-surface-muted p-3">
-        <p className="text-xs text-fg-subtle">Overtime hours</p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-fg">{Math.round(totalOTHours)}</p>
-        <p className="mt-0.5 text-2xs text-fg-subtle">total submitted</p>
-      </div>
-      <div className="rounded-lg bg-surface-muted p-3">
-        <p className="text-xs text-fg-subtle">Approved OT hours</p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-fg">
-          {Math.round(approvedOT?.totalHours ?? 0)}
-        </p>
-        <p className="mt-0.5 text-2xs text-fg-subtle">
-          avg {Math.round(approvedOT?.avgHours ?? 0)}h / request
-        </p>
-      </div>
-      <div className="rounded-lg bg-surface-muted p-3">
-        <p className="text-xs text-fg-subtle">Approved OT requests</p>
-        <p className="mt-1 text-2xl font-bold tabular-nums text-fg">{approvedOT?.count ?? 0}</p>
-        <p className="mt-0.5 text-2xs text-fg-subtle">approved this period</p>
-      </div>
-    </div>
+    </Card>
   );
 }

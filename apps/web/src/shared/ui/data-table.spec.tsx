@@ -156,6 +156,249 @@ describe('DataTable', () => {
   });
 });
 
+/*
+ * SELECTION, the opt-in surface. Twenty-plus pages pass neither `selectedIds` nor
+ * `onSelectionChange`, so the first test is the one that protects them: no props, no checkbox, no
+ * extra column. Everything else here only runs when a caller wires it up.
+ *
+ * The identity in play is the component's own — `rowKey`, defaulting to `row.id` — which is why the
+ * row handles below go through `data-row-id` rather than assuming an `id` field.
+ */
+describe('DataTable selection', () => {
+  interface SelectionRow {
+    id: string;
+    name: string;
+  }
+  const SELECT_COLUMNS: DataTableColumn<SelectionRow>[] = [
+    { key: 'name', header: 'Name', cell: (r) => r.name },
+  ];
+  const PAGE_A: SelectionRow[] = [
+    { id: 'a', name: 'Alpha' },
+    { id: 'b', name: 'Beta' },
+  ];
+  /** Page B exists only to prove "current page" means something. */
+  const PAGE_B: SelectionRow[] = [
+    { id: 'c', name: 'Gamma' },
+    { id: 'd', name: 'Delta' },
+  ];
+
+  const rowInput = (id: string): HTMLInputElement =>
+    document.querySelector(`tr[data-row-id="${id}"] input`) as HTMLInputElement;
+
+  it('renders NO checkbox column unless the selection props are passed', () => {
+    // The backward-compat guard: every existing page renders through this line.
+    render(<DataTable columns={SELECT_COLUMNS} rows={PAGE_A} />);
+
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(1);
+  });
+
+  it('stays off when only `selectedIds` is passed without the callback', () => {
+    // A half-wired call site must not render a column that can do nothing.
+    render(<DataTable columns={SELECT_COLUMNS} rows={PAGE_A} selectedIds={['a']} />);
+
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('adds a leading checkbox column, labelled, when the selection props are passed', () => {
+    const { container } = render(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={[]}
+        onSelectionChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole('columnheader')).toHaveLength(2);
+    expect(screen.getByRole('checkbox', { name: 'Select all on page' })).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Select row')).toHaveLength(2);
+    // Leading, and native — the platform supplies Space, so "keyboard support" is not something
+    // the component has to rebuild at runtime.
+    expect(container.querySelector('thead th:first-child input')).toBe(
+      screen.getByRole('checkbox', { name: 'Select all on page' }),
+    );
+    expect(rowInput('a').tagName).toBe('INPUT');
+  });
+
+  it('toggles a row and reports the complete next selection with its count', () => {
+    const onSelectionChange = vi.fn();
+    render(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={[]}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    fireEvent.click(rowInput('a'));
+    // The whole array, not a delta — the caller's update is a plain replacement.
+    expect(onSelectionChange).toHaveBeenCalledWith(['a'], 1);
+  });
+
+  it('reports an uncheck as the id removed, again with the count', () => {
+    const onSelectionChange = vi.fn();
+    render(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={['a', 'b']}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    fireEvent.click(rowInput('a'));
+    expect(onSelectionChange).toHaveBeenCalledWith(['b'], 1);
+  });
+
+  it('selects every row on the CURRENT page from the header checkbox', () => {
+    const onSelectionChange = vi.fn();
+    render(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={['c']}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all on page' }));
+    expect(onSelectionChange).toHaveBeenCalledWith(['a', 'b', 'c'], 3);
+  });
+
+  it('DEselects only the page rows from a full page, leaving other pages untouched', () => {
+    // Two contracts in one click: select-all is page-scoped, and so is its inverse — 'c' belongs
+    // to a page the user is not looking at and must survive the unselect-all.
+    const onSelectionChange = vi.fn();
+    render(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={['a', 'b', 'c']}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all on page' }));
+    expect(onSelectionChange).toHaveBeenCalledWith(['c'], 1);
+  });
+
+  it('marks the header checkbox indeterminate on a partial page', () => {
+    const { rerender } = render(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={['a']}
+        onSelectionChange={vi.fn()}
+      />,
+    );
+    const header = screen.getByRole('checkbox', {
+      name: 'Select all on page',
+    }) as HTMLInputElement;
+    // Native input means native semantics: `indeterminate` is what a screen reader announces as
+    // mixed, not a class or a data attribute.
+    expect(header).not.toBeChecked();
+    expect(header.indeterminate).toBe(true);
+
+    rerender(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={['a', 'b']}
+        onSelectionChange={vi.fn()}
+      />,
+    );
+    expect(header).toBeChecked();
+    expect(header.indeterminate).toBe(false);
+
+    rerender(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={[]}
+        onSelectionChange={vi.fn()}
+      />,
+    );
+    expect(header).not.toBeChecked();
+    expect(header.indeterminate).toBe(false);
+  });
+
+  it('keeps selections across a page change, because the caller owns the state', () => {
+    // The component is stateless about selection: the pager swaps `rows`, and whatever ids the
+    // page still holds stay selected — here 'a', which page B does not even render. Retention is
+    // by construction, which is also why there is nothing to assert about the component clearing
+    // it: it has nowhere to clear FROM.
+    const onSelectionChange = vi.fn();
+    const { rerender } = render(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={['a']}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    rerender(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_B}
+        selectedIds={['a', 'c']}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    expect(rowInput('a')).toBeNull();
+    expect(rowInput('c')).toBeChecked();
+    expect(onSelectionChange).not.toHaveBeenCalled();
+  });
+
+  it('renders bulk actions with the count only while something is selected', () => {
+    const { rerender } = render(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={[]}
+        onSelectionChange={vi.fn()}
+        bulkActions={(n) => <button type="button">{n} selected</button>}
+      />,
+    );
+
+    // Empty selection, no bar — an action bar sitting empty above every table is furniture.
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+
+    rerender(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={['a', 'b']}
+        onSelectionChange={vi.fn()}
+        bulkActions={(n) => <button type="button">{n} selected</button>}
+      />,
+    );
+    expect(screen.getByRole('button', { name: '2 selected' })).toBeInTheDocument();
+  });
+
+  it('keeps a row checkbox click and Space from activating the row', () => {
+    // The checkbox is a control in the row, not the row: click and key events must stop at it, or
+    // toggling a selection also opens whatever the row opens.
+    const onRowClick = vi.fn();
+    render(
+      <DataTable
+        columns={SELECT_COLUMNS}
+        rows={PAGE_A}
+        selectedIds={[]}
+        onSelectionChange={vi.fn()}
+        onRowClick={onRowClick}
+      />,
+    );
+
+    fireEvent.click(rowInput('a'));
+    fireEvent.keyDown(rowInput('a'), { key: ' ' });
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+});
+
 /** Re-render into a clean document, for the one test that needs two trees in sequence. */
 function cleanupAndRender(ui: React.ReactElement): void {
   document.body.innerHTML = '';

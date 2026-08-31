@@ -23,6 +23,12 @@ export const WORKFORCE_REPOSITORY = Symbol('WORKFORCE_REPOSITORY');
 export interface IWorkforceRepository {
   // Timesheets
   createTimesheet(input: CreateTimesheetInput): Promise<Timesheet>;
+  /**
+   * Every entry in ONE insert. Runs inside `tx` when the caller passed one — the service does,
+   * so the audit trail for the batch commits in the SAME transaction as the rows — and opens its
+   * own otherwise. Either way, all rows land or none do.
+   */
+  createTimesheets(inputs: CreateTimesheetInput[], tx?: DbExecutor): Promise<Timesheet[]>;
   findTimesheetById(id: string): Promise<Timesheet | null>;
   listTimesheets(
     filters: TimesheetFilters,

@@ -44,6 +44,15 @@
   --accent-muted: #eff6ff;
   --accent-muted-fg: #1d4ed8;
 
+  /* secondary accent (violet-600) — same five-token shape as the blue family above.
+     Promoted from the violet status pair, which stays for badges; this is the
+     interactive/brand-use tier. Blue remains the primary. */
+  --accent-secondary: #7c3aed;
+  --accent-secondary-hover: #6d28d9;
+  --accent-secondary-fg: #ffffff;
+  --accent-secondary-muted: #f5f3ff;
+  --accent-secondary-muted-fg: #6d28d9;
+
   /* status — bg + fg pairs (always color + icon + text in the component) */
   --status-success-bg: #f0fdf4;
   --status-success-fg: #15803d;
@@ -69,6 +78,14 @@
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
+
+  /* elevation. Three steps, matching the radius scale's discipline. Tinted with
+     the same zinc-950 as --overlay rather than pure black, so shadows read as
+     part of the palette instead of grey soot; dark lifts the opacity, since a
+     shadow only reads on dark surfaces by being deeper. */
+  --shadow-sm: 0 1px 2px 0 rgb(9 9 11 / 0.06);
+  --shadow-md: 0 2px 8px -2px rgb(9 9 11 / 0.1);
+  --shadow-lg: 0 8px 24px -8px rgb(9 9 11 / 0.14);
 }
 
 .dark {
@@ -105,6 +122,13 @@
   --accent-muted: #18233b;
   --accent-muted-fg: #93c5fd;
 
+  /* secondary accent — same lift one step up the violet ramp */
+  --accent-secondary: #8b5cf6;
+  --accent-secondary-hover: #a78bfa;
+  --accent-secondary-fg: #ffffff;
+  --accent-secondary-muted: #211a3a;
+  --accent-secondary-muted-fg: #c4b5fd;
+
   /* status — muted dark fills, lighter text for AA contrast */
   --status-success-bg: #102a1c;
   --status-success-fg: #4ade80;
@@ -124,6 +148,12 @@
   /* scrollbar (lighter thumb on dark surfaces) */
   --scrollbar-thumb: rgb(255 255 255 / 0.14);
   --scrollbar-thumb-hover: rgb(255 255 255 / 0.28);
+
+  /* elevation — deeper, not larger: a shadow on a dark surface reads through
+     opacity, so the geometry stays and the alpha climbs */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-md: 0 2px 8px -2px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 8px 24px -8px rgb(0 0 0 / 0.6);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -158,6 +188,12 @@
   --color-accent-muted: var(--accent-muted);
   --color-accent-muted-fg: var(--accent-muted-fg);
 
+  --color-accent-secondary: var(--accent-secondary);
+  --color-accent-secondary-hover: var(--accent-secondary-hover);
+  --color-accent-secondary-fg: var(--accent-secondary-fg);
+  --color-accent-secondary-muted: var(--accent-secondary-muted);
+  --color-accent-secondary-muted-fg: var(--accent-secondary-muted-fg);
+
   --color-success: var(--status-success-fg);
   --color-success-bg: var(--status-success-bg);
   --color-warning: var(--status-warning-fg);
@@ -186,12 +222,31 @@
   --text-2xs: 0.625rem;
   --text-2xs--line-height: 0.875rem;
 
+  /*
+   * THE TOP OF THE TYPE SCALE — one display step, the mirror of `--text-2xs` at the
+   * other end. Marketing surfaces and page-level heroes are where `text-2xl` + a
+   * hand-written `tracking-tight` kept being re-composed; the step carries that pair
+   * once, with the line box tightened to match, so a display heading is one class
+   * instead of three opinions.
+   */
+  --text-display: 2.25rem;
+  --text-display--line-height: 2.5rem;
+  --text-display--letter-spacing: -0.03em;
+
   --font-sans: 'Geist Variable', 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: 'Geist Mono Variable', 'Geist Mono', ui-monospace, 'Cascadia Code', monospace;
 
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
+
+  /* Same self-reference as the radius lines above: `inline` bakes `var(--shadow-sm)`
+     into the utility, so `.dark`'s raw override re-themes elevation with no `dark:`
+     prefix at the call site — and the three names replace Tailwind's defaults, which
+     is the point: one shadow system, zinc-tinted, not two. */
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -251,6 +306,25 @@
     }
     to {
       opacity: 1;
+    }
+  }
+
+  /* A THIRD token, for content entering in place — a card, a panel, a form — rather
+     than an overlay arriving at the centre of the screen. Where `dialog-in` scales,
+     this rises: 8px of travel is enough to read as settling into position without
+     reading as the page being scrolled. Easing and family duration match
+     `dialog-in`; the extra 50ms is the room a translate needs that a scale does not.
+     `transform`, not `translate`, for the same reason `dialog-in` gives. */
+  --animate-fade-up: fade-up 200ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 }
@@ -358,6 +432,7 @@ pre {
   :root {
     --animate-dialog-in: none;
     --animate-tooltip-in: none;
+    --animate-fade-up: none;
   }
 
   *,

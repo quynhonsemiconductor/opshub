@@ -359,8 +359,7 @@ export class StorageService {
       const result = await this.resilience.execute(
         's3.headObject',
         this.resilience.interactive,
-        () =>
-          this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key })),
+        () => this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key })),
       );
       return {
         contentLength: result.ContentLength ?? 0,

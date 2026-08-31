@@ -298,6 +298,13 @@ export function NonconformancesPage() {
           errorMessage="Failed to load the non-conformance register."
           emptyMessage="No findings match these filters"
           emptyIcon={ClipboardX}
+          emptyAction={
+            list.search ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setRaising(true)}>
+                <Plus className="h-3.5 w-3.5" /> Raise a finding
+              </Button>
+            )
+          }
           onRowClick={setClicked}
           isRowActive={(finding) => finding.id === selected?.id}
         />

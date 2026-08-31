@@ -17,6 +17,7 @@ import {
   SlideOverSection,
   StatusBadge,
   TabToolbar,
+  Tooltip,
   humanizeStatus,
   statusTone,
   type DataTableColumn,
@@ -154,15 +155,16 @@ export function CyclesTab() {
               was the wrong side of the disagreement: the API's refusal is pinned by a test.
             */}
             {cycle.status === 'open' && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Add a review to ${cycle.reference}`}
-                title="Add a review"
-                onClick={() => setAddingReviewTo(cycle)}
-              >
-                <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
-              </Button>
+              <Tooltip content="Add a review">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Add a review to ${cycle.reference}`}
+                  onClick={() => setAddingReviewTo(cycle)}
+                >
+                  <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
+                </Button>
+              </Tooltip>
             )}
             {cycle.status === 'draft' && (
               <Button
@@ -243,6 +245,13 @@ export function CyclesTab() {
         errorMessage="Failed to load review cycles."
         emptyMessage="No review cycles yet"
         emptyIcon={CalendarRange}
+        emptyAction={
+          !canManage ? undefined : (
+            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-3.5 w-3.5" /> New cycle
+            </Button>
+          )
+        }
         onRowClick={openCycle}
         isRowActive={(cycle) => cycle.id === selected?.id}
       />

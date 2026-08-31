@@ -16,7 +16,7 @@
  * two acts, and logging is `@SelfScoped` and stays open to everybody.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const GET = vi.fn();
@@ -26,6 +26,15 @@ vi.mock('@/shared/api/client', () => ({
   api: { GET: (...a: unknown[]) => GET(...a), POST: (...a: unknown[]) => POST(...a) },
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+/*
+ * THE CLOCK IS FAKE, and it is not ceremony — see `shared/ui/date-range-picker.spec.tsx`. The date
+ * filter's calendar opens on the month holding TODAY, and the day the filter test clicks (`4 March
+ * 2026`) exists only in March. `setSystemTime` alone mocks the Date — the real timers keep running,
+ * which is what React Query's queries and Testing Library's `findBy*` polling need; faking the
+ * timers would stall both.
+ */
+vi.setSystemTime(new Date('2026-03-10T12:00:00'));
 
 /** Mutated per test. Stubbed rather than seeded through `/me` so one review code can be held alone. */
 const viewer = { sub: 'emp-me' as string | undefined, permissions: [] as string[] };
@@ -75,6 +84,21 @@ function renderTab(rows: unknown[]) {
       <OvertimeTab />
     </QueryClientProvider>,
   );
+}
+
+/**
+ * Sets a range through the picker the way a keyboard does it: the first pick is a calendar click
+ * (nothing has been committed yet, so typing cannot work — see the picker's own spec), the second
+ * end is typed into the To field, which commits the ordered pair. Same helper as
+ * `timesheets-tab.spec.tsx`; not shared because the picker interaction is not the thing under test.
+ */
+async function pickRange(scope: HTMLElement, from: string, to: string) {
+  const fromField = within(scope).getByLabelText('From date') as HTMLInputElement;
+  fromField.focus();
+  fireEvent.focus(fromField);
+  const calendar = within(scope).getByRole('dialog', { name: 'Choose date range' });
+  fireEvent.click(within(calendar).getByRole('button', { name: from }));
+  fireEvent.change(within(scope).getByLabelText('To date'), { target: { value: to } });
 }
 
 beforeEach(() => {
@@ -163,5 +187,52 @@ describe('the Overtime tab detail drawer', () => {
     const own = screen.getByRole('dialog');
     expect(within(own).queryByRole('button', { name: 'Approve' })).toBeNull();
     expect(within(own).getByText('Yours — a colleague decides')).toBeTruthy();
+  });
+});
+
+describe('the list date-range filter', () => {
+  it('filters on workDate — "worked between", the timesheets tab’s own question — and sends dateFrom/dateTo', async () => {
+    /*
+     * Unlike leave (which filters on when a window BEGINS), overtime filters on the plain `workDate`
+     * the row is about, so the label reads the same as the timesheets tab's for the same column.
+     * Clearing goes back to `undefined`s, which share one cache entry with a never-set filter.
+     */
+    renderTab([]);
+    await screen.findByText('No overtime records found');
+
+    expect(screen.getByText('Worked between')).toBeTruthy();
+
+    await pickRange(document.body, '4 March 2026', '2026-03-11');
+
+    await waitFor(() => {
+      const query = GET.mock.calls.at(-1)![1].params.query;
+      expect(query.dateFrom).toBe('2026-03-04');
+      expect(query.dateTo).toBe('2026-03-11');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear dates' }));
+    await waitFor(() => {
+      const query = GET.mock.calls.at(-1)![1].params.query;
+      expect(query.dateFrom).toBeUndefined();
+      expect(query.dateTo).toBeUndefined();
+    });
+  });
+});
+
+describe('the empty state', () => {
+  it('repeats the toolbar CTA, and withdraws it once a filter narrows the list', async () => {
+    /*
+     * An empty table under no filter is "nothing logged yet" — the moment to offer the one action the
+     * toolbar already carries. Under a filter the same blank means "nothing matches this", and
+     * "log overtime" stops being the answer, so the toolbar button is left as the only offer.
+     */
+    renderTab([]);
+    await screen.findByText('No overtime records found');
+    expect(screen.getAllByRole('button', { name: /log overtime/i })).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Pending' }));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: /log overtime/i })).toHaveLength(1),
+    );
   });
 });

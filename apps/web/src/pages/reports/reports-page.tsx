@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { PageHeader, SegmentedControl } from '@/shared/ui';
-import { Card } from './report-parts';
 import { DAYS_OPTIONS } from './report-config';
 import { AssetUtilizationChart } from './asset-reports';
 import { FindingsChart } from './compliance-reports';
@@ -16,7 +15,9 @@ import { WorkforceSummary } from './workforce-reports';
 /*
  * Analytics across the four systems.
  *
- * COMPOSITION ONLY: pick a window, lay the panels out. The charts and the panel frame moved to their
+ * COMPOSITION ONLY: pick a window, lay the panels out. Each panel renders its own `Card` — it has to,
+ * because the panel owns the query, and its export button (which lives in the card header) needs the
+ * loaded rows to know whether it can be pressed at all. The charts and the panel frame moved to their
  * own modules when this file passed the FE line ceiling — which it did because of the comments
  * explaining the colour change, not because of new behaviour, and the ceiling is right either way.
  */
@@ -42,43 +43,27 @@ export function ReportsPage() {
 
       {/* Row 1: Throughput (wide) + Queue depth */}
       <div className="grid grid-cols-3 gap-4">
-        <Card title="Request Throughput" className="col-span-2">
-          <ThroughputChart days={days} />
-        </Card>
-        <Card title="Live Queue Depth">
-          <QueueTable />
-        </Card>
+        <ThroughputChart days={days} className="col-span-2" />
+        <QueueTable />
       </div>
 
       {/* Row 2: SLA compliance + Cycle time */}
       <div className="grid grid-cols-2 gap-4">
-        <Card title="SLA Compliance">
-          <SlaChart days={days} />
-        </Card>
-        <Card title="Cycle Time (p50 / p90)">
-          <CycleTimeChart days={days} />
-        </Card>
+        <SlaChart days={days} />
+        <CycleTimeChart days={days} />
       </div>
 
       {/* What the window is made of, before the per-measure panels below break it down. */}
-      <Card title="Requests by Type and Status">
-        <RequestMixChart days={days} />
-      </Card>
+      <RequestMixChart days={days} />
 
       {/* Row 3: Asset utilization + Findings donut */}
       <div className="grid grid-cols-2 gap-4">
-        <Card title="Asset Utilization">
-          <AssetUtilizationChart />
-        </Card>
-        <Card title="Open Compliance Findings">
-          <FindingsChart days={days} />
-        </Card>
+        <AssetUtilizationChart />
+        <FindingsChart days={days} />
       </div>
 
       {/* Row 4: Workforce */}
-      <Card title="Workforce Summary">
-        <WorkforceSummary days={days} />
-      </Card>
+      <WorkforceSummary days={days} />
     </div>
   );
 }

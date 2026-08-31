@@ -139,14 +139,19 @@ export class DrizzleProvider implements OnModuleInit, OnModuleDestroy {
     // MIN > MAX is representable. Unclamped, the surplus `connect()` calls would queue
     // behind an exhausted pool and resolve only by hitting `connectionTimeoutMillis`,
     // turning a typo into five seconds of silent boot delay.
-    const target = Math.min(this.config.get('DATABASE_POOL_MIN'), this.config.get('DATABASE_POOL_MAX'));
+    const target = Math.min(
+      this.config.get('DATABASE_POOL_MIN'),
+      this.config.get('DATABASE_POOL_MAX'),
+    );
     if (target <= 0) return;
 
     const startedAt = Date.now();
     try {
       const clients = await Promise.all(Array.from({ length: target }, () => this.pool.connect()));
       for (const client of clients) client.release();
-      this.logger.log(`Database pool warmed: ${target} connection(s) in ${Date.now() - startedAt}ms`);
+      this.logger.log(
+        `Database pool warmed: ${target} connection(s) in ${Date.now() - startedAt}ms`,
+      );
     } catch (err) {
       this.logger.warn(
         `Database pool warm-up failed after ${Date.now() - startedAt}ms; continuing with a cold pool. ` +

@@ -28,6 +28,7 @@ export type FindingResponse = components['schemas']['FindingResponseDto'];
 
 // Workforce
 export type TimesheetResponse = components['schemas']['TimesheetResponseDto'];
+export type CreateTimesheetInput = components['schemas']['CreateTimesheetDto'];
 export type LeaveResponse = components['schemas']['LeaveResponseDto'];
 export type OvertimeResponse = components['schemas']['OvertimeResponseDto'];
 export type ShiftLogResponse = components['schemas']['ShiftLogResponseDto'];

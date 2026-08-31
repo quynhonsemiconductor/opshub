@@ -268,6 +268,13 @@ export function RecordsTab() {
         errorMessage="Failed to load training records."
         emptyMessage="No training records match these filters"
         emptyIcon={GraduationCap}
+        emptyAction={
+          expiringSoon || !canManage ? undefined : (
+            <Button variant="primary" size="sm" onClick={() => setRecording(true)}>
+              <Plus className="h-3.5 w-3.5" /> Record completion
+            </Button>
+          )
+        }
         onRowClick={setSelected}
         isRowActive={(record) => record.id === selected?.id}
       />

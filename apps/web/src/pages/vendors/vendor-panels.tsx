@@ -11,6 +11,7 @@ import {
   EntityPicker,
   RowActions,
   StatusBadge,
+  Tooltip,
   humanizeStatus,
   statusTone,
 } from '@/shared/ui';
@@ -171,15 +172,16 @@ export function VendorRisksPanel({
           <StatusBadge tone={statusTone(risk.status)}>{humanizeStatus(risk.status)}</StatusBadge>
           {canManage && (
             <RowActions>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Unlink ${risk.reference}`}
-                title="Unlink"
-                onClick={() => void unlink(risk.id, risk.reference)}
-              >
-                <X className="h-3.5 w-3.5" strokeWidth={2} />
-              </Button>
+              <Tooltip content="Unlink">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Unlink ${risk.reference}`}
+                  onClick={() => void unlink(risk.id, risk.reference)}
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                </Button>
+              </Tooltip>
             </RowActions>
           )}
         </div>

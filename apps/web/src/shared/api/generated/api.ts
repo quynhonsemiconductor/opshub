@@ -949,6 +949,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/workforce/timesheets/bulk': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create draft timesheets in bulk (max 50, all-or-nothing) */
+    post: operations['WorkforceController_createTimesheetsBulk'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/workforce/timesheets/{id}/submit': {
     parameters: {
       query?: never;
@@ -5463,7 +5480,19 @@ export interface components {
       /** Format: date */
       workDate: string;
       minutesWorked: number;
+      startTime?: string;
+      endTime?: string;
       note?: string;
+    };
+    BulkCreateTimesheetsDto: {
+      entries: {
+        /** Format: date */
+        workDate: string;
+        minutesWorked: number;
+        startTime?: string;
+        endTime?: string;
+        note?: string;
+      }[];
     };
     ReviewDto: {
       approve: boolean;
@@ -10493,6 +10522,8 @@ export interface operations {
       query?: {
         employeeId?: string;
         status?: 'draft' | 'submitted' | 'approved' | 'rejected';
+        dateFrom?: string;
+        dateTo?: string;
         limit?: number;
         offset?: number;
       };
@@ -10554,6 +10585,43 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['TimesheetResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  WorkforceController_createTimesheetsBulk: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BulkCreateTimesheetsDto'];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TimesheetResponseDto'][];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -10679,6 +10747,8 @@ export interface operations {
       query?: {
         employeeId?: string;
         status?: 'pending' | 'approved' | 'rejected' | 'cancelled';
+        dateFrom?: string;
+        dateTo?: string;
         limit?: number;
         offset?: number;
       };
@@ -10879,6 +10949,8 @@ export interface operations {
       query?: {
         employeeId?: string;
         status?: 'pending' | 'approved' | 'rejected';
+        dateFrom?: string;
+        dateTo?: string;
         limit?: number;
         offset?: number;
       };

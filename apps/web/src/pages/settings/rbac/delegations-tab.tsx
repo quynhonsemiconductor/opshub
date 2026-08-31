@@ -263,6 +263,11 @@ export function DelegationsTab() {
           errorMessage="Failed to load delegations."
           emptyMessage="No delegations"
           emptyIcon={Users}
+          emptyAction={
+            <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="h-3.5 w-3.5" /> New delegation
+            </Button>
+          }
         />
       </SectionCard>
     </>

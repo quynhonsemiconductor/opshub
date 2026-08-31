@@ -9,6 +9,7 @@ import {
   formatDate,
   formatDateTime,
   formatDecimal,
+  formatDuration,
   formatMoney,
   formatTime,
   formatTimeUntil,
@@ -201,5 +202,24 @@ describe('formatTimeUntil', () => {
      * boundary answers the same either way — which is the whole reason the other cases here pass `now`.
      */
     expect(formatTimeUntil(new Date(Date.now() + 5.5 * 86_400_000))).toBe('5d left');
+  });
+});
+
+describe('formatDuration', () => {
+  it('says a length the way it is said aloud, dropping the empty unit', () => {
+    expect(formatDuration(510)).toBe('8h 30m');
+    expect(formatDuration(480)).toBe('8h');
+    expect(formatDuration(45)).toBe('45m');
+    // A zero length is a real answer — `0m`, not the em dash that means "absent".
+    expect(formatDuration(0)).toBe('0m');
+  });
+
+  it('floors a fractional hour instead of rounding a duration up', () => {
+    // 90.5 minutes is 1h 30m of held time; rounding to 1h 31m would promise time nobody holds.
+    expect(formatDuration(90.5)).toBe('1h 30m');
+  });
+
+  it('treats a negative as nothing held, not as time running backwards', () => {
+    expect(formatDuration(-30)).toBe('0m');
   });
 });

@@ -13,6 +13,7 @@ import {
   SegmentedControl,
   SlideOverSection,
   StatusBadge,
+  Tooltip,
   humanizeStatus,
   statusTone,
   type DataTableColumn,
@@ -169,26 +170,28 @@ export function PositionsPage() {
               this — `size="icon-sm"` exists — and the FE ratchet counts raw buttons for exactly this
               reason. `aria-label` is not optional on an icon-only control. */}
           {canManage && p.status === 'active' && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Assign somebody to ${p.title}`}
-              title="Assign"
-              onClick={() => setAssigning(p)}
-            >
-              <UserPlus className="h-4 w-4" strokeWidth={2} />
-            </Button>
+            <Tooltip content="Assign">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Assign somebody to ${p.title}`}
+                onClick={() => setAssigning(p)}
+              >
+                <UserPlus className="h-4 w-4" strokeWidth={2} />
+              </Button>
+            </Tooltip>
           )}
           {canManage && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Edit ${p.title}`}
-              title="Edit"
-              onClick={() => setEditing(p)}
-            >
-              <Pencil className="h-4 w-4" strokeWidth={2} />
-            </Button>
+            <Tooltip content="Edit">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Edit ${p.title}`}
+                onClick={() => setEditing(p)}
+              >
+                <Pencil className="h-4 w-4" strokeWidth={2} />
+              </Button>
+            </Tooltip>
           )}
         </div>
       ),
@@ -354,6 +357,13 @@ export function PositionsPage() {
               errorMessage="Failed to load assignments."
               emptyMessage="Nobody assigned yet"
               emptyIcon={UserPlus}
+              emptyAction={
+                !canManage ? undefined : (
+                  <Button variant="primary" size="sm" onClick={() => setAssigning(selected)}>
+                    <UserPlus className="h-3.5 w-3.5" /> Assign somebody
+                  </Button>
+                )
+              }
             />
           </SlideOverSection>
         )}

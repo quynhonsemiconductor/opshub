@@ -20,6 +20,7 @@ import { WorkforceService } from './workforce.service';
 
 const mockRepo = {
   createTimesheet: vi.fn(),
+  createTimesheets: vi.fn(),
   findTimesheetById: vi.fn(),
   listTimesheets: vi.fn().mockResolvedValue({ rows: [], total: 0 }),
   setTimesheetStatus: vi.fn(),
@@ -35,6 +36,7 @@ const mockAudit = createFakeAudit();
 const mockEngine = { submit: vi.fn(), approve: vi.fn(), reject: vi.fn() };
 const mockStorage = { presignUpload: vi.fn(), confirmUpload: vi.fn() };
 const mockAuthz = { check: vi.fn() };
+const mockDb = { transaction: vi.fn((cb: (tx: unknown) => unknown) => cb({})) };
 
 const SELF = { sub: 'emp-1', email: 'emp1@test.com' };
 const OTHER = 'emp-2';
@@ -52,9 +54,10 @@ function service(): WorkforceService {
     // LeaveBalanceService is unused by the narrowing paths under test; a stub keeps this spec
     // about scoping rather than about leave arithmetic, which has its own suite.
     {} as never,
-    // db: only the entitlement/holiday writes open a transaction, and none of those are exercised
-    // by the narrowing paths under test.
-    {} as never,
+    // db: createTimesheetsBulk is the one narrowing-adjacent path that opens a transaction (so its
+    // batch and the batch's audit trail commit together) — the callback just runs against a stub
+    // executor, since the repo and audit fake underneath are mocked either way.
+    mockDb as never,
   );
 }
 
@@ -142,6 +145,104 @@ describe('WorkforceService access narrowing', () => {
       holds('workforce.read');
       await service()[method]({}, 20, 0, SELF);
       expect(mockAuthz.check).toHaveBeenCalledWith(SELF.sub, 'workforce.read');
+    });
+  });
+
+  // The date-range bounds are payload, not scope: they must survive narrowing untouched for a
+  // global reader and ride along beside the PINNED employeeId for everyone else.
+  describe('listTimesheets date-range filter', () => {
+    it('passes dateFrom/dateTo through for a global workforce.read holder', async () => {
+      holds('workforce.read');
+      await service().listTimesheets(
+        { employeeId: OTHER, dateFrom: '2026-08-01', dateTo: '2026-08-31' },
+        20,
+        0,
+        SELF,
+      );
+      expect(mockRepo.listTimesheets).toHaveBeenCalledWith(
+        { employeeId: OTHER, dateFrom: '2026-08-01', dateTo: '2026-08-31' },
+        20,
+        0,
+      );
+    });
+
+    it('keeps the bounds alongside the pinned employeeId for an unprivileged caller', async () => {
+      holds();
+      await service().listTimesheets({ dateFrom: '2026-08-01', dateTo: '2026-08-31' }, 20, 0, SELF);
+      expect(mockRepo.listTimesheets).toHaveBeenCalledWith(
+        { employeeId: SELF.sub, dateFrom: '2026-08-01', dateTo: '2026-08-31' },
+        20,
+        0,
+      );
+    });
+  });
+
+  // Leave bounds land on `startDate` (the day the window BEGINS — the list's own ORDER BY column),
+  // overtime's on `workDate`; in both cases they are payload, not scope, exactly as for timesheets.
+  describe.each([
+    ['listLeave', 'listLeave'],
+    ['listOvertime', 'listOvertime'],
+  ] as const)('%s date-range filter', (method, repoMethod) => {
+    it('passes dateFrom/dateTo through for a global workforce.read holder', async () => {
+      holds('workforce.read');
+      await service()[method](
+        { employeeId: OTHER, dateFrom: '2026-08-01', dateTo: '2026-08-31' },
+        20,
+        0,
+        SELF,
+      );
+      expect(mockRepo[repoMethod]).toHaveBeenCalledWith(
+        { employeeId: OTHER, dateFrom: '2026-08-01', dateTo: '2026-08-31' },
+        20,
+        0,
+      );
+    });
+
+    it('keeps the bounds alongside the pinned employeeId for an unprivileged caller', async () => {
+      holds();
+      await service()[method]({ dateFrom: '2026-08-01', dateTo: '2026-08-31' }, 20, 0, SELF);
+      expect(mockRepo[repoMethod]).toHaveBeenCalledWith(
+        { employeeId: SELF.sub, dateFrom: '2026-08-01', dateTo: '2026-08-31' },
+        20,
+        0,
+      );
+    });
+  });
+
+  describe('createTimesheetsBulk', () => {
+    const entries = [
+      { workDate: '2026-08-03', minutesWorked: 480 },
+      { workDate: '2026-08-04', minutesWorked: 45 },
+    ];
+
+    beforeEach(() => {
+      mockRepo.createTimesheets.mockResolvedValue([
+        { id: 'ts-1', employeeId: SELF.sub, status: 'draft' },
+        { id: 'ts-2', employeeId: SELF.sub, status: 'draft' },
+      ]);
+    });
+
+    // Same self-scoping rule as the single create, applied to EVERY entry: no employeeId travels
+    // in the payload, so the caller's identity is the only thing that can own the rows.
+    it('stamps employeeId from the actor onto every entry and writes the batch in ONE call', async () => {
+      holds();
+      await service().createTimesheetsBulk(entries, SELF);
+      expect(mockRepo.createTimesheets).toHaveBeenCalledTimes(1);
+      expect(mockRepo.createTimesheets).toHaveBeenCalledWith(
+        [
+          { workDate: '2026-08-03', minutesWorked: 480, employeeId: SELF.sub },
+          { workDate: '2026-08-04', minutesWorked: 45, employeeId: SELF.sub },
+        ],
+        expect.anything(),
+      );
+    });
+
+    it('fails the whole batch when the write fails — there is no partial-success path', async () => {
+      holds();
+      // One insert of every row: the repository either resolves with all of them or rejects, and
+      // the service must propagate that rejection rather than swallow it into a smaller result.
+      mockRepo.createTimesheets.mockRejectedValue(new Error('insert failed'));
+      await expect(service().createTimesheetsBulk(entries, SELF)).rejects.toThrow('insert failed');
     });
   });
 

@@ -273,6 +273,13 @@ export function AssignmentsTab() {
             errorMessage="Failed to load assignments for that user."
             emptyMessage="No assignments for this user"
             emptyIcon={UserCheck}
+            emptyAction={
+              !canAssign ? undefined : (
+                <Button variant="primary" size="sm" onClick={() => setShowAssign(true)}>
+                  <UserCheck className="h-3.5 w-3.5" /> Assign role
+                </Button>
+              )
+            }
           />
         ) : (
           <p className="px-4 py-10 text-center text-sm text-fg-subtle">

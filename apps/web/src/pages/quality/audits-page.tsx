@@ -303,6 +303,13 @@ export function AuditsPage() {
           errorMessage="Failed to load the audit programme."
           emptyMessage="No audits match these filters"
           emptyIcon={ClipboardList}
+          emptyAction={
+            list.search || !canManage ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setPlanning(true)}>
+                <Plus className="h-3.5 w-3.5" /> Plan an audit
+              </Button>
+            )
+          }
           onRowClick={setClicked}
           isRowActive={(audit) => audit.id === selected?.id}
         />

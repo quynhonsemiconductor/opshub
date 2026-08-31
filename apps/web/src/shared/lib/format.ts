@@ -215,6 +215,23 @@ export function orDash<T>(value: T | null | undefined): T | string {
 }
 
 /**
+ * A length of time held in MINUTES, as it is said aloud: `8h 30m`, `8h`, `45m`.
+ *
+ * `DurationInput` stores minutes — the unit the API accepts — and every sentence ABOUT a duration
+ * ("at least 4h") comes through here, so a field's hint, an error message and a table cell cannot
+ * grow three spellings of the same length. An absent or negative length is `0m` rather than the em
+ * dash: a duration of nothing is a real answer, unlike an absent timestamp.
+ */
+export function formatDuration(minutes: number): string {
+  const total = Math.floor(Math.max(minutes, 0));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours === 0) return `${mins}m`;
+  if (mins === 0) return `${hours}h`;
+  return `${hours}h ${mins}m`;
+}
+
+/**
  * Money held in CENTS, as the API stores it.
  *
  * Integer cents in the database and a formatted string at the edge — never a float in between, which

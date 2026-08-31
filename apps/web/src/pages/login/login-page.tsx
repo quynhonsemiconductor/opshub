@@ -89,13 +89,13 @@ export function LoginPage() {
       </div>
 
       {/* Right: dev login form */}
-      <div className="flex flex-1 flex-col items-center justify-center bg-surface px-6 py-12">
+      <div className="flex flex-1 flex-col items-center justify-center bg-linear-to-b from-surface to-page px-6 py-12">
         <div className="mb-8 flex items-center gap-2.5 lg:hidden">
           <OpsHubMark size={28} />
           <span className="text-base font-semibold tracking-tight text-fg">OpsHub</span>
         </div>
 
-        <div className="w-full max-w-[360px]">
+        <div className="w-full max-w-[360px] animate-fade-up">
           <div className="mb-7">
             <h2 className="text-lg font-semibold tracking-tight text-fg">Sign in</h2>
             <p className="mt-1 text-sm text-fg-muted">Use your company Microsoft account.</p>
@@ -105,7 +105,7 @@ export function LoginPage() {
             type="button"
             onClick={onSignIn}
             disabled={loading}
-            className="flex h-9 w-full items-center justify-center gap-2 rounded-md bg-accent text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:ring-offset-1 focus:ring-offset-surface"
+            className="flex h-9 w-full items-center justify-center gap-2 rounded-md bg-accent text-sm font-medium text-accent-fg transition hover:bg-accent-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-accent/40 focus:ring-offset-1 focus:ring-offset-surface"
           >
             {loading ? 'Redirecting…' : 'Sign in with Microsoft'}
           </button>

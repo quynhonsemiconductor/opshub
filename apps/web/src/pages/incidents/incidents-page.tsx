@@ -378,6 +378,11 @@ export function IncidentsPage() {
           errorMessage="Failed to load incidents."
           emptyMessage="No incidents match these filters"
           emptyIcon={AlertOctagon}
+          emptyAction={
+            <Button variant="primary" size="sm" onClick={() => setReporting(true)}>
+              <Plus className="h-3.5 w-3.5" /> Report an incident
+            </Button>
+          }
           onRowClick={setSelected}
           isRowActive={(incident) => incident.id === selected?.id}
         />

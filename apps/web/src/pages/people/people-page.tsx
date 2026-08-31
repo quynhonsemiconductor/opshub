@@ -257,6 +257,13 @@ export function PeoplePage() {
           errorMessage="Failed to load employees."
           emptyMessage="No employees match this filter"
           emptyIcon={Users}
+          emptyAction={
+            list.search ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setModal({ mode: 'create' })}>
+                <Plus className="h-3.5 w-3.5" /> Add employee
+              </Button>
+            )
+          }
           onRowClick={(emp) => setSelected(emp)}
           isRowActive={(emp) => emp.id === selected?.id}
         />

@@ -42,6 +42,9 @@ export interface CreateTimesheetInput {
 export interface TimesheetFilters {
   employeeId?: string;
   status?: TimesheetStatus;
+  /** Inclusive lower and upper bounds on `workDate`, as YYYY-MM-DD. */
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 // ── Leave ────────────────────────────────────────────────────────────────────
@@ -86,6 +89,9 @@ export interface CreateLeaveInput {
 export interface LeaveFilters {
   employeeId?: string;
   status?: LeaveStatus;
+  /** Inclusive lower and upper bounds on `startDate`, as YYYY-MM-DD — window BEGINS in range. */
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 // ── Overtime ─────────────────────────────────────────────────────────────────
@@ -114,6 +120,9 @@ export interface CreateOvertimeInput {
 export interface OvertimeFilters {
   employeeId?: string;
   status?: OvertimeStatus;
+  /** Inclusive lower and upper bounds on `workDate`, as YYYY-MM-DD. */
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 // ── Shift logs ───────────────────────────────────────────────────────────────

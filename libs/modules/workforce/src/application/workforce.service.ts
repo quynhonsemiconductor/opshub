@@ -154,6 +154,35 @@ export class WorkforceService {
     return this.repo.createTimesheet({ ...input, employeeId: actor.sub });
   }
 
+  /**
+   * Bulk draft creation, all-or-nothing: the repository writes every entry in ONE insert, so a
+   * failure anywhere rolls the whole batch back — a half-imported week of timesheets is worse
+   * than an unimported one, because the caller cannot tell which rows landed. Validation has
+   * already happened upstream, so the only failures left here are database ones.
+   *
+   * Same self-scoping as {@link createTimesheet}: every entry is filed BY the caller, there is no
+   * employeeId in the payload to trust.
+   */
+  async createTimesheetsBulk(
+    inputs: Omit<CreateTimesheetInput, 'employeeId'>[],
+    actor: Actor,
+  ): Promise<Timesheet[]> {
+    return this.db.transaction(async (tx) => {
+      const created = await this.repo.createTimesheets(
+        inputs.map((input) => ({ ...input, employeeId: actor.sub })),
+        tx,
+      );
+      // One entry per row, same action as a single create, in the SAME transaction as the
+      // insert — a batch that rolls back leaves no orphaned audit rows behind it.
+      for (const ts of created) {
+        await this.timesheetTrail.record(AUDIT_ACTION.TIMESHEET_CREATED, ts.id, actor, tx, {
+          after: { workDate: ts.workDate, minutesWorked: ts.minutesWorked },
+        });
+      }
+      return created;
+    });
+  }
+
   async getTimesheet(id: string): Promise<Timesheet> {
     const t = await this.repo.findTimesheetById(id);
     if (!t) throw new NotFoundException(ErrorCodes.TIMESHEET_NOT_FOUND, 'Timesheet not found');

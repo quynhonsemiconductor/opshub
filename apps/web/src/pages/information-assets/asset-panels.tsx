@@ -5,7 +5,15 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import { assetOptions } from '@/shared/api/picker-sources';
-import { Badge, Button, EntityPicker, PanelState, RowActions, humanizeStatus } from '@/shared/ui';
+import {
+  Badge,
+  Button,
+  EntityPicker,
+  PanelState,
+  RowActions,
+  Tooltip,
+  humanizeStatus,
+} from '@/shared/ui';
 import { formatDateTime, orDash } from '@/shared/lib/format';
 import { classificationTone } from './asset.types';
 import { useAssetDevices, useClassificationHistory } from './use-assets';
@@ -166,25 +174,27 @@ export function AssetDevicesPanel({
           <RowActions>
             {/* The link read backwards, from the row that names the device: what ELSE is on this
                 machine. Available to anybody who can read the register — it is a report, not a change. */}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`What ${device.assetTag} holds`}
-              title="What this device holds"
-              onClick={() => onInspectDevice(device.deviceAssetId, device.assetTag)}
-            >
-              <ScanSearch className="h-3.5 w-3.5" strokeWidth={2} />
-            </Button>
-            {canManage && (
+            <Tooltip content="What this device holds">
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`Unlink ${device.assetTag}`}
-                title="Unlink"
-                onClick={() => void unlink(device.deviceAssetId, device.assetTag)}
+                aria-label={`What ${device.assetTag} holds`}
+                onClick={() => onInspectDevice(device.deviceAssetId, device.assetTag)}
               >
-                <X className="h-3.5 w-3.5" strokeWidth={2} />
+                <ScanSearch className="h-3.5 w-3.5" strokeWidth={2} />
               </Button>
+            </Tooltip>
+            {canManage && (
+              <Tooltip content="Unlink">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Unlink ${device.assetTag}`}
+                  onClick={() => void unlink(device.deviceAssetId, device.assetTag)}
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                </Button>
+              </Tooltip>
             )}
           </RowActions>
         </div>

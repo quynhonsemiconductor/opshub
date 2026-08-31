@@ -374,6 +374,11 @@ export function AccessPage() {
           errorMessage="Failed to load requests. Is the API running?"
           emptyMessage="No access requests found"
           emptyIcon={ShieldCheck}
+          emptyAction={
+            <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
+              <Plus className="h-3.5 w-3.5" /> Request access
+            </Button>
+          }
           onRowClick={setSelected}
           isRowActive={(r) => r.id === selected?.id}
         />

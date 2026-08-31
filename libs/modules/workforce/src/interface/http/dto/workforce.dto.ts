@@ -15,20 +15,93 @@ import {
 // rejects impossible dates like `2026-02-31` that a regex accepts.
 const dateStr = z.string().date();
 
+// Same idiom for clock times. `.time()` also accepts a seconds/fraction part, which is tolerated
+// rather than forbidden: the column counts whole minutes, so anything finer is truncated by
+// `minutesOfDay` below.
+const timeStr = z.string().time();
+
+/** An `HH:mm` clock time (anything finer truncated) as minutes past midnight. */
+function minutesOfDay(time: string): number {
+  return Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+}
+
+/**
+ * Minutes on the clock face between `start` and `end`.
+ *
+ * OVERNIGHT RULE, decided once here: `end < start` is an overnight shift, not an error — a
+ * 22:00→06:00 shift is 480 minutes worked, and `workDate` is the day the shift STARTED, so which
+ * side of midnight it crosses is the caller's business. The one refused case is `end === start`:
+ * a zero-minute shift is a typo, not a midnight-to-midnight one, and the schema's refine rejects
+ * it. The modulo also caps every span at 1439 minutes, so a derived value can never breach the
+ * 1440-minute ceiling `minutesWorked` is validated against.
+ */
+function spanMinutes(start: string, end: string): number {
+  return (minutesOfDay(end) - minutesOfDay(start) + 1440) % 1440;
+}
+
 // ── Timesheets ───────────────────────────────────────────────────────────────
-export const CreateTimesheetSchema = z.object({
-  workDate: dateStr,
-  minutesWorked: z.number().int().min(0).max(1440),
-  note: z.string().max(500).optional(),
-});
+export const CreateTimesheetSchema = z
+  .object({
+    workDate: dateStr,
+    minutesWorked: z.number().int().min(0).max(1440),
+    startTime: timeStr.optional(),
+    endTime: timeStr.optional(),
+    note: z.string().max(500).optional(),
+  })
+  .refine((v) => (v.startTime === undefined) === (v.endTime === undefined), {
+    message: 'startTime and endTime must be given together',
+    path: ['startTime'],
+  })
+  .refine(
+    (v) => !v.startTime || !v.endTime || minutesOfDay(v.startTime) !== minutesOfDay(v.endTime),
+    {
+      message: 'startTime and endTime must differ — equal times describe a zero-minute shift',
+      path: ['endTime'],
+    },
+  )
+  /**
+   * The value the controller receives carries NO times: they are input vocabulary only, and
+   * everything downstream — service, repository, audit, response — keeps reading
+   * `minutesWorked`, which is why no schema or column had to change for them. When both times
+   * are present they WIN: an explicitly given `minutesWorked` is recomputed from the span rather
+   * than trusted, because two numbers for one day is a disagreement the API settles, not
+   * persists. Without times `minutesWorked` passes through exactly as before.
+   */
+  .transform((v) => {
+    if (v.startTime && v.endTime) {
+      return {
+        workDate: v.workDate,
+        minutesWorked: spanMinutes(v.startTime, v.endTime),
+        note: v.note,
+      };
+    }
+    return { workDate: v.workDate, minutesWorked: v.minutesWorked, note: v.note };
+  });
 export class CreateTimesheetDto extends createZodDto(CreateTimesheetSchema) {}
+
+/**
+ * The whole batch is validated by this one parse — one bad entry fails all of them here, before
+ * the service is ever reached, which is the first half of the bulk endpoint's all-or-nothing
+ * promise. The second half (one INSERT, one transaction) lives in the repository.
+ */
+export const BulkCreateTimesheetsSchema = z.object({
+  entries: z.array(CreateTimesheetSchema).min(1).max(50),
+});
+export class BulkCreateTimesheetsDto extends createZodDto(BulkCreateTimesheetsSchema) {}
 
 export const ListTimesheetsQuerySchema = z
   .object({
     employeeId: z.string().uuid().optional(),
     status: z.enum(timesheetStatusEnum.enumValues).optional(),
+    /** Inclusive lower and upper bounds on `workDate` — "this pay period", not "this instant". */
+    dateFrom: dateStr.optional(),
+    dateTo: dateStr.optional(),
   })
-  .merge(PaginationQuerySchema);
+  .merge(PaginationQuerySchema)
+  .refine((v) => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, {
+    message: 'dateFrom must be on or before dateTo',
+    path: ['dateTo'],
+  });
 export class ListTimesheetsQueryDto extends createZodDto(ListTimesheetsQuerySchema) {}
 
 export class TimesheetResponseDto {
@@ -73,8 +146,19 @@ export const ListLeaveQuerySchema = z
   .object({
     employeeId: z.string().uuid().optional(),
     status: z.enum(leaveStatusEnum.enumValues).optional(),
+    /**
+     * Inclusive bounds on `startDate` — requests whose window BEGINS in the range, the same column
+     * the list is ordered by. Not an overlap test: a window straddling the range boundary is not
+     * matched (that is `overlappingLeaveCandidates`' job, not a list filter's).
+     */
+    dateFrom: dateStr.optional(),
+    dateTo: dateStr.optional(),
   })
-  .merge(PaginationQuerySchema);
+  .merge(PaginationQuerySchema)
+  .refine((v) => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, {
+    message: 'dateFrom must be on or before dateTo',
+    path: ['dateTo'],
+  });
 export class ListLeaveQueryDto extends createZodDto(ListLeaveQuerySchema) {}
 
 export class LeaveResponseDto {
@@ -123,8 +207,15 @@ export const ListOvertimeQuerySchema = z
   .object({
     employeeId: z.string().uuid().optional(),
     status: z.enum(overtimeStatusEnum.enumValues).optional(),
+    /** Inclusive lower and upper bounds on `workDate` — "this pay period", not "this instant". */
+    dateFrom: dateStr.optional(),
+    dateTo: dateStr.optional(),
   })
-  .merge(PaginationQuerySchema);
+  .merge(PaginationQuerySchema)
+  .refine((v) => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, {
+    message: 'dateFrom must be on or before dateTo',
+    path: ['dateTo'],
+  });
 export class ListOvertimeQueryDto extends createZodDto(ListOvertimeQuerySchema) {}
 
 export class OvertimeResponseDto {

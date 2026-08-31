@@ -19,6 +19,7 @@ import {
   RowActions,
   Select,
   TabToolbar,
+  Tooltip,
   humanizeStatus,
   type DataTableColumn,
 } from '@/shared/ui';
@@ -204,15 +205,16 @@ export function RequirementsTab() {
       cell: (requirement) =>
         canManage ? (
           <RowActions>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Remove ${requirement.courseTitle}`}
-              title="Remove"
-              onClick={() => setRemoving(requirement)}
-            >
-              <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-            </Button>
+            <Tooltip content="Remove">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Remove ${requirement.courseTitle}`}
+                onClick={() => setRemoving(requirement)}
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+              </Button>
+            </Tooltip>
           </RowActions>
         ) : null,
     },
@@ -293,6 +295,13 @@ export function RequirementsTab() {
           errorMessage="Failed to load requirements."
           emptyMessage="This position requires no training yet"
           emptyIcon={ClipboardList}
+          emptyAction={
+            !canManage ? undefined : (
+              <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
+                <Plus className="h-3.5 w-3.5" /> Require a course
+              </Button>
+            )
+          }
         />
       )}
     </div>
