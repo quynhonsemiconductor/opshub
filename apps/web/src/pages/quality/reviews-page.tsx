@@ -256,7 +256,7 @@ export function ReviewsPage() {
           emptyAction={
             list.search || !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setScheduling(true)}>
-                <Plus className="h-3.5 w-3.5" /> Schedule a review
+                <Plus className="h-3.5 w-3.5" /> Schedule your first review
               </Button>
             )
           }

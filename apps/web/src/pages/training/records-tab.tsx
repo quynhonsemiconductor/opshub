@@ -271,7 +271,7 @@ export function RecordsTab() {
         emptyAction={
           expiringSoon || !canManage ? undefined : (
             <Button variant="primary" size="sm" onClick={() => setRecording(true)}>
-              <Plus className="h-3.5 w-3.5" /> Record completion
+              <Plus className="h-3.5 w-3.5" /> Record your first completion
             </Button>
           )
         }

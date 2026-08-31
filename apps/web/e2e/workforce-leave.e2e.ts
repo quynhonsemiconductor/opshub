@@ -87,12 +87,12 @@ test.describe('workforce leave', () => {
     await expect(dialog.getByRole('heading', { name: 'Request leave' })).toBeVisible();
 
     await dialog.getByRole('combobox').selectOption('annual');
-    // `input[type=date]` surfaces as a textbox in the accessibility tree, so the type selector is
-    // the honest way to reach the two date fields.
-    const dates = dialog.locator('input[type="date"]');
+    // The two ends of `DateRangePicker` are typed text fields (yyyy-mm-dd), not native
+    // `input[type=date]` — it orders the pair and auto-swaps rather than handing "to before
+    // from" to the API. `aria-label` is what actually distinguishes them.
     const { start, end } = uniqueLeaveWindow();
-    await dates.nth(0).fill(start);
-    await dates.nth(1).fill(end);
+    await dialog.getByLabel('From date').fill(start);
+    await dialog.getByLabel('To date').fill(end);
     await dialog.getByPlaceholder(/optional reason/i).fill(reason);
 
     await dialog.getByRole('button', { name: 'Request', exact: true }).click();

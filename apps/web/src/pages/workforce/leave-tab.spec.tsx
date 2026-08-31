@@ -330,19 +330,24 @@ describe('the list date-range filter', () => {
 });
 
 describe('the empty state', () => {
-  it('repeats the toolbar CTA, and withdraws it once a filter narrows the list', async () => {
+  it('offers the same action as the toolbar, and withdraws it once a filter narrows the list', async () => {
     /*
      * An empty table under no filter is "nothing filed yet" — the moment to offer the one action the
      * toolbar already carries. Under a filter the same blank means "nothing matches this", and
      * "request leave" stops being the answer, so the toolbar button is left as the only offer.
+     *
+     * Distinct names from the toolbar button — sharing one made `getByRole` ambiguous for anything
+     * targeting just the header action, e2e specs included.
      */
     renderTab([]);
     await screen.findByText('No leave records found');
-    expect(screen.getAllByRole('button', { name: /request leave/i })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: /^Request leave$/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Request your first leave/i })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('radio', { name: 'Pending' }));
     await waitFor(() =>
-      expect(screen.getAllByRole('button', { name: /request leave/i })).toHaveLength(1),
+      expect(screen.queryByRole('button', { name: /Request your first leave/i })).toBeNull(),
     );
+    expect(screen.getByRole('button', { name: /^Request leave$/ })).toBeTruthy();
   });
 });

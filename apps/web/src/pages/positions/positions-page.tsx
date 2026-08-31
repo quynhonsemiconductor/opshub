@@ -269,7 +269,7 @@ export function PositionsPage() {
           emptyAction={
             list.search || !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-                <Plus className="h-3.5 w-3.5" /> New position
+                <Plus className="h-3.5 w-3.5" /> Create your first position
               </Button>
             )
           }

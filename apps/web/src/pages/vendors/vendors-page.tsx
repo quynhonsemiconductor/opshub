@@ -349,7 +349,7 @@ export function VendorsPage() {
           emptyAction={
             list.search || !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setRegistering(true)}>
-                <Plus className="h-3.5 w-3.5" /> Register a supplier
+                <Plus className="h-3.5 w-3.5" /> Register your first supplier
               </Button>
             )
           }

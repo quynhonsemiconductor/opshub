@@ -262,7 +262,7 @@ export function FinOpsPage() {
             emptyAction={
               list.search || !canManage ? undefined : (
                 <Button variant="primary" size="sm" onClick={() => setShowAdd(true)}>
-                  <Plus className="h-3.5 w-3.5" /> Add license
+                  <Plus className="h-3.5 w-3.5" /> Add your first license
                 </Button>
               )
             }

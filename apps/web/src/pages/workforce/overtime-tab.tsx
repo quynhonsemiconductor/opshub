@@ -295,7 +295,7 @@ export function OvertimeTab() {
              */
             statusFilter || dateRange ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
-                <Plus className="h-3.5 w-3.5" /> Log overtime
+                <Plus className="h-3.5 w-3.5" /> Log your first overtime
               </Button>
             )
           }
