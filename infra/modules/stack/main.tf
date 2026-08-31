@@ -240,12 +240,11 @@ module "secrets" {
     "jwt-private"   = "JWT ES256 private key, EC P-256 (PEM or base64-encoded PEM). The public half is derived from it."
     "cookie-secret" = "Fastify cookie signing secret (min 32 chars)"
     "csrf-secret"   = "HMAC key binding a CSRF token to its session (min 32 chars). Distinct from cookie-secret so the two rotate independently."
-    # Cloudflare Tunnel connector token (cloudflared TUNNEL_TOKEN). Created out of band
-    # with the tunnel itself — Terraform cannot mint a token without owning the tunnel's
-    # lifecycle, and destroying a tunnel to recreate it invalidates every deployed
-    # connector. Present unconditionally so `secret_arns["tunnel-token"]` resolves; the
-    # sidecar is what is gated, not the container.
-    "tunnel-token"        = "Cloudflare Tunnel connector token (cloudflared TUNNEL_TOKEN)"
+    # NOTE: no "tunnel-token" key here any more. It belonged to the OLD manual-tunnel
+    # design (cloudflared tunnel create by hand, id pasted into a variable) — Terraform
+    # now owns the tunnel's whole lifecycle (module.tunnel) and creates its OWN separate
+    # aws_secretsmanager_secret.tunnel_token, populated automatically from the tunnel
+    # resource's own token output. Nothing reads this bundle's key any more.
     "entra-client-secret" = "Entra confidential-client secret for the BFF server-side code exchange"
     "graph-client-secret" = "Microsoft Graph app client secret (client-credentials flow for Graph sync jobs)"
     # Passwords for the least-privilege roles migration 0012 creates. The CONTAINERS exist
