@@ -210,8 +210,16 @@ export const EnvSchema = z
      * to spam, and nothing in our logs explains either. The sibling repo added the same refusal after
      * finding both of its deployed environments running exactly that way.
      */
-    MAIL_FROM_EMAIL: z.string().email().optional(),
-    MAIL_REPLY_TO: z.string().email().optional(),
+    // emptyToUndefined, not bare .optional(): Terraform injects both of these as a literal
+    // empty string when unset (`value = var.mail_from_email`, unconditionally, no ternary),
+    // and Zod's .optional() accepts `undefined` but still runs .email() against an explicit
+    // "" — which fails, and does so for BOTH fields at once, so this crashed every task in
+    // every environment that leaves mail unconfigured. Confirmed live: opshub-develop's api
+    // task crash-looped on exactly "MAIL_FROM_EMAIL: Invalid email address" /
+    // "MAIL_REPLY_TO: Invalid email address" before this fix, same class of bug the
+    // ENTRA_* fields above already guard against.
+    MAIL_FROM_EMAIL: emptyToUndefined(z.string().email().optional()),
+    MAIL_REPLY_TO: emptyToUndefined(z.string().email().optional()),
     RESEND_API_KEY: z.string().optional(),
     /**
      * The SES configuration set to tag every send with.
