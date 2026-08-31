@@ -217,7 +217,7 @@ export function EntityPicker({
         <ul
           id={listboxId}
           role="listbox"
-          className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-border bg-surface py-1 shadow-lg"
+          className="absolute z-20 mt-1 max-h-60 w-full animate-fade-up overflow-y-auto rounded-md border border-border bg-surface py-1 shadow-lg"
         >
           {options.isLoading && <li className="px-3 py-2 text-xs text-fg-subtle">Searching…</li>}
           {options.isError && (

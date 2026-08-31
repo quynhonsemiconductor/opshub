@@ -366,7 +366,7 @@ export function DateRangePicker({
           role="dialog"
           aria-label="Choose date range"
           onKeyDown={onGridKeyDown}
-          className="absolute left-0 z-20 mt-1 w-72 rounded-lg border border-border bg-surface p-3 shadow-lg"
+          className="absolute left-0 z-20 mt-1 w-72 animate-fade-up rounded-lg border border-border bg-surface p-3 shadow-lg"
         >
           <div className="mb-2 flex items-center justify-between">
             <MonthButton
