@@ -248,7 +248,7 @@ export function WebhooksPage() {
           emptyAction={
             !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                <Plus className="h-3.5 w-3.5" /> New subscription
+                <Plus className="h-3.5 w-3.5" /> Create your first subscription
               </Button>
             )
           }

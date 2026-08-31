@@ -298,7 +298,7 @@ export function RequirementsTab() {
           emptyAction={
             !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
-                <Plus className="h-3.5 w-3.5" /> Require a course
+                <Plus className="h-3.5 w-3.5" /> Add your first requirement
               </Button>
             )
           }

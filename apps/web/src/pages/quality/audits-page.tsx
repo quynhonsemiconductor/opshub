@@ -306,7 +306,7 @@ export function AuditsPage() {
           emptyAction={
             list.search || !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setPlanning(true)}>
-                <Plus className="h-3.5 w-3.5" /> Plan an audit
+                <Plus className="h-3.5 w-3.5" /> Plan your first audit
               </Button>
             )
           }

@@ -380,7 +380,7 @@ export function IncidentsPage() {
           emptyIcon={AlertOctagon}
           emptyAction={
             <Button variant="primary" size="sm" onClick={() => setReporting(true)}>
-              <Plus className="h-3.5 w-3.5" /> Report an incident
+              <Plus className="h-3.5 w-3.5" /> Report your first incident
             </Button>
           }
           onRowClick={setSelected}

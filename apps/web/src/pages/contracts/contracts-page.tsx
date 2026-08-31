@@ -260,7 +260,7 @@ export function ContractsPage() {
           emptyAction={
             renewalsOnly || !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setDrafting(true)}>
-                <Plus className="h-3.5 w-3.5" /> Draft contract
+                <Plus className="h-3.5 w-3.5" /> Draft your first contract
               </Button>
             )
           }

@@ -414,7 +414,7 @@ export function InformationAssetsPage() {
             emptyAction={
               list.search || !canManage ? undefined : (
                 <Button variant="primary" size="sm" onClick={() => setRegistering(true)}>
-                  <Plus className="h-3.5 w-3.5" /> Register an asset
+                  <Plus className="h-3.5 w-3.5" /> Register your first asset
                 </Button>
               )
             }

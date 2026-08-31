@@ -276,7 +276,7 @@ export function AssignmentsTab() {
             emptyAction={
               !canAssign ? undefined : (
                 <Button variant="primary" size="sm" onClick={() => setShowAssign(true)}>
-                  <UserCheck className="h-3.5 w-3.5" /> Assign role
+                  <UserCheck className="h-3.5 w-3.5" /> Assign your first role
                 </Button>
               )
             }
