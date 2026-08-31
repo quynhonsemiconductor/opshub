@@ -281,3 +281,52 @@ jobs:
     secrets:
       AWS_ACCOUNT_ID:       ${{ vars.AWS_ACCOUNT_ID }}
       SLACK_DEPLOY_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Grafana deploy annotation — ported from rally.
+  #
+  # WHY THIS IS NOT COSMETIC. opshub's Grafana alert rules fire on symptoms that a
+  # deploy is one of the likeliest causes of, and without a deploy marker on the
+  # dashboard there is nothing on screen that distinguishes "the service regressed"
+  # from "a task was replaced 40 seconds ago". rally's `http-p99-latency` page on
+  # 2026-08-31 was exactly that: the slow request was a cold start after a task
+  # replacement, and establishing it took reading workflow job timestamps by hand
+  # because the latency panel carried no deploy markers to line the spike up against.
+  #
+  # `continue-on-error: true` on purpose, and it is the whole safety argument: an
+  # annotation is an observability nicety, and a Grafana outage or a rotated token must
+  # never turn a SUCCESSFUL deploy into a red pipeline. The failure mode of this step is
+  # a missing marker, never a blocked release.
+  #
+  # `if: always() && needs.deploy.result == 'success'` rather than a bare success():
+  # `always()` is what lets this job run at all when an earlier job in the graph was
+  # skipped, and the explicit result check is what keeps it from annotating a deploy
+  # that did not happen. A marker for a deploy that never shipped is worse than none —
+  # it sends the next reader looking for a cause in the wrong place.
+  #
+  # GRAFANA_ALERTS_TOKEN is an ORGANISATION secret with ALL-repository visibility, so
+  # opshub needs no repo-level secret for this. Verified rather than assumed.
+  #
+  # The env label follows the same tag-versus-branch rule the deploy itself uses, so the
+  # annotation lands on the environment that was actually deployed.
+  # ───────────────────────────────────────────────────────────────────────────
+  annotate-deploy:
+    needs: [deploy]
+    if: always() && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Post deploy annotation to Grafana
+        continue-on-error: true
+        env:
+          GRAFANA_ALERTS_TOKEN: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
+          DEPLOY_ENV: ${{ github.ref_type == 'tag' && 'production' || 'develop' }}
+        run: |
+          curl -sf -X POST "https://qnsc.grafana.net/api/annotations" \
+            -H "Authorization: Bearer ${GRAFANA_ALERTS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                  --arg text "opshub deployed ${GITHUB_SHA:0:7} to ${DEPLOY_ENV}" \
+                  --arg env "$DEPLOY_ENV" \
+                  '{tags: ["deploy", "opshub", $env], text: $text}')"
