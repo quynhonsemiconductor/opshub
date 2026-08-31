@@ -1,0 +1,35 @@
+name: Diag · Loki logs
+on:
+  workflow_dispatch:
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Find Loki datasource uid
+        env:
+          GRAFANA_ALERTS_TOKEN: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
+        run: |
+          curl -sS -H "Authorization: Bearer $GRAFANA_ALERTS_TOKEN" \
+            "https://qnsc.grafana.net/api/datasources" \
+            | python3 -c "import json,sys; ds=json.load(sys.stdin); print([ (d['uid'], d['name'], d['type']) for d in ds ])"
+
+      - name: Query api logs
+        env:
+          GRAFANA_ALERTS_TOKEN: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
+        run: |
+          UID=$(curl -sS -H "Authorization: Bearer $GRAFANA_ALERTS_TOKEN" \
+            "https://qnsc.grafana.net/api/datasources" \
+            | python3 -c "import json,sys; ds=json.load(sys.stdin); print(next(d['uid'] for d in ds if d['type']=='loki'))")
+          echo "loki uid: $UID"
+          NOW=$(date +%s)
+          START=$(( (NOW - 3600) * 1000000000 ))
+          END=$(( NOW * 1000000000 ))
+          curl -sS -G -H "Authorization: Bearer $GRAFANA_ALERTS_TOKEN" \
+            "https://qnsc.grafana.net/api/datasources/proxy/uid/${UID}/loki/api/v1/query_range" \
+            --data-urlencode 'query={service_name="opshub-api"}' \
+            --data-urlencode "start=${START}" \
+            --data-urlencode "end=${END}" \
+            --data-urlencode "limit=200" \
+            | python3 -m json.tool
