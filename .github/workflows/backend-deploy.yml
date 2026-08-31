@@ -151,29 +151,61 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   # CI gate — a red main must not deploy.
   #
-  #   - tag push → CI does not run on tags, and prod is gated by the "production"
-  #     Environment reviewer inside the reusable → nothing to await, proceed.
   #   - push to main → wait for Backend · CI on this sha; `gh run watch
   #     --exit-status` propagates its conclusion, so a failed CI blocks deploy.
+  #   - tag push → wait for the DEVELOP deploy of this sha instead. See below.
   #
   # Fails CLOSED: if no CI run is found for the sha, block rather than ship blind.
+  #
+  # WHY THE TAG BRANCH WAITS ON THE DEVELOP DEPLOY, AND NO LONGER EXITS 0.
+  # It used to `exit 0` with "Backend · CI gate not applicable", which is true on its own
+  # terms — Backend · CI runs on main, not on tags, so there is no CI run to await. But it
+  # left prod with no gate at all, and a prod deploy does not build: it PROMOTES the
+  # sha-<sha> image the develop deploy pushed. So the tag run's real precondition is not
+  # CI, it is "develop already built and deployed this sha" — exactly what the promote
+  # action's own failure message states ("The commit must be merged to main and deployed to
+  # develop before tagging a release").
+  #
+  # With no gate the two runs race. This is PORTED FROM RALLY, where prod lost that race
+  # on v0.7.13 (2026-08-31): a release merge fires both runs on the same commit, the tag
+  # run cleared this gate in 3 seconds while the main run sat here for 15m16s waiting on
+  # Backend · CI, and prod then exhausted the promote step's poll budget waiting for an
+  # image that did not exist yet — failing 21 seconds before this gate cleared on the main
+  # run. Nothing half-deployed (promote runs before the deploy job, and it is idempotent),
+  # but the release needed a manual re-run. opshub shares the reusable workflow, the
+  # promote action and this gate verbatim, so it had the same defect and simply had not
+  # cut a release slow enough to expose it.
+  #
+  # Waiting on the whole develop RUN, not just its build jobs, is deliberate: it is the
+  # documented contract, it is one `gh run watch` rather than per-job polling, and it means
+  # prod can never ship an image develop itself failed to deploy.
+  #
+  # NOT-FOUND WARNS RATHER THAN BLOCKING, unlike the main branch below. A release tag
+  # always produces a develop run (package.json and the manifest are never in
+  # paths-ignore), so absence means something unusual — a hand-cut tag on a docs-only
+  # commit, or a deleted run — and the promote step's ECR poll is still the backstop.
+  # Blocking would turn this gate into a new way to make a release un-shippable. Same
+  # warn-and-proceed shape as wait-for-infra above. A develop run that EXISTS and FAILED
+  # does block, which is the diagnostic this adds: prod now says "develop deploy failed"
+  # in seconds instead of "not found in ECR" in ~17 min.
   # ───────────────────────────────────────────────────────────────────────────
   wait-for-ci:
     name: Wait for Backend · CI
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45, not 30: the tag branch now awaits the develop deploy, whose own slowest input is
+    # a Docker build that a lockfile change forces to rebuild from scratch. Rally measured
+    # 24m24s for that run on the release this fix comes from.
+    timeout-minutes: 45
     permissions:
       contents: read
       actions: read
     steps:
       - name: Wait for Backend · CI on this commit
+        if: github.ref_type != 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "Tag deploy — Backend · CI gate not applicable."; exit 0
-          fi
           # This job does not check out the repo, so `gh` cannot infer it from a
           # local remote — pass it explicitly.
           for _ in $(seq 1 12); do
@@ -190,6 +222,42 @@ jobs:
           echo "Waiting on Backend · CI run $ID …"
           gh run watch --repo "$GITHUB_REPOSITORY" "$ID" --exit-status
           echo "Backend · CI succeeded; deploy may proceed."
+
+      # Prod promotes the image the develop deploy pushed, so this is the tag run's real
+      # precondition. See the block comment above this job for the race it closes.
+      - name: Wait for the develop deploy of this commit
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # `--branch main` is what excludes THIS run: the develop deploy's headBranch is
+          # `main` while the tag run's is the tag ref, so the two never match each other
+          # despite sharing a workflow file and a commit. Without it this would find
+          # itself and wait forever.
+          #
+          # `|| ID=""` on the assignment, matching wait-for-infra above and for the same
+          # reason: runners use `set -e`, an assignment takes its command substitution's
+          # exit status, so a rate-limited `gh run list` would skip the retry loop.
+          for _ in $(seq 1 12); do
+            ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow backend-deploy.yml \
+                   --branch main --commit "$GITHUB_SHA" \
+                   --limit 1 --json databaseId --jq '.[0].databaseId // empty') || ID=""
+            [ -n "$ID" ] && break
+            sleep 10
+          done
+
+          if [ -z "${ID:-}" ]; then
+            echo "::warning::No develop Backend · Deploy run found for $GITHUB_SHA — proceeding, the promote step's ECR poll is the backstop."
+            exit 0
+          fi
+
+          echo "Waiting on develop Backend · Deploy run $ID …"
+          if ! gh run watch --repo "$GITHUB_REPOSITORY" "$ID" --exit-status; then
+            echo "::error::The develop deploy of $GITHUB_SHA did not succeed (run $ID). Prod promotes the image that run pushes, so there is nothing to promote. Fix develop, then re-run this deploy."
+            exit 1
+          fi
+          echo "Develop deployed this commit; the sha image exists and prod may promote it."
 
   deploy:
     needs: [wait-for-infra, wait-for-ci]
