@@ -191,13 +191,13 @@ export function AppShell() {
                       )}
                       activeProps={{
                         className:
-                          'group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm bg-sidebar-active text-sidebar-fg-active',
+                          'group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm bg-sidebar-active text-sidebar-fg-active shadow-sm',
                       }}
                     >
                       <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
                       <span className="flex-1">{label}</span>
                       {upgradeBadge ? (
-                        <span className="rounded px-1 py-0.5 text-2xs font-semibold uppercase tracking-wide bg-surface-muted text-fg-muted">
+                        <span className="rounded px-1 py-0.5 text-2xs font-semibold uppercase tracking-wide bg-accent-secondary-muted text-accent-secondary-muted-fg">
                           Upgrade
                         </span>
                       ) : (
@@ -230,7 +230,7 @@ export function AppShell() {
       {/* Main content */}
       <main className="flex min-w-0 flex-1 flex-col overflow-auto bg-page">
         {/* Top bar */}
-        <div className="sticky top-0 z-20 flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface/85 px-6 backdrop-blur supports-[backdrop-filter]:bg-surface/70">
+        <div className="sticky top-0 z-20 flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface/85 px-6 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-surface/70">
           <div className="flex items-center gap-2">
             {collapsed && (
               <Button

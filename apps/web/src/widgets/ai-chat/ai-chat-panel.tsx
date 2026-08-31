@@ -47,7 +47,7 @@ function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user';
   return (
-    <div className={cn('flex items-start gap-2.5', isUser && 'flex-row-reverse')}>
+    <div className={cn('flex animate-fade-up items-start gap-2.5', isUser && 'flex-row-reverse')}>
       {/* Avatar */}
       <div
         className={cn(
