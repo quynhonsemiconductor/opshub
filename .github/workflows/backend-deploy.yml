@@ -209,6 +209,23 @@ jobs:
       product: opshub
       has_worker: true
       has_migrator: true
+      # ARM64 (Graviton) Fargate, ~20% cheaper per vCPU-hour and GB-hour for identical
+      # sizing. These two move TOGETHER with `cpu_architecture = "ARM64"` in
+      # infra/live/*/main.tf, in one commit: qnsc-ci's own note on these inputs is that
+      # setting only one produces "image Manifest does not contain descriptor matching
+      # platform" at task start — after a clean apply and a build that reported success.
+      #
+      # One commit is safe because `wait-for-infra` above holds this deploy until the
+      # Infrastructure · Apply for the same sha finishes, so the ARM64 task definition
+      # exists before the deploy that builds arm64 images rolls onto it. And the
+      # ecs-service module runs `deployment_circuit_breaker` with rollback enabled, so a
+      # task that cannot start returns the service to its previous x86 revision by itself.
+      #
+      # NATIVE ARM RUNNER, not QEMU: emulating an arm64 pnpm + Nest compile on an x86
+      # runner multiplies build minutes by enough to outweigh the Fargate saving, which is
+      # the reusable workflow's own stated reason for having a separate runner input.
+      build_runner: ubuntu-24.04-arm
+      image_platforms: linux/arm64
     # Least-privilege: pass only what the reusable declares (no `secrets: inherit`).
     secrets:
       AWS_ACCOUNT_ID:       ${{ vars.AWS_ACCOUNT_ID }}
