@@ -248,7 +248,7 @@ export function CyclesTab() {
         emptyAction={
           !canManage ? undefined : (
             <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-              <Plus className="h-3.5 w-3.5" /> New cycle
+              <Plus className="h-3.5 w-3.5" /> Create your first cycle
             </Button>
           )
         }

@@ -283,7 +283,7 @@ export function LeaveTab() {
              */
             statusFilter || dateRange ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
-                <Plus className="h-3.5 w-3.5" /> Request leave
+                <Plus className="h-3.5 w-3.5" /> Request your first leave
               </Button>
             )
           }

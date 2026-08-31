@@ -120,9 +120,11 @@ describe('FinOpsPage licence-writing gate', () => {
     expect(
       await screen.findByText('Add your first license to start tracking seats and cost'),
     ).toBeTruthy();
-    // TWO, not one: the header action and the empty-state action are separate `setShowAdd` call sites,
-    // and a count catches gating only one of them — which a presence check would report as a pass.
-    expect(screen.getAllByRole('button', { name: /Add license/ })).toHaveLength(2);
+    // Two SEPARATE `setShowAdd` call sites — the header action and the empty-state action — each
+    // asserted by its own distinct name (they used to share one, which made `getByRole` ambiguous
+    // for anything trying to target just the header button, e2e specs included).
+    expect(screen.getByRole('button', { name: /^Add license$/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Add your first license/ })).toBeTruthy();
   });
 
   it('does not tell a license.read holder to add the first licence', async () => {

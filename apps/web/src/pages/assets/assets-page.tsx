@@ -218,7 +218,7 @@ export function AssetsPage() {
           emptyAction={
             list.search ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setShowAdd(true)}>
-                <Plus className="h-3.5 w-3.5" /> Add asset
+                <Plus className="h-3.5 w-3.5" /> Add your first asset
               </Button>
             )
           }

@@ -13,20 +13,13 @@
  * because focus landing on a day that cannot be picked reads as a broken control. No date library
  * was installed, and two components are not the price of admission for one.
  */
-import {
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type InputHTMLAttributes,
-  type ReactNode,
-  type Ref,
-} from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { todayIso } from '@/shared/lib/format';
 import { FOCUS_RING } from './button';
 import { FieldError } from './form-field';
+import { RangeField, MonthButton } from './date-range-field';
 import {
   MONTHS,
   WEEKDAYS,
@@ -60,57 +53,6 @@ export interface DateRangePickerProps {
   className?: string;
 }
 
-/** One end of the range. Identical twins by design — see `Select`'s "styled to match `Input`" note. */
-interface RangeFieldProps extends InputHTMLAttributes<HTMLInputElement> {
-  ref?: Ref<HTMLInputElement>;
-  invalid: boolean;
-  onEdit: (text: string) => void;
-}
-
-function RangeField({ invalid, onEdit, className, ...rest }: RangeFieldProps) {
-  return (
-    <input
-      type="text"
-      inputMode="numeric"
-      autoComplete="off"
-      placeholder="yyyy-mm-dd"
-      {...rest}
-      onChange={(e) => onEdit(e.target.value)}
-      aria-invalid={invalid || undefined}
-      className={cn(
-        'h-9 w-full rounded-md border bg-surface pl-8 pr-2 text-sm text-fg placeholder:text-fg-subtle transition-colors focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50',
-        invalid
-          ? 'border-red-400 focus:border-red-400 focus:ring-red-400/20 dark:border-red-500'
-          : 'border-border focus:border-accent focus:ring-accent/20',
-        className,
-      )}
-    />
-  );
-}
-
-/** A month chevron. Two of these differed by nothing but direction, so they are one component. */
-function MonthButton(props: {
-  label: string;
-  blocked: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={props.label}
-      disabled={props.blocked}
-      onClick={props.onClick}
-      className={cn(
-        'rounded-md p-1 text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg disabled:pointer-events-none disabled:opacity-40',
-        FOCUS_RING,
-      )}
-    >
-      {props.children}
-    </button>
-  );
-}
-
 export function DateRangePicker({
   value,
   onChange,
@@ -141,9 +83,19 @@ export function DateRangePicker({
   const [focused, setFocused] = useState<string | null>(null);
   /** The first click of a two-click pick: the day awaiting its partner. */
   const [anchor, setAnchor] = useState<string | null>(null);
-  /** Half-typed field text, held locally so it is not clobbered while the pair is incomplete. */
-  const [draft, setDraft] = useState<{ field: 'from' | 'to'; text: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * Half-typed field text, held locally so it is not clobbered while the pair is incomplete.
+   *
+   * BOTH SIDES, not just the one being typed — the pair has to survive the blur that moving from
+   * `from` to `to` fires: nothing is committed until each side has been ENTERED, and if the first
+   * side's draft died on that blur, a keyboard-only user could never fill a range starting from
+   * empty at all (typing `from`, tabbing to `to`, typing `to` — the pair only ever coming from a
+   * `value` that already existed). A side is cleared once it commits, or on blur if what is sitting
+   * in it does not parse to a selectable day — an invalid leftover should not survive to confuse
+   * the next edit, but a VALID one that is simply waiting for its partner should.
+   */
+  const [draft, setDraft] = useState<{ from?: string; to?: string }>({});
+  const [error, setError] = useState<{ field: 'from' | 'to'; message: string } | null>(null);
   const [today] = useState(() => todayIso());
 
   const shown = value ? orderRange(value.from, value.to) : null;
@@ -201,19 +153,26 @@ export function DateRangePicker({
   }
 
   function editField(field: 'from' | 'to', text: string) {
-    setDraft({ field, text });
+    const otherField = field === 'from' ? 'to' : 'from';
+    setDraft((d) => ({ ...d, [field]: text }));
     if (text === '') {
       // Clearing one end just leaves half a pair — not an error, and nothing to emit yet.
       setError(null);
     } else if (!parseIso(text)) {
-      setError(isWellFormedIso(text) ? 'Not a real calendar date.' : null);
+      setError(isWellFormedIso(text) ? { field, message: 'Not a real calendar date.' } : null);
     } else if (dayDisabled(text)) {
-      setError('That date is outside the allowed window.');
+      setError({ field, message: 'That date is outside the allowed window.' });
     } else {
-      const other = field === 'from' ? shown?.to : shown?.from;
+      // The partner can be an already-COMMITTED value (`shown`, the normal case: adjusting one end
+      // of an existing range) or the OTHER field's own still-uncommitted draft (a range being typed
+      // for the first time, where neither side has committed yet).
+      const draftOther = draft[otherField];
+      const other =
+        (draftOther && parseIso(draftOther) && !dayDisabled(draftOther) ? draftOther : undefined) ??
+        (field === 'from' ? shown?.to : shown?.from);
       if (other) {
         onChange(orderRange(text, other));
-        setDraft(null);
+        setDraft({});
       }
       setError(null);
     }
@@ -302,8 +261,22 @@ export function DateRangePicker({
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [open]);
 
-  const dropDraft = () => {
-    setDraft(null);
+  /**
+   * Blurring a field drops only ITS OWN draft, and only if it never became a real, selectable day —
+   * a stray "2026-0" left behind should not linger to confuse the next edit. A VALID entry stays,
+   * because it may still be waiting for its partner (see {@link editField}); it is cleared once the
+   * pair actually commits, or by the explicit Clear button.
+   */
+  const dropDraft = (field: 'from' | 'to') => () => {
+    setDraft((d) => {
+      const text = d[field];
+      if (text !== undefined && (!parseIso(text) || dayDisabled(text))) {
+        const next = { ...d };
+        delete next[field];
+        return next;
+      }
+      return d;
+    });
     setError(null);
   };
 
@@ -331,17 +304,17 @@ export function DateRangePicker({
             ref={fromRef}
             id={rootId}
             aria-label="From date"
-            value={draft?.field === 'from' ? draft.text : (shown?.from ?? '')}
-            aria-describedby={!!error && draft?.field === 'from' ? errorId : undefined}
+            value={draft.from ?? shown?.from ?? ''}
+            aria-describedby={error?.field === 'from' ? errorId : undefined}
             disabled={disabled}
-            invalid={!!error && draft?.field === 'from'}
+            invalid={error?.field === 'from'}
             onEdit={(text) => editField('from', text)}
             onFocus={() => {
               // Handing focus BACK must not read as "open me" again — see returningFocusRef.
               if (returningFocusRef.current) returningFocusRef.current = false;
               else openCalendar('from');
             }}
-            onBlur={dropDraft}
+            onBlur={dropDraft('from')}
             onKeyDown={(event) => onFieldKeyDown(event, 'from')}
           />
         </div>
@@ -353,16 +326,16 @@ export function DateRangePicker({
           aria-label="To date"
           ref={toRef}
           className="flex-1"
-          value={draft?.field === 'to' ? draft.text : (shown?.to ?? '')}
-          aria-describedby={!!error && draft?.field === 'to' ? errorId : undefined}
+          value={draft.to ?? shown?.to ?? ''}
+          aria-describedby={error?.field === 'to' ? errorId : undefined}
           disabled={disabled}
-          invalid={!!error && draft?.field === 'to'}
+          invalid={error?.field === 'to'}
           onEdit={(text) => editField('to', text)}
           onFocus={() => {
             if (returningFocusRef.current) returningFocusRef.current = false;
             else openCalendar('to');
           }}
-          onBlur={dropDraft}
+          onBlur={dropDraft('to')}
           onKeyDown={(event) => onFieldKeyDown(event, 'to')}
         />
         {shown && !disabled && (
@@ -372,7 +345,7 @@ export function DateRangePicker({
             onClick={() => {
               onChange(null);
               setAnchor(null);
-              setDraft(null);
+              setDraft({});
               setError(null);
             }}
             className={cn(
@@ -385,7 +358,7 @@ export function DateRangePicker({
         )}
       </div>
 
-      <FieldError id={errorId} message={error ?? undefined} />
+      <FieldError id={errorId} message={error?.message} />
 
       {open && view && (
         <div

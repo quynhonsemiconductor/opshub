@@ -260,7 +260,7 @@ export function PeoplePage() {
           emptyAction={
             list.search ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setModal({ mode: 'create' })}>
-                <Plus className="h-3.5 w-3.5" /> Add employee
+                <Plus className="h-3.5 w-3.5" /> Add your first employee
               </Button>
             )
           }

@@ -220,19 +220,24 @@ describe('the list date-range filter', () => {
 });
 
 describe('the empty state', () => {
-  it('repeats the toolbar CTA, and withdraws it once a filter narrows the list', async () => {
+  it('offers the same action as the toolbar, and withdraws it once a filter narrows the list', async () => {
     /*
      * An empty table under no filter is "nothing logged yet" — the moment to offer the one action the
      * toolbar already carries. Under a filter the same blank means "nothing matches this", and
      * "log overtime" stops being the answer, so the toolbar button is left as the only offer.
+     *
+     * Distinct names from the toolbar button — sharing one made `getByRole` ambiguous for anything
+     * targeting just the header action, e2e specs included.
      */
     renderTab([]);
     await screen.findByText('No overtime records found');
-    expect(screen.getAllByRole('button', { name: /log overtime/i })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: /^Log overtime$/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Log your first overtime/i })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('radio', { name: 'Pending' }));
     await waitFor(() =>
-      expect(screen.getAllByRole('button', { name: /log overtime/i })).toHaveLength(1),
+      expect(screen.queryByRole('button', { name: /Log your first overtime/i })).toBeNull(),
     );
+    expect(screen.getByRole('button', { name: /^Log overtime$/ })).toBeTruthy();
   });
 });

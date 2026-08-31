@@ -254,7 +254,7 @@ export function CatalogueTab() {
         emptyAction={
           list.search || !canManage ? undefined : (
             <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-              <Plus className="h-3.5 w-3.5" /> New control
+              <Plus className="h-3.5 w-3.5" /> Add your first control
             </Button>
           )
         }

@@ -218,7 +218,7 @@ export function ShiftsTab() {
              */
             typeFilter ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
-                <Plus className="h-3.5 w-3.5" /> Log shift
+                <Plus className="h-3.5 w-3.5" /> Log your first shift
               </Button>
             )
           }

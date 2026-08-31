@@ -301,7 +301,7 @@ export function NonconformancesPage() {
           emptyAction={
             list.search ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setRaising(true)}>
-                <Plus className="h-3.5 w-3.5" /> Raise a finding
+                <Plus className="h-3.5 w-3.5" /> Raise your first finding
               </Button>
             )
           }

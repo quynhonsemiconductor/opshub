@@ -376,7 +376,7 @@ export function AccessPage() {
           emptyIcon={ShieldCheck}
           emptyAction={
             <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
-              <Plus className="h-3.5 w-3.5" /> Request access
+              <Plus className="h-3.5 w-3.5" /> Make your first access request
             </Button>
           }
           onRowClick={setSelected}

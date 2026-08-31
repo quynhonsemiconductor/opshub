@@ -309,7 +309,7 @@ export function RisksPage() {
           emptyAction={
             !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setIdentifying(true)}>
-                <Plus className="h-3.5 w-3.5" /> Identify a risk
+                <Plus className="h-3.5 w-3.5" /> Identify your first risk
               </Button>
             )
           }
