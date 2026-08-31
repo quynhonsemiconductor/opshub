@@ -332,12 +332,34 @@ export class StorageService {
 
   // ── Private helpers ─────────────────────────────────────────────────────────
 
+  /**
+   * `interactive`, NOT `external`, and this is the only S3 call in this file that changed.
+   *
+   * This is the one place where a user-waiting HTTP request makes a real network round trip
+   * to S3: `confirmUpload` awaits it, and `confirmUpload` is reached from live routes —
+   * `POST /v1/assets/:id/photo/confirm` → `AssetService.confirmPhoto`
+   * (`libs/modules/assets/src/interface/http/assets.controller.ts:222`), and the equivalent
+   * confirm paths in identity, workforce and training. Under `external` a downstream blip
+   * made that request take up to ~41 s (four attempts of 10 s plus backoff — see the
+   * `maxAttempts` note in ResilienceService), and because the failure is reported as a 4xx
+   * the 5xx alert never saw it. `interactive` bounds it at ~6.2 s.
+   *
+   * The presign call sites in this file (`s3.presignPut`, `s3.presignGet`) DELIBERATELY keep
+   * `external`, even though they are on the same request paths. `getSignedUrl` signs
+   * locally: it performs no request to S3, so there is no round trip for a tighter timeout
+   * to bound and no latency to win. The only I/O it can reach is one-time credential
+   * resolution against the ECS credential endpoint, which is cached for the rest of the
+   * process's life. Tightening those would trade a real cold-start failure mode for nothing
+   * measurable, which is the opposite of the trade being made here.
+   */
   private async headObject(
     key: string,
   ): Promise<{ contentLength: number; checksumSha256: string | null } | null> {
     try {
-      const result = await this.resilience.execute('s3.headObject', this.resilience.external, () =>
-        this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key })),
+      const result = await this.resilience.execute(
+        's3.headObject',
+        this.resilience.interactive,
+        () => this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key })),
       );
       return {
         contentLength: result.ContentLength ?? 0,

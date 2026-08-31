@@ -1225,8 +1225,102 @@ resource "aws_scheduler_schedule" "ecs_scale_up" {
 #
 # Adopted from rally. opshub had no alarms at all, which is the state where an outage is
 # discovered by a person rather than by a page.
+
+# ── Burstable-RDS alarm sizing, keyed by instance class ──────────────────────
+# opshub runs `db.t4g.micro` in BOTH environments (infra/live/develop/main.tf and
+# infra/live/prod/main.tf), so both of the observability module's opt-in burstable alarms
+# apply here and both get a real floor. This is not an assumption inherited from rally —
+# it was read off opshub's own live files.
+#
+# Why these alarms matter to this product in particular: a burstable class does not fail
+# under sustained load, it DEGRADES, and neither of those degradations is visible to the
+# CPU, connection-count or storage alarms already created. A credit-throttled instance
+# sits pinned at its baseline percentage, so `CPUUtilization` reads healthy while every
+# query slows; a memory-starved one loses its filesystem cache and reads fall through to
+# EBS. Both surface downstream as application p99 latency — which is exactly the alert
+# that just paged rally with an uninterpretable value, and exactly the alert this change
+# has now made quieter. Removing noise from the symptom while leaving the cause unalarmed
+# would be a net loss of coverage, so the two halves belong in one change.
+#
+# KEYED BY CLASS rather than written as two constants, because a correct floor is a
+# function of the instance class and opshub has a DOCUMENTED plan to change it: prod's
+# GO-LIVE CHECKLIST in infra/live/prod/main.tf calls for `db.t4g.small`. Two constants
+# would survive that flip while quietly becoming wrong — 200 MB is a 20% memory floor on
+# 1 GiB and a 10% floor on 2 GiB.
+#
+# Only the class opshub actually runs is populated, on purpose. The precondition below
+# fails the plan for any other class rather than falling back to a default, so the go-live
+# flip to `db.t4g.small` cannot land until someone sizes it against the AWS T4g credit
+# table. Inventing numbers here for classes nobody has sized would defeat the guard: a
+# plausible-looking wrong floor is worse than a failed plan, because the plan gets fixed.
+#
+# A non-burstable class (`db.m*`, `db.r*`) belongs in this map too when one is adopted,
+# with `cpu_credit_min = 0`. Those classes never publish `CPUCreditBalance` at all, so a
+# non-zero floor would create an alarm that parks in INSUFFICIENT_DATA forever and reads
+# as coverage — the same trap `rds_instance_id`'s own validation exists to prevent.
+locals {
+  rds_burst_alarm_thresholds_by_class = {
+    # 1 GiB of RAM; earns 24 CPU credits/hour against a 576-credit maximum.
+    #
+    # 100 credits is roughly four hours of accumulated burst still in hand, which is
+    # enough warning to shed load or resize before throttling starts rather than a page
+    # that arrives once the instance is already pinned at baseline. Taken from the
+    # observability module README's own worked example for this exact class, so the number
+    # is the organisation's, not this file's.
+    #
+    # 200 MB freeable is a 20% floor on 1 GiB. Below that PostgreSQL is already giving up
+    # filesystem cache, which is the earliest point the degradation is both real and still
+    # cheap to act on. MEGABYTES, not bytes — the module converts, and the unit is in the
+    # variable name precisely so a nine-digit constant never has to appear at a call site.
+    "db.t4g.micro" = {
+      cpu_credit_min     = 100
+      freeable_memory_mb = 200
+    }
+  }
+  rds_burst_alarm_thresholds = lookup(
+    local.rds_burst_alarm_thresholds_by_class,
+    var.rds.instance_class,
+    { cpu_credit_min = 0, freeable_memory_mb = 0 },
+  )
+}
+
+# Guarded as a precondition for the same reason as the two guards above: the fallback in
+# that `lookup` is `0`/`0`, which the module reads as "do not create the alarm". Without
+# this assertion, changing the instance class would DELETE two production alarms silently
+# and the plan would show it as an ordinary destroy among many. Failing the plan makes
+# sizing the new class a required step of the resize rather than a follow-up nobody files.
+resource "terraform_data" "rds_burst_alarms_sized_for_instance_class" {
+  input = {
+    instance_class = var.rds.instance_class
+    thresholds     = local.rds_burst_alarm_thresholds
+  }
+
+  lifecycle {
+    precondition {
+      condition = contains(
+        keys(local.rds_burst_alarm_thresholds_by_class),
+        var.rds.instance_class,
+      )
+      error_message = join(" ", [
+        "No burstable-alarm sizing for ${var.rds.instance_class}.",
+        "CPUCreditBalance and FreeableMemory floors depend on the class, so changing it",
+        "without adding an entry to local.rds_burst_alarm_thresholds_by_class would drop",
+        "both alarms to their 0 default and delete them.",
+        "Add the class with a sized floor (or cpu_credit_min = 0 if it is not burstable).",
+        "Sized so far: ${join(", ", keys(local.rds_burst_alarm_thresholds_by_class))}.",
+      ])
+    }
+  }
+}
+
 module "observability" {
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability?ref=observability-v4.2.1"
+  # observability-v4.3.0 adds the two opt-in burstable RDS alarms wired below
+  # (`thresholds.rds_cpu_credit_min`, `thresholds.rds_freeable_memory_mb`). Additive and
+  # both defaulting to 0, so the bump is a minor version and is a no-op for every other
+  # caller of this module.
+  #
+  # THIS TAG DOES NOT EXIST YET — it must be cut in qnsc-tf-modules before this plans.
+  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability?ref=observability-v4.3.0"
 
   create_dashboard = var.create_dashboard
 
@@ -1259,6 +1353,16 @@ module "observability" {
   # alarms across both environments. observability-v3.0.0+ rejects a resource id outright, so
   # this fails the plan rather than regressing silently.
   rds_instance_id = module.rds.identifier
+
+  # The FIRST thresholds passthrough in this module — every other key keeps the module's
+  # default, which is deliberate and unchanged. Only the two burstable alarms are set,
+  # because they are the only two that default OFF and therefore the only two that a
+  # caller has to opt into. See local.rds_burst_alarm_thresholds_by_class above for the
+  # sizing argument and the precondition that keeps it honest across a class change.
+  thresholds = {
+    rds_cpu_credit_min     = local.rds_burst_alarm_thresholds.cpu_credit_min
+    rds_freeable_memory_mb = local.rds_burst_alarm_thresholds.freeable_memory_mb
+  }
 
   # No target groups while tunnelled, so the latency and UnHealthyHostCount alarms are not
   # created. See `monitor_target_health` — that is a real gap to close from outside AWS, not
@@ -1559,7 +1663,7 @@ resource "aws_iam_role_policy" "worker_sqs_bounce_feedback" {
 }
 
 # ── Grafana Alerting + Dashboards ──────────────────────────────────────────────
-# Mirrors rally's stack module exactly — same thresholds philosophy (per-env, single
+# Mirrors rally's stack module — same thresholds philosophy (per-env, single
 # source of truth shared between the alert condition and the dashboard's threshold
 # line), same `or vector(0)`/absent-vector fix on every ratio query (confirmed live
 # in rally's own prod: a zero-failure series is ABSENT, not present-at-zero, and
@@ -1571,7 +1675,73 @@ resource "aws_iam_role_policy" "worker_sqs_bounce_feedback" {
 # `db_pool_in_use`/`db_pool_waiting` are simply absent metrics until then, so the
 # panel shows "No data" and the alert's `no_data_state` (see the module's own
 # default) keeps it from paging on that absence.
+#
+# NO LONGER a byte-for-byte mirror of rally as of this change: the four
+# statistically-unsound rules gained a minimum-sample gate and `http-slow-request-count`
+# was added. rally carries the same fix for the same defect — see the gate comment below
+# for the production page that prompted it.
 locals {
+  # ── Minimum-sample gates: why four rules carry one ──────────────────────────
+  # A percentile over a handful of samples is not a percentile, and a ratio over a
+  # handful of samples is not a rate. Both of the affected rule shapes here were
+  # capable of paging on a single request.
+  #
+  # The evidence is a real page on the sibling `rally` product, which runs these SAME
+  # rules from this SAME shared module: `http-p99-latency` fired in production with
+  # `A=10000` and resolved at `A=48.5`. Neither number is what it looks like:
+  #
+  #   * `10000` was not a latency. It was the largest FINITE bucket boundary of the
+  #     OpenTelemetry JS default histogram, which is what opshub exported at the time, so
+  #     `histogram_quantile` had nothing above it to interpolate into and clamped to the
+  #     boundary. It meant only "at least one request took longer than 10s" — the true
+  #     value could have been 11s or 200s. The same change that added this gate widened
+  #     the view out to 60000 (`local.http_duration_buckets_ms` below, mirroring
+  #     apps/api/src/otel.ts), so a repeat of that page lands in a bucket that separates
+  #     12s from a spent retry budget. The clamp itself is a property of the TOP bucket,
+  #     not of the number 10000, and it still applies there.
+  #   * `48.5` being the resolve value is the tell. A service does not travel from 10s to
+  #     48ms because it recovered; it travels there because the ONE slow sample aged out
+  #     of the 5-minute window and left the ordinary traffic behind.
+  #
+  # Low sample counts are structural here, not incidental. The load-balancer and browser
+  # probes that would otherwise pad the histogram are excluded upstream by
+  # `IGNORED_REQUEST_PATHS` in @qnsc-vn/observability (`/v1/healthz`, `/v1/readyz`,
+  # `/healthz`, `/readyz`, `/favicon.ico`), so a 5-minute window on a quiet environment
+  # holds only the handful of genuine requests that arrived. A p99 over one sample IS
+  # that sample.
+  #
+  # THIS ORGANISATION HAS ALREADY FIXED THIS DEFECT ONCE, on the CloudWatch side:
+  # `qnsc-tf-modules//modules/observability` gates its `alb_latency` alarm behind
+  # `alb_latency_min_requests` (default 50) after a single slow request held that alarm
+  # over threshold for three consecutive periods and paged. Its comment is worth quoting
+  # because it is the whole argument: noise "trains people to ignore the alarm, which is
+  # worse than no alarm." The Grafana rules never got the same treatment. Same bug, one
+  # side unfixed until now.
+  #
+  # WHERE OPSHUB'S NUMBERS COME FROM — and where they do NOT. Unlike rally, opshub has no
+  # measured traffic to derive a floor from, because opshub has never served any: per
+  # docs/system-roadmap.md `infra/` has never been applied and there is no deployed
+  # environment, production is provisioned with `min_count = 0`, autoscaling off and a
+  # weekly `idle_schedule`, and develop is schedule-driven (CI deploys and manual pokes).
+  # So these are NOT observations, and they are deliberately not presented as such. They
+  # are the statistical floor the organisation already sized and shipped on the CloudWatch
+  # side — 50 samples per 5-minute period, roughly 1 rps sustained: low enough that any
+  # environment under real use clears it, high enough that noise cannot reach a threshold.
+  # Develop is set lower at 20 because a CI-driven environment will never sustain 1 rps
+  # and a gate it can never clear is a deleted alert, not a quieter one.
+  #
+  # THE HONEST CONSEQUENCE, stated here rather than discovered during an incident: until
+  # go-live these four rules will be largely DARK, because a pre-launch environment
+  # cannot clear a traffic floor. That is the correct reading and not a regression —
+  # silence below the gate means "not enough samples to judge", never "healthy". The
+  # coverage that survives at this traffic level is `http-slow-request-count` below, which
+  # is a COUNT and therefore needs no population to be meaningful. Revisit every number
+  # in this block at go-live, against the first fortnight of real traffic.
+  #
+  # Rejected: raising `for` from 5m to 15m instead. That delays the page without fixing
+  # it — one slow request in a window of three still holds a p99 above threshold for the
+  # whole window, because the problem is the size of the population, not the length of
+  # the observation.
   alert_thresholds_by_env = {
     develop = {
       http_error_rate         = 0.05
@@ -1579,6 +1749,39 @@ locals {
       db_pool_waiting         = 0
       worker_failure_rate     = 0.10
       auth_login_failure_rate = 0.30
+
+      # Requests (or job runs) that must land in a 5-minute window before the p99, the
+      # 5xx-rate and the worker-failure-rate rules are allowed to evaluate at all.
+      min_samples_5m = 20
+
+      # Login attempts in a 15-minute window, and a SEPARATE key rather than
+      # `min_samples_5m * 3` on purpose. Logins are a different population from HTTP
+      # requests by roughly two orders of magnitude: reusing the HTTP floor would demand
+      # 60 attempts here (150 in production, about 10 per minute) which an internal tool
+      # will not sustain, and a gate that never opens would silently disarm a SECURITY
+      # alert. That is a worse outcome than the noise being removed, and it would
+      # contravene the rule that no existing alert gets weakened.
+      #
+      # 10 attempts against develop's 30% threshold: one mistyped password is 10%, so a
+      # single typo cannot page, but four genuine failures still can.
+      min_login_attempts_15m = 10
+
+      # The `le` boundary that `http-slow-request-count` subtracts at, in milliseconds.
+      # MUST be an actually-exported bucket boundary — see
+      # `local.http_duration_buckets_ms` and the precondition that enforces it.
+      #
+      # 2500 rather than 2000. Develop's own p99 threshold is 2000ms, but 2000 is NOT a
+      # boundary in the exported set and a `le="2000"` selector would match no series
+      # at all — a rule that quietly never fires while appearing to be coverage. 2500 is
+      # the next real boundary ABOVE the threshold. Snapped up rather than down to 1000
+      # deliberately: 1000 would count requests that develop's own p99 rule considers
+      # perfectly acceptable, so the count rule would contradict the latency rule.
+      slow_request_bucket_ms = 2500
+
+      # Slow requests permitted in a 30-minute window before the count rule fires.
+      # Per-env like everything else in this block so production can tighten it at
+      # go-live without touching the rule body.
+      slow_request_count_30m = 3
     }
     production = {
       http_error_rate         = 0.02
@@ -1586,9 +1789,51 @@ locals {
       db_pool_waiting         = 0
       worker_failure_rate     = 0.05
       auth_login_failure_rate = 0.15
+
+      # 50, the figure `alb_latency_min_requests` already ships as its default on the
+      # CloudWatch side. Sanity-checked against this environment's own thresholds: at 50
+      # requests a single 5xx is exactly 2%, and the rule compares with `gt`, so one
+      # error cannot page — two can.
+      min_samples_5m = 50
+
+      # 20 attempts against production's 15% threshold: one mistyped password is 5%, well
+      # under the threshold, while three genuine failures out of 20 is 15% and a fourth
+      # pages. See develop's note above for why this is not derived from min_samples_5m.
+      min_login_attempts_15m = 20
+
+      # 1000ms, which is BOTH this environment's own p99 threshold and a real boundary in
+      # the exported set — the one case where no snapping is needed.
+      slow_request_bucket_ms = 1000
+
+      slow_request_count_30m = 3
     }
   }
   alert_thresholds = lookup(local.alert_thresholds_by_env, var.env, local.alert_thresholds_by_env.develop)
+
+  # The explicit bucket boundaries of `http_server_duration_milliseconds`, in the
+  # instrument's own unit (milliseconds — `http.server.duration` is declared `unit: 'ms'`,
+  # which is why the Prometheus exposition names it
+  # `http_server_duration_milliseconds_bucket`).
+  #
+  # Written out rather than assumed because the whole `A=10000` misreading above comes
+  # from not knowing this list, and because `slow_request_bucket_ms` is only meaningful as
+  # a member of it.
+  #
+  # MIRRORS apps/api/src/otel.ts, and is NOT the SDK defaults any more. The same change
+  # that added the volume gate passed `httpDurationBoundaries` to `startOtel`, because a
+  # top finite bucket of 10000 is exactly where a slow request goes to hide. The first
+  # fifteen entries are the OTel JS defaults verbatim, so the low end a healthy p99 sits
+  # in is untouched; the four above 10000 cover opshub's real request-path timeout
+  # budgets. BOTH LISTS MOVE TOGETHER OR NEITHER MOVES — nothing here can detect a
+  # boundary edited on only one side, and the precondition below would then assert
+  # against a set nobody exports.
+  #
+  # Note what is still NOT here: 2000, 3000, 1500. Those are the round numbers an
+  # operator reaches for, and every one of them selects nothing.
+  http_duration_buckets_ms = [
+    0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000,
+    15000, 30000, 45000, 60000,
+  ]
 
   runbook_base_url = "https://github.com/QNSC-VN/opshub/blob/main/docs/runbooks/alerts"
 
@@ -1599,6 +1844,103 @@ locals {
   slo_success_objective = lookup(local.slo_success_objective_by_env, var.env, local.slo_success_objective_by_env.develop)
 }
 
+# ── Guard: the slow-request bucket must be a boundary that actually exists ────
+# `http-slow-request-count` selects a histogram series by an exact `le` label value. A
+# value that is not an exported boundary does not fail, warn, or read zero — it matches
+# NO SERIES, so the subtraction yields an empty vector and the rule sits permanently
+# silent while every dashboard and every review reads it as coverage. That is the same
+# failure mode as passing an RDS resource id where CloudWatch wants the identifier: it
+# looks monitored and is not.
+#
+# The trap is specific and easy to fall into: `http_p99_latency_ms` is 2000 on develop,
+# so the obvious move is to reuse it as the `le` value, and 2000 is not a boundary. Only
+# production's 1000 happens to be one. So the two values cannot simply be the same
+# number, and the difference has to be enforced rather than remembered.
+#
+# ENFORCED as a resource precondition rather than a `check` block, for the reason
+# `db_pool_fits_instance_class` above already documents: a violated check prints a
+# warning and the plan still exits 0, which puts the problem somewhere nobody looks. A
+# variable validation cannot be used either, since the condition reads `local.*`. `input`
+# is bound to the guarded values so the precondition re-evaluates whenever they change
+# rather than only on first create.
+resource "terraform_data" "slow_request_bucket_is_exported_boundary" {
+  input = {
+    bucket_ms = local.alert_thresholds.slow_request_bucket_ms
+    p99_ms    = local.alert_thresholds.http_p99_latency_ms
+  }
+
+  lifecycle {
+    precondition {
+      condition = contains(
+        local.http_duration_buckets_ms,
+        local.alert_thresholds.slow_request_bucket_ms,
+      )
+      error_message = join(" ", [
+        "slow_request_bucket_ms for ${var.env} is ${local.alert_thresholds.slow_request_bucket_ms},",
+        "which is not an exported histogram bucket boundary.",
+        "A le= selector on a non-boundary matches no series, so the rule would never fire.",
+        "Pick one of: ${join(", ", [for b in local.http_duration_buckets_ms : tostring(b)])}.",
+      ])
+    }
+
+    # Second, independent guard: the boundary must not sit BELOW this environment's own
+    # p99 threshold. If it did, the count rule would page for requests the latency rule
+    # is deliberately willing to accept, and the two rules would disagree about what
+    # "slow" means in the same environment. Snapping the boundary UP to the next
+    # available one is always the correct resolution.
+    precondition {
+      condition = local.alert_thresholds.slow_request_bucket_ms >= local.alert_thresholds.http_p99_latency_ms
+      error_message = join(" ", [
+        "slow_request_bucket_ms (${local.alert_thresholds.slow_request_bucket_ms}ms) is below",
+        "http_p99_latency_ms (${local.alert_thresholds.http_p99_latency_ms}ms) in ${var.env}.",
+        "http-slow-request-count would then count requests that http-p99-latency treats as",
+        "acceptable. Snap the bucket UP to the next exported boundary above the threshold.",
+      ])
+    }
+  }
+}
+
+# The minimum-sample gate is composed INTO each promql below rather than added as an input
+# to the observability-alerts module. That module's README states the constraint plainly —
+# "`promql` used verbatim, no label injection", because "string surgery on arbitrary
+# PromQL to inject a label filter is exactly the kind of hidden magic that silently breaks
+# on a query shape nobody tested". A gate injected by the module would be that magic, and
+# these five queries have five different shapes, so it would break here first. The gate is
+# therefore visible at the call site, where a reviewer reads it next to the query it
+# guards.
+#
+# THE GATE'S LABEL-SET SEMANTICS, checked per rule rather than assumed, since `and on()`
+# silently yields an empty vector when the two sides do not match:
+#
+#   * `and` binds LOOSER than `/` and looser than `>=` in PromQL, so
+#     `A / B and on() (C * 300 >= N)` groups as `(A / B) and on() ((C * 300) >= N)`. The
+#     parentheses below are for the reader, not for the parser.
+#   * `http-p99-latency`: `sum(...) by (le)` is consumed by `histogram_quantile`, which
+#     drops `le` and leaves a single series with NO labels.
+#   * the three ratio rules: `sum()` without `by` is unlabelled, and dividing unlabelled
+#     by unlabelled stays unlabelled.
+#   * the gate side: `sum(rate(...)) * 300 >= N` is unlabelled, and the comparison acts as
+#     a FILTER, so the gate is either one unlabelled series or empty.
+#
+# Both sides therefore carry the empty label set on all four rules, `on()` matches on the
+# empty set, and `and` passes the left series through exactly when the gate is non-empty.
+# `and on()` is correct for all four; no rule needed a different form.
+#
+# The window in each gate MATCHES its rule's own window, and the multiplier converts the
+# per-second rate back to a count over it: 5-minute rules multiply by 300, and
+# `auth-login-failure-rate` multiplies by 900 because it evaluates over 15m. A 5m gate on
+# a 15m rule would demand three times the traffic density the rule itself asks for.
+#
+# The DENOMINATOR SERIES is per rule, not shared: each gate counts the population that
+# rule's own arithmetic divides by — `http_server_requests_total` for the two HTTP rules,
+# `job_runs_total` for the worker rule, `auth_login_total` for the login rule. Gating the
+# worker rule on HTTP traffic would tie the worker's alerting to a signal it has nothing
+# to do with, and would leave it dark on an api-idle environment that is still running
+# jobs.
+#
+# `db-pool-contention` is deliberately NOT gated. It reads a gauge, not a percentile or a
+# ratio, so one sample is a legitimate observation: a single queued connection is a real
+# queued connection. Adding a traffic floor there would remove coverage for no benefit.
 module "alerts" {
   count  = var.grafana_alerting_auth != "" ? 1 : 0
   source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/observability-alerts?ref=observability-alerts-v1.1.1"
@@ -1621,42 +1963,80 @@ module "alerts" {
     },
     {
       name        = "http-5xx-rate"
-      promql      = "(sum(rate(http_server_errors_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+      promql      = "(sum(rate(http_server_errors_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
       for         = "5m"
       op          = "gt"
       threshold   = local.alert_thresholds.http_error_rate
       severity    = "critical"
-      summary     = "HTTP 5xx rate above 5% in ${var.env} for 5m."
+      summary     = "HTTP 5xx rate above ${local.alert_thresholds.http_error_rate * 100}% in ${var.env} for 5m, over at least ${local.alert_thresholds.min_samples_5m} requests."
       runbook_url = "${local.runbook_base_url}/http-5xx-rate.md"
     },
     {
       name        = "http-p99-latency"
-      promql      = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+      promql      = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le)) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
       for         = "5m"
       op          = "gt"
       threshold   = local.alert_thresholds.http_p99_latency_ms
       severity    = "warning"
-      summary     = "HTTP p99 latency above 2s in ${var.env} for 5m."
+      summary     = "HTTP p99 latency above ${local.alert_thresholds.http_p99_latency_ms}ms in ${var.env} for 5m, over at least ${local.alert_thresholds.min_samples_5m} requests — a reported value of exactly 10000 means the histogram saturated at its largest bucket, not that p99 was 10s."
       runbook_url = "${local.runbook_base_url}/http-p99-latency.md"
+    },
+    # ── The coverage that survives at low traffic ──────────────────────────────
+    # Every gated rule above trades sensitivity for trustworthiness, and at opshub's
+    # pre-launch traffic that trade costs nearly all of the sensitivity. This rule is what
+    # buys it back, and it works precisely because it is a COUNT rather than a percentile:
+    # "four requests took longer than a second in the last half hour" is exactly as true
+    # over 4 requests as over 40,000, so no sample floor is needed or wanted, and none is
+    # applied.
+    #
+    # It is also the rule that would have described rally's page HONESTLY. Where p99
+    # reported `A=10000` — a clamped bucket boundary that an on-call reader has to know the
+    # histogram's internals to interpret — this reports a plain integer count of requests
+    # that crossed the line, which needs no interpretation at all.
+    #
+    # THE SHAPE: `le="+Inf"` is the total request count in the histogram, and the bucket at
+    # the chosen boundary is the count of requests at or under it, because OTel histogram
+    # buckets are CUMULATIVE. Subtracting gives the count strictly above the boundary. It
+    # is written as two `sum(increase(...))` terms rather than one expression over a
+    # negative matcher because a `le!=` selector would sum every intermediate cumulative
+    # bucket and count the same request many times over.
+    #
+    # `increase()` rather than `rate()` so the result is a whole number of requests that
+    # matches the threshold's units and the summary's wording — a reader comparing the
+    # panel to the page should not have to multiply anything by 1800.
+    #
+    # 30m rather than 5m: at this traffic level a 5-minute window is thin enough that the
+    # count itself becomes noisy, and a slow-request problem worth waking someone for
+    # persists for half an hour. Both terms MUST use the same window or the subtraction
+    # compares different spans of traffic.
+    {
+      name        = "http-slow-request-count"
+      promql      = "sum(increase(http_server_duration_milliseconds_bucket{le=\"+Inf\", deployment_environment_name=\"${var.env}\"}[30m])) - sum(increase(http_server_duration_milliseconds_bucket{le=\"${local.alert_thresholds.slow_request_bucket_ms}\", deployment_environment_name=\"${var.env}\"}[30m]))"
+      for         = "5m"
+      op          = "gt"
+      threshold   = local.alert_thresholds.slow_request_count_30m
+      severity    = "warning"
+      summary     = "More than ${local.alert_thresholds.slow_request_count_30m} requests took longer than ${local.alert_thresholds.slow_request_bucket_ms}ms in ${var.env} over 30m — a count, not a percentile, so this is meaningful at any traffic level and is not volume-gated."
+      runbook_url = "${local.runbook_base_url}/http-slow-request-count.md"
     },
     {
       name        = "worker-job-failure-rate"
-      promql      = "(sum(rate(job_failures_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(job_runs_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+      promql      = "(sum(rate(job_failures_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(job_runs_total{deployment_environment_name=\"${var.env}\"}[5m])) and on() (sum(rate(job_runs_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
       for         = "5m"
       op          = "gt"
       threshold   = local.alert_thresholds.worker_failure_rate
       severity    = "warning"
-      summary     = "Worker job failure rate above 10% in ${var.env} for 5m."
+      summary     = "Worker job failure rate above ${local.alert_thresholds.worker_failure_rate * 100}% in ${var.env} for 5m, over at least ${local.alert_thresholds.min_samples_5m} job runs."
       runbook_url = "${local.runbook_base_url}/worker-job-failure-rate.md"
     },
     {
       name        = "auth-login-failure-rate"
-      promql      = "(sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\", outcome=\"failure\"}[15m])) or vector(0)) / sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m]))"
+      promql      = "(sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\", outcome=\"failure\"}[15m])) or vector(0)) / sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m])) and on() (sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m])) * 900 >= ${local.alert_thresholds.min_login_attempts_15m})"
       for         = "15m"
       op          = "gt"
       threshold   = local.alert_thresholds.auth_login_failure_rate
       severity    = "warning"
-      summary     = "Login failure rate above ${local.alert_thresholds.auth_login_failure_rate * 100}% in ${var.env} for 15m — entra-login/dev-login both collapse their failure detail before it reaches the caller, check Recent errors / Logs Explorer for the actual cause."
+      summary     = "Login failure rate above ${local.alert_thresholds.auth_login_failure_rate * 100}% in ${var.env} for 15m, over at least ${local.alert_thresholds.min_login_attempts_15m} attempts — entra-login/dev-login both collapse their failure detail before it reaches the caller, check Recent errors / Logs Explorer for the actual cause."
       runbook_url = "${local.runbook_base_url}/auth-login-failure-rate.md"
     },
   ]
