@@ -176,8 +176,7 @@ export class WorkforceService {
       // insert — a batch that rolls back leaves no orphaned audit rows behind it.
       for (const ts of created) {
         await this.timesheetTrail.record(AUDIT_ACTION.TIMESHEET_CREATED, ts.id, actor, tx, {
-          workDate: ts.workDate,
-          minutesWorked: ts.minutesWorked,
+          after: { workDate: ts.workDate, minutesWorked: ts.minutesWorked },
         });
       }
       return created;
