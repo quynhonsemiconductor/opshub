@@ -138,6 +138,26 @@ module "stack" {
   // runtime-dev, at $18.40/mo + $3.65 per AZ.
   tunnel_enabled = true
 
+  // ── Graviton ────────────────────────────────────────────────────────────────
+  // ARM64 bills ~20% less per vCPU-hour and GB-hour than X86_64 for identical sizing,
+  // with no capability difference. rally has run this since its own build moved; opshub
+  // was still on the module's X86_64 default, which is drift rather than a decision — it
+  // is not recorded in docs/DIVERGENCE.md, and nothing about opshub's workload argues for
+  // x86.
+  //
+  // THIS LINE ALONE IS NOT ENOUGH, and getting it half-done fails at TASK START rather
+  // than at apply: the images must be built for linux/arm64 too. That is
+  // `build_runner: ubuntu-24.04-arm` + `image_platforms: linux/arm64` in
+  // .github/workflows/backend-deploy.yml, and they land in the SAME COMMIT as this. The
+  // `wait-for-infra` gate is what makes one commit safe — it holds the deploy until this
+  // apply finishes, so the ARM64 task definition exists before the deploy that builds
+  // arm64 images rolls onto it. Both halves in one commit, or neither.
+  //
+  // Every sidecar was checked for an arm64 build with `docker manifest inspect` (see the
+  // stack variable's description for the three images and the result). Re-check on a
+  // sidecar image bump.
+  cpu_architecture = "ARM64"
+
   // ── Parked between deploys ──────────────────────────────────────────────────
   // Twice daily, matching rally. Develop is exercised by CI deploys and the occasional
   // manual poke, so the useful default is "down unless something just deployed": the
