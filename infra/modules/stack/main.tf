@@ -375,6 +375,10 @@ module "api" {
   source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
 
   use_firelens = module.firelens_agent_api.enabled
+  # Moves with the caller's build_runner/image_platforms in ONE change — see the
+  # variable's own description for why setting one without the other fails at task
+  # start rather than at apply.
+  cpu_architecture = var.cpu_architecture
 
   service_name = "api"
   cluster_name = module.ecs_cluster.cluster_name
@@ -474,6 +478,10 @@ module "worker" {
   source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
 
   use_firelens = module.firelens_agent_worker.enabled
+  # Moves with the caller's build_runner/image_platforms in ONE change — see the
+  # variable's own description for why setting one without the other fails at task
+  # start rather than at apply.
+  cpu_architecture = var.cpu_architecture
 
   service_name = "worker"
   cluster_name = module.ecs_cluster.cluster_name
@@ -552,6 +560,11 @@ module "migrator" {
   task_role_arn      = module.api.task_role_arn
   region             = var.region
   log_retention_days = var.log_retention_days
+
+  # Same value as the api and worker, deliberately: the migrator runs the same image
+  # family, so an architecture split here would fail only at `db:migrate` time — after
+  # a clean apply and a green build — which is the worst place to discover it.
+  cpu_architecture = var.cpu_architecture
 
   environment = {
     NODE_ENV   = "production"
