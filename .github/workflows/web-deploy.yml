@@ -188,7 +188,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: QNSC-VN/qnsc-ci/.github/workflows/web-deploy.yml@v1.10.0
+    uses: QNSC-VN/qnsc-ci/.github/workflows/web-deploy.yml@v1.13.1
     with:
       product: opshub
       # Monorepo: run wrangler from the web package dir so paths resolve against
