@@ -63,7 +63,7 @@ export function StatCard({
   return (
     <div
       className={cn(
-        'rounded-xl border bg-surface p-4',
+        'rounded-xl border bg-surface p-4 shadow-sm',
         alarming ? 'border-danger/40 ring-1 ring-danger/15' : 'border-border',
         className,
       )}

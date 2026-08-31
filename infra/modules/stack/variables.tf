@@ -778,3 +778,47 @@ variable "mail_reply_to" {
   type        = string
   default     = ""
 }
+
+variable "cpu_architecture" {
+  type    = string
+  default = "X86_64"
+  validation {
+    condition     = contains(["X86_64", "ARM64"], var.cpu_architecture)
+    error_message = "cpu_architecture must be X86_64 or ARM64."
+  }
+  description = <<-EOT
+    Fargate CPU architecture for the api, worker and migrator: "X86_64" or "ARM64".
+
+    ARM64 (Graviton) bills ~20% less per vCPU-hour and GB-hour for identical sizing, with
+    no capability difference — same Fargate platform, same networking, same limits.
+
+    IT IS NOT A FREE FLAG. The image must be built for linux/arm64, or the container fails
+    at start with "image Manifest does not contain descriptor matching platform" — a
+    failure that appears at TASK START, after a clean apply and a deploy that reports a
+    rollout. So this moves together with `build_runner` and `image_platforms` in the
+    caller's deploy workflow, in one change, and the three task definitions here move
+    together with each other: the migrator runs the same image family as the api.
+
+    Build NATIVELY on an ARM runner (`ubuntu-24.04-arm`), not under QEMU emulation. The
+    qnsc-ci reusable's own note is explicit that emulating an arm64 pnpm + Nest compile on
+    an x86 runner multiplies build minutes by enough to outweigh the Fargate saving.
+
+    NOT EVERY PRODUCT CAN TAKE THIS. It depends on every image in the task having an arm64
+    build, INCLUDING SIDECARS, and a sidecar is the easy one to forget because nothing in
+    this repo names its image — the agent modules carry them as defaults. opshub's three
+    were checked with `docker manifest inspect` rather than from documentation, on
+    2026-08-31, and all three publish arm64 alongside amd64:
+
+      public.ecr.aws/aws-observability/aws-for-fluent-bit:init-3.4.14   (firelens-agent)
+      public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3       (otel agent)
+      cloudflare/cloudflared:2026.6.1                                   (tunnel-agent)
+
+    cloudflared is in the api task only where `tunnel_enabled` is true, which today is
+    develop. RE-CHECK ON A SIDECAR BUMP: an image pin that moves to an amd64-only tag
+    breaks task start, and none of these modules would fail an apply over it. qnsc-kb is
+    the counter-example on the same point — `clamav/clamav` is amd64-only on every
+    published tag, so that product cannot take ARM64 at all.
+
+    Defaults to X86_64 so a caller that has not moved its build keeps working.
+  EOT
+}
