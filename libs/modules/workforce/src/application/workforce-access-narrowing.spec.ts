@@ -36,6 +36,7 @@ const mockAudit = createFakeAudit();
 const mockEngine = { submit: vi.fn(), approve: vi.fn(), reject: vi.fn() };
 const mockStorage = { presignUpload: vi.fn(), confirmUpload: vi.fn() };
 const mockAuthz = { check: vi.fn() };
+const mockDb = { transaction: vi.fn((cb: (tx: unknown) => unknown) => cb({})) };
 
 const SELF = { sub: 'emp-1', email: 'emp1@test.com' };
 const OTHER = 'emp-2';
@@ -53,9 +54,10 @@ function service(): WorkforceService {
     // LeaveBalanceService is unused by the narrowing paths under test; a stub keeps this spec
     // about scoping rather than about leave arithmetic, which has its own suite.
     {} as never,
-    // db: only the entitlement/holiday writes open a transaction, and none of those are exercised
-    // by the narrowing paths under test.
-    {} as never,
+    // db: createTimesheetsBulk is the one narrowing-adjacent path that opens a transaction (so its
+    // batch and the batch's audit trail commit together) — the callback just runs against a stub
+    // executor, since the repo and audit fake underneath are mocked either way.
+    mockDb as never,
   );
 }
 
@@ -226,10 +228,13 @@ describe('WorkforceService access narrowing', () => {
       holds();
       await service().createTimesheetsBulk(entries, SELF);
       expect(mockRepo.createTimesheets).toHaveBeenCalledTimes(1);
-      expect(mockRepo.createTimesheets).toHaveBeenCalledWith([
-        { workDate: '2026-08-03', minutesWorked: 480, employeeId: SELF.sub },
-        { workDate: '2026-08-04', minutesWorked: 45, employeeId: SELF.sub },
-      ]);
+      expect(mockRepo.createTimesheets).toHaveBeenCalledWith(
+        [
+          { workDate: '2026-08-03', minutesWorked: 480, employeeId: SELF.sub },
+          { workDate: '2026-08-04', minutesWorked: 45, employeeId: SELF.sub },
+        ],
+        expect.anything(),
+      );
     });
 
     it('fails the whole batch when the write fails — there is no partial-success path', async () => {

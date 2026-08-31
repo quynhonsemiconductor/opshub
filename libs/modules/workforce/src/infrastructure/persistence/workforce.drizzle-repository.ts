@@ -42,13 +42,13 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
     return row;
   }
 
-  async createTimesheets(inputs: CreateTimesheetInput[]): Promise<Timesheet[]> {
-    // ONE multi-row insert inside a transaction — a partial batch is not a state this method can
-    // reach: any failure rolls every row back together. The explicit transaction is redundant for
-    // a single statement but keeps the all-or-nothing promise true if a second write ever joins
-    // it, and the bulk endpoint is written against that promise.
-    return this.db.transaction(async (tx) =>
-      tx
+  async createTimesheets(inputs: CreateTimesheetInput[], tx?: DbExecutor): Promise<Timesheet[]> {
+    // ONE multi-row insert — a partial batch is not a state this method can reach: any failure
+    // rolls every row back together. Runs inside the caller's transaction when given one (the
+    // service passes one so the batch's audit trail commits with it); opens its own otherwise, so
+    // the all-or-nothing promise holds either way.
+    const run = (executor: DbExecutor) =>
+      executor
         .insert(timesheets)
         .values(
           inputs.map((input) => ({
@@ -59,8 +59,8 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
             note: input.note ?? null,
           })),
         )
-        .returning(),
-    );
+        .returning();
+    return tx ? run(tx) : this.db.transaction((inner) => run(inner));
   }
 
   async findTimesheetById(id: string): Promise<Timesheet | null> {

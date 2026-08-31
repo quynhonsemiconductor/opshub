@@ -210,19 +210,9 @@ export class WorkforceController {
     @Body() dto: BulkCreateTimesheetsDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<TimesheetResponseDto[]> {
+    // The audit entry per row is written inside the service's own transaction — see
+    // WorkforceService.createTimesheetsBulk — so a rolled-back batch leaves no orphaned trail.
     const created = await this.service.createTimesheetsBulk(dto.entries, user);
-    // One entry per row, with the same action as a single create, so the trail stays queryable
-    // per timesheet no matter which route made it.
-    for (const ts of created) {
-      void this.audit.record({
-        actorId: user.sub,
-        actorEmail: user.email,
-        action: AUDIT_ACTION.TIMESHEET_CREATED,
-        resourceType: AUDIT_RESOURCE.TIMESHEET,
-        resourceId: ts.id,
-        metadata: { workDate: ts.workDate, minutesWorked: ts.minutesWorked },
-      });
-    }
     return created.map(toTimesheetDto);
   }
 

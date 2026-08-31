@@ -5480,14 +5480,19 @@ export interface components {
       /** Format: date */
       workDate: string;
       minutesWorked: number;
-      /** Format: time */
       startTime?: string;
-      /** Format: time */
       endTime?: string;
       note?: string;
     };
     BulkCreateTimesheetsDto: {
-      entries: components['schemas']['CreateTimesheetDto'][];
+      entries: {
+        /** Format: date */
+        workDate: string;
+        minutesWorked: number;
+        startTime?: string;
+        endTime?: string;
+        note?: string;
+      }[];
     };
     ReviewDto: {
       approve: boolean;

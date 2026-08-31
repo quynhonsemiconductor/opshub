@@ -167,7 +167,21 @@ export class WorkforceService {
     inputs: Omit<CreateTimesheetInput, 'employeeId'>[],
     actor: Actor,
   ): Promise<Timesheet[]> {
-    return this.repo.createTimesheets(inputs.map((input) => ({ ...input, employeeId: actor.sub })));
+    return this.db.transaction(async (tx) => {
+      const created = await this.repo.createTimesheets(
+        inputs.map((input) => ({ ...input, employeeId: actor.sub })),
+        tx,
+      );
+      // One entry per row, same action as a single create, in the SAME transaction as the
+      // insert — a batch that rolls back leaves no orphaned audit rows behind it.
+      for (const ts of created) {
+        await this.timesheetTrail.record(AUDIT_ACTION.TIMESHEET_CREATED, ts.id, actor, tx, {
+          workDate: ts.workDate,
+          minutesWorked: ts.minutesWorked,
+        });
+      }
+      return created;
+    });
   }
 
   async getTimesheet(id: string): Promise<Timesheet> {

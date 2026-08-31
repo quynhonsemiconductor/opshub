@@ -24,10 +24,11 @@ export interface IWorkforceRepository {
   // Timesheets
   createTimesheet(input: CreateTimesheetInput): Promise<Timesheet>;
   /**
-   * Every entry in ONE insert, inside a transaction — all rows land or none do. The bulk
-   * endpoint's whole-batch guarantee rests on this, not on anything the service does.
+   * Every entry in ONE insert. Runs inside `tx` when the caller passed one — the service does,
+   * so the audit trail for the batch commits in the SAME transaction as the rows — and opens its
+   * own otherwise. Either way, all rows land or none do.
    */
-  createTimesheets(inputs: CreateTimesheetInput[]): Promise<Timesheet[]>;
+  createTimesheets(inputs: CreateTimesheetInput[], tx?: DbExecutor): Promise<Timesheet[]>;
   findTimesheetById(id: string): Promise<Timesheet | null>;
   listTimesheets(
     filters: TimesheetFilters,
