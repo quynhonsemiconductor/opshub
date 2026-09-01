@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -71,7 +71,16 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Typecheck
+      - name: Typecheck (shipped sources)
+        run: npx tsc -p tsconfig.build.json --noEmit
+
+      - name: Typecheck (including tests)
+        # `tsconfig.build.json` excludes `test` and `**/*spec.ts`, so the step above cannot
+        # see a type error in a test file. Rally hit exactly this gap (incident #262): a
+        # wrong service-call signature reached main behind a green check because the spec
+        # mocked the call, so it still passed at runtime with the wrong signature. `tsconfig.json`
+        # is a superset, hence both steps rather than a replacement — the first one stays as
+        # the fast gate that matches exactly what the Docker build compiles.
         run: pnpm typecheck
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -128,7 +137,7 @@ jobs:
           --health-retries 20
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -315,7 +324,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # need origin/main to build the baseline schema
           persist-credentials: false
@@ -377,7 +386,7 @@ jobs:
     needs: [quality, test]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
@@ -442,7 +451,7 @@ jobs:
         options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 5
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
