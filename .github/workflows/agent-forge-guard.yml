@@ -68,7 +68,7 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: printf '%s' "$PR_BODY" > "${RUNNER_TEMP}/pr-body.txt"
 
-      - uses: quynhonsemiconductor/qnsc-ci/actions/agent-forge-test-guard@v1.13.0
+      - uses: quynhonsemiconductor/qnsc-ci/actions/agent-forge-test-guard@v1
         with:
           # The BRANCH NAME, not a ref: the action prefixes `origin/` itself. It reaches the script
           # through the environment rather than `${{ }}` interpolation, which is the action's job —

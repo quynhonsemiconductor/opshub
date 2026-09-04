@@ -272,7 +272,7 @@ jobs:
       id-token: write
       attestations: write
       packages: read # build-push-ecr pulls private @qnsc-vn/* from GitHub Packages
-    uses: quynhonsemiconductor/qnsc-ci/.github/workflows/backend-deploy.yml@v1.13.1
+    uses: quynhonsemiconductor/qnsc-ci/.github/workflows/backend-deploy.yml@v1
     with:
       product: opshub
       has_worker: true
