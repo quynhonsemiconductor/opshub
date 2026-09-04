@@ -1,8 +1,8 @@
 # opshub
 
-Internal IT/HR operations platform (**Zone B2 — internal**, not internet-exposed by default). Runs on **ECS Fargate**, per the [platform architecture](https://github.com/QNSC-VN/.github/blob/main/docs/PLATFORM_ARCHITECTURE.md).
+Internal IT/HR operations platform (**Zone B2 — internal**, not internet-exposed by default). Runs on **ECS Fargate**, per the [platform architecture](https://github.com/quynhonsemiconductor/.github/blob/main/docs/PLATFORM_ARCHITECTURE.md).
 
-> **Monorepo.** Consolidates the former `opshub-api` + `opshub-web` + `opshub-infra` into one repository per [REPOSITORY_STRUCTURE.md](https://github.com/QNSC-VN/.github/blob/main/docs/REPOSITORY_STRUCTURE.md) (ADR-R1). Old repos archived (read-only) for history.
+> **Monorepo.** Consolidates the former `opshub-api` + `opshub-web` + `opshub-infra` into one repository per [REPOSITORY_STRUCTURE.md](https://github.com/quynhonsemiconductor/.github/blob/main/docs/REPOSITORY_STRUCTURE.md) (ADR-R1). Old repos archived (read-only) for history.
 
 ## Layout
 
@@ -15,11 +15,11 @@ opshub/
 ├── infra/                   # OpenTofu (product-owned resources)
 │   ├── live/{_shared,develop,prod}/
 │   └── modules/             # LOCAL modules (see KNOWN ISSUES — dedup to qnsc-tf-modules pending)
-├── .github/workflows/       # CI/CD → QNSC-VN/qnsc-ci
+├── .github/workflows/       # CI/CD → quynhonsemiconductor/qnsc-ci
 └── Dockerfile               # multi-target: api, worker, migrator
 ```
 
-Workspace model, develop, build, and deploy conventions mirror [`rally`](https://github.com/QNSC-VN/rally): NestJS backend is the pnpm root, `apps/web` is a workspace member; deploy is push-based to ECS via `qnsc-ci`.
+Workspace model, develop, build, and deploy conventions mirror [`rally`](https://github.com/quynhonsemiconductor/rally): NestJS backend is the pnpm root, `apps/web` is a workspace member; deploy is push-based to ECS via `qnsc-ci`.
 
 ## Local stack
 

@@ -1,4 +1,4 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>QNSC-VN/.github:renovate-config"]
+  "extends": ["local>quynhonsemiconductor/.github:renovate-config"]
 }

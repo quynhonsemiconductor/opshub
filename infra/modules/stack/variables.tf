@@ -613,7 +613,7 @@ variable "monitor_ingress" {
     ALARM permanently: it pages for a condition that IS the intended state, and bills every
     month for that non-signal. rally hit exactly that — its develop had floors of 0, an idle
     schedule taking it to zero tasks nightly and all weekend, and this variable unset, so it
-    paid for a probe that was red most of the week (fixed in QNSC-VN/rally#393, which is
+    paid for a probe that was red most of the week (fixed in quynhonsemiconductor/rally#393, which is
     where this derivation comes from).
 
     Default true, matching rally, because the idle gate makes true SAFE: it cannot create a
