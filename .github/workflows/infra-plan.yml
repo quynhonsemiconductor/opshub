@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   plan:
-    uses: quynhonsemiconductor/qnsc-ci/.github/workflows/infra-plan.yml@v1
+    uses: quynhonsemiconductor/ci/.github/workflows/infra-plan.yml@v1
     with:
       product: opshub
       # No tf_vars_json. The Entra tenant/client id and the Cloudflare account id are

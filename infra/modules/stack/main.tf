@@ -213,7 +213,7 @@ locals {
 # signal — a task injected with an empty secret fails to boot, so a forgotten secret
 # is a failed deploy rather than an app running on a blank credential.
 module "secrets" {
-  source      = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/secrets?ref=secrets-v2.1.1"
+  source      = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/secrets?ref=secrets-v2.1.1"
   prefix      = "${var.product}/${var.env}"
   kms_key_arn = local.kms_key_arn
 
@@ -260,7 +260,7 @@ module "secrets" {
 
 # ── RDS PostgreSQL ────────────────────────────────────────────────────────────
 module "rds" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/rds?ref=rds-v2.1.2"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/rds?ref=rds-v2.1.2"
 
   identifier        = local.name
   subnet_ids        = data.terraform_remote_state.runtime.outputs.data_subnet_ids
@@ -300,7 +300,7 @@ module "rds" {
 # the URL above is `rediss://`.
 module "cache" {
   count  = var.cache.enabled ? 1 : 0
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/cache?ref=cache-v1.1.0"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/cache?ref=cache-v1.1.0"
 
   name              = "${local.name}-valkey"
   subnet_ids        = data.terraform_remote_state.runtime.outputs.data_subnet_ids
@@ -315,7 +315,7 @@ module "cache" {
 
 # ── S3 upload bucket ──────────────────────────────────────────────────────────
 module "app_bucket" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/app-bucket?ref=app-bucket-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/app-bucket?ref=app-bucket-v1.0.1"
 
   name          = "${var.product}-${var.env}-uploads"
   kms_key_arn   = local.kms_key_arn
@@ -361,7 +361,7 @@ module "app_bucket" {
 
 # ── ECS cluster ───────────────────────────────────────────────────────────────
 module "ecs_cluster" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/ecs-cluster?ref=ecs-cluster-v2.0.0"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-cluster?ref=ecs-cluster-v2.0.0"
   name   = local.name
   tags   = local.tags
 
@@ -372,7 +372,7 @@ module "ecs_cluster" {
 
 # ── ECS service — API ─────────────────────────────────────────────────────────
 module "api" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
 
   use_firelens = module.firelens_agent_api.enabled
   # Moves with the caller's build_runner/image_platforms in ONE change — see the
@@ -475,7 +475,7 @@ module "api" {
 
 # ── ECS service — worker ──────────────────────────────────────────────────────
 module "worker" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
 
   use_firelens = module.firelens_agent_worker.enabled
   # Moves with the caller's build_runner/image_platforms in ONE change — see the
@@ -549,7 +549,7 @@ module "worker" {
 # same database secret from the same KMS key, so a second pair of roles would be two
 # copies of one grant to keep in step.
 module "migrator" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/oneshot-task?ref=oneshot-task-v2.0.0"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/oneshot-task?ref=oneshot-task-v2.0.0"
 
   name               = "${local.name}-migrator"
   container_name     = "migrator"
@@ -626,7 +626,7 @@ module "migrator" {
 # that connected, reported healthy, and 503'd every request).
 module "tunnel" {
   count  = var.tunnel_enabled && var.cloudflare_account_id != "" ? 1 : 0
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/cf-tunnel?ref=cf-tunnel-v0.2.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/cf-tunnel?ref=cf-tunnel-v0.2.1"
 
   account_id = var.cloudflare_account_id
   name       = local.name
@@ -657,7 +657,7 @@ resource "aws_secretsmanager_secret_version" "tunnel_token" {
 }
 
 module "tunnel_api" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/tunnel-agent?ref=tunnel-agent-v1.0.0"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/tunnel-agent?ref=tunnel-agent-v1.0.0"
 
   tunnel_token_secret_arn = var.tunnel_enabled ? aws_secretsmanager_secret.tunnel_token[0].arn : ""
   app_port                = 3000
@@ -675,7 +675,7 @@ module "tunnel_api" {
 # turning telemetry on a one-line change per environment rather than a migration, and it is
 # why adopting this costs nothing while it is off.
 module "otel_agent_api" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
 
   product       = var.product
   env           = var.env
@@ -688,7 +688,7 @@ module "otel_agent_api" {
 }
 
 module "otel_agent_worker" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
 
   product          = var.product
   env              = var.env
@@ -703,7 +703,7 @@ module "otel_agent_worker" {
 # shipping at all, so an incident meant reading CloudWatch Logs Insights by hand instead
 # of Grafana Explore alongside the metrics and traces for the same request.
 module "firelens_agent_api" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.2"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.2"
 
   service_name     = "${var.product}-api"
   product          = var.product
@@ -716,7 +716,7 @@ module "firelens_agent_api" {
 }
 
 module "firelens_agent_worker" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.2"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/firelens-agent?ref=firelens-agent-v0.2.2"
 
   service_name     = "${var.product}-worker"
   product          = var.product
@@ -735,7 +735,7 @@ module "firelens_agent_worker" {
 # Cloudflare account is wired.
 module "web" {
   count  = var.cloudflare_account_id != "" ? 1 : 0
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/pages-web?ref=pages-web-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/pages-web?ref=pages-web-v1.0.1"
 
   account_id  = var.cloudflare_account_id
   name        = "${local.name}-web"
@@ -762,7 +762,7 @@ module "web" {
 # Cloudflare-proxied (orange cloud): the ALB security group in runtime-<env> only
 # admits Cloudflare edge ranges, so a grey-clouded record would simply time out.
 module "dns_api" {
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/dns-record?ref=dns-record-v1.1.0"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/dns-record?ref=dns-record-v1.1.0"
 
   enabled = local.cloudflare_zone_id != ""
   zone_id = local.cloudflare_zone_id
@@ -1333,7 +1333,7 @@ module "observability" {
   # caller of this module.
   #
   # THIS TAG DOES NOT EXIST YET — it must be cut in qnsc-tf-modules before this plans.
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/observability?ref=observability-v4.3.0"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability?ref=observability-v4.3.0"
 
   create_dashboard = var.create_dashboard
 
@@ -1956,7 +1956,7 @@ resource "terraform_data" "slow_request_bucket_is_exported_boundary" {
 # queued connection. Adding a traffic floor there would remove coverage for no benefit.
 module "alerts" {
   count  = var.grafana_alerting_auth != "" ? 1 : 0
-  source = "git::https://github.com/quynhonsemiconductor/qnsc-tf-modules.git//modules/observability-alerts?ref=observability-alerts-v1.1.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-alerts?ref=observability-alerts-v1.1.1"
 
   product                    = var.product
   env                        = var.env

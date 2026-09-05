@@ -15,7 +15,7 @@ opshub/
 ├── infra/                   # OpenTofu (product-owned resources)
 │   ├── live/{_shared,develop,prod}/
 │   └── modules/             # LOCAL modules (see KNOWN ISSUES — dedup to qnsc-tf-modules pending)
-├── .github/workflows/       # CI/CD → quynhonsemiconductor/qnsc-ci
+├── .github/workflows/       # CI/CD → quynhonsemiconductor/ci
 └── Dockerfile               # multi-target: api, worker, migrator
 ```
 

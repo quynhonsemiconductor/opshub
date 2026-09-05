@@ -7,7 +7,7 @@
 # It applies to human pull requests too, deliberately. A check that exempts humans is a check that
 # tells an agent to open its pull request as a human.
 #
-# THE GUARD ITSELF LIVES IN quynhonsemiconductor/qnsc-ci. What used to ship alongside this file was a ~280-line
+# THE GUARD ITSELF LIVES IN quynhonsemiconductor/ci. What used to ship alongside this file was a ~280-line
 # Python script, copied into every repository, which then drifted — in the direction nobody watches.
 # rally's copy was fixed for a shell injection (a branch name interpolated into a `run:` block,
 # flagged by zizmor) and the fix never came back to this template, so every repository onboarded after
@@ -68,7 +68,7 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: printf '%s' "$PR_BODY" > "${RUNNER_TEMP}/pr-body.txt"
 
-      - uses: quynhonsemiconductor/qnsc-ci/actions/agent-forge-test-guard@v1
+      - uses: quynhonsemiconductor/ci/actions/agent-forge-test-guard@v1
         with:
           # The BRANCH NAME, not a ref: the action prefixes `origin/` itself. It reaches the script
           # through the environment rather than `${{ }}` interpolation, which is the action's job —
