@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import type { JwtPayload as SharedJwtPayload } from '@qnsc-vn/identity';
+import type { JwtPayload as SharedJwtPayload } from '@quynhonsemiconductor/identity';
 import { AppConfigService } from '../config/app-config.service';
 import { toOpshubPrincipal } from './opshub-principal';
 
 /**
  * Authenticated principal attached to request.user after JWT validation.
  *
- * The access token is minted by the shared `@qnsc-vn/identity` AuthService, so
+ * The access token is minted by the shared `@quynhonsemiconductor/identity` AuthService, so
  * it carries the package's payload shape (`sessionId`, `contextId`, and a nested
  * `claims` bag). OpsHub is single-tenant — roles drive RBAC (e.g. 'it-admin',
  * 'hr', 'security') — so the strategy flattens `claims.roles/email/name` onto

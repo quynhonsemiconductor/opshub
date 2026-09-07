@@ -1,5 +1,5 @@
 # =============================================================================
-# Backend · Deploy — thin caller of the shared reusable (qnsc-ci).
+# Backend · Deploy — thin caller of the shared reusable (ci).
 #
 # Triggers:
 #   develop → push to main (auto)
@@ -271,7 +271,7 @@ jobs:
       contents: read
       id-token: write
       attestations: write
-      packages: read # build-push-ecr pulls private @qnsc-vn/* from GitHub Packages
+      packages: read # build-push-ecr pulls private @quynhonsemiconductor/* from GitHub Packages
     uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@v1
     with:
       product: opshub
@@ -279,7 +279,7 @@ jobs:
       has_migrator: true
       # ARM64 (Graviton) Fargate, ~20% cheaper per vCPU-hour and GB-hour for identical
       # sizing. These two move TOGETHER with `cpu_architecture = "ARM64"` in
-      # infra/live/*/main.tf, in one commit: qnsc-ci's own note on these inputs is that
+      # infra/live/*/main.tf, in one commit: ci's own note on these inputs is that
       # setting only one produces "image Manifest does not contain descriptor matching
       # platform" at task start — after a clean apply and a build that reported success.
       #

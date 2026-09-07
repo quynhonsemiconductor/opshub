@@ -5,7 +5,7 @@ import type { JwtPayload } from './jwt.strategy';
  * from an opaque, server-side BFF session cookie when no `Bearer` token is present.
  *
  * The concrete implementation (Entra OIDC + Valkey session, both from
- * `@qnsc-vn/identity`) lives in the product's identity module and is bound to
+ * `@quynhonsemiconductor/identity`) lives in the product's identity module and is bound to
  * {@link BFF_SESSION_RESOLVER}. While it is UNBOUND the guard behaves exactly as a
  * pure JWT guard, so the Bearer path is untouched — which is what lets the BFF land
  * in the codebase before the shared cache exists to hold its sessions.

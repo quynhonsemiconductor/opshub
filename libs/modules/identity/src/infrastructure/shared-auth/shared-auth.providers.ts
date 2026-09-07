@@ -13,7 +13,7 @@ import {
   USER_REPOSITORY,
   type AuthServiceOptions,
   type EntraVerifierOptions,
-} from '@qnsc-vn/identity';
+} from '@quynhonsemiconductor/identity';
 import { AuditServiceAdapter } from './audit-service.adapter';
 import { AuthSessionDrizzleRepository } from './auth-session.drizzle-repository';
 import { DrizzleTransactionRunner } from './drizzle-transaction.runner';
@@ -22,7 +22,7 @@ import { RolesClaimsProvider } from './roles-claims.provider';
 import { UserDrizzleRepository } from './user.drizzle-repository';
 
 /**
- * Wires opshub's concrete adapters onto the shared `@qnsc-vn/identity`
+ * Wires opshub's concrete adapters onto the shared `@quynhonsemiconductor/identity`
  * AuthService's collaborator ports, plus the two option factories and the
  * package's `EntraTokenVerifier` / `AuthService`. `AuthTokenCache` and
  * `JwtService` are provided globally (CacheModule / PlatformModule) and are not

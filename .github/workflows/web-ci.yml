@@ -30,7 +30,7 @@ concurrency:
 
 permissions:
   contents: read
-  packages: read # pull @qnsc-vn/* from GitHub Packages
+  packages: read # pull @quynhonsemiconductor/* from GitHub Packages
 
 env:
   NODE_VERSION: '24'
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # Authenticates pnpm against GitHub Packages for @qnsc-vn/* (see .npmrc).
+      # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # Authenticates pnpm against GitHub Packages for @qnsc-vn/* (see .npmrc).
+      # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     outputs:
       has_tests: ${{ steps.detect.outputs.has_tests }}
@@ -121,7 +121,7 @@ jobs:
     needs: [quality, test]
     timeout-minutes: 20
     env:
-      # Authenticates pnpm against GitHub Packages for @qnsc-vn/* (see .npmrc).
+      # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -207,7 +207,7 @@ jobs:
           --health-retries 12
 
     env:
-      # Authenticates pnpm against GitHub Packages for @qnsc-vn/* (see .npmrc).
+      # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Shared by migrate/seed and the API process. Connects as the owner rather than the
       # restricted role: Backend · CI already proves the least-privilege grants are complete,

@@ -1,11 +1,11 @@
-// Offset pagination is sourced from `@qnsc-vn/platform-http` (the `offsetPagination`
+// Offset pagination is sourced from `@quynhonsemiconductor/platform-http` (the `offsetPagination`
 // namespace) — the single source of truth shared across QNSC product backends.
 //
 // It is re-exported flat here so existing '@platform' consumers (controllers using
 // `buildPageResult` / `ApiPagedResponse` / `PagedResult`) keep their import paths
 // unchanged. opshub uses offset pagination; products needing cursor pagination use
 // the sibling `cursorPagination` namespace from the same package.
-import { offsetPagination } from '@qnsc-vn/platform-http';
+import { offsetPagination } from '@quynhonsemiconductor/platform-http';
 
 export const PageQuerySchema = offsetPagination.PageQuerySchema;
 export const PageQueryDto = offsetPagination.PageQueryDto;

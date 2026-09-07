@@ -2,9 +2,9 @@ import { Global, Module } from '@nestjs/common';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
 import { TerminusModule } from '@nestjs/terminus';
-import { CacheModule } from '@qnsc-vn/platform-cache';
-import { AuthTokenCache } from '@qnsc-vn/identity';
-import { AuthMetrics } from '@qnsc-vn/observability';
+import { CacheModule } from '@quynhonsemiconductor/platform-cache';
+import { AuthTokenCache } from '@quynhonsemiconductor/identity';
+import { AuthMetrics } from '@quynhonsemiconductor/observability';
 import { AppConfigModule } from './config/config.module';
 import { AppConfigService } from './config/app-config.service';
 import { DatabaseModule } from './database/database.module';
@@ -70,7 +70,7 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
         },
       }),
     }),
-    // Single shared Valkey/Redis client (@qnsc-vn/platform-cache), registered
+    // Single shared Valkey/Redis client (@quynhonsemiconductor/platform-cache), registered
     // globally so every consumer (rate-limit, idempotency, health, pub/sub) and
     // the shared identity AuthService/AuthTokenCache share one connection.
     // Optional mode: when REDIS_URL is unset the cache is disabled and all

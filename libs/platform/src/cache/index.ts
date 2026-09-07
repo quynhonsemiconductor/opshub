@@ -1,1 +1,1 @@
-export * from '@qnsc-vn/platform-cache';
+export * from '@quynhonsemiconductor/platform-cache';

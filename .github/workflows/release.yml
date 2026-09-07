@@ -3,7 +3,7 @@
 # main push, then auto-tags when that PR is merged.
 # The tag triggers backend-deploy.yml (prod deploy with approval gate).
 #
-# Delegates to the shared reusable workflow in qnsc-ci so release logic stays
+# Delegates to the shared reusable workflow in ci so release logic stays
 # DRY across products. RELEASE_BOT_APP_ID (org var) is read automatically;
 # RELEASE_BOT_PRIVATE_KEY (org secret) is passed explicitly below.
 # =============================================================================

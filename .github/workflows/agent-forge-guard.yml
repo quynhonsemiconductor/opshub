@@ -18,7 +18,7 @@
 # agent-forge's layer-2 deny-list still refuses to let an agent touch it, but that is now a second
 # line of defence rather than the only one.
 #
-# THE COMPOSITE ACTION RATHER THAN qnsc-ci's REUSABLE WORKFLOW, and this is not a style choice.
+# THE COMPOSITE ACTION RATHER THAN ci's REUSABLE WORKFLOW, and this is not a style choice.
 # A job that calls a reusable workflow reports its check as `<caller job>/<called job>` — rally's
 # security checks appear as `security / SAST (Semgrep)` for exactly this reason. So the reusable form
 # would report `test-guard / test-guard`, and branch protection requiring `test-guard` would match

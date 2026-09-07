@@ -1,5 +1,5 @@
 # =============================================================================
-# Security · Scan — thin caller of the shared reusable suite (qnsc-ci).
+# Security · Scan — thin caller of the shared reusable suite (ci).
 #
 # One org-wide security standard: Trivy (container CVEs, CRITICAL blocks),
 # Semgrep (SAST — replaces CodeQL, no GHAS needed), Gitleaks (secrets) and
@@ -33,7 +33,7 @@ permissions:
   # above this caller's top-level grant, and GitHub validates the whole chain at
   # startup -- so this must stay even though no step in THIS file uses it directly.
   security-events: write # zizmor: ignore[excessive-permissions] ceiling for reusable's SARIF job
-  packages: read # ceiling for the reusable Trivy build to pull private @qnsc-vn/* (packages can only be reduced, not elevated, in the called workflow)
+  packages: read # ceiling for the reusable Trivy build to pull private @quynhonsemiconductor/* (packages can only be reduced, not elevated, in the called workflow)
 
 jobs:
   security:

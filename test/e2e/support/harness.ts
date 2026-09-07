@@ -20,7 +20,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
-import { CacheService } from '@qnsc-vn/platform-cache';
+import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { RATE_LIMIT_TIERS } from '@platform';
 import { AppModule } from '../../../apps/api/src/app.module';
 import { bootstrapApp } from '../../../apps/api/src/bootstrap/app.bootstrap';

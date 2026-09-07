@@ -1332,7 +1332,7 @@ module "observability" {
   # both defaulting to 0, so the bump is a minor version and is a no-op for every other
   # caller of this module.
   #
-  # THIS TAG DOES NOT EXIST YET — it must be cut in qnsc-tf-modules before this plans.
+  # THIS TAG DOES NOT EXIST YET — it must be cut in tf-modules before this plans.
   source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability?ref=observability-v4.3.0"
 
   create_dashboard = var.create_dashboard
@@ -1407,7 +1407,7 @@ module "observability" {
 # `observability.otlp_endpoint` is set, so a counter would report nothing while looking
 # like monitoring. Container logs reach CloudWatch regardless of the OTel path.
 #
-# The field comes from `FAIL_OPEN_FIELD` in @qnsc-vn/observability, emitted by
+# The field comes from `FAIL_OPEN_FIELD` in @quynhonsemiconductor/observability, emitted by
 # `failOpenLog()` at the two guards. Renaming it there would silently disarm this filter,
 # so libs/platform/src/observability/fail-open.spec.ts greps THIS file for the pattern and
 # fails if the two disagree.
@@ -1718,13 +1718,13 @@ locals {
   #
   # Low sample counts are structural here, not incidental. The load-balancer and browser
   # probes that would otherwise pad the histogram are excluded upstream by
-  # `IGNORED_REQUEST_PATHS` in @qnsc-vn/observability (`/v1/healthz`, `/v1/readyz`,
+  # `IGNORED_REQUEST_PATHS` in @quynhonsemiconductor/observability (`/v1/healthz`, `/v1/readyz`,
   # `/healthz`, `/readyz`, `/favicon.ico`), so a 5-minute window on a quiet environment
   # holds only the handful of genuine requests that arrived. A p99 over one sample IS
   # that sample.
   #
   # THIS ORGANISATION HAS ALREADY FIXED THIS DEFECT ONCE, on the CloudWatch side:
-  # `qnsc-tf-modules//modules/observability` gates its `alb_latency` alarm behind
+  # `tf-modules//modules/observability` gates its `alb_latency` alarm behind
   # `alb_latency_min_requests` (default 50) after a single slow request held that alarm
   # over threshold for three consecutive periods and paged. Its comment is worth quoting
   # because it is the whole argument: noise "trains people to ignore the alarm, which is

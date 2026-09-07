@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { AuditRecordInput, IAuditService } from '@qnsc-vn/identity';
+import type { AuditRecordInput, IAuditService } from '@quynhonsemiconductor/identity';
 import { AuditService, type AuditAction, type AuditResource } from '@modules/audit';
 
 /**

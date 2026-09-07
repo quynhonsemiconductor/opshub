@@ -113,18 +113,18 @@ importers:
       '@opentelemetry/semantic-conventions':
         specifier: ^1.43.0
         version: 1.43.0
-      '@qnsc-vn/identity':
-        specifier: ^6.0.0
-        version: 6.0.0(48e067e105e5646a96d3b4f9dded667a)
-      '@qnsc-vn/observability':
-        specifier: ^0.1.6
-        version: 0.1.6(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.1)(@opentelemetry/auto-instrumentations-node@0.78.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1)))(@opentelemetry/exporter-metrics-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-node@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(nestjs-pino@4.6.1(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2))
-      '@qnsc-vn/platform-cache':
-        specifier: ^2.1.0
-        version: 2.1.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1)
-      '@qnsc-vn/platform-http':
-        specifier: ^3.1.1
-        version: 3.1.1(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(@qnsc-vn/platform-cache@2.1.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1))(fastify@5.10.0)(ioredis@5.11.1)(nestjs-zod@5.4.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.4.3))(zod@4.4.3)
+      '@quynhonsemiconductor/identity':
+        specifier: ^7.0.0
+        version: 7.0.0(5a3e99669c09ae44ad369e20c8a2364d)
+      '@quynhonsemiconductor/observability':
+        specifier: ^0.2.0
+        version: 0.2.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.1)(@opentelemetry/auto-instrumentations-node@0.78.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1)))(@opentelemetry/exporter-metrics-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-node@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(nestjs-pino@4.6.1(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2))
+      '@quynhonsemiconductor/platform-cache':
+        specifier: ^3.0.0
+        version: 3.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1)
+      '@quynhonsemiconductor/platform-http':
+        specifier: ^4.0.0
+        version: 4.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(@quynhonsemiconductor/platform-cache@3.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1))(fastify@5.10.0)(ioredis@5.11.1)(nestjs-zod@5.4.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.4.3))(zod@4.4.3)
       cockatiel:
         specifier: ^4.0.0
         version: 4.0.0
@@ -2359,19 +2359,19 @@ packages:
   '@protobufjs/utf8@1.1.2':
     resolution: {integrity: sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug==}
 
-  '@qnsc-vn/identity@6.0.0':
-    resolution: {integrity: sha512-truDsw9QwgKhlLOdnLdZ+KFKFC/cPYcxhBrb3sy6WLyDa+cZVYrZhuIaKrmsCl11ZRuQ1LVzu8zwa5N37m+E8Q==, tarball: https://npm.pkg.github.com/download/@qnsc-vn/identity/6.0.0/593a4e82e69da03265c360106c03dee2278c7896}
+  '@quynhonsemiconductor/identity@7.0.0':
+    resolution: {integrity: sha512-F5c46aWk5XUztq9bbC/PlS3yhOK+EKNbdRT9vI2dmv0YZZSV4ZSVLA1BffQ7qnqQqrjNvPeTnuWJF6v352ZPkA==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/identity/7.0.0/48964ece2ba79622a508e9068840ba7df82816aa}
     peerDependencies:
       '@nestjs/common': '>=11'
       '@nestjs/jwt': '>=11'
       '@nestjs/passport': '>=11'
-      '@qnsc-vn/platform-cache': '>=2.0.0'
-      '@qnsc-vn/platform-http': '>=2.0.0'
+      '@quynhonsemiconductor/platform-cache': '>=2.0.0'
+      '@quynhonsemiconductor/platform-http': '>=2.0.0'
       passport: '>=0.7'
       passport-jwt: '>=4'
 
-  '@qnsc-vn/observability@0.1.6':
-    resolution: {integrity: sha512-b18N6KJ4z76g14LWllMaml/xW0XQw85tYHAkX7/3yqBdjj8+3PuZKNMBrdX3H2VF1k5C4rBnuZvzwzH10ZNwTw==, tarball: https://npm.pkg.github.com/download/@qnsc-vn/observability/0.1.6/648ea51a31bbbd77ab838d33d35694a7cdc68006}
+  '@quynhonsemiconductor/observability@0.2.0':
+    resolution: {integrity: sha512-fheBhoTa0Dg6EtGVtuJ4De3vgM6YamNFqVp5iNLzwqd1oo9mUbxS6eP8jbOqOiWK0NWI/TSnTxTTDYWwVBSt3A==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/observability/0.2.0/6a69296f0467a16d1191ba5f07b19168c8c7368e}
     peerDependencies:
       '@nestjs/common': '>=11'
       '@opentelemetry/api': '>=1.9'
@@ -2385,19 +2385,19 @@ packages:
       '@opentelemetry/semantic-conventions': '>=1.41'
       nestjs-pino: '>=4'
 
-  '@qnsc-vn/platform-cache@2.1.0':
-    resolution: {integrity: sha512-BXJ7UWEQUfWVi/OoG3AaitwlqOH8xjpeQZavk0Gsg2U38mB+VYDORwP3VC/TangFNC77bK0qdGSiXOBBsgISNg==, tarball: https://npm.pkg.github.com/download/@qnsc-vn/platform-cache/2.1.0/25d962fb0bdf7387bfddcd82c2850066e8ed8d71}
+  '@quynhonsemiconductor/platform-cache@3.0.0':
+    resolution: {integrity: sha512-TJtdk+PIMLHwvD2i1YWb5toSa5mun6BTjhsFd7UkOwEHjL+peDgejJQkG5ZG04QYkC0YVgMb0eRPt0kNFa/Xqw==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-cache/3.0.0/5db2efb31bb0ef79369a60a06decd4d8fb37eb43}
     peerDependencies:
       '@nestjs/common': '>=11'
       ioredis: '>=5'
 
-  '@qnsc-vn/platform-http@3.1.1':
-    resolution: {integrity: sha512-nxH1LBTIjMiOLjEPcqW0LvbCjHLgyMBWCovRw7d+NuF6huw76ItCjnvpW1SCgtx4qD19DPJj9fcHw7aA16BhJA==, tarball: https://npm.pkg.github.com/download/@qnsc-vn/platform-http/3.1.1/47f3d4b9232087fd32a37e9cc4a77522805a8c74}
+  '@quynhonsemiconductor/platform-http@4.0.0':
+    resolution: {integrity: sha512-awT3W8cAlXz+lIFoNpxmpwrSFEltodWlSpr+IgHsYS+HzHOzXTqgJmxSOamaJPoobSjtPGFLDhbkkcyMbI7bTg==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-http/4.0.0/ab9b0a9eac68b1724aac95c80b0bae9e5b084119}
     peerDependencies:
       '@nestjs/common': '>=11'
       '@nestjs/core': '>=11'
       '@nestjs/swagger': '>=11'
-      '@qnsc-vn/platform-cache': '>=2.0.0'
+      '@quynhonsemiconductor/platform-cache': '>=2.0.0'
       fastify: '>=5'
       ioredis: '>=5'
       nestjs-zod: '>=5'
@@ -8880,19 +8880,19 @@ snapshots:
 
   '@protobufjs/utf8@1.1.2': {}
 
-  '@qnsc-vn/identity@6.0.0(48e067e105e5646a96d3b4f9dded667a)':
+  '@quynhonsemiconductor/identity@7.0.0(5a3e99669c09ae44ad369e20c8a2364d)':
     dependencies:
       '@nestjs/common': 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/jwt': 11.0.2(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))
       '@nestjs/passport': 11.0.5(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(passport@0.7.0)
-      '@qnsc-vn/platform-cache': 2.1.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1)
-      '@qnsc-vn/platform-http': 3.1.1(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(@qnsc-vn/platform-cache@2.1.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1))(fastify@5.10.0)(ioredis@5.11.1)(nestjs-zod@5.4.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.4.3))(zod@4.4.3)
+      '@quynhonsemiconductor/platform-cache': 3.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1)
+      '@quynhonsemiconductor/platform-http': 4.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(@quynhonsemiconductor/platform-cache@3.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1))(fastify@5.10.0)(ioredis@5.11.1)(nestjs-zod@5.4.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.4.3))(zod@4.4.3)
       jose: 6.2.3
       passport: 0.7.0
       passport-jwt: 4.0.1
       uuidv7: 1.2.1
 
-  '@qnsc-vn/observability@0.1.6(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.1)(@opentelemetry/auto-instrumentations-node@0.78.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1)))(@opentelemetry/exporter-metrics-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-node@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(nestjs-pino@4.6.1(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2))':
+  '@quynhonsemiconductor/observability@0.2.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.1)(@opentelemetry/auto-instrumentations-node@0.78.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1)))(@opentelemetry/exporter-metrics-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-node@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(nestjs-pino@4.6.1(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2))':
     dependencies:
       '@nestjs/common': 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@opentelemetry/api': 1.9.1
@@ -8906,17 +8906,17 @@ snapshots:
       '@opentelemetry/semantic-conventions': 1.43.0
       nestjs-pino: 4.6.1(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2)
 
-  '@qnsc-vn/platform-cache@2.1.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1)':
+  '@quynhonsemiconductor/platform-cache@3.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1)':
     dependencies:
       '@nestjs/common': 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
       ioredis: 5.11.1
 
-  '@qnsc-vn/platform-http@3.1.1(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(@qnsc-vn/platform-cache@2.1.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1))(fastify@5.10.0)(ioredis@5.11.1)(nestjs-zod@5.4.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.4.3))(zod@4.4.3)':
+  '@quynhonsemiconductor/platform-http@4.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(@quynhonsemiconductor/platform-cache@3.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1))(fastify@5.10.0)(ioredis@5.11.1)(nestjs-zod@5.4.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.4.3))(zod@4.4.3)':
     dependencies:
       '@nestjs/common': 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/core': 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/swagger': 11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)
-      '@qnsc-vn/platform-cache': 2.1.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1)
+      '@quynhonsemiconductor/platform-cache': 3.0.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1)
       fastify: 5.10.0
       ioredis: 5.11.1
       nestjs-zod: 5.4.0(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.4.3)

@@ -1,5 +1,5 @@
 # =============================================================================
-# Web · Deploy — thin caller of the shared reusable (qnsc-ci).
+# Web · Deploy — thin caller of the shared reusable (ci).
 #
 # Triggers:
 #   develop → push to main (auto)
@@ -184,7 +184,7 @@ jobs:
     # Must match the UNION of every inner job's own permissions in the reusable
     # web-deploy.yml, not just default (GitHub validates the whole chain at
     # startup) -- packages:read is for the build job's pnpm install of private
-    # @qnsc-vn/* packages.
+    # @quynhonsemiconductor/* packages.
     permissions:
       contents: read
       packages: read

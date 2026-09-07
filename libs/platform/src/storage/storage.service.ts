@@ -13,7 +13,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { ResilienceService } from '../resilience/resilience.service';
 import { NotFoundException, ValidationException } from '../errors/exceptions';
 import { ErrorCodes } from '../errors/error-codes';
-import { Span } from '@qnsc-vn/observability';
+import { Span } from '@quynhonsemiconductor/observability';
 import { storedFiles } from '../../../../db/schema';
 import { newId } from '../../../shared-kernel/src/index';
 import type {

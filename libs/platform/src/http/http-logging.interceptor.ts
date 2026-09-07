@@ -1,5 +1,5 @@
 import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common';
-import { DomainException as SharedDomainException } from '@qnsc-vn/platform-http';
+import { DomainException as SharedDomainException } from '@quynhonsemiconductor/platform-http';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
@@ -13,7 +13,7 @@ const SILENT_PREFIXES = ['/v1/healthz', '/v1/readyz', '/favicon.ico'];
  * Resolve the status code for the access log from the THROWN error rather than
  * the reply, which the global exception filter has not written yet when this
  * interceptor's error tap fires. DomainException (opshub's own or any shared
- * `@qnsc-vn/*` package's — all extend the shared base) exposes `httpStatus`;
+ * `@quynhonsemiconductor/*` package's — all extend the shared base) exposes `httpStatus`;
  * Nest HttpExceptions expose `getStatus()`. This keeps 4xx domain failures (e.g.
  * a 401 bad login thrown by the shared AuthService) out of the 5xx alert stream.
  */

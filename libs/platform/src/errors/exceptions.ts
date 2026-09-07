@@ -1,12 +1,12 @@
-import { DomainException as SharedDomainException } from '@qnsc-vn/platform-http';
+import { DomainException as SharedDomainException } from '@quynhonsemiconductor/platform-http';
 import type { ErrorCategory, ErrorCode } from './error-codes';
 
 /**
  * Base exception for all domain/application errors.
  * The global exception filter maps this to the wire envelope.
  *
- * Extends the shared `@qnsc-vn/platform-http` DomainException so that errors
- * thrown by shared packages (e.g. `@qnsc-vn/identity`'s AuthService) and errors
+ * Extends the shared `@quynhonsemiconductor/platform-http` DomainException so that errors
+ * thrown by shared packages (e.g. `@quynhonsemiconductor/identity`'s AuthService) and errors
  * thrown by opshub's own use-cases share ONE class identity. The global
  * exception filter then maps both through a single `instanceof` branch instead
  * of letting shared-package errors fall through to a generic 500. opshub keeps
