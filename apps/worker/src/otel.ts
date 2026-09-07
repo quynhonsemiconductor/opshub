@@ -3,7 +3,7 @@
  * auto-instrumentation patches pg, ioredis and the AWS SDK before any module loads them.
  * The relays are precisely the code whose latency and failures no request trace covers.
  *
- * Shared implementation, from `@qnsc-vn/observability/otel` — see apps/api/src/otel.ts for
+ * Shared implementation, from `@quynhonsemiconductor/observability/otel` — see apps/api/src/otel.ts for
  * why the subpath rather than the package root, and for what the local copy this replaced
  * had drifted behind.
  *
@@ -14,7 +14,7 @@
  * is the local-development default — but a default that is wrong only when configuration is
  * missing is the kind that goes unnoticed.
  */
-import { shutdownOtel, startOtel } from '@qnsc-vn/observability/otel';
+import { shutdownOtel, startOtel } from '@quynhonsemiconductor/observability/otel';
 
 export { shutdownOtel };
 

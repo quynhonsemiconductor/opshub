@@ -10,7 +10,7 @@
 receivers:
   otlp:
     protocols:
-      # http only: @qnsc-vn/observability posts to ${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces
+      # http only: @quynhonsemiconductor/observability posts to ${OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces
       # and /v1/metrics over OTLP-HTTP, so a gRPC listener would be an unused port.
       http:
         endpoint: 0.0.0.0:4318

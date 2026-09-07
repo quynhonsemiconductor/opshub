@@ -8,8 +8,8 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
-import { AuthTokenCache } from '@qnsc-vn/identity';
-import { failOpenLog } from '@qnsc-vn/observability';
+import { AuthTokenCache } from '@quynhonsemiconductor/identity';
+import { failOpenLog } from '@quynhonsemiconductor/observability';
 import {
   BFF_SESSION_COOKIE,
   BFF_SESSION_RESOLVER,

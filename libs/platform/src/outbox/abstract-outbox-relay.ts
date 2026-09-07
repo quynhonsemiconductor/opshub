@@ -28,7 +28,7 @@
  *   5. Register the class as a provider in the module.
  */
 import { Logger } from '@nestjs/common';
-import { QueueMetrics, withJobContext } from '@qnsc-vn/observability';
+import { QueueMetrics, withJobContext } from '@quynhonsemiconductor/observability';
 import type { DrizzleDB, DrizzleTx } from '../database/drizzle.provider';
 
 /** Optional callback returned by processRow() to run after the transaction commits. */

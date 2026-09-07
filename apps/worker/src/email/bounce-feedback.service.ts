@@ -32,7 +32,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { DeleteMessageCommand, ReceiveMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { eq, and } from 'drizzle-orm';
 import { InjectDrizzle, Span, AppConfigService } from '@platform';
-import { withJobContext } from '@qnsc-vn/observability';
+import { withJobContext } from '@quynhonsemiconductor/observability';
 import type { DrizzleDB } from '@platform';
 import { emailOutbox } from '../../../../db/schema/messaging';
 

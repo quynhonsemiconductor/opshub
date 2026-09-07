@@ -577,7 +577,7 @@ variable "observability" {
     libs/platform/src/observability/otel.ts builds a ParentBased/TraceIdRatio sampler from it,
     and otel.spec.ts asserts a configured probability changes the decisions. It was inert
     before that — declared here and in the env schema, and ignored by opshub's own OTel
-    bootstrap, which had drifted behind the `@qnsc-vn/observability` package rally uses.
+    bootstrap, which had drifted behind the `@quynhonsemiconductor/observability` package rally uses.
   EOT
   type = object({
     otlp_endpoint        = optional(string, "")
@@ -613,7 +613,7 @@ variable "monitor_ingress" {
     ALARM permanently: it pages for a condition that IS the intended state, and bills every
     month for that non-signal. rally hit exactly that — its develop had floors of 0, an idle
     schedule taking it to zero tasks nightly and all weekend, and this variable unset, so it
-    paid for a probe that was red most of the week (fixed in QNSC-VN/rally#393, which is
+    paid for a probe that was red most of the week (fixed in quynhonsemiconductor/rally#393, which is
     where this derivation comes from).
 
     Default true, matching rally, because the idle gate makes true SAFE: it cannot create a
@@ -800,7 +800,7 @@ variable "cpu_architecture" {
     together with each other: the migrator runs the same image family as the api.
 
     Build NATIVELY on an ARM runner (`ubuntu-24.04-arm`), not under QEMU emulation. The
-    qnsc-ci reusable's own note is explicit that emulating an arm64 pnpm + Nest compile on
+    ci reusable's own note is explicit that emulating an arm64 pnpm + Nest compile on
     an x86 runner multiplies build minutes by enough to outweigh the Fargate saving.
 
     NOT EVERY PRODUCT CAN TAKE THIS. It depends on every image in the task having an arm64

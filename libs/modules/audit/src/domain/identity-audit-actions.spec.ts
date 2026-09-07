@@ -1,7 +1,7 @@
 /**
  * The shared identity package's audit vocabulary must be a SUBSET of opshub's catalogue.
  *
- * `@qnsc-vn/identity` records auth events (login, logout, workspace switch, token-theft
+ * `@quynhonsemiconductor/identity` records auth events (login, logout, workspace switch, token-theft
  * detection, role elevation) through `AuditServiceAdapter`, and its `AuditRecordInput.action`
  * is a plain `string` — the package does not share opshub's union. So the adapter narrows,
  * and a narrowing assertion is a promise that nothing checks.
@@ -26,7 +26,7 @@ function emittedValues(field: 'action' | 'resourceType'): string[] {
     'sh',
     [
       '-c',
-      `grep -rhoE "${field}: ['\\"][a-z._]+['\\"]" node_modules/@qnsc-vn/identity/dist 2>/dev/null || true`,
+      `grep -rhoE "${field}: ['\\"][a-z._]+['\\"]" node_modules/@quynhonsemiconductor/identity/dist 2>/dev/null || true`,
     ],
     { encoding: 'utf8' },
   );
@@ -38,13 +38,13 @@ function emittedValues(field: 'action' | 'resourceType'): string[] {
   return [...values].sort();
 }
 
-describe('@qnsc-vn/identity audit vocabulary is declared in the catalogue', () => {
+describe('@quynhonsemiconductor/identity audit vocabulary is declared in the catalogue', () => {
   it('finds the package output it claims to read', () => {
     // A grep that matches nothing reports no violations, which is indistinguishable from a
     // package whose every action is declared.
     expect(
       emittedValues('action').length,
-      'Found no audit actions in @qnsc-vn/identity/dist. The scanner is broken, or the ' +
+      'Found no audit actions in @quynhonsemiconductor/identity/dist. The scanner is broken, or the ' +
         'package stopped recording auth events — check which before touching the catalogue.',
     ).toBeGreaterThanOrEqual(6);
   });
@@ -55,7 +55,7 @@ describe('@qnsc-vn/identity audit vocabulary is declared in the catalogue', () =
 
     expect(
       undeclared,
-      `@qnsc-vn/identity emits audit actions that AUDIT_ACTION does not declare:\n  ` +
+      `@quynhonsemiconductor/identity emits audit actions that AUDIT_ACTION does not declare:\n  ` +
         `${undeclared.join('\n  ')}\n\nAdd them to the shared-package section of ` +
         `audit-catalogue.ts. AuditServiceAdapter asserts its input is an AuditAction, so an ` +
         `undeclared one is written to audit_logs under a name that appears nowhere in code.`,
@@ -66,6 +66,6 @@ describe('@qnsc-vn/identity audit vocabulary is declared in the catalogue', () =
     const declared = new Set<string>(Object.values(AUDIT_RESOURCE));
     const undeclared = emittedValues('resourceType').filter((r) => !declared.has(r));
 
-    expect(undeclared, `Undeclared resource types from @qnsc-vn/identity`).toEqual([]);
+    expect(undeclared, `Undeclared resource types from @quynhonsemiconductor/identity`).toEqual([]);
   });
 });

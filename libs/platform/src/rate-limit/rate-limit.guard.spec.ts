@@ -1,6 +1,6 @@
 import { HttpException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { GlobalExceptionFilter } from '@qnsc-vn/platform-http';
+import { GlobalExceptionFilter } from '@quynhonsemiconductor/platform-http';
 import { RateLimitGuard } from './rate-limit.guard';
 
 /**

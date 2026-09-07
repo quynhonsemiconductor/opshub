@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDrizzle, type DrizzleDB, type DbExecutor } from '@platform';
-import type { ITransactionRunner } from '@qnsc-vn/identity';
+import type { ITransactionRunner } from '@quynhonsemiconductor/identity';
 
 /**
  * opshub binding for the shared `ITransactionRunner` port — threads a single

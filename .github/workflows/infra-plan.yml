@@ -1,5 +1,5 @@
 # =============================================================================
-# Infrastructure · Plan — thin caller of the shared reusable (qnsc-ci).
+# Infrastructure · Plan — thin caller of the shared reusable (ci).
 # Dry-run on every PR touching infra/live/**; posts a plan comment per changed
 # workspace and gates on `tofu fmt`.
 # =============================================================================
@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   plan:
-    uses: QNSC-VN/qnsc-ci/.github/workflows/infra-plan.yml@v1.13.1
+    uses: quynhonsemiconductor/ci/.github/workflows/infra-plan.yml@v1
     with:
       product: opshub
       # No tf_vars_json. The Entra tenant/client id and the Cloudflare account id are
@@ -47,6 +47,8 @@ jobs:
       # task-definition revision bump in a prod plan is expected.
     secrets:
       AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      # Lets the reusable mint a RELEASE_BOT token to fetch the private tf-modules.
+      RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
       # Secret TF_VARs (masked inside the reusable). Without cloudflare_api_token the
       # Cloudflare provider cannot refresh the API's DNS record and the plan errors.
       # Without grafana_alerting_auth the plan disagrees with apply about whether

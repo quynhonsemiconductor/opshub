@@ -30,7 +30,7 @@ permissions:
   # this change is making: nothing here needs it today (the openapi job reads
   # `github.event.pull_request.base.sha` straight off the payload, which needs no grant).
   pull-requests: read
-  packages: read       # pull @qnsc-vn/* from GitHub Packages
+  packages: read       # pull @quynhonsemiconductor/* from GitHub Packages
 
 env:
   # 24, matching .nvmrc and the Dockerfile's `ARG NODE_VERSION=24`. Nothing overrides that
@@ -61,12 +61,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: QNSC-VN/qnsc-ci/actions/setup-node-pnpm@v1.10.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @qnsc-vn/* from GitHub Packages
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @quynhonsemiconductor/* from GitHub Packages
 
       - name: Lint
         run: pnpm lint
@@ -141,12 +141,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: QNSC-VN/qnsc-ci/actions/setup-node-pnpm@v1.10.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @qnsc-vn/* from GitHub Packages
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @quynhonsemiconductor/* from GitHub Packages
 
       - name: Run migrations
         run: pnpm db:migrate
@@ -351,7 +351,7 @@ jobs:
             echo "No backward-incompatible DDL detected."
           fi
 
-      - uses: QNSC-VN/qnsc-ci/actions/setup-node-pnpm@v1.10.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -456,12 +456,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: QNSC-VN/qnsc-ci/actions/setup-node-pnpm@v1.10.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @qnsc-vn/* from GitHub Packages
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @quynhonsemiconductor/* from GitHub Packages
 
       - name: Run migrations
         run: pnpm db:migrate
@@ -532,7 +532,7 @@ jobs:
           OPENAPI_SPEC: ${{ github.workspace }}/openapi.json
 
       - name: Upload OpenAPI spec artifact
-        uses: QNSC-VN/qnsc-ci/actions/publish-openapi-spec@v1.10.0
+        uses: quynhonsemiconductor/ci/actions/publish-openapi-spec@v1
         with:
           spec-path: openapi.json
           artifact-name: openapi-spec-${{ github.sha }}
@@ -551,7 +551,7 @@ jobs:
 
       - name: Check for breaking API changes (PR only)
         if: github.event_name == 'pull_request'
-        uses: QNSC-VN/qnsc-ci/actions/validate-openapi-contract@v1.10.0
+        uses: quynhonsemiconductor/ci/actions/validate-openapi-contract@v1
         with:
           current-spec-path: openapi.json
           base-spec-path: base-spec/openapi.json

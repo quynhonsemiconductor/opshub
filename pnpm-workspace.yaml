@@ -59,7 +59,22 @@ overrides:
   # fast-uri — so a partially-applied pin is the worst outcome: the scanner is quiet on
   # nine of ten paths and the tenth is the one serving traffic. The whole tree is already
   # on 4.x, so a bare floor forces no major jump on anyone.
-  "fast-uri": ">=4.1.2"
+  # Bumped from >=4.1.2: newer advisories (GHSA-5jgf-p345-68v8 / GHSA-f65p-4m7j-42xc /
+  # GHSA-fph4-wmhf-6fwf / GHSA-jqff-g426-hqxp — host confusion via skipped IDN
+  # canonicalization, CVSS 7.5) are only fixed at 4.1.3 on the 4.x line. Bare key so it
+  # binds the resolved version, matching the reasoning above.
+  "fast-uri": ">=4.1.3"
+  # GHSA-73wf-gq98-2v4g / GHSA-c83g-rgw3-j3cx — browserslist crash / prototype write via
+  # untrusted browserslist-stats, CVSS 7.5, fixed 4.28.7. Transitive via the web build
+  # toolchain; the tree is on 4.x so a floor forces no major jump.
+  "browserslist@<4.28.7": ">=4.28.7"
+  # GHSA-3m5p-2c4r-xxw2 / GHSA-w2qp-rph6-63g4 — fastify X-Forwarded-* spoofing under
+  # trustProxy hop-count, fixed 5.12.1. Scope to the 5.x line the API runs; the 11.x in
+  # the tree is a different (@fastify/*) package's versioning, untouched.
+  "fastify@5": ">=5.12.1"
+  # GHSA-4mjr-xmp4-gh2g / GHSA-x5fp-wj9c-mxmx — qs DoS via attacker-controlled isBuffer,
+  # fixed 6.16.0. Scope to the 6.x line (the 3.x `qs` in the tree is an unrelated package).
+  "qs@6": ">=6.16.0"
   # GHSA-r28c-9q8g-f849 — postcss line-return parsing, fixed 8.5.18. Transitive
   # via the web build toolchain (vite / tailwind).
   "postcss@<8.5.18": ">=8.5.18"

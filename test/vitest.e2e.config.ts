@@ -66,7 +66,7 @@ export default defineConfig({
        *
        * `GlobalExceptionFilter` maps a validation failure to 422 with field-level details by
        * testing `exception instanceof ZodValidationException`. It ships from
-       * `@qnsc-vn/platform-http` as CJS and `require`s the CJS build of `nestjs-zod`; the app's
+       * `@quynhonsemiconductor/platform-http` as CJS and `require`s the CJS build of `nestjs-zod`; the app's
        * own source is transformed by vite and imports the ESM build. Two module instances, a
        * distinct class identity in each, so the `instanceof` is false — under vitest ONLY. Nest's
        * default handling answers 400 `BAD_REQUEST` with `details: []`.
@@ -82,7 +82,7 @@ export default defineConfig({
        * `process.cwd()` — vitest runs from the repo root — because the backend tsconfig compiles
        * to CJS and rejects `import.meta.url` outright.
        *
-       * Inlining `@qnsc-vn/platform-http` instead does NOT work: vite leaves the `require` calls
+       * Inlining `@quynhonsemiconductor/platform-http` instead does NOT work: vite leaves the `require` calls
        * inside a CJS dependency alone, so the filter still reaches the CJS copy. Measured.
        *
        * The durable fix belongs upstream — a cross-package `instanceof` is fragile for every

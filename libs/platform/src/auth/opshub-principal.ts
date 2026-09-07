@@ -1,4 +1,4 @@
-import type { JwtPayload as SharedJwtPayload } from '@qnsc-vn/identity';
+import type { JwtPayload as SharedJwtPayload } from '@quynhonsemiconductor/identity';
 import type { JwtPayload } from './jwt.strategy';
 
 /** The nested authorization claims opshub's `RolesClaimsProvider` stamps at mint time. */
@@ -11,7 +11,7 @@ interface OpshubClaims {
 /**
  * Flatten the shared package's payload onto opshub's request principal.
  *
- * The access token is minted by `@qnsc-vn/identity`, so it carries the package's shape:
+ * The access token is minted by `@quynhonsemiconductor/identity`, so it carries the package's shape:
  * a nested `claims` bag alongside `sub`/`jti`/`sessionId`. Guards, controllers and the
  * audit context all read `email`, `name` and `roles` directly, so the flattening happens
  * once, here.

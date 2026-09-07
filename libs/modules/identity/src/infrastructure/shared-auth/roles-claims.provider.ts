@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB } from '@platform';
-import type { IClaimsProvider, ProductClaims } from '@qnsc-vn/identity';
+import type { IClaimsProvider, ProductClaims } from '@quynhonsemiconductor/identity';
 import { employees } from '../../../../../../db/schema';
 
 /**
