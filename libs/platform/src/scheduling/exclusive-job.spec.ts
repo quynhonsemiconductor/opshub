@@ -1,6 +1,6 @@
 import type { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ExclusiveJob } from './exclusive-job.service';
+import { ExclusiveJob } from '@quynhonsemiconductor/platform-runtime';
 
 /**
  * Stub cache with the real `SET NX PX` semantics that matter here: acquire succeeds only
