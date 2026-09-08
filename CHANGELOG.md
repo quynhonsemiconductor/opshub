@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.3.1](https://github.com/quynhonsemiconductor/opshub/compare/v0.3.0...v0.3.1) (2026-09-08)
+
+
+### ✨ Features
+
+* **ci:** post a Grafana deploy annotation after a successful backend deploy ([#287](https://github.com/quynhonsemiconductor/opshub/issues/287)) ([1fe100b](https://github.com/quynhonsemiconductor/opshub/commit/1fe100b6b56ea8c396f27968baafbd194833d3f6))
+* **infra:** add secrets-bundling plumbing, matching rally ([#266](https://github.com/quynhonsemiconductor/opshub/issues/266)) ([1384927](https://github.com/quynhonsemiconductor/opshub/commit/138492794af858532e7b92129b36ab13ab450743))
+* **infra:** create the bundled secret for opshub develop ([#267](https://github.com/quynhonsemiconductor/opshub/issues/267)) ([9035833](https://github.com/quynhonsemiconductor/opshub/commit/903583394a563e418b6e226b0c701bc245e5a8a3))
+* **infra:** move the api, worker and migrator to ARM64 Fargate ([#288](https://github.com/quynhonsemiconductor/opshub/issues/288)) ([86a30cd](https://github.com/quynhonsemiconductor/opshub/commit/86a30cd0de9b431b144583b204bea19abe1f152a))
+* **infra:** port SES bounce/complaint feedback loop and log-group guard from rally ([#265](https://github.com/quynhonsemiconductor/opshub/issues/265)) ([bc2153c](https://github.com/quynhonsemiconductor/opshub/commit/bc2153c5733285c157be0185b55e188e83d95691))
+* **infra:** turn on real SES sending for opshub develop ([#279](https://github.com/quynhonsemiconductor/opshub/issues/279)) ([014e0c5](https://github.com/quynhonsemiconductor/opshub/commit/014e0c5c8cc02c7c7b135d53fa4fef18757cfa97))
+* **isms:** every register record can be corrected ([#250](https://github.com/quynhonsemiconductor/opshub/issues/250)) ([b88bec5](https://github.com/quynhonsemiconductor/opshub/commit/b88bec5cda8d743ef505b9f131dc8b27aa6a0eb6))
+* make the notification settings true, and the motion real ([#252](https://github.com/quynhonsemiconductor/opshub/issues/252)) ([0ec7104](https://github.com/quynhonsemiconductor/opshub/commit/0ec710437adbf0b5acf0973d651a5c5fda35f9a9))
+* **observability:** Grafana dashboards, alerts and SLO for opshub ([#257](https://github.com/quynhonsemiconductor/opshub/issues/257)) ([c630158](https://github.com/quynhonsemiconductor/opshub/commit/c6301584bb08f39e2d3a87ab1fe15296cdd616d2))
+* **observability:** wire OTLP, log shipping, cache/CloudWatch alarms and auth.login metric ([#256](https://github.com/quynhonsemiconductor/opshub/issues/256)) ([6bc63fe](https://github.com/quynhonsemiconductor/opshub/commit/6bc63fec0807fc5c1bab3aa5ddd7a3842fbaf853))
+* **web:** give the authenticated shell and dashboard the same design polish as the login page ([#289](https://github.com/quynhonsemiconductor/opshub/issues/289)) ([192f272](https://github.com/quynhonsemiconductor/opshub/commit/192f272f6d8388376c4f8846c7e631af7da4e493))
+* **web:** give the authenticated shell and dashboard the same design polish as the login page ([#302](https://github.com/quynhonsemiconductor/opshub/issues/302)) ([9dfc259](https://github.com/quynhonsemiconductor/opshub/commit/9dfc259a43fcccdcf0f8639a5ac270e8a02d04b8))
+* **web:** real visual identity on the login page ([#286](https://github.com/quynhonsemiconductor/opshub/issues/286)) ([934d8c8](https://github.com/quynhonsemiconductor/opshub/commit/934d8c85f75e0f883bef93febc0ed4925228d9af))
+* **web:** roll out shadow, accent-secondary, display and fade-up tokens to shell primitives ([#290](https://github.com/quynhonsemiconductor/opshub/issues/290)) ([bb02a16](https://github.com/quynhonsemiconductor/opshub/commit/bb02a16696a7fe1b6b826511a4078027858cd7f8))
+* **web:** roll out shadow, accent-secondary, display and fade-up tokens to shell primitives ([#303](https://github.com/quynhonsemiconductor/opshub/issues/303)) ([55ff73f](https://github.com/quynhonsemiconductor/opshub/commit/55ff73f67359441ebd1bb36be22dc6ebafeb7e98))
+* **web:** smarter workforce logging, date-range filters, and a design-token pass ([#283](https://github.com/quynhonsemiconductor/opshub/issues/283)) ([1a8000d](https://github.com/quynhonsemiconductor/opshub/commit/1a8000d322082045c833ec96532efc787146fa8e))
+
+
+### 🐛 Bug Fixes
+
+* **api:** finish naming the person across ISMS, QMS, training and requests ([#244](https://github.com/quynhonsemiconductor/opshub/issues/244)) ([cfd8247](https://github.com/quynhonsemiconductor/opshub/commit/cfd82470d85387897018392ee43c4725adc43ee8))
+* **ci:** bump reusable-workflow pins to v1.10.0, add agent-forge test-guard ([#269](https://github.com/quynhonsemiconductor/opshub/issues/269)) ([a844449](https://github.com/quynhonsemiconductor/opshub/commit/a8444491eb6f736d580db12ad2645213a505de3a))
+* **ci:** make the tag deploy wait for the develop deploy of the same commit ([#285](https://github.com/quynhonsemiconductor/opshub/issues/285)) ([eb9f8fc](https://github.com/quynhonsemiconductor/opshub/commit/eb9f8fccefb01916a549de32586fccbdf4d76279))
+* **ci:** map GRAFANA_ALERTS_TOKEN into infra-apply and infra-plan ([#258](https://github.com/quynhonsemiconductor/opshub/issues/258)) ([48e4fbe](https://github.com/quynhonsemiconductor/opshub/commit/48e4fbe75a8e449dddf856b63bcbeb8b627f10d1))
+* close the audit findings — rules that existed, were documented, and did not apply ([#254](https://github.com/quynhonsemiconductor/opshub/issues/254)) ([aac6f62](https://github.com/quynhonsemiconductor/opshub/commit/aac6f62b8f7b111a57ad35119cefecfb6ef7c2fa))
+* close the go-live blockers — journeys that could not be completed at all ([#248](https://github.com/quynhonsemiconductor/opshub/issues/248)) ([093d484](https://github.com/quynhonsemiconductor/opshub/commit/093d4849ebf26d1f266ef41651e90c88b69577d4))
+* close two data-protection holes, stop failure reading as reassurance, and unstall the relay ([#246](https://github.com/quynhonsemiconductor/opshub/issues/246)) ([a878c4e](https://github.com/quynhonsemiconductor/opshub/commit/a878c4e2acd5869f97200a511b05f8eee70ad688))
+* **config:** treat empty MAIL_FROM_EMAIL/MAIL_REPLY_TO as unset ([#277](https://github.com/quynhonsemiconductor/opshub/issues/277)) ([afa165e](https://github.com/quynhonsemiconductor/opshub/commit/afa165e6948ce83b7dee0f7b92d4f7e0ad503843))
+* **deps:** restore dependabot npm updates ([#319](https://github.com/quynhonsemiconductor/opshub/issues/319)) ([937fe35](https://github.com/quynhonsemiconductor/opshub/commit/937fe35fcc55756e9721dfa14f6e8831e7375d7a))
+* gate every write surface on the permission its route requires ([#251](https://github.com/quynhonsemiconductor/opshub/issues/251)) ([0a6bf72](https://github.com/quynhonsemiconductor/opshub/commit/0a6bf72d224687d96794876e07966ae6544ea16b))
+* **identity:** log real cause of BFF callback failures server-side ([#280](https://github.com/quynhonsemiconductor/opshub/issues/280)) ([1ec9873](https://github.com/quynhonsemiconductor/opshub/commit/1ec98734255c8b3e3d79ed5640270629e4769d02))
+* **infra:** bump ecs-service to v2.3.2 for the task-role KMS decrypt fix ([#270](https://github.com/quynhonsemiconductor/opshub/issues/270)) ([52f102f](https://github.com/quynhonsemiconductor/opshub/commit/52f102fd92a42f590b70ac6e180ed4fc1a8d1bac))
+* **infra:** bump to the module versions that unblock a first-ever apply ([#260](https://github.com/quynhonsemiconductor/opshub/issues/260)) ([e9261d9](https://github.com/quynhonsemiconductor/opshub/commit/e9261d911ff1123fb23c8f43229f98f70375e0a6))
+* **infra:** give opshub a real, Terraform-managed Cloudflare Tunnel ([#261](https://github.com/quynhonsemiconductor/opshub/issues/261)) ([d24a5e6](https://github.com/quynhonsemiconductor/opshub/commit/d24a5e6138c28da11b155ea223b7abc3b160b003))
+* **infra:** grant the api/worker execution roles read access to their own secrets ([#268](https://github.com/quynhonsemiconductor/opshub/issues/268)) ([fdda923](https://github.com/quynhonsemiconductor/opshub/commit/fdda9238a76f85a8082bb4d46847f49ebe4e9068))
+* **infra:** guard alb_dns_name output like rally's copy already does ([#259](https://github.com/quynhonsemiconductor/opshub/issues/259)) ([47b5894](https://github.com/quynhonsemiconductor/opshub/commit/47b5894a8b814caab9d40c36bdfd5ff5edff86f4))
+* **infra:** import the real DNS CNAME record too, looked up dynamically ([#263](https://github.com/quynhonsemiconductor/opshub/issues/263)) ([cf11200](https://github.com/quynhonsemiconductor/opshub/commit/cf1120025e97ab4ba503a20a070c6ea71c68522b))
+* **infra:** import the real Pages custom domain attachment too ([#262](https://github.com/quynhonsemiconductor/opshub/issues/262)) ([7246244](https://github.com/quynhonsemiconductor/opshub/commit/7246244ca33577e373749d56d8b559909613fbe8))
+* **infra:** wire entra-client-secret and graph-client-secret into opshub develop ([#281](https://github.com/quynhonsemiconductor/opshub/issues/281)) ([5b51e66](https://github.com/quynhonsemiconductor/opshub/commit/5b51e66a94dc3d8503a1cdceab7d7d95df9dafaf))
+* make the five "checked by the service" document references actually checked ([#255](https://github.com/quynhonsemiconductor/opshub/issues/255)) ([f489927](https://github.com/quynhonsemiconductor/opshub/commit/f48992787a3713f5721dd5687255c7a11141c7b5))
+* **requests:** tell the people who can decide a request that it is waiting ([#253](https://github.com/quynhonsemiconductor/opshub/issues/253)) ([346c19b](https://github.com/quynhonsemiconductor/opshub/commit/346c19b84e6ebfb65fc73da634e654af95aee73a))
+* volume-gate the low-traffic latency alerts, warm the DB pool, bound the interactive S3 budget ([#282](https://github.com/quynhonsemiconductor/opshub/issues/282)) ([14dcdc5](https://github.com/quynhonsemiconductor/opshub/commit/14dcdc5c8b9a70fe21f7aa0c1bc35e216644cef0))
+* **web:** give empty-state CTAs their own name, distinct from the toolbar button ([#284](https://github.com/quynhonsemiconductor/opshub/issues/284)) ([5b5be38](https://github.com/quynhonsemiconductor/opshub/commit/5b5be38399d43f6b11c32d41fcacf0146fb1d0fc))
+* **web:** notification bell used a nonexistent bg-accent-muted0 class ([#291](https://github.com/quynhonsemiconductor/opshub/issues/291)) ([7447b81](https://github.com/quynhonsemiconductor/opshub/commit/7447b81d357592f9a7b8b8a1d24c69b15594897d))
+
+
+### ♻️ Refactors
+
+* **platform:** source runtime primitives from @quynhonsemiconductor/platform-runtime ([#304](https://github.com/quynhonsemiconductor/opshub/issues/304)) ([2a32d58](https://github.com/quynhonsemiconductor/opshub/commit/2a32d58dbfc325cf6cad1a7e703b0265ff1d5850))
+
 ## [0.3.0](https://github.com/QNSC-VN/opshub/compare/v0.2.1...v0.3.0) (2026-08-21)
 
 
