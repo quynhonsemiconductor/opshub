@@ -5,7 +5,7 @@ import {
   albWaitMs,
   arrivalAtMs,
   registerRequestTiming,
-} from './request-timing';
+} from '@quynhonsemiconductor/platform-runtime';
 
 /**
  * The decoding is the whole value of this module — a wrong epoch would produce a

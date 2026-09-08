@@ -1,14 +1,12 @@
 // `.env` FIRST, above the OTel bootstrap: that bootstrap reads process.env directly,
 // and @nestjs/config does not load the file until ConfigModule initialises — far too
-// late. See libs/platform/src/config/load-env.ts.
-import '@platform/config/load-env';
+// late. See @quynhonsemiconductor/platform-runtime's own header: this MUST stay
+// above the OTel bootstrap, and MUST come from the subpath, not the package root.
+import '@quynhonsemiconductor/platform-runtime/load-env';
 // OTel must be imported before any other module — registers auto-instrumentation
 import { shutdownOtel } from './otel';
 import { NestFactory } from '@nestjs/core';
-import {
-  FastifyAdapter,
-  type NestFastifyApplication,
-} from '@nestjs/platform-fastify';
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AppConfigService } from '@platform';
@@ -54,8 +52,12 @@ async function main(): Promise<void> {
     }
   };
 
-  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
-  process.on('SIGINT',  () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => {
+    void shutdown('SIGTERM');
+  });
+  process.on('SIGINT', () => {
+    void shutdown('SIGINT');
+  });
 
   process.on('unhandledRejection', (reason: unknown) => {
     logger.error({ msg: 'Unhandled promise rejection', reason }, 'Bootstrap');

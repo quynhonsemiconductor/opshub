@@ -79,6 +79,7 @@
     "@quynhonsemiconductor/observability": "^0.2.0",
     "@quynhonsemiconductor/platform-cache": "^3.0.0",
     "@quynhonsemiconductor/platform-http": "^4.0.0",
+    "@quynhonsemiconductor/platform-runtime": "^0.1.1",
     "cockatiel": "^4.0.0",
     "drizzle-orm": "^0.45.0",
     "drizzle-zod": "^0.8.0",

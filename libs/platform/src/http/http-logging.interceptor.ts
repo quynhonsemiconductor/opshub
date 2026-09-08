@@ -4,7 +4,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { RequestContextService } from '../context/request-context';
-import { albReceivedAtMs, albWaitMs, arrivalAtMs } from './request-timing';
+import { albReceivedAtMs, albWaitMs, arrivalAtMs } from '@quynhonsemiconductor/platform-runtime';
 
 /** Health/readiness probes — suppress from access logs to avoid noise. */
 const SILENT_PREFIXES = ['/v1/healthz', '/v1/readyz', '/favicon.ico'];

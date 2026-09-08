@@ -22,7 +22,7 @@ import { HttpLoggingInterceptor } from './http/http-logging.interceptor';
 import { ResilienceService } from './resilience/resilience.service';
 import { EMAIL_PROVIDER } from './email/email.provider';
 import { DiscoveryModule } from '@nestjs/core';
-import { ExclusiveJob } from './scheduling/exclusive-job.service';
+import { ExclusiveJob } from '@quynhonsemiconductor/platform-runtime';
 import { ActorScope } from './auth/actor-scope.service';
 import { RouteAuthzAudit } from './auth/route-authz-audit';
 import { DevEmailProvider } from './email/providers/dev.provider';

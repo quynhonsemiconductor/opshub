@@ -1,26 +1,17 @@
-import { Global, Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { Module } from '@nestjs/common';
+import { AppConfigModule as SharedConfigModule } from '@quynhonsemiconductor/platform-runtime';
 import { EnvSchema } from './env.schema';
 import { AppConfigService } from './app-config.service';
 
-@Global()
+/**
+ * Validation and `@Global()` registration come from
+ * `@quynhonsemiconductor/platform-runtime`; the schema and the service are opshub's.
+ *
+ * Kept as a named module rather than calling `forRoot` at the import site so
+ * `AppModule`'s imports list is unchanged.
+ */
 @Module({
-  imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      validate: (env) => {
-        const result = EnvSchema.safeParse(env);
-        if (!result.success) {
-          const msg = result.error.issues
-            .map((e) => `  ${e.path.map(String).join('.')}: ${e.message}`)
-            .join('\n');
-          throw new Error(`Invalid environment configuration:\n${msg}`);
-        }
-        return result.data;
-      },
-    }),
-  ],
-  providers: [AppConfigService],
-  exports: [AppConfigService],
+  imports: [SharedConfigModule.forRoot({ schema: EnvSchema, service: AppConfigService })],
+  exports: [SharedConfigModule],
 })
 export class AppConfigModule {}
