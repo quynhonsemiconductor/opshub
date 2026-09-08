@@ -84,7 +84,7 @@
     "drizzle-orm": "^0.45.0",
     "drizzle-zod": "^0.8.0",
     "fastify": "5.10.0",
-    "ioredis": "^5.11.1",
+    "ioredis": "^6.0.0",
     "jose": "^6.2.3",
     "nestjs-pino": "^4.6.1",
     "nestjs-zod": "^5.4.0",
