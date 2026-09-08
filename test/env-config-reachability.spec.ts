@@ -36,7 +36,7 @@ const SCHEMA = 'libs/platform/src/config/env.schema.ts';
 /**
  * Variables read by code OUTSIDE this repository, from `process.env` directly.
  *
- * `@qnsc-vn/observability`'s bootstrap runs before Nest exists, so it cannot use `AppConfigService` — it
+ * `@quynhonsemiconductor/observability`'s bootstrap runs before Nest exists, so it cannot use `AppConfigService` — it
  * reads these itself (`otel.bootstrap.js`: `process.env['OTEL_ENABLED']`, `process.env`
  * `['OTEL_EXPORTER_OTLP_ENDPOINT']`). They are declared here so the schema still validates and documents
  * them, which is the right call and is invisible to a search of our own source.

@@ -1,5 +1,5 @@
 # =============================================================================
-# Backend · Deploy — thin caller of the shared reusable (qnsc-ci).
+# Backend · Deploy — thin caller of the shared reusable (ci).
 #
 # Triggers:
 #   develop → push to main (auto)
@@ -94,7 +94,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           persist-credentials: false
@@ -271,13 +271,79 @@ jobs:
       contents: read
       id-token: write
       attestations: write
-      packages: read # build-push-ecr pulls private @qnsc-vn/* from GitHub Packages
-    uses: QNSC-VN/qnsc-ci/.github/workflows/backend-deploy.yml@v1.13.1
+      packages: read # build-push-ecr pulls private @quynhonsemiconductor/* from GitHub Packages
+    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@v1
     with:
       product: opshub
       has_worker: true
       has_migrator: true
+      # ARM64 (Graviton) Fargate, ~20% cheaper per vCPU-hour and GB-hour for identical
+      # sizing. These two move TOGETHER with `cpu_architecture = "ARM64"` in
+      # infra/live/*/main.tf, in one commit: ci's own note on these inputs is that
+      # setting only one produces "image Manifest does not contain descriptor matching
+      # platform" at task start — after a clean apply and a build that reported success.
+      #
+      # One commit is safe because `wait-for-infra` above holds this deploy until the
+      # Infrastructure · Apply for the same sha finishes, so the ARM64 task definition
+      # exists before the deploy that builds arm64 images rolls onto it. And the
+      # ecs-service module runs `deployment_circuit_breaker` with rollback enabled, so a
+      # task that cannot start returns the service to its previous x86 revision by itself.
+      #
+      # NATIVE ARM RUNNER, not QEMU: emulating an arm64 pnpm + Nest compile on an x86
+      # runner multiplies build minutes by enough to outweigh the Fargate saving, which is
+      # the reusable workflow's own stated reason for having a separate runner input.
+      build_runner: ubuntu-24.04-arm
+      image_platforms: linux/arm64
     # Least-privilege: pass only what the reusable declares (no `secrets: inherit`).
     secrets:
       AWS_ACCOUNT_ID:       ${{ vars.AWS_ACCOUNT_ID }}
       SLACK_DEPLOY_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Grafana deploy annotation — ported from rally.
+  #
+  # WHY THIS IS NOT COSMETIC. opshub's Grafana alert rules fire on symptoms that a
+  # deploy is one of the likeliest causes of, and without a deploy marker on the
+  # dashboard there is nothing on screen that distinguishes "the service regressed"
+  # from "a task was replaced 40 seconds ago". rally's `http-p99-latency` page on
+  # 2026-08-31 was exactly that: the slow request was a cold start after a task
+  # replacement, and establishing it took reading workflow job timestamps by hand
+  # because the latency panel carried no deploy markers to line the spike up against.
+  #
+  # `continue-on-error: true` on purpose, and it is the whole safety argument: an
+  # annotation is an observability nicety, and a Grafana outage or a rotated token must
+  # never turn a SUCCESSFUL deploy into a red pipeline. The failure mode of this step is
+  # a missing marker, never a blocked release.
+  #
+  # `if: always() && needs.deploy.result == 'success'` rather than a bare success():
+  # `always()` is what lets this job run at all when an earlier job in the graph was
+  # skipped, and the explicit result check is what keeps it from annotating a deploy
+  # that did not happen. A marker for a deploy that never shipped is worse than none —
+  # it sends the next reader looking for a cause in the wrong place.
+  #
+  # GRAFANA_ALERTS_TOKEN is an ORGANISATION secret with ALL-repository visibility, so
+  # opshub needs no repo-level secret for this. Verified rather than assumed.
+  #
+  # The env label follows the same tag-versus-branch rule the deploy itself uses, so the
+  # annotation lands on the environment that was actually deployed.
+  # ───────────────────────────────────────────────────────────────────────────
+  annotate-deploy:
+    needs: [deploy]
+    if: always() && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Post deploy annotation to Grafana
+        continue-on-error: true
+        env:
+          GRAFANA_ALERTS_TOKEN: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
+          DEPLOY_ENV: ${{ github.ref_type == 'tag' && 'production' || 'develop' }}
+        run: |
+          curl -sf -X POST "https://qnsc.grafana.net/api/annotations" \
+            -H "Authorization: Bearer ${GRAFANA_ALERTS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                  --arg text "opshub deployed ${GITHUB_SHA:0:7} to ${DEPLOY_ENV}" \
+                  --arg env "$DEPLOY_ENV" \
+                  '{tags: ["deploy", "opshub", $env], text: $text}')"

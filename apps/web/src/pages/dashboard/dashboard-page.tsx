@@ -28,6 +28,7 @@ export function DashboardPage() {
   return (
     <div className="flex flex-col gap-7">
       <PageHeader
+        size="display"
         title={isLoading ? 'Overview' : `Overview · ${ROLE_TITLE[primaryRole] ?? 'Employee'}`}
         description="Operations summary across IT and HR domains."
       />

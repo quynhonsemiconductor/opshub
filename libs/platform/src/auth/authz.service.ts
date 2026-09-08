@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB } from '../database/drizzle.provider';
-import { CacheService } from '@qnsc-vn/platform-cache';
+import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { rolePermissions, userRoleAssignments } from '../../../../db/schema';
 import { ScopeEvaluator } from './scope-evaluator';
 import { permissionGrants } from '@shared-kernel';

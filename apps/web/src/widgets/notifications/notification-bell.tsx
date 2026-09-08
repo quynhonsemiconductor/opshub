@@ -85,7 +85,7 @@ function NotifItem({ notif, onMarkRead }: NotifItemProps) {
         {notif.body && <p className="mt-0.5 text-xs text-fg-muted line-clamp-2">{notif.body}</p>}
         <p className="mt-1 text-2xs text-fg-subtle">{relativeTime(notif.createdAt)}</p>
       </div>
-      {!notif.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent-muted0" />}
+      {!notif.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />}
     </div>
   );
 }
@@ -161,7 +161,7 @@ export function NotificationBell() {
       >
         <Bell className="h-4 w-4" strokeWidth={1.75} />
         {unreadCount > 0 && (
-          <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent-muted0 text-2xs font-semibold leading-none text-white">
+          <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-2xs font-semibold leading-none text-white">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
@@ -170,7 +170,7 @@ export function NotificationBell() {
       {open && (
         <div
           ref={panelRef}
-          className="absolute right-0 top-10 z-50 w-80 overflow-hidden rounded-xl border border-border bg-surface shadow-lg"
+          className="absolute right-0 top-10 z-50 w-80 animate-fade-up overflow-hidden rounded-xl border border-border bg-surface shadow-lg"
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border px-4 py-3">

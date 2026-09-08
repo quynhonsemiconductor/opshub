@@ -13,8 +13,8 @@ import {
   SelfScoped,
 } from '@platform';
 import type { JwtPayload } from '@platform';
-import { AuthService } from '@qnsc-vn/identity';
-import { AuthMetrics } from '@qnsc-vn/observability';
+import { AuthService } from '@quynhonsemiconductor/identity';
+import { AuthMetrics } from '@quynhonsemiconductor/observability';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import '@fastify/cookie';
 import { EntraLoginDto, DevLoginDto, AuthResponseDto, MeResponseDto } from './dto/auth.dto';

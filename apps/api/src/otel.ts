@@ -3,7 +3,7 @@
  * auto-instrumentation patches HTTP, pg, ioredis and the AWS SDK before any module loads
  * them.
  *
- * The implementation is shared, in `@qnsc-vn/observability`. Imported from its `/otel`
+ * The implementation is shared, in `@quynhonsemiconductor/observability`. Imported from its `/otel`
  * subpath rather than the package root on purpose: the root barrel reaches Nest and pino,
  * which would then be required BEFORE instrumentation is installed — defeating the reason
  * this import sits at the top of main.ts.
@@ -20,7 +20,7 @@
  * in-flight spans are exported rather than dropped. Do NOT register a second SIGTERM
  * handler here — main.ts owns the shutdown sequence.
  */
-import { shutdownOtel, startOtel } from '@qnsc-vn/observability/otel';
+import { shutdownOtel, startOtel } from '@quynhonsemiconductor/observability/otel';
 
 export { shutdownOtel };
 

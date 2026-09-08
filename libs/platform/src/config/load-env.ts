@@ -18,7 +18,7 @@
  * `@platform/config/load-env` subpath rather than the `@platform` barrel is what keeps that
  * true — the barrel pulls in Nest, drizzle and ioredis, and requiring those here would load
  * the very modules OTel still needs to patch. Same reason the OTel bootstrap itself is
- * imported from `@qnsc-vn/observability/otel` and not the package root.
+ * imported from `@quynhonsemiconductor/observability/otel` and not the package root.
  *
  * `loadEnvFile` does NOT overwrite variables that are already set, verified on Node 24, so
  * a real environment always wins over the file. That is what makes this safe to run in

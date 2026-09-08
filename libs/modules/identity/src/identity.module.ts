@@ -8,7 +8,7 @@ import {
   BffSessionStore,
   EntraOidcClient,
   type BffOptions,
-} from '@qnsc-vn/identity';
+} from '@quynhonsemiconductor/identity';
 import { EmployeeService } from './application/employee.service';
 import { OpshubBffSessionResolver } from './application/bff-session.resolver';
 import { EmployeesController } from './interface/http/employees.controller';
@@ -23,7 +23,7 @@ import { sharedAuthProviders } from './infrastructure/shared-auth/shared-auth.pr
 /**
  * Identity module — employee directory + authentication.
  *
- * Authentication is delegated to the shared `@qnsc-vn/identity` AuthService, wired to
+ * Authentication is delegated to the shared `@quynhonsemiconductor/identity` AuthService, wired to
  * opshub's concrete adapters via {@link sharedAuthProviders}. opshub keeps its own
  * `AuthController` (cookie shape + `/me` permission resolution) and its own JWT
  * strategy/guards; only the auth *service* is shared.
@@ -47,7 +47,7 @@ import { sharedAuthProviders } from './infrastructure/shared-auth/shared-auth.pr
     ...sharedAuthProviders,
 
     // ── BFF (Backend-for-Frontend): same-origin Entra OIDC session ─────────────
-    // The mechanism lives in `@qnsc-vn/identity` — the package exposes the pieces
+    // The mechanism lives in `@quynhonsemiconductor/identity` — the package exposes the pieces
     // rather than a module, so each product wires its own options and session store.
     // The multi-IdP broker collaborators (ConnectionRegistry, OidcClient,
     // OidcTokenVerifier) are deliberately NOT bound: they are `@Optional()` in
