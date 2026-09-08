@@ -24,7 +24,7 @@ provider "aws" {
   }
 }
 
-# github_org is declared in variables.tf (with a QNSC-VN default).
+# github_org is declared in variables.tf (with a quynhonsemiconductor default).
 
 # ── Platform remote state (OIDC provider ARN + KMS from qnsc-infra) ───────────
 data "terraform_remote_state" "platform" {
@@ -50,7 +50,7 @@ module "ecr" {
   # nothing to preview: the policy applies from the first pushed image. Run
   # `aws ecr start-lifecycle-policy-preview` before changing the counts later — it is a
   # dry run and the only way to see what a policy will delete.
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/ecr?ref=ecr-v2.0.0"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecr?ref=ecr-v2.0.0"
 
   repository_names     = ["opshub-api", "opshub-worker", "opshub-migrator"]
   image_tag_mutability = "MUTABLE" # allows re-tagging :latest
@@ -68,7 +68,7 @@ module "iam_oidc" {
   # modules, not from a change to this one — its variables and role names are identical
   # to v2.0.1 (verified by diffing both). Taking it now rather than later because these
   # roles do not exist yet, so there is no trust-policy replacement to sequence.
-  source = "git::https://github.com/QNSC-VN/qnsc-tf-modules.git//modules/iam-oidc?ref=iam-oidc-v3.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/iam-oidc?ref=iam-oidc-v3.0.1"
 
   product           = "opshub"
   github_org        = var.github_org

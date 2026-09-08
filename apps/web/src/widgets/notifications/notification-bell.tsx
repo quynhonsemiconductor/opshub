@@ -85,7 +85,7 @@ function NotifItem({ notif, onMarkRead }: NotifItemProps) {
         {notif.body && <p className="mt-0.5 text-xs text-fg-muted line-clamp-2">{notif.body}</p>}
         <p className="mt-1 text-2xs text-fg-subtle">{relativeTime(notif.createdAt)}</p>
       </div>
-      {!notif.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent-muted0" />}
+      {!notif.isRead && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />}
     </div>
   );
 }
@@ -161,7 +161,7 @@ export function NotificationBell() {
       >
         <Bell className="h-4 w-4" strokeWidth={1.75} />
         {unreadCount > 0 && (
-          <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent-muted0 text-2xs font-semibold leading-none text-white">
+          <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-2xs font-semibold leading-none text-white">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}

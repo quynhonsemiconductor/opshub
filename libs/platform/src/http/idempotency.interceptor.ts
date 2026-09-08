@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Observable, from } from 'rxjs';
 import { switchMap, tap } from 'rxjs/operators';
-import { CacheService } from '@qnsc-vn/platform-cache';
+import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { ConflictException, ValidationException } from '../errors/exceptions';
 import { ErrorCodes } from '../errors/error-codes';
 import type { JwtPayload } from '../auth/jwt.strategy';

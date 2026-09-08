@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CacheService } from '@qnsc-vn/platform-cache';
-import { JobMetrics, withJobContext } from '@qnsc-vn/observability';
+import { CacheService } from '@quynhonsemiconductor/platform-cache';
+import { JobMetrics, withJobContext } from '@quynhonsemiconductor/observability';
 
 /**
  * ExclusiveJob — run a scheduled job on exactly one pod, with a correlation id and

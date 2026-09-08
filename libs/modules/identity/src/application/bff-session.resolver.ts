@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { BffService } from '@qnsc-vn/identity';
+import { BffService } from '@quynhonsemiconductor/identity';
 import { type BffSessionResolver, type JwtPayload, toOpshubPrincipal } from '@platform';
 
 /**
- * Binds the shared `@qnsc-vn/identity` {@link BffService} to opshub's
+ * Binds the shared `@quynhonsemiconductor/identity` {@link BffService} to opshub's
  * {@link BffSessionResolver} contract, which the platform `JwtAuthGuard` consumes.
  *
  * The shared service resolves a session id to the product-neutral core payload; opshub

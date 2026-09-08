@@ -17,4 +17,4 @@ export * from './health.controller';
  * use the `/otel` subpath. This module is only loaded via the app modules, long after the
  * OTel bootstrap has installed its instrumentation.
  */
-export { Span } from '@qnsc-vn/observability';
+export { Span } from '@quynhonsemiconductor/observability';

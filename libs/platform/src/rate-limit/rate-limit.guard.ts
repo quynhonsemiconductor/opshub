@@ -10,7 +10,7 @@ import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { AppConfigService } from '../config/app-config.service';
-import { CacheService } from '@qnsc-vn/platform-cache';
+import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import {
   RATE_LIMIT_TIER,
   SKIP_RATE_LIMIT,
@@ -19,11 +19,11 @@ import {
 } from './rate-limit.constants';
 import type { JwtPayload } from '../auth/jwt.strategy';
 import { BFF_SESSION_COOKIE } from '../auth/bff-session-resolver';
-import { failOpenLog } from '@qnsc-vn/observability';
+import { failOpenLog } from '@quynhonsemiconductor/observability';
 
 /**
  * Global rate-limit guard backed by the shared sliding-window limiter
- * (@qnsc-vn/platform-cache `consumeRateLimit`, an atomic sorted-set log). rally
+ * (@quynhonsemiconductor/platform-cache `consumeRateLimit`, an atomic sorted-set log). rally
  * and opshub share the same limiter mechanism; only the tiers/policy differ.
  *
  * WHY THIS DOES NOT READ `req.user`, AND WHY IT USED TO TRY.

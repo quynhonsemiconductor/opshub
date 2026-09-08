@@ -33,7 +33,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import Redis from 'ioredis';
 import { AppConfigService } from '../config/app-config.service';
-import { CacheService } from '@qnsc-vn/platform-cache';
+import { CacheService } from '@quynhonsemiconductor/platform-cache';
 
 export interface NotificationPubSubPayload {
   notificationId: string;

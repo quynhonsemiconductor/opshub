@@ -1,8 +1,11 @@
 # =============================================================================
-# PR title — Conventional Commits, checked on its own.
+# PR title — Conventional Commits, checked on its own workflow.
 #
-# This job used to live inside BOTH Backend · CI and Web · CI, which caused two
-# problems it is extracted to fix.
+# The CHECK ITSELF now lives in quynhonsemiconductor/ci as a composite action. This
+# file was 72 lines byte-identical with opshub's, including the incident history
+# below, which is now recorded once in the action rather than in every repo.
+#
+# WHY ITS OWN WORKFLOW, rather than a job inside Backend · CI and Web · CI:
 #
 # 1. A FALSE GREEN, and the serious one. Those workflows listened for the `edited`
 #    pull_request action purely so this check would re-run when a title changed. But
@@ -14,17 +17,11 @@
 #
 # 2. The check ran TWICE per PR, once from each workflow, with byte-identical config.
 #
-# Both go away by giving the check its own workflow: it is the only thing that needs
-# `edited`, and it needs no repo checkout, so it costs seconds. The two CI workflows now
-# listen only for opened/synchronize/reopened, which means every run they produce is a
-# real one.
-#
-# The check NAME is unchanged — "PR title (conventional commits)" — so any branch
-# protection rule requiring it keeps matching, since GitHub matches required checks by
-# name rather than by workflow.
-#
-# Release Please derives the CHANGELOG from PR titles, so a malformed title is a release
-# defect, not a style nit.
+# WHY THE ACTION AND NOT ci's REUSABLE WORKFLOW: a job that calls a reusable workflow
+# reports its check as `<caller job>/<called job>`, which would rename this check and
+# leave the ruleset requiring "PR title (conventional commits)" matching nothing. A
+# required check that never reports does not fail — it blocks every merge. Calling the
+# action keeps the job local, so the name below is the name branch protection sees.
 # =============================================================================
 name: PR title
 
@@ -40,33 +37,14 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: read # required by amannn/action-semantic-pull-request
+  pull-requests: read # required by the action's underlying semantic-pull-request step
 
 jobs:
   pr-title:
+    # This name IS the required check. Do not rename it.
     name: PR title (conventional commits)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50  # v6
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          types: |
-            feat
-            fix
-            chore
-            docs
-            style
-            refactor
-            perf
-            security
-            test
-            build
-            ci
-            deps
-            revert
-          requireScope: false
-          subjectPattern: ^(?![A-Z]).+$
-          subjectPatternError: |
-            The subject "{subject}" must start with a lowercase letter.
+      # No checkout: the action reads the title from the event payload.
+      - uses: quynhonsemiconductor/ci/actions/pr-title-conventional-commits@v1

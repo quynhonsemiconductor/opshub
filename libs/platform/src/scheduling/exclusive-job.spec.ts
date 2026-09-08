@@ -1,4 +1,4 @@
-import type { CacheService } from '@qnsc-vn/platform-cache';
+import type { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ExclusiveJob } from './exclusive-job.service';
 

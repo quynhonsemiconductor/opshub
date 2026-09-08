@@ -7,7 +7,7 @@ import {
   StorageService,
   type DrizzleDB,
 } from '@platform';
-import { AuthTokenCache } from '@qnsc-vn/identity';
+import { AuthTokenCache } from '@quynhonsemiconductor/identity';
 import type { PresignUploadResult } from '@platform';
 import { SEC_PER_DAY } from '@shared-kernel';
 import {

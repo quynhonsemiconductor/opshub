@@ -24,7 +24,7 @@ import {
   SelfScoped,
 } from '@platform';
 import type { JwtPayload } from '@platform';
-import { BffService, readCookie } from '@qnsc-vn/identity';
+import { BffService, readCookie } from '@quynhonsemiconductor/identity';
 import { BffLoginDto, DevLoginDto } from '../dto/auth.dto';
 import {
   BFF_SESSION_COOKIE,

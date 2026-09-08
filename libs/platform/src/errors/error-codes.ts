@@ -298,7 +298,7 @@ export const ErrorCodes = {
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
 // The error-category taxonomy and its HTTP-status mapping are framework-level
-// invariants owned by @qnsc-vn/platform-http. Re-exported here so product code keeps
+// invariants owned by @quynhonsemiconductor/platform-http. Re-exported here so product code keeps
 // importing them from '@platform' while there is a SINGLE source of truth (no drift).
 // The product-specific `ErrorCode` catalog above stays local (product policy).
-export { type ErrorCategory, CATEGORY_HTTP_STATUS } from '@qnsc-vn/platform-http';
+export { type ErrorCategory, CATEGORY_HTTP_STATUS } from '@quynhonsemiconductor/platform-http';

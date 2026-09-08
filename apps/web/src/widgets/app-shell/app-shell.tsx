@@ -62,7 +62,13 @@ function AvatarChip({ name, email }: { name: string; email: string }) {
   );
 }
 
-/** Sidebar bottom — link to My Profile, shows current user name. */
+/**
+ * Sidebar bottom — link to My Profile, shows current user name.
+ *
+ * Active state uses accent-SECONDARY (violet) rather than the primary blue the nav items above use:
+ * "my profile" is a present-but-not-primary destination, and the second accent tier exists precisely
+ * for that distinction — see the token comment in globals.css.
+ */
 function UserFooter() {
   const { data: me } = useCurrentUser();
   return (
@@ -74,7 +80,7 @@ function UserFooter() {
       )}
       activeProps={{
         className:
-          'group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm bg-sidebar-active text-sidebar-fg-active',
+          'group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm bg-accent-secondary-muted text-accent-secondary-muted-fg shadow-[inset_2px_0_0_0_var(--accent-secondary)]',
       }}
     >
       {me ? (
@@ -146,7 +152,7 @@ export function AppShell() {
     <div className="flex h-full">
       {/* Sidebar */}
       {!collapsed && (
-        <aside className="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
+        <aside className="relative z-10 flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar shadow-[2px_0_8px_-4px_rgb(9_9_11_/_0.06)] dark:shadow-[2px_0_8px_-4px_rgb(0_0_0_/_0.35)]">
           {/* Logo + collapse toggle */}
           <div className="flex h-14 items-center gap-2.5 px-4 shrink-0">
             <OpsHubMark />
@@ -189,9 +195,15 @@ export function AppShell() {
                         'group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors',
                         'text-sidebar-fg hover:bg-sidebar-hover hover:text-sidebar-fg-active',
                       )}
+                      /*
+                       * Active state carries hierarchy on THREE channels, not one background swap: an
+                       * inset accent bar (via box-shadow, so it costs no layout width), a tinted fill,
+                       * and — via the [&>svg] selector below — the icon alone picking up the accent
+                       * color while the label stays the same neutral weight as every other row.
+                       */
                       activeProps={{
                         className:
-                          'group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm bg-sidebar-active text-sidebar-fg-active shadow-sm',
+                          'group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm bg-accent-muted text-sidebar-fg-active shadow-[inset_2px_0_0_0_var(--accent)] [&>svg]:text-accent',
                       }}
                     >
                       <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
@@ -224,6 +236,8 @@ export function AppShell() {
               Sign out
             </Button>
           </div>
+          {/* Text-only company credit — no logo, kept small and out of the way. */}
+          <p className="px-4 pb-3 pt-1 text-2xs text-sidebar-label">QNSC Co., Ltd.</p>
         </aside>
       )}
 

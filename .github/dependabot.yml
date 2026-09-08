@@ -19,12 +19,26 @@ updates:
       prefix: "deps"
     open-pull-requests-limit: 10
     groups:
+      # MINOR AND PATCH ONLY, and the exclusion is the point of the grouping.
+      #
+      # Without `update-types`, a group sweeps majors in alongside everything else and
+      # presents a framework upgrade as a routine bump. That is not hypothetical here:
+      # one such PR carried NestJS 11 -> 12 across nine packages plus ioredis 5 -> 6,
+      # in a +1300/-1600 diff titled "bump the production-dependencies group with 45
+      # updates". Its sibling carried TypeScript 6 -> 7 and vitest 4 -> 5, and failed
+      # lint outright. Both were closed rather than reviewed, because a 45-package diff
+      # containing a framework major cannot be attributed when something breaks.
+      #
+      # Majors still get PRs — they simply open individually, one dependency each,
+      # reviewable on their own merits.
       production-dependencies:
         dependency-type: "production"
+        update-types: ["minor", "patch"]
       development-dependencies:
         dependency-type: "development"
+        update-types: ["minor", "patch"]
 
-  # Shared Terraform modules from qnsc-tf-modules, pinned by git tag as
+  # Shared Terraform modules from tf-modules, pinned by git tag as
   # `?ref=<module>-vX.Y.Z`. WITHOUT THIS ECOSYSTEM every module bump is manual, and that
   # is exactly how the drift happened: ecs-cluster sat at v1.0.0 in both products while
   # v2.0.0 was released, and qnsc-infra-template — the repo new products are created from

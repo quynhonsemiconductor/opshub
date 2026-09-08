@@ -278,7 +278,7 @@ export const AUDIT_ACTION = {
   WEBHOOK_DELIVERY_RETRIED: 'webhook_delivery.retried',
 
   /**
-   * ── Emitted by `@qnsc-vn/identity`, NOT by this repo ──
+   * ── Emitted by `@quynhonsemiconductor/identity`, NOT by this repo ──
    *
    * These arrive as plain strings through `AuditServiceAdapter` and opshub cannot rename
    * them; they are declared here so the adapter has something to narrow to and so the
@@ -360,7 +360,7 @@ export const AUDIT_RESOURCE = {
   OVERTIME_ENTRY: 'overtime_entry',
   WEBHOOK_SUBSCRIPTION: 'webhook_subscription',
   WEBHOOK_DELIVERY: 'webhook_delivery',
-  // Emitted by `@qnsc-vn/identity` — see the actions section above.
+  // Emitted by `@quynhonsemiconductor/identity` — see the actions section above.
   SESSION: 'session',
   USER: 'user',
 } as const;

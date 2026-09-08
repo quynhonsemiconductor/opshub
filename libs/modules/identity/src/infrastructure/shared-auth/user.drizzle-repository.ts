@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB, type DbExecutor } from '@platform';
-import type { IUserRepository, SsoIdentity, User, UserStatus } from '@qnsc-vn/identity';
+import type { IUserRepository, SsoIdentity, User, UserStatus } from '@quynhonsemiconductor/identity';
 import { employees, ssoIdentities } from '../../../../../../db/schema';
 
 type EmployeeRow = typeof employees.$inferSelect;
