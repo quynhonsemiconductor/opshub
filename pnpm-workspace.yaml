@@ -26,9 +26,13 @@ overrides:
   #   GHSA-5p4m-2wfm-xmqj (CVE-2026-59870) — quadratic CPU in !!omap resolution,
   #     CVSS 7.5, fixed 4.3.1. NOT backported to 3.x. 5.x is unaffected, so only the
   #     4.x floor moves.
-  # The floor is ^4.3.1, not ">=4.3.1": the looser form crosses into 5.x, and
+  #   GHSA-2883-xcg3-v3hh — CVSS 7.5, fixed 4.3.2. `maxTotalMergeKeys` counts only the
+  #     keys a merge actually CONTRIBUTES, so an alias chain of EMPTY merge sources
+  #     burns CPU without ever incrementing the counter the limit reads: the mitigation
+  #     added for the advisory above is what this one walks past. 5.x unaffected again.
+  # The floor is ^4.3.2, not ">=4.3.2": the looser form crosses into 5.x, and
   # @nestjs/swagger 11.4.5 and cosmiconfig were built against the 4.x API.
-  "js-yaml@4": "^4.3.1"
+  "js-yaml@4": "^4.3.2"
   "js-yaml@5": "^5.2.2"
   # GHSA-c96f-x56v-gq3h — HIGH "DDoS with HTTP2", fixed 9.7.0. Transitive via
   # fastify / @nestjs/platform-fastify, whose declared ^9.6.0 already allows it.
