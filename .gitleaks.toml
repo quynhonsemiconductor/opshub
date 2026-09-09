@@ -1,3 +1,16 @@
+# EXTENDS the default ruleset — it does not replace it.
+#
+# Without this block gitleaks 8 treats a discovered config as THE config, so a file
+# that defines only an [allowlist] and no [[rules]] leaves the scanner with an EMPTY
+# ruleset. It then finds nothing, exits 0, and the required `Secret scan (Gitleaks)`
+# check goes green — a security control whose failure mode is silent success. That is
+# what this file did from the day it was added until 2026-09-09; verified by probe, a
+# real `ghp_` token was NOT detected while this block was absent, and IS with it.
+#
+# Never delete these two lines to "simplify" the config.
+[extend]
+useDefault = true
+
 title = "opshub gitleaks config"
 
 [allowlist]
@@ -6,10 +19,25 @@ description = "Known false-positives in test and dev files"
 # Test JWT key pairs in vitest.config.ts — placeholder EC P-256 keys, never used for real signing.
 paths = [
   '''vitest\.config\.ts''',
+  # .env.example is a TEMPLATE — every value in it is a placeholder, including
+  # JWT_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----,
+  # which is what trips the `private-key` rule. A path entry rather than a regex
+  # because the whole file is placeholders by definition; a real secret does not
+  # belong here in any form, and one committed to .env.example would be a mistake
+  # to fix at the source rather than to detect.
+  '''\.env\.example''',
 ]
 
 # Hardcoded dev/CI service credentials intentionally public.
 # postgres/postgres is the standard docker-compose convention for ephemeral CI containers.
 regexes = [
   '''POSTGRES_PASSWORD:\s*postgres''',
+  # CI CSRF placeholder — self-describing, exists only to satisfy CSRF_SECRET's
+  # 32-character minimum in CI jobs. A regex, not a .gitleaksignore fingerprint,
+  # because fingerprints are commit-scoped and this literal recurs in every new
+  # commit touching those workflow lines.
+  '''ci-test-csrf-secret-min-32-characters-okay''',
+  # Smoke-test webhook secret in scripts/smoke-api.py — a fixed placeholder posted to
+  # https://example.invalid, named for the length rule it exists to satisfy.
+  '''smoke-secret-at-least-16-chars''',
 ]
