@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -169,13 +169,39 @@ describe('the catalogue is the only vocabulary', () => {
     // `--untracked` so the result does not depend on what happens to be staged —
     // without it a brand-new file is invisible and the test passes for the wrong
     // reason.
-    const hits = execFileSync(
+    //
+    // The boundary is spelled out rather than written `\b`. `git grep -E` is POSIX
+    // ERE, where `\b` is a GNU EXTENSION: glibc honours it, so this matched on CI
+    // and passed, while BSD's regex does not, so on macOS it matched NOTHING — and
+    // no match is also this test's own passing condition, so the check could not
+    // run at all on a developer's machine and reported it as a thrown error.
+    // `($|[^A-Za-z0-9_])` is the same assertion in a dialect both engines share, so
+    // `PERMISSION_DESCRIPTIONS` still does not count as a second map.
+    //
+    // `spawnSync`, not `execFileSync`: git grep exits 1 to mean "no matches", which
+    // is a RESULT here and not a failure. execFileSync turns that exit code into a
+    // throw, so the one outcome this test exists to accept arrived as a crash whose
+    // message named neither the catalogue nor the file that broke the rule. Anything
+    // other than 0 or 1 is still a real fault and is re-thrown.
+    const found = spawnSync(
       'git',
-      ['grep', '--untracked', '-l', '-E', 'export const PERMISSION\\b', '--', 'libs', 'apps', 'db'],
+      [
+        'grep',
+        '--untracked',
+        '-l',
+        '-E',
+        'export const PERMISSION($|[^A-Za-z0-9_])',
+        '--',
+        'libs',
+        'apps',
+        'db',
+      ],
       { cwd: ROOT, encoding: 'utf8' },
-    )
-      .split('\n')
-      .filter(Boolean);
+    );
+    if (found.status !== 0 && found.status !== 1) {
+      throw new Error(`git grep failed (${found.status}): ${found.stderr}`);
+    }
+    const hits = found.stdout.split('\n').filter(Boolean);
 
     expect(hits).toEqual(['db/permissions.catalog.ts']);
   });
