@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.2](https://github.com/quynhonsemiconductor/opshub/compare/v0.3.1...v0.3.2) (2026-09-10)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** run CI on stacked pull requests, not only PRs aimed at main ([#330](https://github.com/quynhonsemiconductor/opshub/issues/330)) ([fee1264](https://github.com/quynhonsemiconductor/opshub/commit/fee1264dfcc908071aac07686e0598b34435dd64))
+* **deps:** update @quynhonsemiconductor/identity and platform-cache ([#322](https://github.com/quynhonsemiconductor/opshub/issues/322)) ([60c938f](https://github.com/quynhonsemiconductor/opshub/commit/60c938f2aec11e1e4c6ab94ed11eb7781bf69468))
+* **platform:** converge sanitize.util with rova ([#324](https://github.com/quynhonsemiconductor/opshub/issues/324)) ([453c175](https://github.com/quynhonsemiconductor/opshub/commit/453c17584022cc67cb2446f2932278c5d178789d))
+* **test:** make the second-PERMISSION-map ratchet run on macOS ([#328](https://github.com/quynhonsemiconductor/opshub/issues/328)) ([c5f56b0](https://github.com/quynhonsemiconductor/opshub/commit/c5f56b00bc079e64f1f87710c6d8e3990900fe5b))
+
+
+### 🔒 Security
+
+* **ci:** arm gitleaks — the config was replacing the default ruleset ([#329](https://github.com/quynhonsemiconductor/opshub/issues/329)) ([63b175b](https://github.com/quynhonsemiconductor/opshub/commit/63b175b4950d48a411253d17e7a64c0b7307547e))
+* **deps:** raise js-yaml to 4.3.2 and vitest to 4.1.11 for two 2026-09-08 advisories ([#327](https://github.com/quynhonsemiconductor/opshub/issues/327)) ([fd9f50d](https://github.com/quynhonsemiconductor/opshub/commit/fd9f50d9a1a43cf16ffe5fb0c8c5119d01a66c21))
+
 ## [0.3.1](https://github.com/quynhonsemiconductor/opshub/compare/v0.3.0...v0.3.1) (2026-09-08)
 
 
