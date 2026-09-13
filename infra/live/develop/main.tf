@@ -118,24 +118,28 @@ module "stack" {
   log_retention_days           = 7
   secrets_recovery_window_days = 0
 
-  // Step 3 of the staged migration to a bundled secret (see
+  // Step 5 (final) of the staged migration to a bundled secret (see
   // infra/modules/stack/variables.tf's secrets_bundle_name for the full ordering).
   //
   // Step 1 created opshub/develop/app empty. Step 2 populated it out of band from the
   // eight standalone secrets on 2026-09-13, verified key-by-key with SHA256 — all eight
   // matched before anything was switched.
   //
-  // This step points the task definitions at the bundle. `secrets_create_standalone`
-  // is TRUE deliberately: it keeps the standalone secrets in place, so a rollback is
-  // reverting `secrets_use_bundle` to false rather than restoring destroyed values.
-  // Drop it, and them, once opshub-develop has been observed booting from the bundle.
+  // `secrets_create_standalone` is now unset, so it defaults to `!use_bundle` = false and
+  // the eight standalone secrets are destroyed. Held back until the bundle was PROVEN:
+  // a one-off Fargate task on the bundle-based task definition reached RUNNING, and ECS
+  // pulls every secret before the container starts, so reaching RUNNING is proof that all
+  // eight keys resolved and the execution role could read the container.
+  //
+  // That verification also caught a real bug first — both execution roles had been granted
+  // IAM on `secret_arns` (valueFrom references, invalid as IAM resources) rather than
+  // `secret_iam_arns`. Fixed before this step; see the api execution role's own comment.
   //
   // Cost is the reason: Secrets Manager bills per SECRET. opshub carries 17 standalone
   // secrets across both environments at ~$0.40 each; rova collapsed the same data into
   // two bundles. This is opshub catching up with rova, not a new idea.
-  secrets_bundle_name       = "app"
-  secrets_use_bundle        = true
-  secrets_create_standalone = true
+  secrets_bundle_name = "app"
+  secrets_use_bundle  = true
 
   // OFF here and in production alike — see ../prod/main.tf. Per-task metrics are
   // billed as custom CloudWatch metrics and nothing in this product queries them.
