@@ -162,5 +162,12 @@ variable "alarm_emails" {
     Empty means the alarms still exist and still change state — they just page nobody.
   EOT
   type        = list(string)
-  default     = []
+  # devops@qnsc.vn is an M365 SHARED MAILBOX, deliberately, not an alias on a person.
+  # Recipients are managed in the admin centre rather than here, and the address survives
+  # any individual leaving. Confirm the subscription once from inside that mailbox.
+  #
+  # ARMED 2026-09-12. This was `[]` — and the consequence was measured, not theoretical:
+  # `opshub-prod-alarms` existed in AWS with ZERO subscriptions, so every alarm in this
+  # environment changed state and notified no one.
+  default = ["devops@qnsc.vn"]
 }

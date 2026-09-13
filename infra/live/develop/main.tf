@@ -128,6 +128,34 @@ module "stack" {
   // billed as custom CloudWatch metrics and nothing in this product queries them.
   container_insights = "disabled"
 
+  // ── Cache: the SHARED runtime node, not one of our own ──────────────────────
+  // Verified against live AWS 2026-09-12: three cache.t4g.micro Valkey nodes existed —
+  // `qnsc-runtime-dev-cache-001` (the SHARED develop node), `rova-prod-cache-001`
+  // (legitimate), and `opshub-develop-valkey-001`. That third one should never have
+  // existed: the shared node exists precisely so develop environments do not each run
+  // their own, and qnsc-infra live/runtime-dev records the saving as $15.45/mo replacing
+  // $30.90.
+  //
+  // WHY IT DID. rova and qnsc-kb consume the shared node via `shared = true` with
+  // db_index 0 and 1. This stack had no such option — `shared` and `db_index` existed in
+  // rova's infra/modules/stack and were ABSENT from opshub's, so the consolidation landed
+  // in two of three duplicated composition modules and this one silently kept the default
+  // `enabled = true`. The cost of that duplication was ~$15/mo, paid monthly, invisibly.
+  // Both fields were ported into ../../modules/stack on 2026-09-12; this is the first
+  // caller to use them.
+  //
+  // db_index 2, allocated centrally in the `cache` variable's own comment alongside
+  // rova=0 and qnsc-kb=1. A database index rather than a key prefix because the server
+  // enforces it and a convention does not.
+  //
+  // APPLY EFFECT: destroys `opshub-develop-valkey-001` and issues a new endpoint, so the
+  // task definitions are replaced and the next deploy rolls onto them. Both services sit
+  // at min_count = 0, so nothing is serving while that happens.
+  cache = {
+    shared   = true
+    db_index = 2
+  }
+
   // ── Ingress: no ALB exists any more ─────────────────────────────────────────
   // The shared ALBs in qnsc-infra/live/runtime-{dev,prod} were DELETED once both
   // products moved to Cloudflare Tunnels, so `https_listener_arn` is null and there is

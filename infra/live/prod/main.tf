@@ -5,9 +5,15 @@
 // on-demand capacity, deletion protection, 90-day retention, a real secret recovery
 // window.
 //
-// NOT YET APPLIED. There is no `opshub/prod/terraform.tfstate`, so this file describes
-// the environment that the first v*.*.* tag will create. The go-live checklist on the
-// `rds` block below is part of that first apply, not a later hardening pass.
+// APPLIED. `opshub/prod/terraform.tfstate` exists (verified 2026-09-12 against the state
+// bucket; the RDS instance `opshub-prod` is `available` with 30-day retention and deletion
+// protection, and the `opshub-prod` ECS cluster and alarm topic exist).
+//
+// This comment previously read "NOT YET APPLIED. There is no opshub/prod/terraform.tfstate"
+// and was stale — it misled an infrastructure audit into treating opshub production as a
+// greenfield target for state-affecting refactors. The go-live checklist on the `rds` block
+// below is therefore a HARDENING pass on a live environment, not part of a first apply:
+// changing instance class or enabling Multi-AZ now replaces or modifies a running database.
 terraform {
   required_version = ">= 1.9"
   required_providers {

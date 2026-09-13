@@ -91,9 +91,28 @@ locals {
   # endpoint address grants nothing on its own — so it travels as plain env.
   # `.invalid` is reserved by RFC 2606 and can never resolve, so an idled environment
   # that somehow runs a task fails with a loud DNS error naming the cause rather than
-  # quietly degrading. The real guard is the `check` block at the bottom of this file:
+  # quietly degrading. The real guard is the cross-variable `validation` on var.cache:
   # with the cache off, no task may run at all.
-  valkey_url = var.cache.enabled ? "rediss://${module.cache[0].endpoint}:${module.cache[0].port}" : "rediss://cache-disabled.invalid:6379"
+  #
+  # THREE-WAY, ported from rova 2026-09-12 with `cache.shared`:
+  #   disabled       -> unresolvable host, and no task may run (validation enforces it)
+  #   shared         -> the runtime layer's node, with this product's database index
+  #   dedicated      -> this product's own node
+  # The shared branch reads the runtime stack's outputs through `try(...)` so a develop
+  # runtime with `enable_shared_cache = false` yields a named unresolvable host rather
+  # than an "Invalid index" plan error that reads as a fault in this stack.
+  shared_cache_endpoint = try(data.terraform_remote_state.runtime.outputs.cache_endpoint, null)
+  shared_cache_port     = try(data.terraform_remote_state.runtime.outputs.cache_port, 6379)
+
+  valkey_url = (
+    !var.cache.enabled ? "rediss://cache-disabled.invalid:6379" :
+    var.cache.shared ? (
+      local.shared_cache_endpoint == null
+      ? "rediss://shared-cache-missing.invalid:6379"
+      : "rediss://${local.shared_cache_endpoint}:${local.shared_cache_port}/${var.cache.db_index}"
+    ) :
+    "rediss://${module.cache[0].endpoint}:${module.cache[0].port}"
+  )
 
   tags = { Environment = var.env }
 
@@ -299,7 +318,11 @@ module "rds" {
 # into the task is not. At-rest KMS and transit encryption are both on, which is why
 # the URL above is `rediss://`.
 module "cache" {
-  count  = var.cache.enabled ? 1 : 0
+  # NOT created when this product uses the shared node in the runtime layer. Switching a
+  # live environment to `shared` therefore DESTROYS its dedicated node — that is where the
+  # saving is — and issues a different endpoint, so the change is a task-definition
+  # revision and a rolling deploy, not an in-place edit.
+  count  = var.cache.enabled && !var.cache.shared ? 1 : 0
   source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/cache?ref=cache-v1.1.0"
 
   name              = "${local.name}-valkey"
@@ -1353,8 +1376,12 @@ module "observability" {
   # and a count gated on that directly is a hard OpenTofu error, not a deferred
   # plan (see observability-v4.2.1's own changelog). This condition is known at
   # plan time regardless.
-  enable_cache_alarms = var.cache.enabled && var.cache.mode == "node"
-  cache_cluster_id    = var.cache.enabled && var.cache.mode == "node" ? module.cache[0].cluster_id : ""
+  # Also excludes `shared`: a shared node's alarms belong to whoever OWNS the node — the
+  # runtime layer — not to every product borrowing a database index on it. Without this,
+  # each product would create duplicate alarms on the same cluster, and
+  # `module.cache[0]` would not exist to read the id from.
+  enable_cache_alarms = var.cache.enabled && !var.cache.shared && var.cache.mode == "node"
+  cache_cluster_id    = var.cache.enabled && !var.cache.shared && var.cache.mode == "node" ? module.cache[0].cluster_id : ""
 
   # Empty while the api is tunnelled: the shared ALBs were deleted when both products moved to
   # tunnels, so `runtime.outputs.alb_arn` is absent and the two ALB alarms have nothing to read.
