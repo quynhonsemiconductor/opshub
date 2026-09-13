@@ -118,11 +118,24 @@ module "stack" {
   log_retention_days           = 7
   secrets_recovery_window_days = 0
 
-  // Step 1 of the staged migration to a bundled secret (see
-  // infra/modules/stack/variables.tf's secrets_bundle_name for why it's staged):
-  // creates opshub/develop/app, empty, alongside the existing standalone secrets.
-  // secrets_use_bundle stays unset (false) — nothing reads from it yet.
-  secrets_bundle_name = "app"
+  // Step 3 of the staged migration to a bundled secret (see
+  // infra/modules/stack/variables.tf's secrets_bundle_name for the full ordering).
+  //
+  // Step 1 created opshub/develop/app empty. Step 2 populated it out of band from the
+  // eight standalone secrets on 2026-09-13, verified key-by-key with SHA256 — all eight
+  // matched before anything was switched.
+  //
+  // This step points the task definitions at the bundle. `secrets_create_standalone`
+  // is TRUE deliberately: it keeps the standalone secrets in place, so a rollback is
+  // reverting `secrets_use_bundle` to false rather than restoring destroyed values.
+  // Drop it, and them, once opshub-develop has been observed booting from the bundle.
+  //
+  // Cost is the reason: Secrets Manager bills per SECRET. opshub carries 17 standalone
+  // secrets across both environments at ~$0.40 each; rova collapsed the same data into
+  // two bundles. This is opshub catching up with rova, not a new idea.
+  secrets_bundle_name       = "app"
+  secrets_use_bundle        = true
+  secrets_create_standalone = true
 
   // OFF here and in production alike — see ../prod/main.tf. Per-task metrics are
   // billed as custom CloudWatch metrics and nothing in this product queries them.
