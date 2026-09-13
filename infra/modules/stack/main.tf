@@ -469,8 +469,19 @@ module "api" {
   # length from `count`, which is known from config regardless of the ARN's value.
   # module.firelens_agent_api.secret_arns is the router's own observability-token
   # read grant — missing it left the execution role unable to pull that secret too.
+  # `secret_iam_arns`, NOT `secret_arns`: this is an IAM RESOURCE list. The two outputs
+  # are identical while secrets are standalone, but with `use_bundle` on, `secret_arns`
+  # returns "<arn>:<key>::" — a valueFrom reference, not an ARN. An IAM statement built
+  # from those matches NOTHING while still applying cleanly, and the failure surfaces at
+  # the next task start as "unable to pull secrets", long after the apply reported success.
+  #
+  # Caught on 2026-09-13 by reading the rendered policy after enabling the bundle: the
+  # grant listed `opshub/develop/app-g5z7BM:jwt-private::` and friends with no container
+  # ARN among them. Develop is idled to zero, so nothing was running to fail; the next
+  # scheduled scale-up would have been the first symptom. rova documents the same trap at
+  # its own api execution role.
   secret_arns = concat(
-    values(module.secrets.secret_arns),
+    values(module.secrets.secret_iam_arns),
     [module.rds.master_secret_arn],
     aws_secretsmanager_secret.tunnel_token[*].arn,
     module.firelens_agent_api.secret_arns,
@@ -545,8 +556,19 @@ module "worker" {
   # module.firelens_agent_worker.secret_arns is the worker's own router's
   # observability-token read grant — no tunnel_token here, the worker has no tunnel
   # sidecar (it serves no HTTP surface).
+  # `secret_iam_arns`, NOT `secret_arns`: this is an IAM RESOURCE list. The two outputs
+  # are identical while secrets are standalone, but with `use_bundle` on, `secret_arns`
+  # returns "<arn>:<key>::" — a valueFrom reference, not an ARN. An IAM statement built
+  # from those matches NOTHING while still applying cleanly, and the failure surfaces at
+  # the next task start as "unable to pull secrets", long after the apply reported success.
+  #
+  # Caught on 2026-09-13 by reading the rendered policy after enabling the bundle: the
+  # grant listed `opshub/develop/app-g5z7BM:jwt-private::` and friends with no container
+  # ARN among them. Develop is idled to zero, so nothing was running to fail; the next
+  # scheduled scale-up would have been the first symptom. rova documents the same trap at
+  # its own api execution role.
   secret_arns = concat(
-    values(module.secrets.secret_arns),
+    values(module.secrets.secret_iam_arns),
     [module.rds.master_secret_arn],
     module.firelens_agent_worker.secret_arns,
   )
