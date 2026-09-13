@@ -481,7 +481,7 @@ module "api" {
   # scheduled scale-up would have been the first symptom. rova documents the same trap at
   # its own api execution role.
   secret_arns = concat(
-    values(module.secrets.secret_iam_arns),
+    module.secrets.secret_iam_arns,
     [module.rds.master_secret_arn],
     aws_secretsmanager_secret.tunnel_token[*].arn,
     module.firelens_agent_api.secret_arns,
@@ -568,7 +568,7 @@ module "worker" {
   # scheduled scale-up would have been the first symptom. rova documents the same trap at
   # its own api execution role.
   secret_arns = concat(
-    values(module.secrets.secret_iam_arns),
+    module.secrets.secret_iam_arns,
     [module.rds.master_secret_arn],
     module.firelens_agent_worker.secret_arns,
   )
