@@ -10,8 +10,17 @@ output "ecs_migrator_task_def" {
 }
 output "rds_endpoint" { value = module.rds.endpoint }
 output "rds_master_secret_arn" { value = module.rds.master_secret_arn }
-# Null when the cache is disabled for an idled environment, rather than a plan error.
-output "cache_endpoint" { value = var.cache.enabled ? module.cache[0].endpoint : null }
+# THREE cases, matching local.valkey_url:
+#   disabled  -> null, rather than a plan error, so an idled environment still plans
+#   shared    -> the runtime layer's node, which is the endpoint this stack actually uses
+#   dedicated -> this stack's own node
+# The shared branch must not touch module.cache: with `cache.shared = true` no node is
+# created here, so `module.cache[0]` is an index into an empty tuple and fails the plan.
+output "cache_endpoint" {
+  value = !var.cache.enabled ? null : (
+    var.cache.shared ? local.shared_cache_endpoint : module.cache[0].endpoint
+  )
+}
 output "secret_arns" { value = module.secrets.secret_arns }
 
 # Networking — needed for ECS run-task (migrator) and the GitHub environment vars.

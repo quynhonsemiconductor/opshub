@@ -343,11 +343,41 @@ variable "cache" {
     # Create the cache node at all. False is for an environment that is deliberately
     # idle: ElastiCache cannot be stopped, only deleted, so the node is the one component
     # of an idled environment that keeps billing (~$12/mo). Requires min_count = 0 on
-    # BOTH services — the `check` block in main.tf enforces it, because a task without a
-    # reachable cache does not fail loudly.
+    # BOTH services — enforced by the `validation` block below, NOT a `check` block (see
+    # its comment for why the distinction matters).
     enabled   = optional(bool, true)
     mode      = optional(string, "node")
     node_type = optional(string, "cache.t4g.micro")
+
+    # Use the SHARED node in the runtime layer instead of creating one for this product.
+    #
+    # PORTED FROM rova 2026-09-12, because its absence here cost real money. ElastiCache
+    # has no stopped state, so a per-product node bills 730 h/month however little the
+    # environment runs. rova and qnsc-kb already consumed the shared node via db_index 0
+    # and 1; this module had no way to, so opshub-develop provisioned its own
+    # `opshub-develop-valkey-001` and paid ~$15/mo for a cache serving an environment whose
+    # services sit at min_count = 0. Verified against live AWS: three t4g.micro nodes
+    # existed where two were needed.
+    #
+    # The runtime layer already owned the security group and the data subnets. Only the
+    # node was duplicated. See qnsc-infra live/runtime-dev, module.shared_cache.
+    shared = optional(bool, false)
+
+    # Which Valkey database this product uses on the shared node. IGNORED when
+    # `shared = false` — a dedicated node has nobody to collide with.
+    #
+    # NOT A KEY PREFIX, deliberately: a prefix has to be honoured by every library that
+    # touches the connection, whereas a database index is enforced by the server. Cluster
+    # mode is disabled on the shared node (num_cache_clusters = 1), so all 16 databases
+    # exist and SELECT works.
+    #
+    # ALLOCATE CENTRALLY. Two products silently sharing an index is exactly the collision
+    # this exists to prevent, and nothing detects it at plan time.
+    #
+    # THE REGISTRY LIVES IN ONE PLACE: qnsc-infra `allocations.json`, key
+    # `cache_db_index_allocations`. Do not copy the table here — it drifted into three
+    # different states across the three product stack modules before being centralised.
+    db_index = optional(number, 0)
   })
   default = {}
 
@@ -363,6 +393,19 @@ variable "cache" {
   validation {
     condition     = var.cache.enabled || (var.api.min_count == 0 && var.worker.min_count == 0)
     error_message = "cache.enabled = false requires min_count = 0 on BOTH services. Without a cache, tasks do not fail loudly — VALKEY_URL resolves nowhere and the token denylist and rate limiter fail open. Set both floors to 0, or re-enable the cache."
+  }
+
+  # `shared` without `enabled` reads as "use the shared cache" and silently produces the
+  # cache-disabled URL instead — the same fail-open state the validation above exists to
+  # prevent, reached by a different route.
+  validation {
+    condition     = !var.cache.shared || var.cache.enabled
+    error_message = "cache.shared = true requires cache.enabled = true. `shared` selects WHERE the cache is, not WHETHER there is one."
+  }
+
+  validation {
+    condition     = var.cache.db_index >= 0 && var.cache.db_index <= 15
+    error_message = "cache.db_index must be 0-15: Valkey exposes 16 databases when cluster mode is disabled, which is what the shared node runs."
   }
 }
 

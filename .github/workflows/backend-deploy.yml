@@ -294,6 +294,24 @@ jobs:
       # the reusable workflow's own stated reason for having a separate runner input.
       build_runner: ubuntu-24.04-arm
       image_platforms: linux/arm64
+
+      # ── Build cache: GHA, not the `registry` default ─────────────────────────
+      # The registry backend writes a `:buildcache` tag to ECR with `mode=max` and PULLS it
+      # back on every build. GitHub runners live outside AWS, so each pull is ECR internet
+      # egress at ~$0.085/GB. Measured 2026-09-12: ECR spend is ~94% DataTransfer-Out
+      # ($29.49 / 345 GB in August) against $1.74 of storage — the opposite of where anyone
+      # would look first.
+      #
+      # opshub's `:buildcache` is 0.35 GiB per image, which build-push-ecr's note calls
+      # "effectively free" — accurate per image, misleading in aggregate: three images here
+      # plus three in rova at ~5 builds/day is roughly 167 GB/month, about $14.
+      #
+      # `gha` keeps the cache and removes the egress. The 10 GB per-repository cap that
+      # forced qnsc-kb onto `none` is irrelevant at ~1 GiB total across three scopes. The
+      # cost is a lower cache hit rate on feature branches (GHA scopes per branch, falling
+      # back to the default branch), paid in build minutes, which are unmetered on public
+      # repositories.
+      cache_backend: gha
     # Least-privilege: pass only what the reusable declares (no `secrets: inherit`).
     secrets:
       AWS_ACCOUNT_ID:       ${{ vars.AWS_ACCOUNT_ID }}
