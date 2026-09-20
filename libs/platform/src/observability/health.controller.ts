@@ -18,6 +18,34 @@ export class HealthController {
     @InjectDrizzle() private readonly db: DrizzleDB,
   ) {}
 
+  /**
+   * Liveness probe for Kubernetes — is the process alive?
+   *
+   * SERVED AT `/livez`, NOT `/v1/livez` — the exclusion is in
+   * `apps/api/src/bootstrap/app.bootstrap.ts`. `gitops/charts/qnsc-service`
+   * hardcodes the liveness path (§9j: it is deliberately NOT a per-service
+   * value), and `gitops/platform/policy/admission.yaml` DENIES any Deployment
+   * whose liveness path is not exactly `/livez`. So a prefixed path is not a
+   * lesser option, it is a rejected manifest — and a missing route is a 404, a
+   * restarting container and CrashLoopBackOff.
+   *
+   * It DUPLICATES `healthz` rather than replacing it because `/v1/healthz` is
+   * load-bearing on the ECS path — the ALB target group and the Dockerfile
+   * HEALTHCHECK both point at it — and §17b runs both platforms at once. They
+   * collapse into one at Phase 5.
+   *
+   * ⚠ NEVER TOUCH A DEPENDENCY HERE. §9j: a liveness probe that checks the
+   * database turns a slowdown into an outage, because Kubernetes kills every
+   * replica of every service at once. `readyz` is where dependencies belong.
+   */
+  @Get('livez')
+  @Public()
+  @SkipRateLimit()
+  @ApiOperation({ summary: 'Kubernetes liveness probe — process only, no dependencies' })
+  livez() {
+    return { status: 'ok' };
+  }
+
   /** Liveness probe — is the process alive? */
   @Get('healthz')
   @Public()
