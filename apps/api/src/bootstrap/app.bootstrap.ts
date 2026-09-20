@@ -1,3 +1,4 @@
+import { RequestMethod } from '@nestjs/common';
 import fastifyCompress from '@fastify/compress';
 import fastifyCookie from '@fastify/cookie';
 import fastifyCsrf from '@fastify/csrf-protection';
@@ -112,7 +113,20 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
 
   // Health probes are served at /v1/healthz and /v1/readyz to match the ALB
   // target-group health check, the Docker HEALTHCHECK, and the deploy smoke test.
-  app.setGlobalPrefix('v1');
+  // `/livez` IS EXCLUDED from the prefix, and it is the one route that must be.
+  // The Kubernetes chart hardcodes the liveness path (§9j — not a per-service
+  // value) and `gitops/platform/policy/admission.yaml` DENIES any other path, so
+  // `/v1/livez` would be a rejected manifest rather than a working probe. Without
+  // the route the probe 404s and the pod sits in CrashLoopBackOff.
+  //
+  // Readiness needs no exclusion: `readinessPath` IS a chart value, and
+  // `gitops/values/opshub/base.yaml` sets it to `/v1/readyz`.
+  //
+  // Same change as rova, same cause — both share app-platform's health
+  // controller. Found 2026-09-19 in the pre-apply audit.
+  app.setGlobalPrefix('v1', {
+    exclude: [{ path: 'livez', method: RequestMethod.GET }],
+  });
   app.enableShutdownHooks();
 
   // Expose OpenAPI only outside production — avoids leaking endpoint inventory

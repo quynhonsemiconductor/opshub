@@ -38,22 +38,32 @@ data "terraform_remote_state" "platform" {
 
 # ── Container registries ──────────────────────────────────────────────────────
 module "ecr" {
-  # ecr-v2.0.0 splits the keep-count lifecycle rule by tag prefix. The single rule it
-  # replaces was provably dead: `tagPrefixList` is AND, not OR, so one rule listing
-  # ["sha-", "v"] only ever selected images carrying BOTH prefixes and never fired.
-  # rally verified that on live repositories (105 `sha-` images under a policy claiming
-  # to keep 30).
+  # ecr-v2.1.0 (task 0.7, §13): the RELEASE keep rule is now TIME-based
+  # (`release_retention_days = 180`) instead of count-based. A count is a duration only if
+  # the promotion rate is known, and GitOps raises that rate, so a count silently shortens
+  # the rollback window as deploys get healthier. The tag EXISTS (release-please cut it),
+  # so this bump plans and validates today.
   #
-  # No argument change is needed here: this call never set `keep_tagged_count` or
-  # `tag_prefix_list`, so it simply adopts the new defaults — keep 30 releases (v*) and
-  # 20 builds (sha-*). These repositories do not exist yet, so unlike rally there is
-  # nothing to preview: the policy applies from the first pushed image. Run
-  # `aws ecr start-lifecycle-policy-preview` before changing the counts later — it is a
-  # dry run and the only way to see what a policy will delete.
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecr?ref=ecr-v2.0.0"
+  # v2.0.0 already split the keep rule by tag prefix (the combined ["sha-","v"] rule was
+  # dead: `tagPrefixList` is AND, so it only matched images carrying BOTH prefixes). rally
+  # verified that live (105 `sha-` images under a policy claiming to keep 30).
+  #
+  # No count/day override here: this call adopts the defaults — keep 20 builds (sha-*),
+  # expire releases (v*) after 180 days, untagged after 1 day. These repositories do not
+  # exist yet, so unlike rally there is nothing to preview: the policy applies from the
+  # first pushed image. Run the estate preview (infra/scripts/ecr_lifecycle_preview.py)
+  # before changing the numbers later — a dry run, and the only way to see what a policy
+  # will delete.
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecr?ref=ecr-v2.1.0"
 
-  repository_names     = ["opshub-api", "opshub-worker", "opshub-migrator"]
-  image_tag_mutability = "MUTABLE" # allows re-tagging :latest
+  repository_names = ["opshub-api", "opshub-worker", "opshub-migrator"]
+
+  # IMMUTABLE (task 0.8, §11): a rewritable tag underneath a running workload is not
+  # pinned. Flipped only after the CI `:latest` push was removed
+  # (ci/.github/workflows/backend-deploy.yml — 0.8 step a); IMMUTABLE rejects a second push
+  # of an existing tag, so flipping first breaks the pipeline. opshub deploys with
+  # `cache_backend: gha`, so no `:buildcache` overwrite depends on mutability either.
+  image_tag_mutability = "IMMUTABLE"
   kms_key_arn          = data.terraform_remote_state.platform.outputs.kms_key_arn
   tags                 = { Scope = "shared" }
 }
