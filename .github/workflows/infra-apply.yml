@@ -162,17 +162,17 @@ jobs:
           # no Grafana resources at all, silently.
           TF_VAR_grafana_alerting_auth: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
 
-      # Mint a short-lived installation token from the RELEASE_BOT GitHub App
+      # Mint a short-lived installation token from the qnsc-automation GitHub App
       # (same app release.yml uses) so we never need a long-lived user PAT.
       # Requires the app to have "Variables: read and write" on this repo.
       # Falls back to no token (publish step skipped) when the app isn't set.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         id: app-token
-        if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
+        if: ${{ vars.QNSC_AUTOMATION_APP_ID != '' }}
         continue-on-error: true
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          app-id: ${{ vars.QNSC_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.QNSC_AUTOMATION_PRIVATE_KEY }}
 
       # Sync the infra IDs the deploy workflows read (backend-deploy.yml,
       # web-deploy.yml) straight from Terraform outputs, so a rebuild that changes
@@ -266,17 +266,17 @@ jobs:
           # cannot go stale.
           TF_VAR_image_tag:            ${{ github.ref_name }}
 
-      # Mint a short-lived installation token from the RELEASE_BOT GitHub App so we
+      # Mint a short-lived installation token from the qnsc-automation GitHub App so we
       # never need a long-lived user PAT. Requires the app to have
       # "Variables: read and write" on this repo. Falls back to no token (publish step
       # skipped) when the app isn't configured.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         id: app-token
-        if: ${{ vars.RELEASE_BOT_APP_ID != '' }}
+        if: ${{ vars.QNSC_AUTOMATION_APP_ID != '' }}
         continue-on-error: true
         with:
-          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          app-id: ${{ vars.QNSC_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.QNSC_AUTOMATION_PRIVATE_KEY }}
 
       # The production half of the output sync, which this workflow simply did not have:
       # develop published its infra IDs and production never did, so backend-deploy.yml
