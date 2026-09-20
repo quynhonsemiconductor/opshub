@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { sql } from 'drizzle-orm';
 import { Public } from '../auth/decorators';
 import { SkipRateLimit } from '../rate-limit/rate-limit.decorator';
@@ -38,6 +38,14 @@ export class HealthController {
    * database turns a slowdown into an outage, because Kubernetes kills every
    * replica of every service at once. `readyz` is where dependencies belong.
    */
+  // EXCLUDED FROM THE OPENAPI DOCUMENT. `/livez` is a contract with the kubelet,
+  // not with API consumers: nothing generates a client for it and nothing calls it
+  // from a browser. Leaving it in the schema also broke CI — both this repo and
+  // rova diff the committed generated web client against the captured spec, so a
+  // new path there is a failing build until someone regenerates a client for a
+  // route no client will ever use. `/metrics` in qnsc-kb is excluded for the same
+  // reason.
+  @ApiExcludeEndpoint()
   @Get('livez')
   @Public()
   @SkipRateLimit()
