@@ -1,23 +1,15 @@
 # =============================================================================
 # Code review — AI review of a pull request against QNSC's rules.
 #
-# Not a required check: this workflow failing cannot fail the merge by itself. Its FINDINGS do gate the
-# merge, and that is chosen — high and critical findings become review threads, and `main-protection`
-# requires threads to be resolved before merging. Medium and low are collected in the summary comment as
-# advice. The shared workflow posts a verdict either way, so a clean review says so rather than being
-# indistinguishable from a review that never ran.
+# Everything that is an organisation decision lives in quynhonsemiconductor/ci: the model, the endpoint
+# and protocol, the severity threshold, the App identity, the timeout, and skipping pull requests a bot
+# opened. Changing any of those is one edit there rather than one per repository.
 #
-# Five profiles, matching what this repository holds:
+# What stays here is what genuinely differs: which repository this is, which rule profiles apply, and the
+# two secrets. Secrets cannot be defaulted — a reusable workflow receives only what the caller hands it,
+# and the alternative, `secrets: inherit`, would give it every secret this repository holds.
 #
-#   typescript  642 .ts files — layering, the repository column whitelist, tenant scoping, permissions
-#   frontend    219 .tsx files and 52 shared components in apps/web/src/shared/ui — accessibility, and
-#               reuse rather than a second implementation of a component that already exists
-#   sql         35 migrations, and the rule that a merged one is never edited
-#   dockerfile  one image, and no built-in rules exist for Dockerfiles
-#   workflows   pinning, required-check naming, and secrets in run steps
-#
-# No `python` profile for a single .py file, and no `terraform`: the 13 .tf files describe this product's
-# stack but are planned from the infra repository rather than here.
+# 642 .ts, 219 .tsx with 52 shared components, 35 migrations and one image.
 # =============================================================================
 
 name: Code review
@@ -31,15 +23,6 @@ concurrency:
 
 jobs:
   review:
-    # Skip pull requests a bot opened, which in practice means Renovate. A dependency bump changes a
-    # manifest and a lockfile, and nothing in our rules speaks to that: they are about layering, tenant
-    # scoping, accessibility and migrations. The risk a bump does carry is already covered by osv-scanner,
-    # Semgrep, and Renovate's own `minimumReleaseAge` — which is why dependency review was deliberately
-    # removed from `base.json` rather than written there.
-    #
-    # It is also the largest avoidable cost: there were 42 open Renovate pull requests across the
-    # organisation when this was added, and one review costs roughly 26k tokens.
-    if: github.event.pull_request.user.type != 'Bot'
     permissions:
       contents: read
       pull-requests: write
@@ -47,16 +30,6 @@ jobs:
     with:
       product: opshub
       profiles: typescript,frontend,sql,dockerfile,workflows
-      # GLM on the Coding Plan endpoint. It speaks OpenAI chat completions rather than Anthropic's
-      # protocol, and the default `llm_extra_body` disables Anthropic's thinking block, which that
-      # endpoint will not accept — hence all three overrides rather than only the model.
-      llm_url: https://open.bigmodel.cn/api/coding/paas/v4
-      use_anthropic_protocol: 'false'
-      llm_extra_body: '{}'
-      model: glm-5.3
-      inline_from_severity: high
-      # Comments arrive as our own App rather than github-actions[bot]. Identity only.
-      app_id: ${{ vars.CODE_REVIEW_APP_ID }}
     secrets:
       llm_token: ${{ secrets.Z_AI_CODING_API_KEY }}
       app_private_key: ${{ secrets.CODE_REVIEW_APP_KEY }}
