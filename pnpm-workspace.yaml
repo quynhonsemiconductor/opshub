@@ -19,7 +19,7 @@ overrides:
   # here (5.0.8, GHSA-mh99-v99m-4gvg) was for — so 5.0.8 is no longer merely an older
   # floor, it is no longer a safe one. The range spans every published major, so the
   # whole tree has to move (leaf util).
-  "brace-expansion": "5.0.9"
+  "brace-expansion": "5.0.12"
   # js-yaml. Two live majors, each patched separately: transitive via cosmiconfig
   # (@nestjs/cli, commitlint) and @nestjs/swagger.
   #   GHSA-pm4m-ph32-ghv5 — the original pin, fixed 4.3.0 / 5.2.2.
