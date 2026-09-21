@@ -31,6 +31,15 @@ concurrency:
 
 jobs:
   review:
+    # Skip pull requests a bot opened, which in practice means Renovate. A dependency bump changes a
+    # manifest and a lockfile, and nothing in our rules speaks to that: they are about layering, tenant
+    # scoping, accessibility and migrations. The risk a bump does carry is already covered by osv-scanner,
+    # Semgrep, and Renovate's own `minimumReleaseAge` — which is why dependency review was deliberately
+    # removed from `base.json` rather than written there.
+    #
+    # It is also the largest avoidable cost: there were 42 open Renovate pull requests across the
+    # organisation when this was added, and one review costs roughly 26k tokens.
+    if: github.event.pull_request.user.type != 'Bot'
     permissions:
       contents: read
       pull-requests: write
