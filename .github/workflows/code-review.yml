@@ -16,6 +16,11 @@ name: Code review
 
 on:
   pull_request:
+    # The default list leaves out `ready_for_review`. The reusable workflow skips drafts, and only
+    # reviews a large pull request (> 2,500 reviewable lines) on opened / reopened / ready_for_review
+    # rather than on every push, so without it a draft marked ready waits for its next push, and a
+    # large pull request has no way to ask for a fresh review.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: code-review-${{ github.ref }}
