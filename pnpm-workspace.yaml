@@ -97,5 +97,5 @@ overrides:
   # Keep each consumer inside the major it declares:
   #   7.x — jsdom → vitest     (patched in 7.29.0)
   #   8.x — testcontainers     (patched in 8.9.0)
-  "undici@>=7.0.0 <7.29.0": ">=7.29.0 <8.0.0"
+  "undici@>=7.0.0 <7.29.0": ">=8.10.2 <9.0.0"
   "undici@>=8.0.0 <8.9.0": ">=8.9.0"
