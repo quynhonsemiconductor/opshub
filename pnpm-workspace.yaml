@@ -19,7 +19,9 @@ overrides:
   # here (5.0.8, GHSA-mh99-v99m-4gvg) was for — so 5.0.8 is no longer merely an older
   # floor, it is no longer a safe one. The range spans every published major, so the
   # whole tree has to move (leaf util).
-  "brace-expansion": "5.0.9"
+  # Bumped 5.0.9 -> 5.0.12 for GHSA-6j4f-fj2g-mc7p (fixed 5.0.10), GHSA-qhr7-859c-m2p7
+  # (fixed 5.0.11) and GHSA-q2hr-2g5m-vwhr (fixed 5.0.12). Same exact-pin shape.
+  "brace-expansion": "5.0.12"
   # js-yaml. Two live majors, each patched separately: transitive via cosmiconfig
   # (@nestjs/cli, commitlint) and @nestjs/swagger.
   #   GHSA-pm4m-ph32-ghv5 — the original pin, fixed 4.3.0 / 5.2.2.
@@ -67,7 +69,9 @@ overrides:
   # GHSA-fph4-wmhf-6fwf / GHSA-jqff-g426-hqxp — host confusion via skipped IDN
   # canonicalization, CVSS 7.5) are only fixed at 4.1.3 on the 4.x line. Bare key so it
   # binds the resolved version, matching the reasoning above.
-  "fast-uri": ">=4.1.3"
+  # Bumped from >=4.1.3: GHSA-hrr3-gc8f-f4qj and GHSA-jvvf-x445-j334 are fixed at 4.1.5 on
+  # the 4.x line. Capped below 5.0.0 so the floor can never drag the tree onto a new major.
+  "fast-uri": ">=4.1.5 <5.0.0"
   # GHSA-73wf-gq98-2v4g / GHSA-c83g-rgw3-j3cx — browserslist crash / prototype write via
   # untrusted browserslist-stats, CVSS 7.5, fixed 4.28.7. Transitive via the web build
   # toolchain; the tree is on 4.x so a floor forces no major jump.
@@ -75,7 +79,10 @@ overrides:
   # GHSA-3m5p-2c4r-xxw2 / GHSA-w2qp-rph6-63g4 — fastify X-Forwarded-* spoofing under
   # trustProxy hop-count, fixed 5.12.1. Scope to the 5.x line the API runs; the 11.x in
   # the tree is a different (@fastify/*) package's versioning, untouched.
-  "fastify@5": ">=5.12.1"
+  # Bumped to 5.12.5 for GHSA-4mh8-r7rc-xpvc (fixed 5.12.5). This key also rewrites the
+  # root's exact "fastify" pin, so the floor here — not package.json — is what decides the
+  # resolved version: the lockfile sat on 5.12.3 while package.json said 5.12.4.
+  "fastify@5": ">=5.12.5 <6.0.0"
   # GHSA-4mjr-xmp4-gh2g / GHSA-x5fp-wj9c-mxmx — qs DoS via attacker-controlled isBuffer,
   # fixed 6.16.0. Scope to the 6.x line (the 3.x `qs` in the tree is an unrelated package).
   "qs@6": ">=6.16.0"
@@ -97,5 +104,32 @@ overrides:
   # Keep each consumer inside the major it declares:
   #   7.x — jsdom → vitest     (patched in 7.29.0)
   #   8.x — testcontainers     (patched in 8.9.0)
-  "undici@>=7.0.0 <7.29.0": ">=7.29.0 <8.0.0"
-  "undici@>=8.0.0 <8.9.0": ">=8.9.0"
+  #
+  # Re-keyed per major and floors raised for eleven more advisories, fixed at 7.29.1 /
+  # 8.10.2: GHSA-2gqq-gqf2-x968, GHSA-2jfj-6hjv-fm6j, GHSA-3wwx-pv8p-q78v,
+  # GHSA-3xpg-4rpp-hhhm, GHSA-8436-99hf-9mmv, GHSA-pmjh-fq2x-6v4x, GHSA-r53p-7pc4-xj5r,
+  # GHSA-rfgv-xxqx-mfg5, GHSA-rx4f-c7p8-82vq, GHSA-vp8m-p9jh-q5pm, GHSA-w293-vg96-wgc3.
+  # The old ranged keys (`undici@>=8.0.0 <8.9.0`) matched the range a consumer REQUESTS,
+  # so jsdom 30's `^8.x` request slipped past them and stayed on 8.10.0. `undici@7` /
+  # `undici@8` match any request inside that major, and each target is capped below the
+  # next one, so the jsdom constraint above still holds.
+  "undici@7": ">=7.29.1 <8.0.0"
+  "undici@8": ">=8.10.2 <9.0.0"
+  # GHSA-f596-whhp-79r4 / GHSA-m9gg-hp2v-232j — @grpc/grpc-js, fixed 1.14.5 (1.13.6 on
+  # the older line). Transitive via the OTel gRPC exporters, @nestjs/terminus and
+  # dockerode; all request 1.x, so a floor capped below 2.0.0 forces no major jump.
+  "@grpc/grpc-js": ">=1.14.5 <2.0.0"
+  # GHSA-hrh2-vp3x-79xf — @xhmikosr/decompress, fixed 11.1.4. Dev-only: @swc/cli ->
+  # bin-wrapper -> downloader, which fetches the swc binary at install time.
+  "@xhmikosr/decompress": ">=11.1.4 <12.0.0"
+  # GHSA-jggr-w7fw-pc2j — fast-copy, fixed 4.1.0 on the 4.x line. Dev-only via pino-pretty.
+  "fast-copy": ">=4.1.0 <5.0.0"
+  # GHSA-67c8-pqhq-4rmx — piscina, fixed 4.9.4 on the 4.x line. Dev-only via @swc/cli
+  # (and @nestjs/cli through it), which pins ^4.
+  "piscina": ">=4.9.4 <5.0.0"
+  # GHSA-p6vx-979v-rg4c (fixed 1.6.2) / GHSA-jp82-f5mq-hwhp (fixed 1.6.3) — seroval.
+  # Transitive via @tanstack/router-core in apps/web; it requests 1.x.
+  "seroval": ">=1.6.3 <2.0.0"
+  # GHSA-68fv-2mgg-jv7q — source-map-js, fixed 1.2.2. Transitive via postcss, tailwind,
+  # css-tree (jsdom) and magicast (coverage); all request 1.x.
+  "source-map-js": ">=1.2.2 <2.0.0"
