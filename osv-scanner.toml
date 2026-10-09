@@ -1,0 +1,18 @@
+# osv-scanner suppressions. Read by the shared security workflow from the directory of the
+# lockfile it scans. EVERY entry expires: ignoreUntil is at most 30 days out, so an ignore
+# cannot quietly become permanent -- when it lapses the check goes red again and somebody
+# has to look.
+
+[[IgnoredVulns]]
+id = "GHSA-ch52-4w7c-c8xp"
+ignoreUntil = 2026-11-08
+reason = """\
+http-cache-semantics <= 4.2.0 (CVE-2026-93748, max-stale can re-serve a shared-cache entry \
+that carried Set-Cookie). NO patched version exists: the GitHub advisory lists \
+first_patched_version = null and OSV records last_affected 4.2.0. 4.3.0 is newer but does \
+not touch max-stale handling (it changes Vary), and the maintainer disputes the report as \
+RFC 9111-conformant (kornelski/http-cache-semantics#56), so bumping to it would only hide \
+the finding. Reached only through @swc/cli -> @xhmikosr/bin-wrapper -> downloader -> got -> \
+cacheable-request, a devDependency that downloads the swc binary; nothing here runs a shared \
+HTTP cache that serves other users. Revisit by the expiry: drop this entry if a fixed release \
+ships or the advisory is withdrawn."""
