@@ -38,7 +38,7 @@ overrides:
   "js-yaml@5": "^5.2.2"
   # GHSA-c96f-x56v-gq3h — HIGH "DDoS with HTTP2", fixed 9.7.0. Transitive via
   # fastify / @nestjs/platform-fastify, whose declared ^9.6.0 already allows it.
-  "find-my-way@<9.7.0": "9.7.0"
+  "find-my-way@<9.7.0": "9.10.0"
   # GHSA-2v37-7h3g-55p8 — nanoid, CVSS 8.2 HIGH: a custom generator loops forever when
   # `size` is 0. Fixed 3.3.18, and 5.1.6 on the 4.x/5.x line, which is not in this tree.
   # Transitive via postcss, whose declared range already allows the patch. Pinned "^3.3.18"
