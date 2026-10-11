@@ -10517,6 +10517,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Conflict — duplicate record or state conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   WorkforceController_listTimesheets: {
@@ -23430,6 +23437,13 @@ export interface operations {
       };
       /** @description Forbidden — insufficient permissions */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Conflict — duplicate record or state conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

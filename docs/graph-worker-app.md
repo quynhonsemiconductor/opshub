@@ -108,29 +108,69 @@ does, instead of being dropped. No 403 per cron tick.
 
 ## How the API asks for Graph work
 
-| Trigger                              | What the API does                                                                                         | What the worker does                                                     |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Offboarding approved                 | Queues `entra.account.set_enabled(false)` then `entra.sessions.revoke`, **in the approval's transaction** | Runs them in order; 30 s doubling backoff, 5 attempts, then dead-letters |
-| Onboarding approved (final step)     | Queues `entra.account.set_enabled(true)`, same transaction                                                | Same                                                                     |
-| `POST /v1/compliance/shadow-it/scan` | Queues `compliance.shadow_it.scan` (deduped), returns **202**                                             | Walks `detectedApps`                                                     |
-| `POST /v1/security-posture/sync`     | Queues `security.posture.sync` (deduped), returns **202**                                                 | Secure Score + baseline controls                                         |
-| Schedule                             | —                                                                                                         | Device sync every 30 min, shadow-IT every 6 h, posture daily 02:00 UTC   |
+| Trigger                              | What the API does                                                                                               | What the worker does                                                                                                     |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Offboarding or onboarding approved   | Queues `entra.account.reconcile` `{ employeeId }` **in the approval's transaction**                             | Reads the employee's _current_ status and Entra id, sets the account to match, one task per employee at a time, in order |
+| `POST /v1/compliance/shadow-it/scan` | `409 GRAPH_DISABLED` if no worker with Graph is up, else queues `compliance.shadow_it.scan` and answers **202** | Walks `detectedApps` under the cron's lock                                                                               |
+| `POST /v1/security-posture/sync`     | Same, `security.posture.sync`                                                                                   | Secure Score + baseline controls under the cron's lock                                                                   |
+| Schedule                             | —                                                                                                               | Device sync every 30 min, shadow-IT every 6 h, posture daily 02:00 UTC                                                   |
 
-Tasks live in `messaging.graph_task_outbox`. The Intune device sync resumes from
-`messaging.graph_sync_state` (the newest `lastSyncDateTime` seen), not from an in-memory link: the
-`managedDevices/delta` endpoint it used to call is not a documented method of the v1.0 managedDevice
-resource, so it lists with a `lastSyncDateTime` filter instead.
+**Level-triggered, never carrying a directory object.** An account task names an _employee_, never an
+Entra object id and never "enable" or "disable". The worker decides from the database when it runs:
+`offboarded` => disable and revoke sign-in sessions; otherwise => enable. So the API cannot aim a task at
+an arbitrary account, and a stale task cannot undo a later one — an "enable" queued at onboarding that
+runs after the person was offboarded finds them offboarded and disables. Tasks for one employee never
+overlap and run in `seq` order. The stored `entra_oid` must be a GUID and is URL-encoded; anything else
+dead-letters without a call.
+
+**No transaction across a Graph call (lease-and-fence).** Every outbox relay (email, notifications,
+webhooks and these tasks) claims rows in a short transaction (`attempts + 1`, a fresh `lease_token`,
+`locked_until`), calls out with **no transaction open**, and finishes in a new one fenced on the token.
+A scan can therefore run for as long as its lease (60 min for scans and syncs, 3 min for account tasks)
+without holding a database session — it cannot trip `idle_in_transaction_session_timeout` — and a relay
+whose lease lapsed cannot overwrite the one that took over. The attempt is spent at claim time, so a
+process that dies mid-call still uses up its budget; a row whose lease lapsed with every attempt used is
+dead-lettered ("abandoned") by the next claim.
+
+**Failures are classified.** 400/403/404 from Graph dead-letter at once (a missing permission or a
+deleted user does not heal); 429/503/504 honour `Retry-After`; everything else uses the 30 s doubling
+backoff, five attempts, then the `outboxDeadLetter` alarm.
+
+**Availability is reported, not assumed.** The worker writes `enabled` or `disabled` to
+`messaging.graph_sync_state` every 30 s. The two 202 endpoints answer `409 GRAPH_DISABLED` unless a fresh
+`enabled` heartbeat exists, so the UI never promises a scan nobody can run. Account tasks ignore it: an
+approved offboarding queues regardless and waits for the app.
+
+The Intune device sync lists all managed devices with a plain `$select` (no `$filter`, no delta — neither
+is a documented feature of that resource), compares `lastSyncDateTime` client-side against a cursor kept
+in `graph_sync_state`, evaluates every device in a daily full pass, raises a finding for any device silent
+for 30 days, and does not let one device's failure end the pass or advance the cursor past it.
+
+## Configuration by process
+
+The environment schema is split by role (`libs/platform/src/config/env.schema.ts`); each process declares
+its role first (`apps/<app>/src/role.ts`) and **refuses to start** with a variable it must not hold, naming
+the variable and never its value.
+
+| Variable                                                                    | API                  | Worker               |
+| --------------------------------------------------------------------------- | -------------------- | -------------------- |
+| `ENTRA_CLIENT_SECRET` (sign-in)                                             | holds it             | **refuses to start** |
+| `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_CERTIFICATE`, `GRAPH_FEDERATED_TOKEN_FILE` | **refuses to start** | holds them           |
+
+The types follow: `ApiConfigService.get('GRAPH_CLIENT_ID')` and `WorkerConfigService.get('ENTRA_CLIENT_SECRET')`
+do not compile. In Terraform the sign-in secret is injected into the API alone (`api_secrets`), and the
+Graph certificate is a **standalone** `aws_secretsmanager_secret` — not a key in the `opshub/<env>/app`
+bundle, whose ARN the API and migrator execution roles are granted — granted to the worker's execution
+role only.
 
 ## Known limits and follow-ups
 
-- The worker still receives `ENTRA_CLIENT_SECRET`: the env schema is shared by both processes. A
-  worker-specific schema removes it.
-- The api task's ECS _execution_ role can still read every secret in the stack's bundle, including
-  `graph-client-certificate` (the application process cannot — only the ECS agent uses the execution
-  role). Scope `secret_iam_arns` per service to close that on ECS; it disappears with External Secrets on
-  k3s.
-- A shadow-IT scan or posture sync runs inside the relay's transaction and can hold it for minutes. Safe
-  (row-level lock, one relay pass at a time), but if scans grow, give long tasks their own relay.
-- Not verified here (no tenant access): the `secureScoreControlProfiles` least-privilege row, and
-  `$filter=lastSyncDateTime ge …` against a live Intune tenant. Check both on the first run and record the
-  result here.
+- The API and the migrator cannot read the Graph certificate. On k3s, with a federated credential, there is
+  no secret to scope at all.
+- A scan or sync can run for many minutes. That is safe now (a lease, not a lock); give long tasks their own
+  relay if scans grow so a long one does not delay short account tasks behind it. (A batch already ends at
+  the first long task, so account tasks claimed _before_ it are not delayed.)
+- A device finding raised for non-compliance, encryption or staleness is not closed automatically when the
+  device recovers; resolve it in the compliance screen.
+- Not verified here (no tenant access): the `secureScoreControlProfiles` least-privilege row, and the list
+  call against a live Intune tenant. Check both on the first run and record the result here.
