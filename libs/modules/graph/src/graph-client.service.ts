@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Client } from '@microsoft/microsoft-graph-client';
 import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials/index.js';
-import { AppConfigService } from '@platform';
+import { WorkerConfigService } from '@platform';
 import { buildGraphCredential, graphCredentialKind } from './graph-credential';
 
 /**
@@ -31,7 +31,7 @@ export class GraphClientService {
   private cached: Client | undefined;
   private announcedOff = false;
 
-  constructor(private readonly config: AppConfigService) {}
+  constructor(private readonly config: WorkerConfigService) {}
 
   private credentialConfig() {
     return {

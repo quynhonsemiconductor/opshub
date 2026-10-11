@@ -7,7 +7,12 @@ import '@quynhonsemiconductor/platform-runtime/load-env';
 import { shutdownOtel } from './otel';
 import { NestFactory } from '@nestjs/core';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import { setProcessRole } from '@platform';
 import { WorkerModule } from './worker.module';
+
+// FIRST: the config module validates the environment against THIS process's schema. The worker holds
+// the Graph credential and refuses to start with ENTRA_CLIENT_SECRET set.
+setProcessRole('worker');
 
 async function main(): Promise<void> {
   const app = await NestFactory.createApplicationContext(WorkerModule, {

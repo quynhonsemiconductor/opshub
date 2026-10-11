@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AppConfigModule as SharedConfigModule } from '@quynhonsemiconductor/platform-runtime';
 import { EnvSchema } from './env.schema';
-import { AppConfigService } from './app-config.service';
+import { ApiConfigService, AppConfigService, WorkerConfigService } from './app-config.service';
 
 /**
  * Validation and `@Global()` registration come from
@@ -12,6 +12,8 @@ import { AppConfigService } from './app-config.service';
  */
 @Module({
   imports: [SharedConfigModule.forRoot({ schema: EnvSchema, service: AppConfigService })],
-  exports: [SharedConfigModule],
+  // The role-typed views are plain wrappers over the same validated environment.
+  providers: [ApiConfigService, WorkerConfigService],
+  exports: [SharedConfigModule, ApiConfigService, WorkerConfigService],
 })
 export class AppConfigModule {}

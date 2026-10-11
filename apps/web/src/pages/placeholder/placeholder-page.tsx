@@ -1,5 +1,5 @@
-import { Link } from "@tanstack/react-router";
-import { ArrowRight, Construction } from "lucide-react";
+import { Link } from '@tanstack/react-router';
+import { ArrowRight, Construction } from 'lucide-react';
 
 interface PlaceholderPageProps {
   title: string;
@@ -20,7 +20,7 @@ export function PlaceholderPage({ title, description }: PlaceholderPageProps) {
         </div>
         <h2 className="text-sm font-medium text-fg-muted">Coming soon</h2>
         <p className="mt-1.5 max-w-sm text-sm text-fg-subtle">
-          This module is scaffolded and ready for implementation. Connect it to the API using{" "}
+          This module is scaffolded and ready for implementation. Connect it to the API using{' '}
           <code className="rounded bg-surface-muted px-1.5 py-0.5 text-xs font-mono text-fg-muted">
             shared/api/client
           </code>

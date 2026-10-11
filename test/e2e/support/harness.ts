@@ -21,7 +21,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { RATE_LIMIT_TIERS } from '@platform';
+import { RATE_LIMIT_TIERS, setProcessRole } from '@platform';
 import { AppModule } from '../../../apps/api/src/app.module';
 import { bootstrapApp } from '../../../apps/api/src/bootstrap/app.bootstrap';
 
@@ -84,6 +84,8 @@ export const FIXTURE = {
 } as const;
 
 export async function createTestApp(): Promise<NestFastifyApplication> {
+  // The harness boots the API, so it validates the environment as the API does.
+  setProcessRole('api');
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({ logger: false, trustProxy: true }),

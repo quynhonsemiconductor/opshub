@@ -2,10 +2,10 @@
 
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| latest (`main`) | ✅ |
-| older releases | ❌ — please upgrade |
+| Version         | Supported           |
+| --------------- | ------------------- |
+| latest (`main`) | ✅                  |
+| older releases  | ❌ — please upgrade |
 
 ## Reporting a Vulnerability
 
@@ -18,11 +18,13 @@ You will receive acknowledgement within **48 hours** and a status update within 
 ## Scope
 
 **In scope:**
+
 - XSS vulnerabilities in the frontend
 - Sensitive data (tokens, PII) exposed in source, logs, or network responses
 - Insecure storage of credentials (localStorage for JWTs etc.)
 - CSRF in form submissions
 
 **Out of scope:**
+
 - Issues requiring physical access
 - Social engineering

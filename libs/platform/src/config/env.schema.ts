@@ -19,253 +19,217 @@ const emptyToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
  * Validated environment schema.
  * The process refuses to start if any required variable is missing or malformed.
  */
-export const EnvSchema = z
-  .object({
-    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    /**
-     * The DEFAULT rate-limit tier's ceiling, in requests per minute per user.
-     *
-     * Exists for ONE reason: the browser E2E suite drives fifty-odd specs through a handful of seeded
-     * identities inside three minutes, and each page load costs about fifteen calls — so it crosses
-     * 200/min and whichever request lands next comes back 429, failing a spec that was testing something
-     * else. Spreading the specs over four seats helped locally and still lost in CI, which runs denser.
-     *
-     * IT CANNOT BE RAISED IN PRODUCTION. The refinement below refuses a value above the default when
-     * `NODE_ENV=production`, so this is a test-environment accommodation and not a control with a dial on
-     * it. Lowering it is always allowed.
-     */
-    RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(200),
-    PORT: z.coerce.number().int().positive().default(3000),
-    HOST: z.string().default('0.0.0.0'),
-    CORS_ORIGINS: z.string().default('http://localhost:5173'),
+const baseShape = {
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  /**
+   * The DEFAULT rate-limit tier's ceiling, in requests per minute per user.
+   *
+   * Exists for ONE reason: the browser E2E suite drives fifty-odd specs through a handful of seeded
+   * identities inside three minutes, and each page load costs about fifteen calls — so it crosses
+   * 200/min and whichever request lands next comes back 429, failing a spec that was testing something
+   * else. Spreading the specs over four seats helped locally and still lost in CI, which runs denser.
+   *
+   * IT CANNOT BE RAISED IN PRODUCTION. The refinement below refuses a value above the default when
+   * `NODE_ENV=production`, so this is a test-environment accommodation and not a control with a dial on
+   * it. Lowering it is always allowed.
+   */
+  RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(200),
+  PORT: z.coerce.number().int().positive().default(3000),
+  HOST: z.string().default('0.0.0.0'),
+  CORS_ORIGINS: z.string().default('http://localhost:5173'),
 
-    // ── Database ───────────────────────────────────────────────────────────────
-    // Supply EITHER a complete DATABASE_URL (local dev, CI) OR the discrete parts
-    // (deployed). See db/database-url.ts for why the deployed path composes from
-    // parts rather than storing a URL: the password belongs to the RDS-managed
-    // secret that AWS rotates, and any copy of it goes stale silently.
-    DATABASE_URL: z.string().url().optional(),
-    DATABASE_HOST: z.string().optional(),
-    DATABASE_PORT: z.coerce.number().int().positive().optional(),
-    DATABASE_NAME: z.string().optional(),
-    DATABASE_USER: z.string().optional(),
-    DATABASE_PASSWORD: z.string().optional(),
-    DATABASE_SSLMODE: z.string().default('require'),
-    DATABASE_POOL_MIN: z.coerce.number().int().positive().default(2),
-    DATABASE_POOL_MAX: z.coerce.number().int().positive().default(20),
+  // ── Database ───────────────────────────────────────────────────────────────
+  // Supply EITHER a complete DATABASE_URL (local dev, CI) OR the discrete parts
+  // (deployed). See db/database-url.ts for why the deployed path composes from
+  // parts rather than storing a URL: the password belongs to the RDS-managed
+  // secret that AWS rotates, and any copy of it goes stale silently.
+  DATABASE_URL: z.string().url().optional(),
+  DATABASE_HOST: z.string().optional(),
+  DATABASE_PORT: z.coerce.number().int().positive().optional(),
+  DATABASE_NAME: z.string().optional(),
+  DATABASE_USER: z.string().optional(),
+  DATABASE_PASSWORD: z.string().optional(),
+  DATABASE_SSLMODE: z.string().default('require'),
+  DATABASE_POOL_MIN: z.coerce.number().int().positive().default(2),
+  DATABASE_POOL_MAX: z.coerce.number().int().positive().default(20),
 
-    // ── Auth ───────────────────────────────────────────────────────────────────
-    // JWT — ES256 asymmetric signing (ECDSA over NIST P-256 / prime256v1).
-    // Keys must be PEM-encoded EC P-256 keypair. Accepted as raw PEM or base64-encoded PEM.
-    // Generate: openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt
-    JWT_PRIVATE_KEY: z
-      .string()
-      .min(1)
-      .transform((v) => (v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8')))
-      .refine((v) => v.includes('-----BEGIN'), 'JWT_PRIVATE_KEY must be a PEM-encoded private key'),
-    /**
-     * OPTIONAL — derived from JWT_PRIVATE_KEY when absent (see the transform at the
-     * bottom of this file). Supply it only to override, e.g. a local .env that already
-     * has a pair. Nothing needs it configured: an ES256 public key is a pure function
-     * of its private key, and opshub publishes no JWKS, so no verifier exists that
-     * lacks the private key.
-     */
-    JWT_PUBLIC_KEY: z
-      .string()
-      .min(1)
-      .transform((v) => (v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8')))
-      .refine((v) => v.includes('-----BEGIN'), 'JWT_PUBLIC_KEY must be a PEM-encoded public key')
-      .optional(),
+  // ── Auth ───────────────────────────────────────────────────────────────────
+  // JWT — ES256 asymmetric signing (ECDSA over NIST P-256 / prime256v1).
+  // Keys must be PEM-encoded EC P-256 keypair. Accepted as raw PEM or base64-encoded PEM.
+  // Generate: openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt
+  JWT_PRIVATE_KEY: z
+    .string()
+    .min(1)
+    .transform((v) => (v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8')))
+    .refine((v) => v.includes('-----BEGIN'), 'JWT_PRIVATE_KEY must be a PEM-encoded private key'),
+  /**
+   * OPTIONAL — derived from JWT_PRIVATE_KEY when absent (see the transform at the
+   * bottom of this file). Supply it only to override, e.g. a local .env that already
+   * has a pair. Nothing needs it configured: an ES256 public key is a pure function
+   * of its private key, and opshub publishes no JWKS, so no verifier exists that
+   * lacks the private key.
+   */
+  JWT_PUBLIC_KEY: z
+    .string()
+    .min(1)
+    .transform((v) => (v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8')))
+    .refine((v) => v.includes('-----BEGIN'), 'JWT_PUBLIC_KEY must be a PEM-encoded public key')
+    .optional(),
 
-    // Entra ID SSO — required in production, optional in dev (enables entra-login endpoint).
-    ENTRA_TENANT_ID: emptyToUndefined(z.string().uuid().optional()),
-    ENTRA_CLIENT_ID: emptyToUndefined(z.string().uuid().optional()),
-    /**
-     * Client id of the Graph WORKER app — a different app registration from ENTRA_CLIENT_ID, which is
-     * the sign-in app and holds no application permissions. READ ONLY BY THE WORKER
-     * (`libs/modules/graph`); the API task is not given any GRAPH_* variable, so a compromised API
-     * process has no Graph credential to steal.
-     *
-     * UNSET MEANS OFF. Every Graph feature (Intune device sync, shadow-IT scan, Secure Score, Entra
-     * account disable/enable and session revoke) skips with one info log instead of failing against a
-     * tenant that never consented. The tenant is ENTRA_TENANT_ID: one directory, two apps.
-     */
-    GRAPH_CLIENT_ID: emptyToUndefined(z.string().uuid().optional()),
-    /**
-     * Credential, option 1 (ECS, now): PEM holding the app's private key AND its certificate, raw or
-     * base64. The public half is uploaded to the Graph worker app registration. No client secret exists
-     * for that app.
-     */
-    GRAPH_CLIENT_CERTIFICATE: emptyToUndefined(
-      z
-        .string()
-        .min(1)
-        .transform((v) =>
-          v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8'),
-        )
-        .refine((v) => v.includes('-----BEGIN'), 'GRAPH_CLIENT_CERTIFICATE must be a PEM')
-        .optional(),
-    ),
-    /**
-     * Credential, option 2 (k3s, later): path of the projected ServiceAccount token that Entra
-     * exchanges through a federated identity credential on the Graph worker app. No secret and no
-     * certificate. Wins over GRAPH_CLIENT_CERTIFICATE when both are set, so the cut-over is adding
-     * this variable.
-     */
-    GRAPH_FEDERATED_TOKEN_FILE: emptyToUndefined(z.string().min(1).optional()),
-    // Used to sign fastify-cookie (required for CSRF signed cookies).
-    COOKIE_SECRET: z.string().min(32),
-    /** Short-lived access token — 15 min is enterprise standard (token theft window). */
-    JWT_ACCESS_EXPIRY: z.string().default('15m'),
-    /** Refresh token TTL in days — stored as HttpOnly cookie, hashed in DB, revocable. */
-    JWT_REFRESH_EXPIRY_DAYS: z.coerce.number().int().positive().default(7),
-    JWT_ISSUER: z.string().default('opshub-api'),
-    JWT_AUDIENCE: z.string().default('opshub-web'),
+  // Entra ID SSO — required in production, optional in dev (enables entra-login endpoint).
+  ENTRA_TENANT_ID: emptyToUndefined(z.string().uuid().optional()),
+  ENTRA_CLIENT_ID: emptyToUndefined(z.string().uuid().optional()),
+  // Used to sign fastify-cookie (required for CSRF signed cookies).
+  COOKIE_SECRET: z.string().min(32),
+  /** Short-lived access token — 15 min is enterprise standard (token theft window). */
+  JWT_ACCESS_EXPIRY: z.string().default('15m'),
+  /** Refresh token TTL in days — stored as HttpOnly cookie, hashed in DB, revocable. */
+  JWT_REFRESH_EXPIRY_DAYS: z.coerce.number().int().positive().default(7),
+  JWT_ISSUER: z.string().default('opshub-api'),
+  JWT_AUDIENCE: z.string().default('opshub-web'),
 
-    // ── BFF (Backend-for-Frontend) — server-side OIDC session ──────────────────
-    // The API is a *confidential* OIDC client: it runs the Entra Authorization-Code
-    // + PKCE flow server-side and issues an opaque, httpOnly `__Host-` session
-    // cookie, so no Entra or JWT token ever reaches the browser. The SPA reaches
-    // these routes same-origin through the Cloudflare Pages Function proxy.
-    /**
-     * Entra confidential-client secret, used only in the server-side code exchange.
-     *
-     * OPTIONAL, unlike rally's, and deliberately so: opshub's Entra app registration
-     * has no client secret minted yet. An empty secret leaves the login path
-     * unusable — `/v1/bff/login` still returns an authorize URL, and the callback's
-     * token exchange is what fails — while the app boots and both the Bearer path and
-     * dev-login keep working. Making it required instead would turn a missing secret
-     * into a crash-looping service.
-     */
-    ENTRA_CLIENT_SECRET: z.string().min(1).optional(),
-    /**
-     * Absolute URL of the BFF OIDC callback, which must also be registered as a
-     * redirect URI on the Entra app registration — e.g.
-     * https://opshub-dev.qnsc.vn/v1/bff/callback. Note the SPA origin, not the API
-     * origin: the browser is redirected here, and it must land same-origin so the
-     * session cookie set on the response is accepted.
-     */
-    ENTRA_REDIRECT_URI: emptyToUndefined(z.string().url().optional()),
-    /**
-     * Same-origin path the browser lands on after a successful login when the
-     * supplied `returnTo` is absent or fails the open-redirect guard.
-     */
-    BFF_POST_LOGIN_REDIRECT: z.string().default('/'),
-    /** Server-side session lifetime in seconds. Defaults to 30 days. */
-    BFF_SESSION_TTL_SECONDS: z.coerce
-      .number()
-      .int()
-      .positive()
-      .default(30 * SEC_PER_DAY),
-    /**
-     * HMAC key binding a CSRF token to the session that requested it, so a token
-     * lifted from one session cannot be replayed in another.
-     *
-     * Distinct from COOKIE_SECRET on purpose: that one signs every cookie the app
-     * sets, so rotating it invalidates all of them. Sharing one value would make a
-     * cookie-hygiene rotation read as a CSRF change in the audit trail, and vice
-     * versa.
-     */
-    CSRF_SECRET: z.string().min(32),
+  // ── BFF (Backend-for-Frontend) — server-side OIDC session ──────────────────
+  // The API is a *confidential* OIDC client: it runs the Entra Authorization-Code
+  // + PKCE flow server-side and issues an opaque, httpOnly `__Host-` session
+  // cookie, so no Entra or JWT token ever reaches the browser. The SPA reaches
+  // these routes same-origin through the Cloudflare Pages Function proxy.
+  /**
+   * Absolute URL of the BFF OIDC callback, which must also be registered as a
+   * redirect URI on the Entra app registration — e.g.
+   * https://opshub-dev.qnsc.vn/v1/bff/callback. Note the SPA origin, not the API
+   * origin: the browser is redirected here, and it must land same-origin so the
+   * session cookie set on the response is accepted.
+   */
+  ENTRA_REDIRECT_URI: emptyToUndefined(z.string().url().optional()),
+  /**
+   * Same-origin path the browser lands on after a successful login when the
+   * supplied `returnTo` is absent or fails the open-redirect guard.
+   */
+  BFF_POST_LOGIN_REDIRECT: z.string().default('/'),
+  /** Server-side session lifetime in seconds. Defaults to 30 days. */
+  BFF_SESSION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30 * SEC_PER_DAY),
+  /**
+   * HMAC key binding a CSRF token to the session that requested it, so a token
+   * lifted from one session cannot be replayed in another.
+   *
+   * Distinct from COOKIE_SECRET on purpose: that one signs every cookie the app
+   * sets, so rotating it invalidates all of them. Sharing one value would make a
+   * cookie-hygiene rotation read as a CSRF change in the audit trail, and vice
+   * versa.
+   */
+  CSRF_SECRET: z.string().min(32),
 
-    // ── AWS (optional in dev) ──────────────────────────────────────────────────
-    AWS_REGION: z.string().default('ap-southeast-1'),
-    /** LocalStack/local-dev endpoint for the AWS SDK clients (SES, SQS). Unset in AWS. */
-    AWS_ENDPOINT_URL: z.string().optional(),
-    /**
-     * The SQS queue BounceFeedbackService drains for SES bounce/complaint verdicts.
-     * OPTIONAL and the consumer's OFF switch: unset = no consumer starts. Pairs with
-     * SES_CONFIGURATION_SET above — the set tags the send, this is where the verdict lands.
-     */
-    SES_BOUNCE_QUEUE_URL: z.string().default(''),
-    /** S3 bucket for all stored files — injected by infra as S3_FILES_BUCKET. Optional in dev (uploads stubbed when unset). */
-    S3_FILES_BUCKET: z.string().optional(),
-    /** CloudFront base URL for file downloads. When set, overrides presigned S3 GET URLs. */
-    CDN_FILES_BASE_URL: z.string().optional(),
+  // ── AWS (optional in dev) ──────────────────────────────────────────────────
+  AWS_REGION: z.string().default('ap-southeast-1'),
+  /** LocalStack/local-dev endpoint for the AWS SDK clients (SES, SQS). Unset in AWS. */
+  AWS_ENDPOINT_URL: z.string().optional(),
+  /**
+   * The SQS queue BounceFeedbackService drains for SES bounce/complaint verdicts.
+   * OPTIONAL and the consumer's OFF switch: unset = no consumer starts. Pairs with
+   * SES_CONFIGURATION_SET above — the set tags the send, this is where the verdict lands.
+   */
+  SES_BOUNCE_QUEUE_URL: z.string().default(''),
+  /** S3 bucket for all stored files — injected by infra as S3_FILES_BUCKET. Optional in dev (uploads stubbed when unset). */
+  S3_FILES_BUCKET: z.string().optional(),
+  /** CloudFront base URL for file downloads. When set, overrides presigned S3 GET URLs. */
+  CDN_FILES_BASE_URL: z.string().optional(),
 
-    // ── Object storage backend selector (AWS S3 by default; R2/MinIO when set) ──
-    // Unset → AWS S3 via the task role (default). STORAGE_ENDPOINT set →
-    // S3-compatible backend (Cloudflare R2, MinIO) with static credentials +
-    // path-style addressing. R2 requires STORAGE_ENDPOINT + STORAGE_ACCESS_KEY_ID
-    // + STORAGE_SECRET_ACCESS_KEY + STORAGE_FORCE_PATH_STYLE=true. The bucket name
-    // still travels as S3_FILES_BUCKET.
-    STORAGE_ENDPOINT: z.string().url().optional(),
-    STORAGE_ACCESS_KEY_ID: z.string().optional(),
-    STORAGE_SECRET_ACCESS_KEY: z.string().optional(),
-    STORAGE_FORCE_PATH_STYLE: booleanish(false),
+  // ── Object storage backend selector (AWS S3 by default; R2/MinIO when set) ──
+  // Unset → AWS S3 via the task role (default). STORAGE_ENDPOINT set →
+  // S3-compatible backend (Cloudflare R2, MinIO) with static credentials +
+  // path-style addressing. R2 requires STORAGE_ENDPOINT + STORAGE_ACCESS_KEY_ID
+  // + STORAGE_SECRET_ACCESS_KEY + STORAGE_FORCE_PATH_STYLE=true. The bucket name
+  // still travels as S3_FILES_BUCKET.
+  STORAGE_ENDPOINT: z.string().url().optional(),
+  STORAGE_ACCESS_KEY_ID: z.string().optional(),
+  STORAGE_SECRET_ACCESS_KEY: z.string().optional(),
+  STORAGE_FORCE_PATH_STYLE: booleanish(false),
 
-    // ── Observability ──────────────────────────────────────────────────────────
-    SERVICE_VERSION: z.string().default('dev'),
-    LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
-    LOG_PRETTY: booleanish(false),
-    LOG_SQL: booleanish(false),
-    OTEL_ENABLED: booleanish(false),
-    OTEL_SERVICE_NAME: z.string().default('opshub-api'),
-    OTEL_WORKER_SERVICE_NAME: z.string().default('opshub-worker'),
-    OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
+  // ── Observability ──────────────────────────────────────────────────────────
+  SERVICE_VERSION: z.string().default('dev'),
+  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+  LOG_PRETTY: booleanish(false),
+  LOG_SQL: booleanish(false),
+  OTEL_ENABLED: booleanish(false),
+  OTEL_SERVICE_NAME: z.string().default('opshub-api'),
+  OTEL_WORKER_SERVICE_NAME: z.string().default('opshub-worker'),
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 
-    // ── Cache (Valkey / Redis — optional in dev) ───────────────────────────────
-    REDIS_URL: z.string().optional(),
-    /** Alias for REDIS_URL injected by infra as VALKEY_URL. Resolved into REDIS_URL at startup. */
-    VALKEY_URL: z.string().optional(),
-    REDIS_KEY_PREFIX: z.string().default('opshub:'),
+  // ── Cache (Valkey / Redis — optional in dev) ───────────────────────────────
+  REDIS_URL: z.string().optional(),
+  /** Alias for REDIS_URL injected by infra as VALKEY_URL. Resolved into REDIS_URL at startup. */
+  VALKEY_URL: z.string().optional(),
+  REDIS_KEY_PREFIX: z.string().default('opshub:'),
 
-    // ── Background jobs ────────────────────────────────────────────────────────
-    /** Audit log retention in days (SOC 2 baseline: 730 = 2 years). */
-    AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(730),
+  // ── Background jobs ────────────────────────────────────────────────────────
+  /** Audit log retention in days (SOC 2 baseline: 730 = 2 years). */
+  AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(730),
 
-    // ── AI assistant (optional) ────────────────────────────────────────────────
-    // When ANTHROPIC_API_KEY is unset the AI module reports itself disabled
-    // (AiService.isEnabled()) and the /ai endpoints return 503.
-    ANTHROPIC_API_KEY: z.string().optional(),
-    ANTHROPIC_MODEL: z.string().default('claude-opus-4-8'),
+  // ── AI assistant (optional) ────────────────────────────────────────────────
+  // When ANTHROPIC_API_KEY is unset the AI module reports itself disabled
+  // (AiService.isEnabled()) and the /ai endpoints return 503.
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().default('claude-opus-4-8'),
 
-    // ── Email ──────────────────────────────────────────────────────────────────
-    /**
-     * Which transport actually sends.
-     *
-     * `ses` is the one to reach for: it is in the same AWS account as everything else and
-     * authenticates with the task role, so there is no third-party account and no API key in a secret.
-     * `resend` stays because it is a working transport and removing it would be a decision about
-     * vendors rather than about code. `dev` logs to the console and sends nothing, which is the default
-     * so that a fresh checkout needs no mail setup at all.
-     */
-    EMAIL_PROVIDER: z.enum(['dev', 'resend', 'ses']).default('dev'),
-    MAIL_FROM_NAME: z.string().default('OpsHub'),
-    /**
-     * NO DEFAULT, deliberately — see the refusal in the `superRefine` below.
-     *
-     * This defaulted to `no-reply@opshub.app`, a domain a given deployment may not own. So a
-     * production configured with `EMAIL_PROVIDER=resend` and no sender did not fail: it sent from an
-     * address that fails SPF and DKIM at the receiving end, which is silent non-delivery or delivery
-     * to spam, and nothing in our logs explains either. The sibling repo added the same refusal after
-     * finding both of its deployed environments running exactly that way.
-     */
-    // emptyToUndefined, not bare .optional(): Terraform injects both of these as a literal
-    // empty string when unset (`value = var.mail_from_email`, unconditionally, no ternary),
-    // and Zod's .optional() accepts `undefined` but still runs .email() against an explicit
-    // "" — which fails, and does so for BOTH fields at once, so this crashed every task in
-    // every environment that leaves mail unconfigured. Confirmed live: opshub-develop's api
-    // task crash-looped on exactly "MAIL_FROM_EMAIL: Invalid email address" /
-    // "MAIL_REPLY_TO: Invalid email address" before this fix, same class of bug the
-    // ENTRA_* fields above already guard against.
-    MAIL_FROM_EMAIL: emptyToUndefined(z.string().email().optional()),
-    MAIL_REPLY_TO: emptyToUndefined(z.string().email().optional()),
-    RESEND_API_KEY: z.string().optional(),
-    /**
-     * The SES configuration set to tag every send with.
-     *
-     * Optional, and what it buys is attribution rather than delivery: without one, a bounce or
-     * complaint arrives as an event nobody can tie back to the message that caused it. Sends work
-     * either way, which is exactly why this is easy to leave unset and regret later.
-     */
-    SES_CONFIGURATION_SET: z.string().optional(),
+  // ── Email ──────────────────────────────────────────────────────────────────
+  /**
+   * Which transport actually sends.
+   *
+   * `ses` is the one to reach for: it is in the same AWS account as everything else and
+   * authenticates with the task role, so there is no third-party account and no API key in a secret.
+   * `resend` stays because it is a working transport and removing it would be a decision about
+   * vendors rather than about code. `dev` logs to the console and sends nothing, which is the default
+   * so that a fresh checkout needs no mail setup at all.
+   */
+  EMAIL_PROVIDER: z.enum(['dev', 'resend', 'ses']).default('dev'),
+  MAIL_FROM_NAME: z.string().default('OpsHub'),
+  /**
+   * NO DEFAULT, deliberately — see the refusal in the `superRefine` below.
+   *
+   * This defaulted to `no-reply@opshub.app`, a domain a given deployment may not own. So a
+   * production configured with `EMAIL_PROVIDER=resend` and no sender did not fail: it sent from an
+   * address that fails SPF and DKIM at the receiving end, which is silent non-delivery or delivery
+   * to spam, and nothing in our logs explains either. The sibling repo added the same refusal after
+   * finding both of its deployed environments running exactly that way.
+   */
+  // emptyToUndefined, not bare .optional(): Terraform injects both of these as a literal
+  // empty string when unset (`value = var.mail_from_email`, unconditionally, no ternary),
+  // and Zod's .optional() accepts `undefined` but still runs .email() against an explicit
+  // "" — which fails, and does so for BOTH fields at once, so this crashed every task in
+  // every environment that leaves mail unconfigured. Confirmed live: opshub-develop's api
+  // task crash-looped on exactly "MAIL_FROM_EMAIL: Invalid email address" /
+  // "MAIL_REPLY_TO: Invalid email address" before this fix, same class of bug the
+  // ENTRA_* fields above already guard against.
+  MAIL_FROM_EMAIL: emptyToUndefined(z.string().email().optional()),
+  MAIL_REPLY_TO: emptyToUndefined(z.string().email().optional()),
+  RESEND_API_KEY: z.string().optional(),
+  /**
+   * The SES configuration set to tag every send with.
+   *
+   * Optional, and what it buys is attribution rather than delivery: without one, a bounce or
+   * complaint arrives as an event nobody can tie back to the message that caused it. Sends work
+   * either way, which is exactly why this is easy to leave unset and regret later.
+   */
+  SES_CONFIGURATION_SET: z.string().optional(),
 
-    // ── Frontend ───────────────────────────────────────────────────────────────
-    /** Public base URL used to build links inside notification emails. */
-    APP_URL: z.string().url().default('http://localhost:5173'),
-  })
-  .superRefine((env, ctx) => {
+  // ── Frontend ───────────────────────────────────────────────────────────────
+  /** Public base URL used to build links inside notification emails. */
+  APP_URL: z.string().url().default('http://localhost:5173'),
+};
+
+/** What every role's schema shares. */
+type Common = z.infer<z.ZodObject<typeof baseShape>>;
+
+/**
+ * Cross-field rules, shared by every role's schema. Written against the common variables so they apply
+ * unchanged to each role's concrete schema ({@link ApiEnvSchema}, {@link WorkerEnvSchema}).
+ */
+const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
+  {
     // A RATE LIMIT TESTS CAN RAISE IS NOT A CONTROL. The knob exists for CI; production keeps the
     // shipped ceiling, and this refusal is what makes that a rule rather than a comment. Deliberately
     // placed above the early return below, for the reason that comment gives.
@@ -359,8 +323,15 @@ export const EnvSchema = z
           `DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD. Missing: ${missing.join(', ')}.`,
       });
     }
-  })
-  .transform((env, ctx) => {
+  }
+};
+
+/** Derivations, shared by every role: the Redis alias and the JWT public key. */
+const deriveEnv = <E extends Common>(
+  env: E,
+  ctx: z.RefinementCtx,
+): E & { REDIS_URL: string | undefined; JWT_PUBLIC_KEY: string } => {
+  {
     // VALKEY_URL is the infra-injected alias for Redis-compatible caches (e.g. ElastiCache
     // Valkey). Normalize at parse time so all callers use get('REDIS_URL') regardless of
     // which var infra sets.
@@ -424,6 +395,143 @@ export const EnvSchema = z
         .export({ type: 'spki', format: 'pem' })
         .toString(),
     };
-  });
+  }
+};
 
-export type Env = z.infer<typeof EnvSchema>;
+/**
+ * A variable the process must NOT have. Present (non-empty) => the process refuses to start, naming it.
+ * The value is never echoed.
+ */
+const forbidden = (name: string, role: 'API' | 'worker', why: string) =>
+  z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.undefined({ error: `${name} must not be set on the ${role}: ${why}` }),
+  );
+
+const GRAPH_WHY =
+  'Microsoft Graph is worker-only; the API asks for Graph work through graph_task_outbox';
+
+/**
+ * The API process. Holds the sign-in secret and NO Graph variable: a request that needs Graph writes a
+ * task row and the worker performs it, so there is no Graph credential here to steal.
+ */
+export const ApiEnvSchema = z
+  .object({
+    ...baseShape,
+
+    /**
+     * Entra confidential-client secret, used only in the server-side code exchange.
+     *
+     * OPTIONAL, unlike rally's, and deliberately so: opshub's Entra app registration
+     * has no client secret minted yet. An empty secret leaves the login path
+     * unusable — `/v1/bff/login` still returns an authorize URL, and the callback's
+     * token exchange is what fails — while the app boots and both the Bearer path and
+     * dev-login keep working. Making it required instead would turn a missing secret
+     * into a crash-looping service.
+     */
+    ENTRA_CLIENT_SECRET: z.string().min(1).optional(),
+    GRAPH_CLIENT_ID: forbidden('GRAPH_CLIENT_ID', 'API', GRAPH_WHY),
+    GRAPH_CLIENT_CERTIFICATE: forbidden('GRAPH_CLIENT_CERTIFICATE', 'API', GRAPH_WHY),
+    GRAPH_FEDERATED_TOKEN_FILE: forbidden('GRAPH_FEDERATED_TOKEN_FILE', 'API', GRAPH_WHY),
+  })
+  .superRefine(refineEnv)
+  .transform(deriveEnv);
+
+/**
+ * The worker process. Holds the Graph variables and NO sign-in secret: the worker never runs a login
+ * callback.
+ */
+export const WorkerEnvSchema = z
+  .object({
+    ...baseShape,
+
+    /**
+     * Client id of the Graph WORKER app — a different app registration from ENTRA_CLIENT_ID, which is
+     * the sign-in app and holds no application permissions. READ ONLY BY THE WORKER
+     * (`libs/modules/graph`); the API task is not given any GRAPH_* variable, so a compromised API
+     * process has no Graph credential to steal.
+     *
+     * UNSET MEANS OFF. Every Graph feature (Intune device sync, shadow-IT scan, Secure Score, Entra
+     * account disable/enable and session revoke) skips with one info log instead of failing against a
+     * tenant that never consented. The tenant is ENTRA_TENANT_ID: one directory, two apps.
+     */
+    GRAPH_CLIENT_ID: emptyToUndefined(z.string().uuid().optional()),
+    /**
+     * Credential, option 1 (ECS, now): PEM holding the app's private key AND its certificate, raw or
+     * base64. The public half is uploaded to the Graph worker app registration. No client secret exists
+     * for that app.
+     */
+    GRAPH_CLIENT_CERTIFICATE: emptyToUndefined(
+      z
+        .string()
+        .min(1)
+        .transform((v) =>
+          v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8'),
+        )
+        .refine((v) => v.includes('-----BEGIN'), 'GRAPH_CLIENT_CERTIFICATE must be a PEM')
+        .optional(),
+    ),
+    /**
+     * Credential, option 2 (k3s, later): path of the projected ServiceAccount token that Entra
+     * exchanges through a federated identity credential on the Graph worker app. No secret and no
+     * certificate. Wins over GRAPH_CLIENT_CERTIFICATE when both are set, so the cut-over is adding
+     * this variable.
+     */
+    GRAPH_FEDERATED_TOKEN_FILE: emptyToUndefined(z.string().min(1).optional()),
+    ENTRA_CLIENT_SECRET: forbidden(
+      'ENTRA_CLIENT_SECRET',
+      'worker',
+      'only the API completes a sign-in; the worker has no use for it',
+    ),
+  })
+  .superRefine(refineEnv)
+  .transform(deriveEnv);
+
+/** What every process has in common. Role-specific variables are typed on {@link ApiEnv} / {@link WorkerEnv}. */
+type GraphKey = 'GRAPH_CLIENT_ID' | 'GRAPH_CLIENT_CERTIFICATE' | 'GRAPH_FEDERATED_TOKEN_FILE';
+
+/**
+ * What each role's config service can READ. The forbidden variables are in the schemas (so a set one
+ * refuses to start) but not in these types, so `get('GRAPH_CLIENT_ID')` does not compile on the API.
+ */
+export type ApiEnv = Omit<z.infer<typeof ApiEnvSchema>, GraphKey>;
+export type WorkerEnv = Omit<z.infer<typeof WorkerEnvSchema>, 'ENTRA_CLIENT_SECRET'>;
+
+/** What every process has in common. */
+export type Env = Omit<ApiEnv, 'ENTRA_CLIENT_SECRET'>;
+
+export type ProcessRole = 'api' | 'worker';
+
+let processRole: ProcessRole | undefined;
+
+/**
+ * Declares which process this is. Called FIRST in each entry point (`apps/api/src/main.ts`,
+ * `apps/worker/src/main.ts`), before the application is created, because the config module validates
+ * the environment against the role's schema.
+ */
+export function setProcessRole(role: ProcessRole): void {
+  processRole = role;
+}
+
+export function schemaForRole(role: ProcessRole) {
+  return role === 'api' ? ApiEnvSchema : WorkerEnvSchema;
+}
+
+/**
+ * The schema the config module validates with: resolved when validation RUNS, not when this module is
+ * imported, so the entry point's `setProcessRole` has taken effect. An unset role is an error, not a
+ * default — a process that does not know what it is must not guess which credentials it may hold.
+ */
+export const EnvSchema = {
+  safeParse(data: unknown): ReturnType<typeof ApiEnvSchema.safeParse> {
+    if (!processRole) {
+      throw new Error(
+        "The process role is not set. Call setProcessRole('api' | 'worker') first in main.ts.",
+      );
+    }
+    // The two roles' outputs differ only in the variables each owns; consumers read the common `Env`.
+    return schemaForRole(processRole).safeParse(data) as unknown as ReturnType<
+      typeof ApiEnvSchema.safeParse
+    >;
+  },
+};

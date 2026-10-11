@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { generateKeyPairSync, createPublicKey } from 'node:crypto';
-import { EnvSchema } from './env.schema';
+import type { ApiConfigService, WorkerConfigService } from './app-config.service';
+import {
+  ApiEnvSchema,
+  ApiEnvSchema as EnvSchema,
+  EnvSchema as RoleAwareEnvSchema,
+  WorkerEnvSchema,
+  setProcessRole,
+} from './env.schema';
 
 const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -309,5 +316,81 @@ describe('EnvSchema — email sender', () => {
     const result = EnvSchema.safeParse(env());
     if (!result.success) throw new Error('expected parse to succeed');
     expect(result.data.MAIL_FROM_EMAIL).not.toBe('no-reply@opshub.app');
+  });
+});
+
+describe('role-specific schemas — the API and the worker hold different credentials', () => {
+  const GRAPH = {
+    GRAPH_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
+    GRAPH_CLIENT_CERTIFICATE: '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----',
+    GRAPH_FEDERATED_TOKEN_FILE: '/var/run/secrets/tokens/graph',
+  };
+
+  it('the API accepts the sign-in secret', () => {
+    const result = ApiEnvSchema.safeParse(env({ ENTRA_CLIENT_SECRET: 'sign-in-secret' }));
+    expect(result.success).toBe(true);
+    expect(result.data?.ENTRA_CLIENT_SECRET).toBe('sign-in-secret');
+  });
+
+  it.each(Object.keys(GRAPH))('the API REFUSES TO START with %s set', (name) => {
+    const result = ApiEnvSchema.safeParse(env({ [name]: GRAPH[name as keyof typeof GRAPH] }));
+
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues.find((i) => i.path[0] === name);
+    expect(issue?.message).toMatch(/must not be set on the API/);
+    // The value never appears in the message.
+    expect(JSON.stringify(result.error?.issues)).not.toContain(GRAPH[name as keyof typeof GRAPH]);
+  });
+
+  it('the API treats an EMPTY Graph variable as unset (a blank chart value is not a credential)', () => {
+    expect(ApiEnvSchema.safeParse(env({ GRAPH_CLIENT_ID: '' })).success).toBe(true);
+  });
+
+  it('the worker accepts the Graph variables', () => {
+    const result = WorkerEnvSchema.safeParse(env(GRAPH));
+    expect(result.success).toBe(true);
+    expect(result.data?.GRAPH_CLIENT_ID).toBe(GRAPH.GRAPH_CLIENT_ID);
+  });
+
+  it('the worker REFUSES TO START with ENTRA_CLIENT_SECRET set', () => {
+    const result = WorkerEnvSchema.safeParse(env({ ENTRA_CLIENT_SECRET: 'sign-in-secret' }));
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.find((i) => i.path[0] === 'ENTRA_CLIENT_SECRET')?.message).toMatch(
+      /must not be set on the worker/,
+    );
+  });
+
+  it('both roles keep the shared rules (a worker still needs a database)', () => {
+    expect(WorkerEnvSchema.safeParse({ JWT_PRIVATE_KEY: privatePem }).success).toBe(false);
+    expect(WorkerEnvSchema.safeParse(env()).success).toBe(true);
+  });
+
+  it('a process that has not declared its role does not get to guess one', () => {
+    // Module state: this runs before any setProcessRole in this file's process.
+    expect(() => RoleAwareEnvSchema.safeParse(env())).toThrow(/process role is not set/);
+  });
+
+  it('validates with the schema of the role the entry point declared', () => {
+    setProcessRole('api');
+    expect(RoleAwareEnvSchema.safeParse(env(GRAPH)).success).toBe(false);
+    setProcessRole('worker');
+    expect(RoleAwareEnvSchema.safeParse(env(GRAPH)).success).toBe(true);
+    expect(RoleAwareEnvSchema.safeParse(env({ ENTRA_CLIENT_SECRET: 'x' })).success).toBe(false);
+  });
+
+  it('is enforced by the TYPES too: the API cannot read a Graph variable, the worker cannot read the sign-in secret', () => {
+    // Compile-time assertions; the `@ts-expect-error` lines fail `tsc` if the boundary is ever widened.
+    const never = () => {
+      const api = {} as ApiConfigService;
+      const worker = {} as WorkerConfigService;
+      // @ts-expect-error GRAPH_CLIENT_ID is not an API variable
+      api.get('GRAPH_CLIENT_ID');
+      // @ts-expect-error ENTRA_CLIENT_SECRET is not a worker variable
+      worker.get('ENTRA_CLIENT_SECRET');
+      api.get('ENTRA_CLIENT_SECRET');
+      worker.get('GRAPH_CLIENT_ID');
+    };
+    expect(typeof never).toBe('function');
   });
 });

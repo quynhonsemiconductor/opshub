@@ -7,7 +7,12 @@ interface UpgradeGateProps {
   learnMoreHref?: string;
 }
 
-export function UpgradeGate({ feature, requiredLicense, description, learnMoreHref }: UpgradeGateProps) {
+export function UpgradeGate({
+  feature,
+  requiredLicense,
+  description,
+  learnMoreHref,
+}: UpgradeGateProps) {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface px-8 py-16 text-center">
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-surface-muted">
@@ -18,7 +23,9 @@ export function UpgradeGate({ feature, requiredLicense, description, learnMoreHr
       <p className="mt-1 text-sm text-fg-muted">{description}</p>
 
       <div className="mt-5 rounded-lg border border-border bg-surface-muted px-4 py-3 text-left">
-        <p className="text-xs font-medium text-fg-muted uppercase tracking-wide">Required license</p>
+        <p className="text-xs font-medium text-fg-muted uppercase tracking-wide">
+          Required license
+        </p>
         <p className="mt-0.5 text-sm font-medium text-fg">{requiredLicense}</p>
       </div>
 

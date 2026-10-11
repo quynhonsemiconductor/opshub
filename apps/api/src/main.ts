@@ -9,8 +9,12 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
-import { AppConfigService } from '@platform';
+import { AppConfigService, setProcessRole } from '@platform';
 import { bootstrapApp } from './bootstrap/app.bootstrap';
+
+// FIRST: the config module validates the environment against THIS process's schema. The API holds the
+// sign-in secret and refuses to start with any GRAPH_* variable set.
+setProcessRole('api');
 
 async function main(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(

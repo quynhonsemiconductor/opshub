@@ -65,12 +65,10 @@ export function initTheme(): void {
   useThemeStore.setState({ mode, resolved });
 
   // Track OS changes while the user is on `system`.
-  window
-    .matchMedia?.('(prefers-color-scheme: dark)')
-    .addEventListener('change', () => {
-      if (useThemeStore.getState().mode !== 'system') return;
-      const next = resolve('system');
-      applyClass(next);
-      useThemeStore.setState({ resolved: next });
-    });
+  window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (useThemeStore.getState().mode !== 'system') return;
+    const next = resolve('system');
+    applyClass(next);
+    useThemeStore.setState({ resolved: next });
+  });
 }
