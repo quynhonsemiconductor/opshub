@@ -6,8 +6,8 @@ import {
   ApiEnvSchema as EnvSchema,
   EnvSchema as RoleAwareEnvSchema,
   WorkerEnvSchema,
-  setProcessRole,
 } from './env.schema';
+import { resetProcessRoleForTests, setProcessRole } from './process-role';
 
 const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -367,8 +367,9 @@ describe('role-specific schemas — the API and the worker hold different creden
   });
 
   it('a process that has not declared its role does not get to guess one', () => {
-    // Module state: this runs before any setProcessRole in this file's process.
+    resetProcessRoleForTests();
     expect(() => RoleAwareEnvSchema.safeParse(env())).toThrow(/process role is not set/);
+    setProcessRole('api'); // restore what test/setup.ts declared
   });
 
   it('validates with the schema of the role the entry point declared', () => {

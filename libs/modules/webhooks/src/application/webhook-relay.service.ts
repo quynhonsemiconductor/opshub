@@ -79,7 +79,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
           this.notLeased(now),
         ),
       )
-      .orderBy(asc(webhookDeliveries.seq))
+      .orderBy(asc(webhookDeliveries.seq), asc(webhookDeliveries.id))
       .limit(limit)
       .for('update', { skipLocked: true, of: webhookDeliveries });
   }

@@ -1,177 +1,216 @@
 /// <reference types="node" />
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { dirname, join, relative, resolve } from 'node:path';
+import ts from 'typescript';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 /**
- * Microsoft Graph lives in the worker, and in one place.
+ * Microsoft Graph lives in the worker, and in one place. Checked by IMPORT CLOSURE, not by grep.
  *
- * THE RULES, each a test below:
- *   1. One factory builds the client and its credential (`libs/modules/graph`). A client built per call
- *      throws away the credential's token cache — a client-credentials round trip to Entra per
- *      operation, and Entra throttles that endpoint.
- *   2. Only that module reads GRAPH_* configuration, so there is one answer to "is Graph on".
- *   3. THE API CANNOT REACH GRAPH. Nothing under `apps/api` imports the Graph module, and nothing
- *      outside the module injects `GraphClientService`: an API request that needs Graph writes a
- *      `graph_task_outbox` row through `GraphTaskQueue` and the worker performs it. The API task is not
- *      given any GRAPH_* variable, so a compromised API process has no Graph credential to steal.
- *   4. The barrel (`@modules/graph`) the API may import does not export the client or the module.
- *   5. No source file asks for the Entra directory role-management permission. The PIM client that did
- *      had no caller and would have put a tenant-takeover permission on an unattended app.
+ * THE RULE. Nothing the API process can load may reach Graph: the API holds no Graph credential, so an
+ * API request that needs Graph writes a `graph_task_outbox` row (`GraphTaskQueue`) and the worker
+ * performs it. "Can load" is the transitive import closure of `apps/api/src/main.ts`, computed with the
+ * TypeScript program itself — the same module resolution (path aliases, barrels, `export *`, dynamic
+ * `import()`, type-only imports) the compiler uses. A text search for `GraphModule` cannot see an
+ * `import { x } from '@modules/graph/graph-credential'`, a barrel re-export, or a package reached through
+ * a third file; the closure sees all of them.
  *
- * WHY A RATCHET. The next Graph integration is written by copying the nearest one, which is how five
- * copies of `buildClient()` happened. This fails the moment a sixth, or an API-side call, appears.
+ * WHAT MAY BE REACHABLE under `libs/modules/graph/src`: only the task queue (`graph-task*.ts`,
+ * `graph-tasks.module.ts`) and the barrel (`index.ts`), which is written to export nothing else. And NO
+ * file of `@azure/identity` or `@microsoft/microsoft-graph-client` may be reachable at all.
+ *
+ * PROVED, not asserted: the mutation tests below add a file to the API's closure that does each of the
+ * things this exists to forbid, and require the check to fail.
  *
  * __dirname, not import.meta.dirname: this suite runs as CommonJS.
  */
 
-const ROOT = join(__dirname, '..');
+const ROOT = resolve(__dirname, '..');
+const API_MAIN = join(ROOT, 'apps/api/src/main.ts');
+const WORKER_MAIN = join(ROOT, 'apps/worker/src/main.ts');
+const MUTANT = join(ROOT, 'apps/api/src/__graph_mutant__.ts');
 
-const MODULE_DIR = 'libs/modules/graph/';
-/** The two files allowed to construct a client and a credential. */
-const OWNERS = [
-  'libs/modules/graph/src/graph-client.service.ts',
-  'libs/modules/graph/src/graph-credential.ts',
-];
-const OWNER = OWNERS[0];
+const GRAPH_DIR = `${join(ROOT, 'libs/modules/graph/src')}/`;
+/** The only files under libs/modules/graph/src the API may load. */
+const API_MAY_LOAD = /\/libs\/modules\/graph\/src\/(graph-task[^/]*\.ts|index\.ts)$/;
+const FORBIDDEN_PACKAGE =
+  /\/node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(@azure\/identity|@microsoft\/microsoft-graph-client)\//;
 
-/** Constructing the client, or the credential it wraps, or naming the scope. */
-const BUILDS_CLIENT =
-  /Client\.initWithMiddleware|new (ClientSecret|ClientCertificate|WorkloadIdentity|ClientAssertion)Credential|graph\.microsoft\.com\/\.default/;
+const options = (() => {
+  const configPath = join(ROOT, 'tsconfig.json');
+  const read = ts.readConfigFile(configPath, (f) => ts.sys.readFile(f));
+  const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, dirname(configPath));
+  return {
+    ...parsed.options,
+    noEmit: true,
+    // Resolution only: no ambient `types` packages as extra roots, and no checking of library files.
+    types: [],
+    skipLibCheck: true,
+  } satisfies ts.CompilerOptions;
+})();
 
-/** The env vars that make up the answer, read directly rather than asked for. */
-const READS_GRAPH_CONFIG = /config\.get\('GRAPH_[A-Z_]+'\)/;
+function makeProgram(
+  rootNames: string[],
+  virtual: Record<string, string> = {},
+  oldProgram?: ts.Program,
+): ts.Program {
+  const base = ts.createCompilerHost(options);
+  // A host that serves `virtual` files over the real file system.
+  const host: ts.CompilerHost = {
+    ...base,
+    fileExists: (f) => f in virtual || base.fileExists(f),
+    readFile: (f) => virtual[f] ?? base.readFile(f),
+    getSourceFile: (f, languageVersion, onError, shouldCreate) =>
+      f in virtual
+        ? ts.createSourceFile(f, virtual[f], languageVersion, true)
+        : base.getSourceFile(f, languageVersion, onError, shouldCreate),
+  };
+  return ts.createProgram({ rootNames, options, host, oldProgram });
+}
 
-interface Offender {
+interface Violation {
   file: string;
-  line: number;
-  text: string;
+  why: string;
 }
 
-function sourceFiles(): string[] {
-  return (
-    execFileSync(
-      'git',
-      // `--others --exclude-standard` too: a NEW integration service is the likeliest sixth copy, and a
-      // bare `git ls-files` cannot see one until it is staged.
-      ['ls-files', '--cached', '--others', '--exclude-standard', 'libs', 'apps'],
-      { cwd: ROOT, encoding: 'utf8' },
-    )
-      .split('\n')
-      .filter(Boolean)
-      .filter((f) => f.endsWith('.ts'))
-      .filter((f) => !/\.(spec|e2e)\.ts$/.test(f))
-      .filter((f) => !f.includes('/generated/'))
-      // The index lists a file deleted but not yet staged; reading it would throw and take this down.
-      .filter((f) => existsSync(join(ROOT, f)))
+/** Everything under libs/modules/graph the API process could load, and any Graph SDK file at all. */
+function violationsIn(program: ts.Program): Violation[] {
+  const out: Violation[] = [];
+  for (const sf of program.getSourceFiles()) {
+    const f = sf.fileName;
+    if (f.startsWith(GRAPH_DIR) && !API_MAY_LOAD.test(f)) {
+      out.push({ file: relative(ROOT, f), why: 'Graph module code reachable from the API' });
+    } else if (FORBIDDEN_PACKAGE.test(f)) {
+      out.push({
+        file: f.replace(/^.*\/node_modules\//, ''),
+        why: 'Graph SDK reachable from the API',
+      });
+    }
+  }
+  return out;
+}
+
+function report(violations: Violation[]): string {
+  return violations.map((v) => `  ${v.file}  (${v.why})`).join('\n');
+}
+
+describe('Graph is unreachable from the API (import closure)', () => {
+  let api: ts.Program;
+
+  beforeAll(() => {
+    api = makeProgram([API_MAIN]);
+  }, 120_000);
+
+  it("the closure is real: it sees the API's own code and the task queue it is allowed to load", () => {
+    /*
+     * The floor. A closure check passes trivially if the analysis loads nothing — a wrong path, a broken
+     * alias — so it must demonstrably see the API's code and the one piece of the Graph module the API
+     * IS allowed, through the same alias the real code uses.
+     */
+    const files = api.getSourceFiles().map((f) => f.fileName);
+    expect(files.length, 'the closure is nearly empty').toBeGreaterThan(300);
+    expect(files).toContain(join(ROOT, 'apps/api/src/app.module.ts'));
+    expect(files, 'GraphTaskQueue is not reachable: the API cannot enqueue').toContain(
+      join(ROOT, 'libs/modules/graph/src/graph-task.queue.ts'),
+    );
+  });
+
+  it('nothing the API can load reaches the Graph client, credential, module or SDK', () => {
+    const violations = violationsIn(api);
+    expect(violations, `\n${report(violations)}\n`).toEqual([]);
+  });
+
+  it('is not vacuous for the worker: the worker closure DOES reach all of it', () => {
+    const worker = makeProgram([WORKER_MAIN], {}, api);
+    const files = worker.getSourceFiles().map((f) => f.fileName);
+    for (const needle of [
+      'libs/modules/graph/src/graph-client.service.ts',
+      'libs/modules/graph/src/graph-credential.ts',
+      'libs/modules/graph/src/graph.module.ts',
+    ]) {
+      expect(files, `the worker does not reach ${needle}`).toContain(join(ROOT, needle));
+    }
+    expect(
+      files.some((f) => FORBIDDEN_PACKAGE.test(f)),
+      'the worker does not reach the Graph SDK',
+    ).toBe(true);
+  }, 120_000);
+});
+
+describe('the closure check fails when an API file does what it forbids (mutation)', () => {
+  const mutants: Array<[string, string]> = [
+    [
+      'importing buildGraphCredential',
+      "import { buildGraphCredential } from '@modules/graph/graph-credential';\nexport const m = buildGraphCredential;\n",
+    ],
+    [
+      'importing GraphClientService',
+      "import { GraphClientService } from '@modules/graph/graph-client.service';\nexport const m = GraphClientService;\n",
+    ],
+    [
+      'importing the Graph module',
+      "import { GraphModule } from '@modules/graph/graph.module';\nexport const m = GraphModule;\n",
+    ],
+    [
+      'importing the SDK client directly',
+      "import { Client } from '@microsoft/microsoft-graph-client';\nexport const m = Client;\n",
+    ],
+    [
+      'importing an Azure credential directly',
+      "import { ClientCertificateCredential } from '@azure/identity';\nexport const m = ClientCertificateCredential;\n",
+    ],
+    [
+      'reaching a Graph service through a barrel re-export',
+      "export * from '@modules/graph/application/entra-account.service';\n",
+    ],
+  ];
+
+  it.each(mutants)(
+    '%s',
+    (_name, source) => {
+      const program = makeProgram([API_MAIN, MUTANT], { [MUTANT]: source });
+      expect(violationsIn(program).length, 'the check did not notice').toBeGreaterThan(0);
+    },
+    120_000,
   );
-}
 
-interface ScanOptions {
-  /** Files to look at; default all. */
-  only?: (file: string) => boolean;
-  /** Files exempt from this rule; default none. */
-  except?: (file: string) => boolean;
-}
+  it("reading a GRAPH_* variable through the API's config does not even compile", () => {
+    const source =
+      "import { ApiConfigService } from '@platform';\n" +
+      "export const m = (c: ApiConfigService) => c.get('GRAPH_CLIENT_ID');\n";
+    const program = makeProgram([API_MAIN, MUTANT], { [MUTANT]: source });
+    const diagnostics = ts.getPreEmitDiagnostics(program, program.getSourceFile(MUTANT));
 
-function scan(pattern: RegExp, { only, except }: ScanOptions = {}): Offender[] {
-  const offenders: Offender[] = [];
-  for (const file of sourceFiles()) {
-    if (only && !only(file)) continue;
-    if (except?.(file)) continue;
-    readFileSync(join(ROOT, file), 'utf8')
-      .split('\n')
-      .forEach((line, index) => {
-        // Prose about the rule is not a violation of it — this file's own docblock would count itself.
-        if (/^\s*(\*|\/\/)/.test(line)) return;
-        if (pattern.test(line)) {
-          offenders.push({ file, line: index + 1, text: line.trim().slice(0, 120) });
+    expect(diagnostics.length, 'ApiConfigService.get accepted a Graph variable').toBeGreaterThan(0);
+  }, 120_000);
+
+  it('control: a harmless API file leaves the closure clean', () => {
+    const source =
+      "import { Injectable } from '@nestjs/common';\n@Injectable()\nexport class Harmless {}\n";
+    const program = makeProgram([API_MAIN, MUTANT], { [MUTANT]: source });
+    expect(violationsIn(program)).toEqual([]);
+  }, 120_000);
+});
+
+describe('no source asks for the Entra directory role-management permission or endpoint', () => {
+  it('has no reference under libs/ or apps/', () => {
+    const offenders: string[] = [];
+    for (const sf of ts
+      .createProgram({
+        rootNames: [API_MAIN, WORKER_MAIN],
+        options,
+      })
+      .getSourceFiles()) {
+      if (sf.fileName.includes('/node_modules/')) continue;
+      sf.text.split('\n').forEach((line, i) => {
+        if (/^\s*(\*|\/\/)/.test(line)) return; // prose about the rule is not a violation of it
+        if (/roleManagement|RoleManagement/.test(line)) {
+          offenders.push(`${relative(ROOT, sf.fileName)}:${i + 1}`);
         }
       });
-  }
-  return offenders;
-}
-
-function report(offenders: Offender[]): string {
-  return offenders.map((o) => `  ${o.file}:${o.line}\n      ${o.text}`).join('\n');
-}
-
-const inModule = (f: string) => f.startsWith(MODULE_DIR);
-
-describe('Graph lives in the worker, in one place', () => {
-  it('finds the factory it claims to guard', () => {
-    /*
-     * The floor. A check on an ABSENT pattern passes trivially when the thing it protects is gone:
-     * if the factory were deleted, every consumer would fail to compile, but this file would go
-     * green. So the floor is the factory's existence, that it still builds a client, that it still
-     * caches one, and that its consumers still ask it.
-     */
-    const files = sourceFiles();
-    expect(files.length, 'the scanner sees almost no source files').toBeGreaterThan(100);
-    for (const owner of OWNERS) expect(files, `${owner} is gone`).toContain(owner);
-
-    const owner = readFileSync(join(ROOT, OWNER), 'utf8');
-    expect(owner).toMatch(/Client\.initWithMiddleware/);
-    expect(owner, 'the factory no longer caches the client').toMatch(/this\.cached/);
-
-    const consumers = files.filter(
-      (f) => f !== OWNER && /GraphClientService/.test(readFileSync(join(ROOT, f), 'utf8')),
-    );
-    expect(
-      consumers.length,
-      'nothing injects the Graph factory — the checks below prove nothing',
-    ).toBeGreaterThanOrEqual(5);
-  });
-
-  it('has no second place building a Graph client or credential', () => {
-    const offenders = scan(BUILDS_CLIENT, { except: (f) => OWNERS.includes(f) });
+    }
     expect(
       offenders,
-      `place(s) building a Graph client outside ${OWNERS.join(' / ')}:\n${report(offenders)}`,
+      'Tier-0 permission/endpoint referenced — the Graph worker app must not hold it',
     ).toEqual([]);
-  });
-
-  it('has no second answer to whether Graph is configured', () => {
-    // `isEnabled()` gates every Graph path, so two implementations of it can disagree about whether the
-    // integration is on — and the failure mode is a silent skip, which reports success.
-    const offenders = scan(READS_GRAPH_CONFIG, { except: inModule });
-    expect(
-      offenders,
-      `place(s) reading GRAPH_* config outside ${MODULE_DIR}:\n${report(offenders)}`,
-    ).toEqual([]);
-  });
-
-  it('keeps Graph out of the API: only the worker imports the Graph module or injects the client', () => {
-    const importsModule = scan(/\bGraphModule\b|modules\/graph\/graph\.module/, {
-      except: (f) => inModule(f) || f.startsWith('apps/worker/'),
-    });
-    expect(
-      importsModule,
-      `The Graph module is worker-only — the API asks via GraphTaskQueue:\n${report(importsModule)}`,
-    ).toEqual([]);
-
-    const injectsClient = scan(/\bGraphClientService\b/, { except: inModule });
-    expect(
-      injectsClient,
-      `Only libs/modules/graph may use GraphClientService:\n${report(injectsClient)}`,
-    ).toEqual([]);
-  });
-
-  it('exports nothing from the barrel that could reach Graph', () => {
-    const barrel = readFileSync(join(ROOT, MODULE_DIR, 'src/index.ts'), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*\/\//.test(line))
-      .join('\n');
-    expect(barrel).not.toMatch(/GraphClientService|GraphModule\b|graph\.module|graph-client/);
-    expect(barrel).toMatch(/GraphTaskQueue/);
-  });
-
-  it('asks for no Entra directory role-management permission or endpoint', () => {
-    const offenders = scan(/roleManagement|RoleManagement/);
-    expect(
-      offenders,
-      `Tier-0 permission/endpoint referenced — the Graph worker app must not hold it:\n${report(offenders)}`,
-    ).toEqual([]);
-  });
+  }, 120_000);
 });

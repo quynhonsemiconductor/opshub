@@ -3,18 +3,16 @@
 // late. See @quynhonsemiconductor/platform-runtime's own header: this MUST stay
 // above the OTel bootstrap, and MUST come from the subpath, not the package root.
 import '@quynhonsemiconductor/platform-runtime/load-env';
+// The process role, before anything that loads @platform (which validates the environment on import).
+import './role';
 // OTel must be imported before any other module — registers auto-instrumentation
 import { shutdownOtel } from './otel';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
-import { AppConfigService, setProcessRole } from '@platform';
+import { AppConfigService } from '@platform';
 import { bootstrapApp } from './bootstrap/app.bootstrap';
-
-// FIRST: the config module validates the environment against THIS process's schema. The API holds the
-// sign-in secret and refuses to start with any GRAPH_* variable set.
-setProcessRole('api');
 
 async function main(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(

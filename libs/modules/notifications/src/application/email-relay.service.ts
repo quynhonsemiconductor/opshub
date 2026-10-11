@@ -96,7 +96,7 @@ export class EmailRelayService
           this.notLeased(now),
         ),
       )
-      .orderBy(asc(emailOutbox.seq))
+      .orderBy(asc(emailOutbox.seq), asc(emailOutbox.id))
       .limit(limit)
       .for('update', { skipLocked: true });
   }

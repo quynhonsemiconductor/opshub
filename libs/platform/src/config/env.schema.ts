@@ -1,5 +1,6 @@
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { z } from 'zod';
+import { getProcessRole, type ProcessRole } from './process-role';
 import { SEC_PER_DAY } from '@shared-kernel';
 
 const booleanish = (defaultValue: boolean) =>
@@ -500,19 +501,6 @@ export type WorkerEnv = Omit<z.infer<typeof WorkerEnvSchema>, 'ENTRA_CLIENT_SECR
 /** What every process has in common. */
 export type Env = Omit<ApiEnv, 'ENTRA_CLIENT_SECRET'>;
 
-export type ProcessRole = 'api' | 'worker';
-
-let processRole: ProcessRole | undefined;
-
-/**
- * Declares which process this is. Called FIRST in each entry point (`apps/api/src/main.ts`,
- * `apps/worker/src/main.ts`), before the application is created, because the config module validates
- * the environment against the role's schema.
- */
-export function setProcessRole(role: ProcessRole): void {
-  processRole = role;
-}
-
 export function schemaForRole(role: ProcessRole) {
   return role === 'api' ? ApiEnvSchema : WorkerEnvSchema;
 }
@@ -524,13 +512,15 @@ export function schemaForRole(role: ProcessRole) {
  */
 export const EnvSchema = {
   safeParse(data: unknown): ReturnType<typeof ApiEnvSchema.safeParse> {
-    if (!processRole) {
+    const role = getProcessRole();
+    if (!role) {
       throw new Error(
-        "The process role is not set. Call setProcessRole('api' | 'worker') first in main.ts.",
+        'The process role is not set. The entry point must import its role module (apps/<app>/src/role.ts) ' +
+          'before anything that loads @platform.',
       );
     }
     // The two roles' outputs differ only in the variables each owns; consumers read the common `Env`.
-    return schemaForRole(processRole).safeParse(data) as unknown as ReturnType<
+    return schemaForRole(role).safeParse(data) as unknown as ReturnType<
       typeof ApiEnvSchema.safeParse
     >;
   },

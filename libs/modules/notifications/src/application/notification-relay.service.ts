@@ -130,7 +130,7 @@ export class NotificationRelayService
           this.notLeased(now),
         ),
       )
-      .orderBy(asc(notificationOutbox.seq))
+      .orderBy(asc(notificationOutbox.seq), asc(notificationOutbox.id))
       .limit(limit)
       .for('update', { skipLocked: true });
   }

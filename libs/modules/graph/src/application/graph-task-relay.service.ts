@@ -116,7 +116,7 @@ export class GraphTaskRelayService extends AbstractOutboxRelay<TaskRow> {
           ))`,
         ),
       )
-      .orderBy(asc(graphTaskOutbox.seq))
+      .orderBy(asc(graphTaskOutbox.seq), asc(graphTaskOutbox.id))
       .limit(limit)
       .for('update', { skipLocked: true });
 
