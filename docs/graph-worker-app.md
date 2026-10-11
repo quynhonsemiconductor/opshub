@@ -117,34 +117,65 @@ does, instead of being dropped. No 403 per cron tick.
 
 **Level-triggered, never carrying a directory object.** An account task names an _employee_, never an
 Entra object id and never "enable" or "disable". The worker decides from the database when it runs:
-`offboarded` => disable and revoke sign-in sessions; otherwise => enable. So the API cannot aim a task at
-an arbitrary account, and a stale task cannot undo a later one — an "enable" queued at onboarding that
-runs after the person was offboarded finds them offboarded and disables. Tasks for one employee never
-overlap and run in `seq` order. The stored `entra_oid` must be a GUID and is URL-encoded; anything else
-dead-letters without a call.
+`offboarded` => disable and revoke sign-in sessions; otherwise => enable, re-reading the status
+immediately before the enable and skipping it if the employee was offboarded in the meantime. A stale
+"enable" queued at onboarding therefore cannot re-enable someone since offboarded. Tasks for one employee
+never overlap (see _Ordering_).
+
+**What this does and does not guarantee about which account is touched.** The API cannot put a directory
+object in a task. But the object acted on is whatever `employees.entra_oid` holds, and that column is
+writable through `POST /employees` (by a holder of `employee.write`; the value is validated as a GUID) and
+by SSO linking. So the worker VERIFIES before any change: `GET /users/{oid}?$select=id,userPrincipalName,mail`
+must return a `mail` or `userPrincipalName` equal to the employee's email (case-insensitive). If not, the
+task dead-letters (alarm), nothing is changed, and the failure message names neither address. The
+`entra_oid` must also be a GUID and is URL-encoded.
+
+**Calls cannot outlive their lease.** The SDK's default retry loop is removed (the relay is the only
+retry) and every request carries a hard 30 s deadline, body included. Each task kind declares its maximum
+number of calls (`GRAPH_TASK_MAX_CALLS`: 3 for an account task, 2 for posture, a 100-page cap for a scan)
+and its lease is `maxCalls x 30 s + 60 s` (150 s, 120 s, 51 min). A test asserts the inequality for every
+kind. Without it: worker A's throttled enable retries inside the SDK past its lease, worker B re-claims,
+reads "offboarded" and disables, and A's late PATCH re-enables the account with nothing to put it right.
+The email relay is bounded the same way (a 30 s send deadline, SES cancelled by `abortSignal`, lease
+90 s).
+
+**Two relays, so a scan never delays an offboarding.** Account tasks and scans/syncs are claimed by
+separate relays (`GraphAccountRelayService`: batches of 10, 150 s leases; `GraphScanRelayService`: one at a
+time, long lease), each its own claim and its own in-flight pass. An offboarding disable runs while a
+scan is still going, and a worker that crashes holding a scan strands that scan alone.
+
+**Ordering.** A task is claimable only while no other task for the employee is earlier and pending, or
+holds a live lease (commit order can differ from `seq` order), and the claim takes a transaction-scoped
+advisory lock on the employee so two simultaneous claims cannot both succeed.
+
+**A held cron lock defers, it does not complete.** A queued scan or sync takes the same `ExclusiveJob` lock
+as the cron. If the lock is held — possibly by a crashed run, whose lock lives for hours — the row stays
+pending with the attempt refunded and retries in 5 minutes; it is never marked done.
 
 **No transaction across a Graph call (lease-and-fence).** Every outbox relay (email, notifications,
 webhooks and these tasks) claims rows in a short transaction (`attempts + 1`, a fresh `lease_token`,
-`locked_until`), calls out with **no transaction open**, and finishes in a new one fenced on the token.
-A scan can therefore run for as long as its lease (60 min for scans and syncs, 3 min for account tasks)
-without holding a database session — it cannot trip `idle_in_transaction_session_timeout` — and a relay
-whose lease lapsed cannot overwrite the one that took over. The attempt is spent at claim time, so a
-process that dies mid-call still uses up its budget; a row whose lease lapsed with every attempt used is
-dead-lettered ("abandoned") by the next claim.
+`locked_until`), calls out with **no transaction open**, and finishes in a new one fenced on the token. A
+scan can run for as long as its lease without holding a database session, and a relay whose lease lapsed
+cannot overwrite the one that took over. The attempt is spent at claim time, so a process that dies
+mid-call still uses up its budget; a row whose lease lapsed with every attempt used is dead-lettered
+("abandoned") by the next claim.
 
 **Failures are classified.** 400/403/404 from Graph dead-letter at once (a missing permission or a
-deleted user does not heal); 429/503/504 honour `Retry-After`; everything else uses the 30 s doubling
-backoff, five attempts, then the `outboxDeadLetter` alarm.
+deleted user does not heal); 429/503/504 honour `Retry-After`, clamped to one hour and ignored if it is
+negative, non-finite or malformed (a hostile `1e13` must not park an employee's offboarding behind it);
+everything else uses the 30 s doubling backoff, five attempts, then the `outboxDeadLetter` alarm.
 
-**Availability is reported, not assumed.** The worker writes `enabled` or `disabled` to
-`messaging.graph_sync_state` every 30 s. The two 202 endpoints answer `409 GRAPH_DISABLED` unless a fresh
-`enabled` heartbeat exists, so the UI never promises a scan nobody can run. Account tasks ignore it: an
+**Availability is reported, not assumed.** Each worker replica writes `enabled` or `disabled` to its own
+row in `messaging.graph_sync_state` every 30 s. The two 202 endpoints answer `409 GRAPH_DISABLED` unless
+ANY replica has a fresh `enabled` heartbeat, so the UI never promises a scan nobody can run. Account tasks ignore it: an
 approved offboarding queues regardless and waits for the app.
 
 The Intune device sync lists all managed devices with a plain `$select` (no `$filter`, no delta — neither
 is a documented feature of that resource), compares `lastSyncDateTime` client-side against a cursor kept
 in `graph_sync_state`, evaluates every device in a daily full pass, raises a finding for any device silent
-for 30 days, and does not let one device's failure end the pass or advance the cursor past it.
+for 30 days, and does not let one device's failure end the pass or advance the cursor past it. A finding is
+not re-raised while one with the same source is still live (open, acknowledged or risk-accepted); once it is
+resolved, the condition returning raises a new one.
 
 ## Configuration by process
 
@@ -167,9 +198,6 @@ role only.
 
 - The API and the migrator cannot read the Graph certificate. On k3s, with a federated credential, there is
   no secret to scope at all.
-- A scan or sync can run for many minutes. That is safe now (a lease, not a lock); give long tasks their own
-  relay if scans grow so a long one does not delay short account tasks behind it. (A batch already ends at
-  the first long task, so account tasks claimed _before_ it are not delayed.)
 - A device finding raised for non-compliance, encryption or staleness is not closed automatically when the
   device recovers; resolve it in the compliance screen.
 - Not verified here (no tenant access): the `secureScoreControlProfiles` least-privilege row, and the list

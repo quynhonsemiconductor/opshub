@@ -105,13 +105,14 @@ export default defineConfig({
       // 26.32. Neither branch's own figure applies once both are in, which is why the rebase
       // re-measured rather than keeping whichever number won the conflict.
       // Raised 2026-10-11 when the Graph worker module, the lease-and-fence relay and the role-split env
-      // schema landed with their specs. Measured lines 42.48 / statements 42.35 / branches 34.38 /
+      // schema landed with their specs (lines/functions nudged again after the review round: measured
+      // 43.03 / 29.34). First measurement: lines 42.48 / statements 42.35 / branches 34.38 /
       // functions 28.78; `check:coverage-floors` refused the old 37/37/29/25 (5 points behind). Set about
       // two and a half points under actual so run-to-run variance does not fail a branch that added no
       // code, and still inside the 3-point limit.
       thresholds: {
-        lines: 40,
-        functions: 26,
+        lines: 41,
+        functions: 27,
         branches: 32,
         statements: 40,
       },
