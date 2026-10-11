@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { graphTaskOutbox } from '../../../../db/schema';
-import { dedupeKeyFor, type GraphTask } from './graph-task';
+import { dedupeKeyFor, orderingKeyFor, type GraphTask } from './graph-task';
 
 /**
  * The API's side of Graph: write a task row, never call Graph.
@@ -21,7 +21,12 @@ export class GraphTaskQueue {
   async enqueue(task: GraphTask, tx?: DbExecutor): Promise<boolean> {
     const rows = await (tx ?? this.db)
       .insert(graphTaskOutbox)
-      .values({ kind: task.kind, payload: task.payload, dedupeKey: dedupeKeyFor(task) })
+      .values({
+        kind: task.kind,
+        payload: task.payload,
+        orderingKey: orderingKeyFor(task),
+        dedupeKey: dedupeKeyFor(task),
+      })
       .onConflictDoNothing()
       .returning({ id: graphTaskOutbox.id });
     return rows.length > 0;

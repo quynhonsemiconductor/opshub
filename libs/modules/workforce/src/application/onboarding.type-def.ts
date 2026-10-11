@@ -1,5 +1,4 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
 import {
   type ApprovalStepDef,
   type DbExecutor,
@@ -10,7 +9,6 @@ import {
 } from '@platform';
 import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
 import { REQUEST_TYPE } from '@shared-kernel';
-import { employees } from '../../../../../db/schema';
 
 export interface OnboardingPayload extends Record<string, unknown> {
   /** The employee being onboarded. */
@@ -68,12 +66,11 @@ export class OnboardingTypeDef implements RequestTypeDef<OnboardingPayload>, OnM
   }
 
   /**
-   * Final approval: queue the Entra account enable IN THE APPROVAL'S TRANSACTION.
+   * Final approval: queue an Entra account reconcile IN THE APPROVAL'S TRANSACTION.
    *
-   * It used to run in `afterApprove`, after the commit and inside the approver's HTTP request, calling
-   * Graph with the API's own credential. Now the API has none: the task row commits with the approval
-   * (roll the approval back and there is no task), and the worker enables the account, retrying with
-   * backoff. An employee without an Entra object id has no account to enable.
+   * The task names the employee and nothing else. The worker reads their status and Entra object id when
+   * it runs and sets the account to match, so this can never enable an account whose owner has been
+   * offboarded since — the stale-enable race a "set enabled = true" payload would have.
    */
   async onApprove(
     payload: OnboardingPayload,
@@ -81,21 +78,8 @@ export class OnboardingTypeDef implements RequestTypeDef<OnboardingPayload>, OnM
     _approverId: string,
     tx: DbExecutor,
   ): Promise<void> {
-    const [row] = await tx
-      .select({ entraOid: employees.entraOid })
-      .from(employees)
-      .where(eq(employees.id, payload.employeeId))
-      .limit(1);
-
-    if (!row?.entraOid) {
-      this.logger.warn(
-        `Onboarding approved: no Entra OID for employee ${payload.employeeId}, no account to enable`,
-      );
-      return;
-    }
-
     await this.graphTasks.enqueue(
-      { kind: GRAPH_TASK.ACCOUNT_SET_ENABLED, payload: { entraOid: row.entraOid, enabled: true } },
+      { kind: GRAPH_TASK.ACCOUNT_RECONCILE, payload: { employeeId: payload.employeeId } },
       tx,
     );
   }

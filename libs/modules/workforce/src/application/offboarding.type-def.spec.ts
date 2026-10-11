@@ -310,23 +310,27 @@ describe('OffboardingTypeDef.onApprove()', () => {
   });
 
   describe('the Entra account', () => {
-    it('is disabled and its sessions revoked by TASKS queued in the approval transaction, in that order', async () => {
-      const tx = makeTx([], [], [{ id: 'token-1' }], 'entra-oid-1');
-      await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
-
-      expect(enqueue.mock.calls.map((c: unknown[]) => c[0])).toEqual([
-        { kind: 'entra.account.set_enabled', payload: { entraOid: 'entra-oid-1', enabled: false } },
-        { kind: 'entra.sessions.revoke', payload: { entraOid: 'entra-oid-1' } },
-      ]);
-      // The SAME transaction: roll the approval back and neither task exists.
-      expect(enqueue.mock.calls.every((c: unknown[]) => c[1] === tx)).toBe(true);
-    });
-
-    it('queues nothing for an employee with no Entra object id', async () => {
+    it('is reconciled by a TASK queued in the approval transaction, naming the employee and nothing else', async () => {
       const tx = makeTx();
       await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-      expect(enqueue).not.toHaveBeenCalled();
+      // No directory object id in the payload: the worker reads the employee's CURRENT status and Entra
+      // id, so the API cannot aim a task at an arbitrary account and a stale task cannot re-enable.
+      expect(enqueue.mock.calls.map((c: unknown[]) => c[0])).toEqual([
+        { kind: 'entra.account.reconcile', payload: { employeeId: EMPLOYEE_ID } },
+      ]);
+      // The SAME transaction: roll the approval back and the task does not exist.
+      expect(enqueue.mock.calls.every((c: unknown[]) => c[1] === tx)).toBe(true);
+    });
+
+    it('is queued after the employee row was set to offboarded, in the same transaction', async () => {
+      const tx = makeTx();
+      await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
+
+      const employeeUpdate = tx._updateCalls.find((c) => c.table === employees)!;
+      expect(employeeUpdate.chain.set.mock.invocationCallOrder[0]).toBeLessThan(
+        enqueue.mock.invocationCallOrder[0],
+      );
     });
   });
 

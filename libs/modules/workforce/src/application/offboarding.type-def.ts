@@ -204,37 +204,20 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     }
 
     /*
-     * 6. Entra: disable the account, then end its sign-in sessions — QUEUED, IN THIS TRANSACTION.
+     * 6. Entra: queue an account reconcile — IN THIS TRANSACTION.
      *
-     * Both used to be a Graph call made by the API after the commit: best-effort, inside the
-     * approver's request, with a credential able to modify every user. Now the API has no Graph
-     * credential. The two task rows commit with the approval (roll it back and neither exists) and the
-     * worker performs them in order with retries, dead-lettering through the alarm already watching
-     * outbox rows. Disabling stops NEW sign-ins; revoking is what ends the refresh tokens already
-     * issued, which keep working after a disable.
+     * The employee row was set to `offboarded` in step 1 of this same transaction, so the task commits
+     * with the status it depends on (roll the approval back and neither exists). The worker reads that
+     * status when it runs and, seeing `offboarded`, disables the account and revokes its sign-in
+     * sessions — disabling stops NEW sign-ins, revoking ends the refresh tokens already issued.
+     *
+     * The task carries the employee id and nothing else, so the API cannot aim it at another account and
+     * an older queued "enable" for this person, run later, still finds them offboarded.
      */
-    const [entra] = await tx
-      .select({ entraOid: employees.entraOid })
-      .from(employees)
-      .where(eq(employees.id, employeeId))
-      .limit(1);
-    if (entra?.entraOid) {
-      await this.graphTasks.enqueue(
-        {
-          kind: GRAPH_TASK.ACCOUNT_SET_ENABLED,
-          payload: { entraOid: entra.entraOid, enabled: false },
-        },
-        tx,
-      );
-      await this.graphTasks.enqueue(
-        { kind: GRAPH_TASK.SESSIONS_REVOKE, payload: { entraOid: entra.entraOid } },
-        tx,
-      );
-    } else {
-      this.logger.warn(
-        `Offboarding approved: no Entra OID for employee ${employeeId}, no account to disable`,
-      );
-    }
+    await this.graphTasks.enqueue(
+      { kind: GRAPH_TASK.ACCOUNT_RECONCILE, payload: { employeeId } },
+      tx,
+    );
   }
 
   async onReject(

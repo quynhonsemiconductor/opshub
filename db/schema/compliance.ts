@@ -38,7 +38,7 @@ export const complianceFindings = complianceSchema.table(
     severity: findingSeverityEnum('severity').notNull().default('medium'),
     status: findingStatusEnum('status').notNull().default('open'),
     /** Source system that raised the finding, e.g. 'defender', 'intune'. */
-    source: varchar('source', { length: 60 }).notNull(),
+    source: varchar('source', { length: 255 }).notNull(),
     detectedAt: timestamp('detected_at', { withTimezone: true }).notNull().defaultNow(),
     resolvedBy: uuid('resolved_by'),
     resolutionNote: text('resolution_note'),

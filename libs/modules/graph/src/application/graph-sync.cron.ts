@@ -1,16 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ExclusiveJob } from '@platform';
-import { MS_PER_HOUR } from '@shared-kernel';
 import { GraphClientService } from '../graph-client.service';
+import { GRAPH_LOCK } from '../graph-locks';
 import { DeviceSyncService } from './device-sync.service';
 import { SecureScoreSyncService } from './secure-score-sync.service';
 import { ShadowItScanService } from './shadow-it-scan.service';
-
-/** Each lock TTL sits just under its schedule, so a crashed pod never blocks the next tick. */
-const DEVICE_SYNC_LOCK_TTL_MS = 25 * 60_000;
-const SHADOW_IT_LOCK_TTL_MS = 5 * MS_PER_HOUR;
-const POSTURE_LOCK_TTL_MS = 23 * MS_PER_HOUR;
 
 /**
  * The scheduled Graph syncs. WORKER ONLY — registered by `GraphModule`, which only the worker imports.
@@ -33,7 +28,7 @@ export class GraphSyncCron {
 
   @Cron(CronExpression.EVERY_30_MINUTES, { name: 'compliance-device-sync' })
   async syncDeviceCompliance(): Promise<void> {
-    await this.run('compliance-device-sync', DEVICE_SYNC_LOCK_TTL_MS, async () => {
+    await this.run(GRAPH_LOCK.DEVICE_SYNC.name, GRAPH_LOCK.DEVICE_SYNC.ttlMs, async () => {
       const result = await this.devices.syncDevices();
       this.logger.log(
         `Device compliance sync done — ${result.devices} devices, ${result.findings} new findings`,
@@ -43,7 +38,7 @@ export class GraphSyncCron {
 
   @Cron('0 */6 * * *', { name: 'compliance-shadow-it' })
   async detectShadowIt(): Promise<void> {
-    await this.run('compliance-shadow-it', SHADOW_IT_LOCK_TTL_MS, async () => {
+    await this.run(GRAPH_LOCK.SHADOW_IT.name, GRAPH_LOCK.SHADOW_IT.ttlMs, async () => {
       await this.shadowIt.detectShadowIt();
     });
   }
@@ -51,7 +46,7 @@ export class GraphSyncCron {
   /** Daily at 02:00 UTC — Secure Score data typically refreshes once a day. */
   @Cron('0 2 * * *', { name: 'security-posture-sync' })
   async syncSecurityPosture(): Promise<void> {
-    await this.run('security-posture-sync', POSTURE_LOCK_TTL_MS, async () => {
+    await this.run(GRAPH_LOCK.POSTURE.name, GRAPH_LOCK.POSTURE.ttlMs, async () => {
       await this.posture.runPostureSync();
     });
   }

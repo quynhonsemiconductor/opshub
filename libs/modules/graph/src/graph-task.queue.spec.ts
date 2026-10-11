@@ -18,15 +18,17 @@ describe('GraphTaskQueue', () => {
     const tx = makeDb([{ id: 'y' }]);
 
     await new GraphTaskQueue(root as never).enqueue(
-      { kind: GRAPH_TASK.SESSIONS_REVOKE, payload: { entraOid: 'o1' } },
+      { kind: GRAPH_TASK.ACCOUNT_RECONCILE, payload: { employeeId: 'emp-1' } },
       tx as never,
     );
 
     expect(tx.insert).toHaveBeenCalledWith(graphTaskOutbox);
     expect(root.insert).not.toHaveBeenCalled();
+    // Keyed by employee, so two tasks for one person never overlap; never merged.
     expect(tx.chain.values).toHaveBeenCalledWith({
-      kind: 'entra.sessions.revoke',
-      payload: { entraOid: 'o1' },
+      kind: 'entra.account.reconcile',
+      payload: { employeeId: 'emp-1' },
+      orderingKey: 'emp-1',
       dedupeKey: null,
     });
   });
@@ -50,13 +52,7 @@ describe('GraphTaskQueue', () => {
       'security.posture.sync',
     );
     expect(
-      dedupeKeyFor({
-        kind: GRAPH_TASK.ACCOUNT_SET_ENABLED,
-        payload: { entraOid: 'o', enabled: false },
-      }),
-    ).toBeNull();
-    expect(
-      dedupeKeyFor({ kind: GRAPH_TASK.SESSIONS_REVOKE, payload: { entraOid: 'o' } }),
+      dedupeKeyFor({ kind: GRAPH_TASK.ACCOUNT_RECONCILE, payload: { employeeId: 'e' } }),
     ).toBeNull();
   });
 });
