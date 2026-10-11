@@ -16,6 +16,11 @@ Q5 keep v7 behaviour · Q8 divergence declared in `docs/DIVERGENCE.md` · Q9 `pl
 Q11 accept 12 h · Q6 and the Entra owner's steps are pending with the owner.
 **Environments (2026-10-11):** the identity-8 cutover happens on **ECS dev**, the only environment that exists, and M3 runs there. **Prod has never launched and launches directly
 on-prem (k3s/gitops) with identity 8: no ECS prod path is added.** Moving opshub dev from ECS to on-prem is a separate infra migration, not part of this plan.
+**Owner, 2026-10-11 (second revision): opshub has NO users yet (dev only, never launched).** So there is **one cutover PR**: no expand→switch→contract, no 30-day rollback window,
+no re-sign-in announcement, no v7 session flush. The same PR creates the identity tables, ships the v8 code and **removes** v7 (BFF, refresh tokens, `AuthTokenCache`, the
+`refresh_tokens` and `sso_identities` tables, the JWT secret, the routes). What is correct regardless of users stays: `employees.id = user.id`, the role sync through `onStaffSignIn`, the
+worker/API module split, and the Pages proxy for `/api/auth/*`. The sign-in app is **delegated-only**: the owner is removing every application permission from "OpsHub Dev", and nothing in
+the sign-in path calls Graph (§5.4).
 
 ---
 
@@ -44,14 +49,13 @@ on-prem (k3s/gitops) with identity 8: no ECS prod path is added.** Moving opshub
 3. **`mail` is a required option** of `createIdentity` although the `staff` preset sends no mail. Workaround without a package change:
    a stub that throws (§1.3). Nicer: make `mail` optional for a staff-only instance.
 
-Items 1 and 2 are small app-platform PRs (one PR each, with kit tests). Until they are released the opshub cutover PR cannot
-be completed; the expand-only migration PR (§7, step 1) can land first.
+Status: item 1 is app-platform #214 and item 2 + optional `mail` is #215 (merged); the release is identity 8.1.0. The cutover PR is opened once #214 is merged and 8.1.0 is released.
 
 ### 0.3 Product-visible changes to confirm (details in §8)
 
-- **Every user signs in again once** (old sessions are not migrated; §2.4).
-- **Sessions last 12 hours, not 30 days.** The staff preset caps every session at 12 h and has no sliding refresh. Users re-authenticate
-  daily (Entra's own session usually makes that a no-prompt redirect).
+- **No sign-out event and no announcement**: there are no users, so nothing is migrated, announced or flushed (§2.4).
+- **Sessions last 12 hours, not 30 days.** The staff preset caps every session at 12 h and has no sliding refresh. Users will re-authenticate
+  daily once there are users (Entra's own session usually makes that a no-prompt redirect).
 - **`SameSite=Lax`** on the session cookie (Better Auth) instead of `Strict`, and the cookie is `__Secure-opshub.session_token`
   instead of `__Host-opshub_session`.
 
@@ -166,10 +170,11 @@ only (§6).
 
 | | Path | Change |
 | --- | --- | --- |
-| M | `infra/modules/stack/main.tf` | Secrets: add `better-auth-secret`; keep `COOKIE_SECRET`, `CSRF_SECRET`; **later** (PR 3) remove `jwt-private`. Env: remove `ENTRA_REDIRECT_URI`; add `APP_URL = local.app_url`. `ENTRA_CLIENT_SECRET` is injected unconditionally (drop the `entra_client_secret_set` gate for staff sign-in). Alarm rewire (§1.5) |
+| M | `infra/modules/stack/main.tf` | Secrets: add `better-auth-secret`; keep `COOKIE_SECRET`, `CSRF_SECRET`; remove `jwt-private` **in the same PR** (nothing reads it any more). Env: remove `ENTRA_REDIRECT_URI`; add `APP_URL = local.app_url`. `ENTRA_CLIENT_SECRET` is injected unconditionally (drop the `entra_client_secret_set` gate for staff sign-in). Alarm rewire (§1.5) |
 | M | `.github/workflows/backend-ci.yml`, `web-ci.yml` | Remove the "Generate ephemeral JWT keypair" steps and `JWT_PRIVATE_KEY`; add `BETTER_AUTH_SECRET` and `IDENTITY_TEST_LOGIN=enabled` for the e2e job |
 | M | `vitest.config.ts`, `test/vitest.e2e.config.ts` | Test env: remove `JWT_*`, add `BETTER_AUTH_SECRET` |
 | — | `infra/live/prod`, `gitops/values/opshub/*.yaml` | **Not part of the dev cutover.** No ECS prod path is added (prod launches on-prem). The on-prem env and secrets are listed in §7.5 for the gitops/infra PR that launches prod |
+| M | `infra/modules/stack/main.tf` (Graph) | Do **not** repurpose or rename `GRAPH_CLIENT_SECRET`, and never use it for sign-in (§5.4): the sign-in secret `ENTRA_CLIENT_SECRET` and the Graph secret are different secrets on different apps |
 | M | `docs/DIVERGENCE.md` | Declare the new auth shape vs rally until rally follows (§8, Q8) |
 | M | `README.md`, `apps/web/README.md`, `docs/runbooks/*` | Login flow, env table |
 
@@ -177,26 +182,32 @@ only (§6).
 
 ## 2. Schema and data
 
-### 2.1 New tables
+### 2.1 One migration set: create the identity tables, backfill, remove v7
 
 Generated with the Better Auth CLI against the **same** `createIdentity` call (`scripts/auth-cli-config.ts`, as in the identity README), with the house
 adjustments (`identity` schema, `uuid` ids, `timestamptz`). For `staff` + the admin plugin the set is: `identity."user"` (+ `role`, `banned`,
 `ban_reason`, `ban_expires`), `identity.session` (+ `impersonated_by`), `identity.account`, `identity.verification`. No `organization`,
 `member`, `sso_provider`, `two_factor` (those belong to presets opshub does not use).
 
-- Drizzle schema: `db/schema/identity-auth.ts` (new), exported from `db/schema/index.ts`. The names `user`, `session`, `account` do not collide with the
-  existing `employees`, `refresh_tokens`, `sso_identities` in the same `identity` schema.
-- Migration `0035_identity_v8_tables.sql` (drizzle-kit generated, **additive only**): the four tables, indexes, FKs inside the auth tables. Privileges come from the
-  `ALTER DEFAULT PRIVILEGES` in `0012`, so `opshub_app`/`opshub_worker` can use them; a privilege test asserts it (the least-privilege CI job already runs the e2e suite as `opshub_app`).
-- It is **expand-only**, which is what the `Migration upgrade path` CI job and the expand-contract advisory check. v7 tables stay untouched.
+Three migrations, in this order, in **the one PR**:
 
-### 2.2 Data migration `0036_identity_v8_backfill.sql` (one transaction)
+| Migration | What |
+| --- | --- |
+| `0035_identity_v8_tables.sql` (drizzle-kit generated) | The four tables, indexes, FKs inside the auth tables. Privileges come from the `ALTER DEFAULT PRIVILEGES` in `0012`, so `opshub_app`/`opshub_worker` can use them (the least-privilege CI job already runs the e2e suite as `opshub_app`) |
+| `0036_identity_v8_backfill.sql` (custom) | `employees` → `user`, `sso_identities` → `account` (§2.2). It reads `sso_identities`, so it must run before 0037 |
+| `0037_identity_v7_removal.sql` | `DROP TABLE identity.refresh_tokens; DROP TABLE identity.sso_identities;` Nothing else in `employees` is touched: **`employees.entra_oid` stays** (the employee API, `graph-pim.service.ts` and the employee repository read it; `onStaffSignIn` keeps it in sync, §3.2) |
 
-Differs from the generic template because the source is `employees`:
+- Drizzle schema: `db/schema/identity-auth.ts` (new), exported from `db/schema/index.ts`; `refreshTokens` and `ssoIdentities` are deleted from `db/schema/identity.ts`. The names `user`, `session`, `account` do not collide with `employees` in the same schema.
+- **CI will warn on the drops** (the "Expand-contract advisory" is WARN-only and matches `DROP TABLE`). The deployment is migrate-before-flip: the migrator runs 0037 while the old v7 api is briefly still up, and that api would
+  fail on `refresh_tokens`. That is acceptable only because nobody uses it; the drop lines carry `-- expand-contract-ok: no users yet (owner, 2026-10-11)` so the advisory records the decision instead of warning.
+- There is no zero-downtime care anywhere in this set: no batching, no dual writes, no compatibility views.
+
+### 2.2 Backfill `0036_identity_v8_backfill.sql` (seed and dev data)
+
+Differs from the generic template because the source is `employees`. It exists so the seeded employees and the dev rows keep their ids; it needs no care for live traffic:
 
 ```sql
-BEGIN;
--- pre-check (also run as a CI assertion on the seeded database): no two employees collide when lower-cased
+-- pre-check (also a CI assertion on the seeded database): no two employees collide when lower-cased
 --   SELECT lower(email) FROM identity.employees GROUP BY 1 HAVING count(*) > 1;   -- must return 0 rows
 
 INSERT INTO identity."user" (id, name, email, email_verified, banned, ban_reason, created_at, updated_at)
@@ -216,7 +227,6 @@ FROM identity.sso_identities s
 JOIN identity."user" u ON u.id = s.user_id
 WHERE s.provider = 'entra'
 ON CONFLICT DO NOTHING;
-COMMIT;
 ```
 
 - Employees created by HR **before** their first Entra login have no `sso_identities` row; they get a `user` row and no `account`. On first Microsoft sign-in
@@ -225,7 +235,7 @@ COMMIT;
   `tf-modules` `rds-v2.3.0` with its default `engine_version = "17"` (opshub's stack does not override it); the on-prem shared instance is `engine_version = "16"`
   (`infra/live/data-prod/main.tf`); only the local compose file is 18. The backfill therefore uses `gen_random_uuid()` (PostgreSQL 13+); a v4 id is as good as a v7 one
   for a row id (Better Auth treats ids as opaque, and the app generates v7 ids itself for every new row). The generated DDL has no `uuidv7()` default.
-- The backfill is re-runnable (`ON CONFLICT`) and is also expressed as a test: after migration, `count(user) = count(employees)` and every `account.user_id` exists.
+- After the migration set: `count(user) = count(employees)`, every `account.user_id` exists, and `refresh_tokens`/`sso_identities` are gone (asserted by the migration job, §6.1).
 
 ### 2.3 Keeping `user` and `employees` in step afterwards
 
@@ -234,14 +244,10 @@ COMMIT;
 - **Email or name change**: employees' email is the join key to Entra; a change goes through `EmployeeService` and updates the `user` row.
 - **Invariant, enforced by a ratchet test:** every `employees.id` has a `user.id` and vice versa, except explicitly listed system rows.
 
-### 2.4 Sessions and the rollout note
+### 2.4 Sessions: nothing to migrate, announce or flush
 
-**Old sessions are not migrated** (v7 BFF sessions live in Valkey, refresh tokens in `identity.refresh_tokens`; neither exists in v8). The release note and the Slack/Teams
-announcement say, verbatim:
-
-> After this release you will be signed out once and asked to sign in with your Microsoft account again. Nothing else changes. Sessions now last up to 12 hours.
-
-Unused v7 data: `refresh_tokens`, `sso_identities`, `employees.entra_oid` stay readable for 30 days (rollback, §7), then PR 3 drops them (contract step).
+There are no users, so **no rollout note, no sign-out announcement and no Valkey flush**. The v7 code, config and routes are simply deleted. Any v7 BFF session keys that happen to sit in dev Valkey are read by nothing and expire on their own
+TTL. The v8 sessions start empty.
 
 ---
 
@@ -258,11 +264,12 @@ Unused v7 data: `refresh_tokens`, `sso_identities`, `employees.entra_oid` stay r
 
 ### 3.2 v8 design
 
-`hooks.onStaffSignIn(user, { oid, email, roles, claims })` (new in app-platform, §0.2 (1)) calls the **same** reconciliation, so nothing in `authz` changes:
+`hooks.onStaffSignIn(user, { oid, tid, email, guest, roles })` (app-platform #214, §0.2 (1)) calls the **same** reconciliation, so nothing in `authz` changes:
 
 ```ts
-async onStaffSignIn(user, { roles }) {
+async onStaffSignIn(user, { oid, roles }) {
   const roleKeys = roles.length > 0 ? roles : ['employee'];
+  await employees.setEntraOid(user.id, oid); // v7 kept employees.entra_oid in step at login; graph-pim and the employee API read it
   await authzAdmin.syncUserRolesByKeys(user.id, roleKeys, { sub: user.id, email: user.email });
 }
 ```
@@ -270,12 +277,12 @@ async onStaffSignIn(user, { roles }) {
 Requirements on the hook, so behaviour is identical:
 - runs on **every** Microsoft sign-in (not only the first), after the user and the employee exist and **before the first request** with the new session is served;
 - receives `roles` as `string[]` (absent claim → `[]`), already validated as an array of strings;
-- a failure of the sync **fails the sign-in** (v7: the login errored and no session was minted); it must not leave a session with stale roles.
+- a failure of the sync **fails the sign-in** (v7: the login errored and no session was minted); it must not leave a session with stale roles. In #214 a throw redirects the browser with `?error=STAFF_SIGN_IN_REFUSED`, writes no session and logs only the error's class and code;
+- it cannot be bypassed: the Microsoft provider takes the code flow only (the id_token sign-in is disabled), and a Microsoft session with no recorded claims is refused.
 
 `/v1/auth/me` returns `roles` from `employees.roles` (read per call) in place of the token claim, and `permissions` from `AuthzService.resolve` exactly as now.
 
-Alternative if the hook is refused: read the user's `appRoleAssignments` from Microsoft Graph with the existing client-credentials `GraphClientService` at sign-in. It reaches the same
-assignments but is **not** the same source (group-inherited roles, latency, a second failure mode), so it would not be "exactly the existing behaviour". Not recommended (Q1).
+Rejected alternative: reading the user's `appRoleAssignments` from Microsoft Graph at sign-in. It would need an **application permission** on the sign-in app, which the owner is removing, and the sign-in path must not depend on Graph (§5.4). The id_token's `roles` claim needs only the App Roles defined on the app and assigned to users.
 
 ### 3.3 Offboarding and re-activation (behaviour kept)
 
@@ -313,11 +320,10 @@ Behaviour change to expect: an `X-Correlation-Id` that was not a UUID used to be
 ### 5.1 Entra: app registration **"OpsHub Dev"** (the only one that exists; used by ECS dev)
 
 1. **Add the redirect URI** (type *Web*): `https://opshub-dev.qnsc.vn/api/auth/callback/microsoft`: the **SPA host**, because the session cookie has to be set on the host the
-   browser uses and the Pages Function proxies `/api/auth/*` to the API (§1.6). Keep the v7 URI (`https://opshub-dev.qnsc.vn/v1/bff/callback`) registered until the 30-day
-   rollback window ends.
+   browser uses and the Pages Function proxies `/api/auth/*` to the API (§1.6). The v7 URI (`https://opshub-dev.qnsc.vn/v1/bff/callback`) can be **removed** once the cutover PR is deployed: there is no rollback window to keep it for.
 2. **Optional claim `email`** on the ID token: already added (confirm it is *ID token*, v2.0). `oid` and `tid` are present by default in v2 id_tokens (ADR check M2).
 3. **App Roles** (`admin`, `it-admin`, `security`, `hr`, `manager`, `helpdesk`, `auditor`, `employee`): the **values** equal the opshub role keys exactly (case-sensitive), assigned in
-   *Enterprise applications → Users and groups*. The `roles` claim needs nothing else.
+   *Enterprise applications → Users and groups*. The `roles` claim needs nothing else. **App Roles are not API permissions**: removing the application permissions (below) must leave the App Roles definitions and the user/group assignments alone.
 4. **Single-tenant** (*Accounts in this organizational directory only*). **"Assignment required"** stays off: v7 behaviour was "any tenant member signs in and gets `employee`" (Q5, kept).
 5. **Client secret (required, unlike v7).** The v7 infra comment says the registration has no secret minted yet, and `ENTRA_CLIENT_SECRET` was optional. Better Auth's Microsoft
    sign-in is a confidential-client authorization-code exchange: it cannot work without one. Mint it, record its expiry and a rotation owner, and store it
@@ -325,6 +331,9 @@ Behaviour change to expect: an `X-Correlation-Id` that was not a UUID used to be
      cutover PR that gate is removed, because a staff-only instance cannot start sign-in without it);
    - on **on-prem prod**: a cluster secret (External Secrets from the vault, per the platform's convention), mounted as `ENTRA_CLIENT_SECRET`.
    **Federated credentials are not the answer here.** They are for the on-prem Graph **mail** sender only (workload identity, no stored secret); they do not replace the client secret for user sign-in.
+
+6. **Make "OpsHub Dev" a delegated-only sign-in app (the owner is doing this now).** Keep `openid`, `profile`, `email` (delegated; identity requests exactly those and disables the default `User.Read`/photo scope), remove every **application** permission. Nothing in the sign-in or
+   session path may call Graph. `ENTRA_CLIENT_SECRET` stays (the code exchange needs it) and is **not** the Graph secret (§5.4).
 
 ### 5.2 Entra: the **production** app (does not exist yet)
 
@@ -355,6 +364,18 @@ It is created before prod launches; nothing in the dev cutover depends on it.
    - **Do not put the Access cookie in the way of `Set-Cookie`:** Access must not strip or rewrite the API's `Set-Cookie`; the existing `proxy.ts` stub test already pins that multiple cookies survive.
    M3 for prod repeats the dev check on the on-prem hostname (§6.2).
 
+### 5.4 Graph: not in the sign-in path, and what breaks when the permissions go
+
+opshub's Graph features use **client credentials with the same app** (`libs/platform/src/graph/graph-client.service.ts`: `ClientSecretCredential(ENTRA_TENANT_ID, ENTRA_CLIENT_ID, GRAPH_CLIENT_SECRET)`, scope `https://graph.microsoft.com/.default` = "every application permission this registration has been granted").
+The consumers are `graph-sync.service.ts` and `shadow-it-detection.service.ts` (compliance), `graph-secure-score.service.ts` (security posture), `graph-provisioning.service.ts` (workforce) and `graph-pim.service.ts` (access requests), among them the **01:30 UTC daily job**.
+With the application permissions removed from "OpsHub Dev" they will fail (a 403 per call), nightly, until a separate least-privilege **"OpsHub Graph Worker"** app exists (Agent D is auditing which calls are needed).
+
+What this plan does and does not do:
+- **The cutover PR does not touch Graph.** It does not rename or repurpose `GRAPH_CLIENT_SECRET`, and sign-in never uses it. `ENTRA_CLIENT_SECRET` (sign-in, code exchange) and `GRAPH_CLIENT_SECRET` (client credentials) are two different secrets; neither is a substitute for the other.
+- **Until the worker app exists, unset `GRAPH_CLIENT_SECRET` on dev** (owner/infra, no code change): `isEnabled()` requires all three variables, and the env schema documents that the features then self-disable, so the jobs skip instead of failing every night.
+- **A separate small PR after Agent D's audit** gives the Graph client its own `GRAPH_TENANT_ID`/`GRAPH_CLIENT_ID` so it stops sharing `ENTRA_CLIENT_ID` with sign-in. It is independent of the cutover and not blocked by it.
+- On-prem prod: Graph **mail** uses a federated credential (workload identity); Graph reads use the worker app; sign-in uses neither.
+
 ---
 
 ## 6. Test plan
@@ -370,7 +391,7 @@ It is created before prod launches; nothing in the dev cutover depends on it.
 - `env.schema.spec.ts`: new/removed variables.
 - Web: `proxy.spec.ts` for the `/api/auth` function (repeated `Set-Cookie`, `redirect: 'manual'`, forwarded host/proto); login-page and app-shell specs.
 
-**Migration job** (`Migration upgrade path` + a new assertion): apply 0035/0036 on the baseline seed; `count(user) = count(employees)`; `account` rows = Entra identities; ids equal; re-run is a no-op; `opshub_app` can `SELECT/INSERT/UPDATE/DELETE` the new tables.
+**Migration job** (`Migration upgrade path` + new assertions): apply 0035-0037 on the baseline seed; `count(user) = count(employees)`; `account` rows = Entra identities; ids equal; `refresh_tokens` and `sso_identities` no longer exist while `employees.entra_oid` does; `opshub_app` can `SELECT/INSERT/UPDATE/DELETE` the new tables. The advisory's `DROP TABLE` warnings are the acknowledged ones (§2.1).
 
 **E2E (`pnpm test:e2e`, in-process Fastify `inject`, least-privilege role)**
 - `test/e2e/support/harness.ts`: `login()` uses `POST /api/auth/test-login` (`IDENTITY_TEST_LOGIN=enabled`, `NODE_ENV=test`) and returns the cookie; `bearer()` and `accessToken` go away; `apiRequest` sends the cookie and fetches the CSRF token for state-changing verbs. Six spec files that read `accessToken`/`Bearer` are updated; the other ~35 go through the harness unchanged.
@@ -396,64 +417,54 @@ Run by the owner with the engineer on a call; record the result in the PR. Pass/
 
 ---
 
-## 7. Cutover, rollback, flag
+## 7. Cutover (one PR), rollback, flag
 
-**Scope:** the cutover is on **ECS dev**. Production has never launched and launches directly **on-prem (k3s/gitops) on identity 8**, so there is no v7 production to migrate and **no ECS prod
-path is added or maintained**. Moving opshub dev from ECS to on-prem is a separate infra migration and is not planned here.
+**Scope:** the cutover is on **ECS dev**. opshub has **no users** and production has never launched, so there is nothing to migrate gently: **one PR** creates the identity tables, ships the v8 code and removes v7. Production launches directly
+**on-prem (k3s/gitops) on identity 8**; no ECS prod path is added or maintained. Moving opshub dev from ECS to on-prem is a separate infra migration and is not planned here.
 
-### 7.1 Why no runtime feature flag
+### 7.1 Why no runtime feature flag, and no expand→switch→contract
 
-v7 and v8 are different majors of the same package with different guards, cookies and tables. A flag would need both loaded at once (an npm alias for v7), two guards on every route and two cookie
-families, and every test twice. For an internal tool with one environment in use that is more risk than it removes. The cutover is **expand → switch → contract**, once, on dev.
+v7 and v8 are different majors with different guards, cookies and tables; a flag would load both and double every test. Expand→switch→contract and a rollback window exist to protect live sessions and data, and there are none. Both are dropped.
 
-### 7.2 Sequence of PRs
+### 7.2 Sequence
 
-| # | Repo | PR | Deploys on merge? | Reversible by |
-| --- | --- | --- | --- | --- |
-| 0a | app-platform | `feat(identity): hooks.onStaffSignIn` (Entra claims) | release PR | not used until opshub adopts it |
-| 0b | app-platform | `feat(identity): revokeUserSessions, setUserBanned; mail optional` | release PR | idem |
-| 1 | opshub | `feat(identity): add the Better Auth tables and backfill them` (0035, 0036 only; no code reads them) | yes (migrator, ECS dev) | additive; ignore |
-| 2 | opshub | `feat(identity): move opshub to identity 8` (§1: api + worker split + web + dev infra env + CI + alarm) | api and web release PRs (ECS dev, Pages) | redeploy the previous images (7.4) |
-| 3 | opshub | `chore(identity): drop the v7 auth tables, columns and secrets` (contract step, ≥30 days later) | yes | restore from backup (not expected) |
-| P | gitops / infra | prod launch on-prem on identity 8 (§7.5): not an opshub-repo PR of this plan | on-prem pipeline | n/a, nothing live to roll back to |
+| # | Repo | PR | Deploys on merge? |
+| --- | --- | --- | --- |
+| 0a | app-platform | `feat(identity): hooks.onStaffSignIn` (#214) | release PR |
+| 0b | app-platform | `feat(identity): revokeUserSessions, setUserBanned; mail optional` (#215, merged) | release PR |
+| R | app-platform | **identity 8.1.0 released** (owner: "go release") | publish |
+| 1 | opshub | `feat(identity): move opshub to identity 8` (§1: api + worker split + web + dev infra env + CI + alarm + migrations 0035-0037) | api and web release PRs (ECS dev, Pages) |
+| P | gitops / infra | prod launch on-prem on identity 8 (§7.4): not an opshub-repo PR of this plan | on-prem pipeline |
 
-Entra: the dev redirect URI and the client secret exist **before** PR 2 is merged (the owner, §5.1). Secrets: `better-auth-secret` and `entra-client-secret` have values in Secrets Manager before PR 2's infra
-applies, because ECS cannot start a task whose secret has no value (the repo's own comment on `var.entra_client_secret_set`).
+Before PR 1 is merged (owner): the dev redirect URI and the client secret exist (§5.1), `better-auth-secret` and `entra-client-secret` have values in Secrets Manager (ECS cannot start a task whose secret has no value; the repo's own comment on `var.entra_client_secret_set`),
+and `GRAPH_CLIENT_SECRET` is unset on dev (§5.4). The opshub release PRs are merged by the owner, never by me.
 
-`infra/modules/stack` is shared by `infra/live/develop` and `infra/live/prod`. PR 2 edits the module (env, secrets, alarm); `infra/live/prod` is **never applied** (prod does not run on ECS), and PR 2
-neither adds to it nor tests it beyond `tofu validate`. The contract PR (3) deletes the JWT secret from the module for both.
+`infra/modules/stack` is shared by `infra/live/develop` and `infra/live/prod`. PR 1 edits the module (env, secrets, alarm, removal of `jwt-private`); `infra/live/prod` is **never applied** (prod does not run on ECS) and PR 1 neither adds to it nor tests it beyond `tofu validate`.
 
 ### 7.3 Cutover on ECS dev
 
-1. Merge PR 1; the migrator runs; verify counts (§6.1).
-2. Announce the one-time sign-out (§2.4).
-3. The owner merges the PR 2 release PRs (api, web). **They deploy separately**, so for a few minutes the old SPA may talk to the new API (the login button gets a 404 from `/v1/bff/login`). Acceptable on dev.
-4. Run M3 on dev (§6.2). The result is recorded in PR 2.
+1. The owner merges PR 1's release PRs (api, web). The migrator runs 0035-0037 **before the flip**, so the old api is briefly up without `refresh_tokens`; the web and api deploy separately, so for a few minutes the old SPA may talk to the new API (the login button gets a 404 from `/v1/bff/login`). Acceptable: no users.
+2. Run M3 on dev (§6.2). The result is recorded in PR 1.
 
-### 7.4 Rollback (dev, until PR 3)
+### 7.4 Rollback
 
-- Redeploy the previous api and web images (the release PR revert is the owner's action, never mine). Nothing destructive ran: v7 tables, `employees.entra_oid`, v7 secrets and the v7 redirect URI are all still there.
-- Data written during the v8 window stays valid for v7: new employees exist in `employees` (JIT/HR create), role assignments are in the authz tables, offboarding set `employees.status`. The only v8-only data is
-  `identity.user/account/session`, which v7 ignores.
-- **Sessions:** v8 sessions are dead after the rollback (users sign in on v7). v7 BFF sessions in Valkey were not deleted by the cutover and still honour their cookie until their TTL (30 days). For a
-  security-motivated rollback the owner flushes the v7 BFF session keys under the `opshub:` Valkey prefix (the exact key pattern comes from `BffSessionStore` in identity 7.1; not verified, the worktree has no `node_modules`).
-- If the problem is Entra (secret expired, redirect URI removed), rollback is not needed: fix the registration; the secret's expiry date is tracked (§5.1).
-- `test-login` can never be on in production: `IDENTITY_TEST_LOGIN` is only set in CI, identity refuses it unless `NODE_ENV` is `test` or `development`, and a boot-time test asserts the env schema rejects it in production.
+With no users there is no data worth a window: the only state is the dev database, which is rebuilt from `db:migrate` + `db:seed`. If PR 1 must be undone, revert it and redeploy the previous images; the migrations are forward-only, so the dev database is reset (`db:reset` + `db:migrate` on the reverted tree) rather than migrated back.
+Entra problems (secret expired, redirect URI removed) are fixed in the registration; they do not need a rollback. `test-login` can never be on in production: `IDENTITY_TEST_LOGIN` is only set in CI, identity refuses it unless `NODE_ENV` is `test` or `development`, and a boot-time test asserts the env schema rejects it in production.
 
 ### 7.5 Prod on-prem: what the launch needs (handed to gitops/infra; nothing in this repo)
 
 | Item | Value |
 | --- | --- |
-| Entra | the separate prod registration (§5.2) |
-| Env | `NODE_ENV=production`, `APP_URL=https://<prod SPA host>`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `staff.domains` is code (`['qnsc.vn']`) |
+| Entra | the separate prod registration (§5.2), delegated-only like dev |
+| Env | `NODE_ENV=production`, `APP_URL=https://<prod SPA host>`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`; `staff.domains` is code (`['qnsc.vn']`) |
 | Secrets (cluster, External Secrets) | `BETTER_AUTH_SECRET` (new, 32+ chars), `ENTRA_CLIENT_SECRET`, `COOKIE_SECRET`, `CSRF_SECRET`. **No** `JWT_PRIVATE_KEY`, no `IDENTITY_TEST_LOGIN` |
-| Graph mail | federated credential (workload identity), **separate from** sign-in; not used for Entra sign-in |
-| Database | PostgreSQL 16 shared instance: migrations 0035/0036 use `gen_random_uuid()` (§2.2); `opshub_app`/`opshub_worker` grants come from `0012`'s default privileges |
+| Graph | mail: federated credential (workload identity); reads: the "OpsHub Graph Worker" app (§5.4). Neither is used for sign-in |
+| Database | PostgreSQL 16 shared instance: migrations 0035-0037 use `gen_random_uuid()` (§2.2); `opshub_app`/`opshub_worker` grants come from `0012`'s default privileges |
 | Edge | the Pages Function for `/api/auth/*` on the prod SPA project; Cloudflare Access rules per §5.3 if Access is created; `trustProxy` stays on for the client IP |
 | Probes | `/livez` (outside the prefix), `/v1/readyz` as in `base.yaml`; add identity's readiness check to `/v1/readyz` |
-| Order | migrations before the api; M3 on the prod hostname before announcing |
+| Order | migrations before the api; M3 on the prod hostname before it is announced |
 
-Prod launches with an empty user base, so it needs no sign-out announcement and no cutover window (Q2).
+Prod launches with an empty user base on identity 8: no sign-out announcement, no window (Q2).
 
 ---
 
@@ -483,15 +494,18 @@ Prod launches with an empty user base, so it needs no sign-out announcement and 
 | `user.id ≠ employees.id` for someone | Actor-id FKs break, permissions look empty | Backfill keeps ids; HR-create writes `user` in the same tx; ratchet test; M3 step 3 checks `sub` |
 | Worker loads identity's Fastify mount | Worker crash loop | `EmployeesModule`/`AuthModule` split; a worker boot test |
 | Global `SessionGuard` 401s opshub `@Public()` routes | Health checks fail, ALB/cluster restarts pods | `Public()` applies both keys; a test on `/v1/readyz`, `/livez`, webhooks inbound |
-| Pages Function missing for `/api/auth/*` | Callback 404; nobody can sign in | Function + spec in PR 2; M3 step 1 |
+| Pages Function missing for `/api/auth/*` | Callback 404; nobody can sign in | Function + spec in PR 1; M3 step 1 |
 | Alarm `auth-login-failure-rate` goes blind | Login outage not noticed | Rewire in the same PR; test the PromQL against the event name in a spec like `fail-open.spec.ts` |
-| Entra client secret missing/expired | Sign-in fails closed | Secret created before PR 2; expiry tracked; alarm on `sign_in.failure` rate |
-| Session cap 12 h vs 30 d | Daily re-login | Communicate; Entra SSO usually makes it a redirect |
+| Entra client secret missing/expired | Sign-in fails closed | Secret created before PR 1; expiry tracked; alarm on `sign_in.failure` rate |
+| Session cap 12 h vs 30 d | Daily re-login once there are users | Entra SSO usually makes it a redirect |
 | Cookie is `Lax`, not `Strict` | Slightly weaker CSRF baseline | opshub's double-submit CSRF stays on all state-changing `/v1` requests |
 | `better-auth` is ESM-only, identity loads it with `require(esm)` | Fails on Node < 22.12 or in a bundler/test runner that cannot | Node 24 in CI and the Dockerfile; a smoke test boots the api under vitest and under the production build |
 | `libs/platform` diverges from rally | Two auth shapes for a while | Declared in `DIVERGENCE.md`; rally follows after opshub |
-| App-platform releases lag | Cutover blocked | 0a/0b are small; the expand-only PR 1 can land meanwhile |
-| Rollback leaves v7 Valkey sessions alive | Stolen-session window of 30 d if rolled back for a security reason | Flush the v7 BFF session keys as part of a security rollback; PR 3 cleans up |
+
+| App-platform release lag | Cutover blocked | PR 1 is not opened until #214 is merged and 8.1.0 is released |
+| The nightly Graph jobs fail once the application permissions are removed | Failed 01:30 UTC runs, log noise, alarms | Unset `GRAPH_CLIENT_SECRET` on dev until the worker app exists (§5.4); the cutover PR does not touch Graph |
+| A destructive migration (`DROP TABLE`) runs before the flip | The old v7 api errors for minutes | No users; the drops carry `-- expand-contract-ok` so the advisory records it (§2.1) |
+| Someone later confuses the two secrets | Sign-in or Graph breaks | Different names, apps and owners (§5.4); stated in the env schema docs of the cutover PR |
 
 ### 8.3 Explicitly not in scope
 
@@ -503,5 +517,6 @@ renaming `JwtPayload`, moving rally.
 ## 9. Status and next steps
 
 1. Decisions Q1-Q5 and Q7-Q11 are recorded (header and §8.1). Q6 (Cloudflare Access) is answered from the code in §5.3; the dashboard check is the owner's.
-2. **0a and 0b** (app-platform, one PR each) come first. Nothing in opshub changes until both are merged and released.
-3. Then opshub **PR 1** (the expand-only migration, §2.1-2.2). The owner merges all opshub PRs and release PRs; the Entra and Secrets Manager steps (§5.1) are done by the owner before PR 2 is merged.
+2. **0b** (#215) is merged. **0a** (#214) is awaiting merge, then **identity 8.1.0** is released on the owner's "go release".
+3. Then **one** opshub cutover PR (§7), opened by me, merged (with its release PRs) by the owner after the Entra and Secrets Manager steps (§5.1) and the Graph secret step (§5.4).
+4. Separate and independent: the Graph client's own `GRAPH_CLIENT_ID` (after Agent D's audit), and the on-prem prod launch (§7.5).
