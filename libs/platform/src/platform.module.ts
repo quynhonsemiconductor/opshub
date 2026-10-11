@@ -1,16 +1,11 @@
 import { Global, Module } from '@nestjs/common';
-import { PassportModule } from '@nestjs/passport';
-import { JwtModule } from '@nestjs/jwt';
 import { TerminusModule } from '@nestjs/terminus';
 import { CacheModule } from '@quynhonsemiconductor/platform-cache';
-import { AuthTokenCache } from '@quynhonsemiconductor/identity';
-import { AuthMetrics } from '@quynhonsemiconductor/observability';
+import { RequestContextService } from '@quynhonsemiconductor/observability';
 import { AppConfigModule } from './config/config.module';
 import { AppConfigService } from './config/app-config.service';
 import { DatabaseModule } from './database/database.module';
-import { RequestContextService } from './context/request-context';
-import { JwtStrategy } from './auth/jwt.strategy';
-import { JwtAuthGuard } from './auth/jwt.guard';
+import { SessionAuthGuard } from './auth/session-principal.guard';
 import { ScopeEvaluator } from './auth/scope-evaluator';
 import { ResourceScopeResolver } from './auth/resource-scope.resolver';
 import { AuthzService } from './auth/authz.service';
@@ -50,28 +45,9 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     DatabaseModule,
     // Gives RouteAuthzAudit the controller inventory it scans at bootstrap.
     DiscoveryModule,
-    PassportModule.register({ defaultStrategy: 'jwt' }),
-    JwtModule.registerAsync({
-      inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => ({
-        privateKey: config.get('JWT_PRIVATE_KEY'),
-        publicKey: config.get('JWT_PUBLIC_KEY'),
-        signOptions: {
-          algorithm: 'ES256',
-          expiresIn: config.get('JWT_ACCESS_EXPIRY') as unknown as number,
-          issuer: config.get('JWT_ISSUER'),
-          audience: config.get('JWT_AUDIENCE'),
-        },
-        verifyOptions: {
-          algorithms: ['ES256'],
-          issuer: config.get('JWT_ISSUER'),
-          audience: config.get('JWT_AUDIENCE'),
-        },
-      }),
-    }),
     // Single shared Valkey/Redis client (@quynhonsemiconductor/platform-cache), registered
     // globally so every consumer (rate-limit, idempotency, health, pub/sub) and
-    // the shared identity AuthService/AuthTokenCache share one connection.
+    // the identity 8 session store and rate limits share one connection.
     // Optional mode: when REDIS_URL is unset the cache is disabled and all
     // consumers fail open (opshub runs without a hard Redis dependency).
     CacheModule.forRootAsync({
@@ -90,8 +66,7 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     // it runs for every app that imports this module, with no call site to forget.
     RouteAuthzAudit,
     RequestContextService,
-    JwtStrategy,
-    JwtAuthGuard,
+    SessionAuthGuard,
     ScopeEvaluator,
     ResourceScopeResolver,
     AuthzService,
@@ -100,8 +75,6 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     RequestRegistry,
     RequestEngine,
     HttpLoggingInterceptor,
-    AuthTokenCache,
-    AuthMetrics,
     ResilienceService,
     {
       provide: EMAIL_PROVIDER,
@@ -147,9 +120,8 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     ExclusiveJob,
     AppConfigModule,
     DatabaseModule,
-    JwtModule,
     RequestContextService,
-    JwtAuthGuard,
+    SessionAuthGuard,
     ScopeEvaluator,
     ResourceScopeResolver,
     AuthzService,
@@ -157,8 +129,6 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     RequestRegistry,
     RequestEngine,
     HttpLoggingInterceptor,
-    AuthTokenCache,
-    AuthMetrics,
     ResilienceService,
     EmailService,
     EmailSchedulerService,

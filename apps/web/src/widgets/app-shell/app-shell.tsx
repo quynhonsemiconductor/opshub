@@ -124,20 +124,18 @@ export function AppShell() {
   }, [showPalette]);
 
   async function handleLogout() {
-    // POST /v1/bff/logout drops the server-side session AND denylists the access token it
-    // held, so the logout is effective at once rather than at token expiry. It is
-    // cookie-authenticated and CSRF-gated like any other write, so the token goes with it.
+    // POST /api/auth/sign-out (identity 8) deletes the server-side session row and clears its cache, so the
+    // logout is effective at once on the server and not only in this tab. Better Auth checks the Origin of
+    // the request itself; it is not behind the CSRF double-submit, which exempts /api/auth.
     //
-    // What this replaced: reading `authMethod` out of the JWT to decide whether to also
-    // call MSAL's logoutRedirect, and a refresh-then-retry dance because a bare fetch
-    // without the Authorization header would 401 — leaving the session row alive and the
-    // refresh cookie in place, so the next navigation silently signed the user back in.
-    // With one opaque cookie there is nothing to inspect and nothing to retry.
+    // What this replaced: a BFF logout that also denylisted the access token, and before that a
+    // refresh-then-retry dance. With one opaque cookie there is nothing to inspect and nothing to retry.
     try {
-      await fetch(`${ENV.API_BASE_URL}/v1/bff/logout`, {
+      await fetch(`${ENV.API_BASE_URL}/api/auth/sign-out`, {
         method: 'POST',
         credentials: 'include',
-        headers: withCsrfHeader('POST'),
+        headers: withCsrfHeader('POST', { 'Content-Type': 'application/json' }),
+        body: '{}',
       });
     } catch {
       // Best-effort: the cookie is cleared locally either way, below.

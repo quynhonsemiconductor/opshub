@@ -14,7 +14,7 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 let user: Session;
@@ -41,7 +41,7 @@ describe('notification preference types', () => {
       .inject({
         method: 'PUT',
         url: '/v1/notifications/preferences/review.due',
-        headers: bearer(user),
+        headers: authHeaders(user),
         payload: { inApp: false, email: true },
       })
       .then((res) => {
@@ -59,7 +59,7 @@ describe('notification preference types', () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/v1/notifications/preferences/workforce.leave_requested',
-      headers: bearer(user),
+      headers: authHeaders(user),
       payload: { inApp: false, email: false },
     });
 
@@ -73,7 +73,7 @@ describe('notification preference types', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/notifications/preferences',
-      headers: bearer(user),
+      headers: authHeaders(user),
     });
     expect(res.statusCode, res.body).toBe(200);
     const types = (JSON.parse(res.body) as { type: string }[]).map((p) => p.type);
@@ -88,7 +88,7 @@ describe('notification preference types', () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/v1/notifications/preferences/*',
-      headers: bearer(user),
+      headers: authHeaders(user),
       payload: { inApp: false, email: false },
     });
     expect(res.statusCode, res.body).toBe(200);
@@ -101,7 +101,7 @@ describe('notification preference types', () => {
     const res = await app.inject({
       method: 'DELETE',
       url: '/v1/notifications/preferences/compliance.finding_resolved',
-      headers: bearer(user),
+      headers: authHeaders(user),
     });
     expect(res.statusCode, res.body).toBe(422);
     expect(errorCode(res.body)).toBe('VALIDATION_FAILED');
@@ -111,7 +111,7 @@ describe('notification preference types', () => {
     const res = await app.inject({
       method: 'DELETE',
       url: '/v1/notifications/preferences/review.due',
-      headers: bearer(user),
+      headers: authHeaders(user),
     });
     expect(res.statusCode, res.body).toBe(204);
   });

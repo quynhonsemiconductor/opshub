@@ -154,11 +154,6 @@ locals {
 
   # Secrets both services share. The DATABASE_* pair is NOT here — see the two locals above.
   app_secrets = concat([
-    # The public half is DERIVED from this at boot, so there is no second secret to fall
-    # out of step with it. A mismatched pair is the one failure a keypair cannot
-    # otherwise have: signing succeeds, every verification rejects, and both values look
-    # individually valid to Terraform and to the app's env schema.
-    { name = "JWT_PRIVATE_KEY", secret_arn = module.secrets.secret_arns["jwt-private"] },
     { name = "COOKIE_SECRET", secret_arn = module.secrets.secret_arns["cookie-secret"] },
     # Required by the env schema, so it is injected unconditionally rather than gated
     # like the two below: it is a random key this side generates, not a credential
@@ -166,15 +161,27 @@ locals {
     { name = "CSRF_SECRET", secret_arn = module.secrets.secret_arns["csrf-secret"] },
   ])
 
-  # The API's ALONE: the BFF's confidential-client secret. The worker never completes a sign-in, and its
-  # env schema REFUSES TO START with ENTRA_CLIENT_SECRET set, so this must not be in `app_secrets`.
-  # Gated: an empty Secrets Manager value cannot be injected at all, so wiring it before the Entra app
-  # registration has one would stop every task from starting. While it is off, the login START still
-  # works and the callback's token exchange is what fails — the app boots, and the Bearer path is
-  # unaffected.
-  api_secrets = var.entra_client_secret_set ? [
+  # The API's ALONE: what only a sign-in needs. The worker never completes one, and its env schema REFUSES TO
+  # START with either of these set, so they must not be in `app_secrets`.
+  #
+  #  - BETTER_AUTH_SECRET: identity 8 (Better Auth) signs its cookies and encrypts what it stores with it.
+  #    Required by the API's env schema (>= 32 characters), so it is injected unconditionally: a random value
+  #    generated on this side (`openssl rand -base64 48`), not a credential minted in someone else's console. It
+  #    REPLACES the v7 JWT keypair: there is no token to sign any more.
+  #  - ENTRA_CLIENT_SECRET: the sign-in app's confidential-client secret. UNCONDITIONAL now: the API's env
+  #    schema refuses to boot NODE_ENV=production without it (a deployed environment with no way to sign in is
+  #    a failed deploy, not a degraded one). The value must already be in Secrets Manager before the tasks
+  #    start: ECS cannot inject an empty secret.
+  #
+  # WHERE THE VALUES LIVE. Develop runs with `secrets_use_bundle = true`, so these are KEYS in the `app`
+  # bundle's JSON (`opshub/develop/app`), not secrets of their own: no container is created for them and
+  # Terraform cannot put the value there. `better-auth-secret` must be added to the bundle by hand BEFORE the
+  # new task definition starts, or ECS cannot resolve the key and the task does not start. (Without the
+  # bundle, a standalone container is created by the apply and then needs its value.)
+  api_secrets = [
+    { name = "BETTER_AUTH_SECRET", secret_arn = module.secrets.secret_arns["better-auth-secret"] },
     { name = "ENTRA_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["entra-client-secret"] },
-  ] : []
+  ]
 
   # Microsoft Graph is the WORKER's alone. The API task is given no GRAPH_* variable and no Graph
   # secret: an API request that needs Graph writes a graph_task_outbox row and the worker performs it
@@ -200,7 +207,7 @@ locals {
   # disagree about any of the three.
   shared_env = [
     # "production" in DEVELOP too, on purpose: NODE_ENV selects the app's SECURITY
-    # posture (cookie flags, dev-login refusal, error verbosity), and a deployed
+    # posture (cookie flags, test-login refusal, error verbosity), and a deployed
     # environment should never run the relaxed one. Environment identity travels in
     # tags and log groups instead.
     { name = "NODE_ENV", value = "production" },
@@ -218,11 +225,6 @@ locals {
     { name = "S3_FILES_BUCKET", value = module.app_bucket.bucket },
     { name = "ENTRA_TENANT_ID", value = var.entra_tenant_id },
     { name = "ENTRA_CLIENT_ID", value = var.entra_client_id },
-    # The SPA origin, NOT the API origin: Entra redirects the browser here, and the
-    # session cookie is set on that response — it has to land same-origin with the SPA or
-    # the `__Host-` cookie is refused. The Pages Function forwards /v1/* to the API.
-    # This exact string must also be registered as a redirect URI on the app registration.
-    { name = "ENTRA_REDIRECT_URI", value = "${local.app_url}/v1/bff/callback" },
     # Terraform already knows the deployed tag, so the version needs no CI plumbing.
     # Read by the OTel resource and by the served OpenAPI document, both of which
     # reported "dev" in every environment before this was injected.
@@ -256,9 +258,8 @@ module "secrets" {
   use_bundle        = var.secrets_use_bundle
   create_standalone = var.secrets_create_standalone
 
-  # Three secrets, not five. `db-url` is gone — the credential is read live from the
-  # RDS-managed secret AWS rotates (see local.app_secrets) — and so is `jwt-public-key`,
-  # which the app derives from the private half at boot.
+  # `db-url` is gone — the credential is read live from the RDS-managed secret AWS rotates (see
+  # local.app_secrets) — and so is every JWT key: identity 8 has no tokens, only `better-auth-secret`.
   # Merged rather than a flat map so `observability-token` can be omitted ENTIRELY while the
   # OTel path is dormant. It is the one secret that cannot exist empty: the collector sidecar
   # reads it as an Authorization header, and ECS refuses to inject a secret with no value —
@@ -268,15 +269,15 @@ module "secrets" {
   secret_names = merge(var.observability.otlp_endpoint == "" ? {} : {
     "observability-token" = "Authorization header for the OTLP backend (e.g. 'Basic <base64>')"
     }, {
-    "jwt-private"   = "JWT ES256 private key, EC P-256 (PEM or base64-encoded PEM). The public half is derived from it."
-    "cookie-secret" = "Fastify cookie signing secret (min 32 chars)"
-    "csrf-secret"   = "HMAC key binding a CSRF token to its session (min 32 chars). Distinct from cookie-secret so the two rotate independently."
+    "better-auth-secret" = "identity 8 (Better Auth) signing/encryption secret (min 32 chars; openssl rand -base64 48). Rotating it signs everyone out."
+    "cookie-secret"      = "Fastify cookie signing secret (min 32 chars)"
+    "csrf-secret"        = "HMAC key binding a CSRF token to its session (min 32 chars). Distinct from cookie-secret so the two rotate independently."
     # NOTE: no "tunnel-token" key here any more. It belonged to the OLD manual-tunnel
     # design (cloudflared tunnel create by hand, id pasted into a variable) — Terraform
     # now owns the tunnel's whole lifecycle (module.tunnel) and creates its OWN separate
     # aws_secretsmanager_secret.tunnel_token, populated automatically from the tunnel
     # resource's own token output. Nothing reads this bundle's key any more.
-    "entra-client-secret" = "Entra confidential-client secret for the BFF server-side code exchange"
+    "entra-client-secret" = "Entra sign-in app confidential-client secret, for identity 8's server-side code exchange"
     # Passwords for the least-privilege roles migration 0012 creates. The CONTAINERS exist
     # unconditionally so `secret_arns["db-app-password"]` always resolves and the IAM list
     # keeps a plan-time-known length; what is gated is the INJECTION — see
@@ -487,7 +488,7 @@ module "api" {
   # the next task start as "unable to pull secrets", long after the apply reported success.
   #
   # Caught on 2026-09-13 by reading the rendered policy after enabling the bundle: the
-  # grant listed `opshub/develop/app-g5z7BM:jwt-private::` and friends with no container
+  # grant listed `opshub/develop/app-g5z7BM:cookie-secret::` and friends with no container
   # ARN among them. Develop is idled to zero, so nothing was running to fail; the next
   # scheduled scale-up would have been the first symptom. rova documents the same trap at
   # its own api execution role.
@@ -505,6 +506,10 @@ module "api" {
     # Per-task pool ceiling, derived from the RDS class — see local.api_pool_max.
     { name = "DATABASE_POOL_MAX", value = tostring(local.api_pool_max) },
     { name = "CORS_ORIGINS", value = local.app_url },
+    # The SPA origin, NOT the API origin: identity 8 derives its base URL, its trusted origin and the Entra
+    # redirect URI (`${APP_URL}/api/auth/callback/microsoft`) from `APP_URL`, and the session cookie is set
+    # on that response, so it has to land same-origin with the SPA. The Pages Function forwards /v1/* and
+    # /api/auth/* to the API. That exact redirect URI must also be registered on the app registration.
     { name = "APP_URL", value = local.app_url },
     # Telemetry. `enabled` and `endpoint` both come FROM the sidecar module, so the app can
     # never be told to export to a collector that was not created — the two cannot disagree.
@@ -574,7 +579,7 @@ module "worker" {
   # the next task start as "unable to pull secrets", long after the apply reported success.
   #
   # Caught on 2026-09-13 by reading the rendered policy after enabling the bundle: the
-  # grant listed `opshub/develop/app-g5z7BM:jwt-private::` and friends with no container
+  # grant listed `opshub/develop/app-g5z7BM:cookie-secret::` and friends with no container
   # ARN among them. Develop is idled to zero, so nothing was running to fail; the next
   # scheduled scale-up would have been the first symptom. rova documents the same trap at
   # its own api execution role.
@@ -815,11 +820,12 @@ module "web" {
   record_name = local.cloudflare_zone_id != "" ? var.web_record : ""
   comment     = "${local.name} web SPA → Cloudflare Pages (managed by ${var.product}-infra ${var.env})"
 
-  # Upstream for the Pages Function at apps/web/functions/v1/[[path]].ts, which
-  # forwards /v1/* (including /v1/bff/*) to the API. That proxy is what keeps the SPA
-  # and the API on ONE origin, and it is a requirement rather than an optimisation:
-  # a `__Host-` session cookie cannot be set cross-site, so the BFF auth flow only
-  # works same-origin. It also removes CORS from the browser path entirely.
+  # Upstream for the Pages Functions at apps/web/functions/v1/[[path]].ts and
+  # apps/web/functions/api/auth/[[path]].ts, which forward /v1/* and identity 8's /api/auth/* (sign-in, the
+  # Microsoft callback, sign-out) to the API. That proxy is what keeps the SPA and the API on ONE origin,
+  # and it is a requirement rather than an optimisation: the session cookie is set on the response the
+  # browser lands on after Entra, which has to come from the SPA host. It also removes CORS from the
+  # browser path entirely.
   #
   # The SPA is built with VITE_API_URL unset, so it calls relative /v1 paths and has
   # no knowledge of this hostname; setting VITE_API_URL would send the browser
@@ -1473,17 +1479,18 @@ module "observability" {
 }
 
 # ── Alerting: security controls that failed OPEN ──────────────────────────────
-# The access-token denylist (JwtAuthGuard) and the rate limiter both fail open when Valkey
-# is unreachable. Each choice is right on its own — an outage should not lock every user
-# out, and rate limiting is protective rather than load-bearing — but TOGETHER a cache
-# outage accepts revoked tokens AND serves unlimited traffic, with nothing watching.
+# The rate limiters (opshub's request limiter and identity's sign-in limiter) fail open when Valkey is
+# unreachable. Each choice is right on its own — an outage should not lock every user out, and rate limiting
+# is protective rather than load-bearing — but an outage serves unlimited traffic with nothing watching.
+# (The v7 access-token denylist, which also failed open and made this alarm matter more, is gone: identity 8
+# sessions fall back to Postgres, which fails SAFE.)
 #
 # Log-based rather than OTel-based, deliberately: `OTEL_ENABLED` is false until
 # `observability.otlp_endpoint` is set, so a counter would report nothing while looking
 # like monitoring. Container logs reach CloudWatch regardless of the OTel path.
 #
 # The field comes from `FAIL_OPEN_FIELD` in @quynhonsemiconductor/observability, emitted by
-# `failOpenLog()` at the two guards. Renaming it there would silently disarm this filter,
+# `failOpenLog()` at the request-limit guard and at identity's storage-degraded callback. Renaming it there would silently disarm this filter,
 # so libs/platform/src/observability/fail-open.spec.ts greps THIS file for the pattern and
 # fails if the two disagree.
 resource "aws_cloudwatch_log_metric_filter" "security_fail_open" {
@@ -2021,7 +2028,7 @@ resource "terraform_data" "slow_request_bucket_is_exported_boundary" {
 #
 # The DENOMINATOR SERIES is per rule, not shared: each gate counts the population that
 # rule's own arithmetic divides by — `http_server_requests_total` for the two HTTP rules,
-# `job_runs_total` for the worker rule, `auth_login_total` for the login rule. Gating the
+# `job_runs_total` for the worker rule, `identity_security_events_total` (sign-in events) for the login rule. Gating the
 # worker rule on HTTP traffic would tie the worker's alerting to a signal it has nothing
 # to do with, and would leave it dark on an api-idle environment that is still running
 # jobs.
@@ -2119,12 +2126,12 @@ module "alerts" {
     },
     {
       name        = "auth-login-failure-rate"
-      promql      = "(sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\", outcome=\"failure\"}[15m])) or vector(0)) / sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m])) and on() (sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m])) * 900 >= ${local.alert_thresholds.min_login_attempts_15m})"
+      promql      = "(sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=\"sign_in.failure\"}[15m])) or vector(0)) / sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=~\"sign_in[.](success|failure)\"}[15m])) and on() (sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=~\"sign_in[.](success|failure)\"}[15m])) * 900 >= ${local.alert_thresholds.min_login_attempts_15m})"
       for         = "15m"
       op          = "gt"
       threshold   = local.alert_thresholds.auth_login_failure_rate
       severity    = "warning"
-      summary     = "Login failure rate above ${local.alert_thresholds.auth_login_failure_rate * 100}% in ${var.env} for 15m, over at least ${local.alert_thresholds.min_login_attempts_15m} attempts — entra-login/dev-login both collapse their failure detail before it reaches the caller, check Recent errors / Logs Explorer for the actual cause."
+      summary     = "Login failure rate above ${local.alert_thresholds.auth_login_failure_rate * 100}% in ${var.env} for 15m, over at least ${local.alert_thresholds.min_login_attempts_15m} attempts — identity 8 reports a refused Microsoft sign-in (wrong tenant, a guest, an address off qnsc.vn, a failed role sync) as one `sign_in.failure` event and tells the caller little; the cause is in the API log (`security event: sign_in.failure`, `identity.auth_handler_threw`, `STAFF_SIGN_IN_REFUSED`) and in the audit log (`auth.login.failed`)."
       runbook_url = "${local.runbook_base_url}/auth-login-failure-rate.md"
     },
   ]
@@ -2373,7 +2380,7 @@ resource "grafana_dashboard" "overview" {
           }
         }
         targets = [{
-          expr         = "(sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\", outcome=\"failure\"}[15m])) or vector(0)) / sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m]))"
+          expr         = "(sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=\"sign_in.failure\"}[15m])) or vector(0)) / sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=~\"sign_in[.](success|failure)\"}[15m]))"
           legendFormat = "failure rate"
           refId        = "A"
         }]

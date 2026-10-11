@@ -1,7 +1,5 @@
-import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { z } from 'zod';
 import { getProcessRole, type ProcessRole } from './process-role';
-import { SEC_PER_DAY } from '@shared-kernel';
 
 const booleanish = (defaultValue: boolean) =>
   z
@@ -54,73 +52,26 @@ const baseShape = {
   DATABASE_POOL_MIN: z.coerce.number().int().positive().default(2),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(20),
 
-  // ── Auth ───────────────────────────────────────────────────────────────────
-  // JWT — ES256 asymmetric signing (ECDSA over NIST P-256 / prime256v1).
-  // Keys must be PEM-encoded EC P-256 keypair. Accepted as raw PEM or base64-encoded PEM.
-  // Generate: openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt
-  JWT_PRIVATE_KEY: z
-    .string()
-    .min(1)
-    .transform((v) => (v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8')))
-    .refine((v) => v.includes('-----BEGIN'), 'JWT_PRIVATE_KEY must be a PEM-encoded private key'),
-  /**
-   * OPTIONAL — derived from JWT_PRIVATE_KEY when absent (see the transform at the
-   * bottom of this file). Supply it only to override, e.g. a local .env that already
-   * has a pair. Nothing needs it configured: an ES256 public key is a pure function
-   * of its private key, and opshub publishes no JWKS, so no verifier exists that
-   * lacks the private key.
-   */
-  JWT_PUBLIC_KEY: z
-    .string()
-    .min(1)
-    .transform((v) => (v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8')))
-    .refine((v) => v.includes('-----BEGIN'), 'JWT_PUBLIC_KEY must be a PEM-encoded public key')
-    .optional(),
+  // ── Auth (identity 8, Better Auth: the `staff` preset, Microsoft Entra) ──────
+  // Sessions are database rows behind an HttpOnly cookie: there is no JWT, no refresh token and no key pair.
+  // What only the API holds (BETTER_AUTH_SECRET, ENTRA_CLIENT_SECRET, IDENTITY_TEST_LOGIN) is declared on
+  // ApiEnvSchema below, and the worker's schema refuses to start with it.
 
-  // Entra ID SSO — required in production, optional in dev (enables entra-login endpoint).
+  // Entra ID tenant and sign-in app. The "OpsHub" app registration is DELEGATED-ONLY (openid, profile, email):
+  // no application permission, and nothing in the sign-in path calls Graph. The tenant is shared with the Graph
+  // worker app (a different registration in the same directory). The API requires both in production
+  // (`refineApiAuth`); the worker only needs the tenant.
   ENTRA_TENANT_ID: emptyToUndefined(z.string().uuid().optional()),
   ENTRA_CLIENT_ID: emptyToUndefined(z.string().uuid().optional()),
   // Used to sign fastify-cookie (required for CSRF signed cookies).
   COOKIE_SECRET: z.string().min(32),
-  /** Short-lived access token — 15 min is enterprise standard (token theft window). */
-  JWT_ACCESS_EXPIRY: z.string().default('15m'),
-  /** Refresh token TTL in days — stored as HttpOnly cookie, hashed in DB, revocable. */
-  JWT_REFRESH_EXPIRY_DAYS: z.coerce.number().int().positive().default(7),
-  JWT_ISSUER: z.string().default('opshub-api'),
-  JWT_AUDIENCE: z.string().default('opshub-web'),
-
-  // ── BFF (Backend-for-Frontend) — server-side OIDC session ──────────────────
-  // The API is a *confidential* OIDC client: it runs the Entra Authorization-Code
-  // + PKCE flow server-side and issues an opaque, httpOnly `__Host-` session
-  // cookie, so no Entra or JWT token ever reaches the browser. The SPA reaches
-  // these routes same-origin through the Cloudflare Pages Function proxy.
-  /**
-   * Absolute URL of the BFF OIDC callback, which must also be registered as a
-   * redirect URI on the Entra app registration — e.g.
-   * https://opshub-dev.qnsc.vn/v1/bff/callback. Note the SPA origin, not the API
-   * origin: the browser is redirected here, and it must land same-origin so the
-   * session cookie set on the response is accepted.
-   */
-  ENTRA_REDIRECT_URI: emptyToUndefined(z.string().url().optional()),
-  /**
-   * Same-origin path the browser lands on after a successful login when the
-   * supplied `returnTo` is absent or fails the open-redirect guard.
-   */
-  BFF_POST_LOGIN_REDIRECT: z.string().default('/'),
-  /** Server-side session lifetime in seconds. Defaults to 30 days. */
-  BFF_SESSION_TTL_SECONDS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(30 * SEC_PER_DAY),
   /**
    * HMAC key binding a CSRF token to the session that requested it, so a token
    * lifted from one session cannot be replayed in another.
    *
-   * Distinct from COOKIE_SECRET on purpose: that one signs every cookie the app
-   * sets, so rotating it invalidates all of them. Sharing one value would make a
-   * cookie-hygiene rotation read as a CSRF change in the audit trail, and vice
-   * versa.
+   * Distinct from COOKIE_SECRET on purpose: that one signs every cookie, so rotating it invalidates all
+   * of them. Sharing one value would make a cookie-hygiene rotation read as a CSRF change in the audit
+   * trail, and vice versa.
    */
   CSRF_SECRET: z.string().min(32),
 
@@ -327,77 +278,14 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
   }
 };
 
-/** Derivations, shared by every role: the Redis alias and the JWT public key. */
-const deriveEnv = <E extends Common>(
-  env: E,
-  ctx: z.RefinementCtx,
-): E & { REDIS_URL: string | undefined; JWT_PUBLIC_KEY: string } => {
-  {
-    // VALKEY_URL is the infra-injected alias for Redis-compatible caches (e.g. ElastiCache
-    // Valkey). Normalize at parse time so all callers use get('REDIS_URL') regardless of
-    // which var infra sets.
-    const normalized = { ...env, REDIS_URL: env.VALKEY_URL ?? env.REDIS_URL };
-
-    // JWT_PUBLIC_KEY is DERIVED, not configured.
-    //
-    // Storing the public half alongside the private one invites the single failure a
-    // key pair cannot otherwise have: a MISMATCHED pair, where signing succeeds and
-    // every verification rejects — total auth outage. Nothing catches it, because both
-    // values are individually valid to Terraform, to the deploy preflight, and to this
-    // schema. Deriving removes the possibility rather than monitoring for it.
-    //
-    // An explicit value still wins, so a local .env with a real pair keeps working and
-    // infra can keep injecting one through the transition.
-    // Restated rather than `return normalized`, and not redundantly: inside this guard
-    // TS narrows the property to `string`, which is what makes JWT_PUBLIC_KEY
-    // non-optional on the inferred Env type. Returning the object unchanged leaves it
-    // `string | undefined` and every consumer needs a non-null assertion.
-    if (normalized.JWT_PUBLIC_KEY) {
-      return { ...normalized, JWT_PUBLIC_KEY: normalized.JWT_PUBLIC_KEY };
-    }
-
-    const reject = (message: string) => {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['JWT_PRIVATE_KEY'], message });
-      return z.NEVER;
-    };
-
-    // createPrivateKey FIRST, deliberately. createPublicKey happily accepts a public
-    // key as its input and hands it straight back, so deriving from it would silently
-    // succeed for the likeliest paste error there is — the public half dropped into the
-    // private slot — and fail much later at the first sign().
-    let privateKey;
-    try {
-      privateKey = createPrivateKey(normalized.JWT_PRIVATE_KEY);
-    } catch {
-      return reject(
-        'JWT_PRIVATE_KEY is PEM but not a PRIVATE key. A public key pasted here would ' +
-          'pass the format check and then break signing at runtime.',
-      );
-    }
-
-    // ES256 means P-256 specifically. Any other curve signs happily and produces
-    // tokens every verifier rejects, which reads as a broken deploy with no cause.
-    const curve = privateKey.asymmetricKeyDetails?.namedCurve;
-    if (privateKey.asymmetricKeyType !== 'ec' || curve !== 'prime256v1') {
-      return reject(
-        `JWT_PRIVATE_KEY must be an EC P-256 key for ES256, got ` +
-          `${privateKey.asymmetricKeyType}${curve ? `/${curve}` : ''}.`,
-      );
-    }
-
-    return {
-      ...normalized,
-      // Derived from the validated PEM rather than the KeyObject: @types/node's
-      // createPublicKey overloads do not accept a bare KeyObject, though the runtime
-      // does. Re-exporting keeps this typed without a cast.
-      JWT_PUBLIC_KEY: createPublicKey(
-        privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
-      )
-        .export({ type: 'spki', format: 'pem' })
-        .toString(),
-    };
-  }
-};
+/** Derivations, shared by every role: the Redis alias. */
+const deriveEnv = <E extends Common>(env: E): E & { REDIS_URL: string | undefined } => ({
+  ...env,
+  // VALKEY_URL is the infra-injected alias for Redis-compatible caches (e.g. ElastiCache
+  // Valkey). Normalize at parse time so all callers use get('REDIS_URL') regardless of
+  // which var infra sets.
+  REDIS_URL: env.VALKEY_URL ?? env.REDIS_URL,
+});
 
 /**
  * A variable the process must NOT have. Present (non-empty) => the process refuses to start, naming it.
@@ -413,7 +301,48 @@ const GRAPH_WHY =
   'Microsoft Graph is worker-only; the API asks for Graph work through graph_task_outbox';
 
 /**
- * The API process. Holds the sign-in secret and NO Graph variable: a request that needs Graph writes a
+ * What only the API's sign-in needs, checked where sign-in is real. Placed in its own refinement, not in
+ * {@link refineEnv}, because the worker has none of these variables and must not be asked for them.
+ */
+const refineApiAuth = (
+  env: Common & { ENTRA_CLIENT_SECRET?: string; IDENTITY_TEST_LOGIN?: 'enabled' },
+  ctx: z.RefinementCtx,
+): void => {
+  // SIGN-IN MUST BE CONFIGURED WHERE IT IS REAL. In production a missing Entra setting is a refused boot, not a
+  // login page that sends everyone to an error; in development and CI the Entra fields may stay unset
+  // (test-login signs in).
+  if (env.NODE_ENV !== 'production') return;
+  for (const key of ['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET'] as const) {
+    if (!env[key]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} is required when NODE_ENV=production: staff sign in with Microsoft Entra.`,
+      });
+    }
+  }
+  if (env.IDENTITY_TEST_LOGIN) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['IDENTITY_TEST_LOGIN'],
+      message:
+        'IDENTITY_TEST_LOGIN cannot be set when NODE_ENV=production: it is a passwordless sign-in for ' +
+        'end-to-end suites only.',
+    });
+  }
+  if (!env.APP_URL.startsWith('https://')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['APP_URL'],
+      message:
+        'APP_URL must be https when NODE_ENV=production: it is the origin Entra redirects the browser to ' +
+        '(/api/auth/callback/microsoft) and the origin of the session cookie.',
+    });
+  }
+};
+
+/**
+ * The API process. Holds everything sign-in needs and NO Graph variable: a request that needs Graph writes a
  * task row and the worker performs it, so there is no Graph credential here to steal.
  */
 export const ApiEnvSchema = z
@@ -421,21 +350,29 @@ export const ApiEnvSchema = z
     ...baseShape,
 
     /**
-     * Entra confidential-client secret, used only in the server-side code exchange.
-     *
-     * OPTIONAL, unlike rally's, and deliberately so: opshub's Entra app registration
-     * has no client secret minted yet. An empty secret leaves the login path
-     * unusable — `/v1/bff/login` still returns an authorize URL, and the callback's
-     * token exchange is what fails — while the app boots and both the Bearer path and
-     * dev-login keep working. Making it required instead would turn a missing secret
-     * into a crash-looping service.
+     * Signs identity's cookies and encrypts what it stores (identity README, "Environment"). 32+ characters,
+     * its own secret: not COOKIE_SECRET (opshub's cookies) and not CSRF_SECRET. Rotating it signs everyone out.
+     * API ONLY: the worker never signs anyone in, and its schema refuses to start with this set.
      */
-    ENTRA_CLIENT_SECRET: z.string().min(1).optional(),
+    BETTER_AUTH_SECRET: z.string().min(32),
+    /**
+     * `IDENTITY_TEST_LOGIN=enabled` loads identity's passwordless `/api/auth/test-login` for the end-to-end
+     * suites. Identity itself refuses it unless NODE_ENV is `test` or `development`; this schema ALSO refuses it in
+     * production (`refineApiAuth`), so a misconfigured pod does not even reach that check.
+     */
+    IDENTITY_TEST_LOGIN: emptyToUndefined(z.enum(['enabled']).optional()),
+    /**
+     * The Entra confidential-client secret of the sign-in app, used only in the server-side code exchange. NOT a
+     * Graph credential: the Graph worker app has no client secret at all. Optional here so development and CI
+     * boot without one; required in production by `refineApiAuth`.
+     */
+    ENTRA_CLIENT_SECRET: emptyToUndefined(z.string().min(1).optional()),
     GRAPH_CLIENT_ID: forbidden('GRAPH_CLIENT_ID', 'API', GRAPH_WHY),
     GRAPH_CLIENT_CERTIFICATE: forbidden('GRAPH_CLIENT_CERTIFICATE', 'API', GRAPH_WHY),
     GRAPH_FEDERATED_TOKEN_FILE: forbidden('GRAPH_FEDERATED_TOKEN_FILE', 'API', GRAPH_WHY),
   })
   .superRefine(refineEnv)
+  .superRefine(refineApiAuth)
   .transform(deriveEnv);
 
 /**
@@ -484,22 +421,34 @@ export const WorkerEnvSchema = z
       'worker',
       'only the API completes a sign-in; the worker has no use for it',
     ),
+    BETTER_AUTH_SECRET: forbidden(
+      'BETTER_AUTH_SECRET',
+      'worker',
+      'only the API runs identity; a worker holding it could forge a session cookie',
+    ),
+    IDENTITY_TEST_LOGIN: forbidden(
+      'IDENTITY_TEST_LOGIN',
+      'worker',
+      'the passwordless test sign-in exists on the API only',
+    ),
   })
   .superRefine(refineEnv)
   .transform(deriveEnv);
 
-/** What every process has in common. Role-specific variables are typed on {@link ApiEnv} / {@link WorkerEnv}. */
+/** Role-specific variables are typed on {@link ApiEnv} / {@link WorkerEnv}. */
 type GraphKey = 'GRAPH_CLIENT_ID' | 'GRAPH_CLIENT_CERTIFICATE' | 'GRAPH_FEDERATED_TOKEN_FILE';
+/** The variables only the API has (sign-in). The worker's schema refuses to start with any of them set. */
+type ApiOnlyKey = 'ENTRA_CLIENT_SECRET' | 'BETTER_AUTH_SECRET' | 'IDENTITY_TEST_LOGIN';
 
 /**
  * What each role's config service can READ. The forbidden variables are in the schemas (so a set one
  * refuses to start) but not in these types, so `get('GRAPH_CLIENT_ID')` does not compile on the API.
  */
 export type ApiEnv = Omit<z.infer<typeof ApiEnvSchema>, GraphKey>;
-export type WorkerEnv = Omit<z.infer<typeof WorkerEnvSchema>, 'ENTRA_CLIENT_SECRET'>;
+export type WorkerEnv = Omit<z.infer<typeof WorkerEnvSchema>, ApiOnlyKey>;
 
 /** What every process has in common. */
-export type Env = Omit<ApiEnv, 'ENTRA_CLIENT_SECRET'>;
+export type Env = Omit<ApiEnv, ApiOnlyKey>;
 
 export function schemaForRole(role: ProcessRole) {
   return role === 'api' ? ApiEnvSchema : WorkerEnvSchema;

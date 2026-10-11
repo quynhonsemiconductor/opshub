@@ -21,14 +21,8 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
       DATABASE_URL: 'postgresql://test:test@localhost:5432/opshub_test',
-      // EC P-256 (ES256) test-only placeholder keys — must match algorithm: 'ES256' in platform.module.ts.
-      JWT_PRIVATE_KEY:
-        '-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQguroUP5ujCG9PaA7F\n+53M+ZEtNeuIunGs3mI6EEuD5qKhRANCAASZgAZjNEMAVYuVFiV1KfKFDRLVoJki\nokvGm4Kv+GReUvPaxoZPolxDcDmmdUfVHKrRxNbN7Kw8/x1o+2BibAO+\n-----END PRIVATE KEY-----',
-      JWT_PUBLIC_KEY:
-        '-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmYAGYzRDAFWLlRYldSnyhQ0S1aCZ\nIqJLxpuCr/hkXlLz2saGT6JcQ3A5pnVH1Ryq0cTWzeysPP8daPtgYmwDvg==\n-----END PUBLIC KEY-----',
-      JWT_ACCESS_EXPIRY: '8h',
-      JWT_ISSUER: 'opshub-test',
-      JWT_AUDIENCE: 'opshub-test-app',
+      // identity 8 signs and encrypts with this; test-only value (the schema wants >= 32 characters).
+      BETTER_AUTH_SECRET: 'test-better-auth-secret-minimum-32-chars!',
       CORS_ORIGINS: 'http://localhost:5173',
       LOG_LEVEL: 'fatal',
       LOG_PRETTY: 'false',

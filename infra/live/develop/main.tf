@@ -98,10 +98,9 @@ module "stack" {
   entra_tenant_id = var.entra_tenant_id
   entra_client_id = var.entra_client_id
 
-  // The sign-in secret is populated in Secrets Manager (opshub/develop/entra-client-secret) —
-  // this is the second, ordered step that actually wires it into api/worker. See the variable's
-  // description in modules/stack for why this is staged rather than unconditional.
-  entra_client_secret_set = true
+  // The sign-in secret (entra-client-secret, a key in the `app` bundle) is injected into the API
+  // unconditionally: identity 8 cannot sign anyone in without it, and the API's env schema refuses to boot
+  // production without it.
 
   // Microsoft Graph is OFF: the "OpsHub Graph Worker" app does not exist yet (it is created at the
   // on-prem move, with a federated credential), and the sign-in app holds no application

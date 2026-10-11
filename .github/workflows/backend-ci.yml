@@ -166,7 +166,7 @@ jobs:
       # The e2e suite authenticates as the DEMO EMPLOYEES — one per system role, so a spec
       # can act as "the caller who holds nothing" and "the caller who holds it globally" —
       # and those come from `db:seed`. Without this step every e2e `beforeAll` fails at
-      # dev-login with a 401 that looks nothing like the missing fixture it is.
+      # test-login with a 401 that looks nothing like the missing fixture it is.
       #
       # The e2e globalSetup truncates and re-seeds in-process as well, so for the e2e step
       # this is belt-and-braces. It stays because it fails LOUDLY and by name, where the
@@ -178,34 +178,12 @@ jobs:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
 
-      - name: Generate ephemeral JWT keypair for tests
-        # Generates a fresh EC P-256 keypair per CI run — never reuse a static secret.
-        # Keys are exported as base64-encoded PEM to $GITHUB_ENV for use in test steps.
-        run: |
-          node - << 'EOF'
-          const { generateKeyPairSync } = require('crypto');
-          const fs = require('fs');
-          const { privateKey, publicKey } = generateKeyPairSync('ec', {
-            namedCurve: 'P-256',
-            privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-            publicKeyEncoding:  { type: 'spki',  format: 'pem' },
-          });
-          fs.appendFileSync(process.env.GITHUB_ENV, `CI_JWT_PRIVATE_KEY=${Buffer.from(privateKey).toString('base64')}\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `CI_JWT_PUBLIC_KEY=${Buffer.from(publicKey).toString('base64')}\n`);
-          console.log('JWT keypair generated');
-          EOF
-
       - name: Unit tests (with coverage)
         run: pnpm test:cov
         env:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
-          JWT_PRIVATE_KEY: ${{ env.CI_JWT_PRIVATE_KEY }}
-          JWT_PUBLIC_KEY: ${{ env.CI_JWT_PUBLIC_KEY }}
-          JWT_ACCESS_EXPIRY: 8h
-          JWT_REFRESH_EXPIRY_DAYS: '7'
-          JWT_ISSUER: opshub-api
-          JWT_AUDIENCE: opshub-web
+          BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
           CORS_ORIGINS: http://localhost:5173
           VALKEY_URL: redis://localhost:6379
           COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
@@ -278,12 +256,10 @@ jobs:
           # re-seeds, which needs the owner, so it reads DATABASE_MIGRATION_URL.
           DATABASE_URL: postgresql://opshub_app:ci-opshub-app-least-privilege@localhost:5432/opshub_test?sslmode=disable
           DATABASE_MIGRATION_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
-          JWT_PRIVATE_KEY: ${{ env.CI_JWT_PRIVATE_KEY }}
-          JWT_PUBLIC_KEY: ${{ env.CI_JWT_PUBLIC_KEY }}
-          JWT_ACCESS_EXPIRY: 8h
-          JWT_REFRESH_EXPIRY_DAYS: '7'
-          JWT_ISSUER: opshub-api
-          JWT_AUDIENCE: opshub-web
+          BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
+          # identity 8's passwordless sign-in, which the harness' login() uses. Loads only with NODE_ENV test or
+          # development, and the env schema refuses it in production.
+          IDENTITY_TEST_LOGIN: enabled
           CORS_ORIGINS: http://localhost:5173
           VALKEY_URL: redis://localhost:6379
           COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
@@ -477,20 +453,6 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_openapi?sslmode=disable
 
-      - name: Generate ephemeral JWT keypair
-        run: |
-          node - << 'EOF'
-          const { generateKeyPairSync } = require('crypto');
-          const fs = require('fs');
-          const { privateKey, publicKey } = generateKeyPairSync('ec', {
-            namedCurve: 'P-256',
-            privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-            publicKeyEncoding:  { type: 'spki',  format: 'pem' },
-          });
-          fs.appendFileSync(process.env.GITHUB_ENV, `CI_JWT_PRIVATE_KEY=${Buffer.from(privateKey).toString('base64')}\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `CI_JWT_PUBLIC_KEY=${Buffer.from(publicKey).toString('base64')}\n`);
-          EOF
-
       - name: Build api
         run: pnpm build:api
 
@@ -511,16 +473,11 @@ jobs:
           kill "$API_PID" || true
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_openapi?sslmode=disable
-          JWT_PRIVATE_KEY: ${{ env.CI_JWT_PRIVATE_KEY }}
-          JWT_PUBLIC_KEY: ${{ env.CI_JWT_PUBLIC_KEY }}
-          JWT_ACCESS_EXPIRY: 8h
-          JWT_ISSUER: opshub-api
-          JWT_AUDIENCE: opshub-web
+          BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
           CORS_ORIGINS: http://localhost:5173
           VALKEY_URL: redis://localhost:6379
           COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
           CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
-          JWT_REFRESH_EXPIRY_DAYS: '7'
           LOG_LEVEL: fatal
           OTEL_ENABLED: 'false'
           OTEL_SERVICE_NAME: opshub-api

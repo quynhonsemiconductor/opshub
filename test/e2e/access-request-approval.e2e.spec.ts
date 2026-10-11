@@ -22,7 +22,7 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 let requester: Session;
@@ -48,7 +48,7 @@ async function submit(): Promise<string> {
   const res = await app.inject({
     method: 'POST',
     url: '/v1/access-requests',
-    headers: bearer(requester),
+    headers: authHeaders(requester),
     payload: {
       accessType: 'app_admin',
       target: 'jira',
@@ -67,7 +67,7 @@ describe('access request approval', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/access-requests/${id}/approve`,
-      headers: bearer(approver),
+      headers: authHeaders(approver),
       payload: { note: 'step approved' },
     });
 
@@ -90,7 +90,7 @@ describe('access request approval', () => {
     const own = await app.inject({
       method: 'POST',
       url: `/v1/access-requests/${id}/approve`,
-      headers: bearer(requester),
+      headers: authHeaders(requester),
       payload: {},
     });
     expect(own.statusCode).toBe(403);
@@ -99,7 +99,7 @@ describe('access request approval', () => {
     const missing = await app.inject({
       method: 'POST',
       url: '/v1/access-requests/019f0000-0000-7000-8000-000000000000/approve',
-      headers: bearer(approver),
+      headers: authHeaders(approver),
       payload: {},
     });
     expect(missing.statusCode).toBe(404);
@@ -125,7 +125,7 @@ describe('access request approval', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/access-requests/${id}/approve`,
-      headers: bearer(stepOneApprover),
+      headers: authHeaders(stepOneApprover),
       payload: { note: 'manager approves step 1' },
     });
 
@@ -151,7 +151,7 @@ describe('access request approval', () => {
     const first = await app.inject({
       method: 'POST',
       url: `/v1/access-requests/${id}/approve`,
-      headers: bearer(stepOneApprover),
+      headers: authHeaders(stepOneApprover),
       payload: {},
     });
     expect(first.statusCode, first.body).toBe(201);
@@ -162,7 +162,7 @@ describe('access request approval', () => {
     const second = await app.inject({
       method: 'POST',
       url: `/v1/access-requests/${id}/approve`,
-      headers: bearer(stepOneApprover),
+      headers: authHeaders(stepOneApprover),
       payload: {},
     });
     expect(second.statusCode, second.body).toBe(403);
@@ -177,7 +177,7 @@ describe('access request approval', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/access-requests/${id}/reject`,
-      headers: bearer(stepOneApprover),
+      headers: authHeaders(stepOneApprover),
       payload: { note: 'not justified' },
     });
 
@@ -192,7 +192,7 @@ describe('access request approval', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/access-requests/not-a-uuid',
-      headers: bearer(approver),
+      headers: authHeaders(approver),
     });
     expect(res.statusCode).toBe(400);
   });

@@ -1,16 +1,16 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '@modules/audit';
-import { IdentityModule } from '@modules/identity';
+import { EmployeesModule } from '@modules/identity';
 import { TrainingService } from './application/training.service';
 import { TrainingController } from './interface/http/training.controller';
 import { TrainingDrizzleRepository } from './infrastructure/persistence/training.drizzle-repository';
 import { TRAINING_REPOSITORY } from './domain/ports/training.repository';
 
 @Module({
-  // IdentityModule for EmployeeService: the controller checks an employee exists before recording a
+  // EmployeesModule for EmployeeService: the controller checks an employee exists before recording a
   // completion for them, since `employee_id` carries no cross-schema FK. `EntityAttachmentsService`
   // needs no import — PlatformModule is global.
-  imports: [AuditModule, IdentityModule],
+  imports: [AuditModule, EmployeesModule],
   controllers: [TrainingController],
   providers: [
     TrainingService,

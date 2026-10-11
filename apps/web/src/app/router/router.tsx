@@ -62,7 +62,7 @@ const shellRoute = createRoute({
     // AppProviders), so this is a synchronous read — no request, no flicker.
     if (isAuthenticated()) return;
 
-    // Carry the attempted path so the BFF can return the user to it after Entra. The
+    // Carry the attempted path so the sign-in can return the user to it after Entra. The
     // server validates it against an open-redirect guard before honouring it.
     throw redirect({ to: '/login', search: { returnTo: location.href } });
   },

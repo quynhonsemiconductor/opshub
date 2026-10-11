@@ -11,21 +11,21 @@ export interface RateLimitTier {
   /**
    * How to derive the rate-limit key.
    * - 'ip'           — client IP; for pre-auth endpoints, where there is no credential yet
-   * - 'userId'       — the caller's SESSION: the session cookie or bearer token, hashed (default)
-   * - 'refreshToken' — SHA-256 of the refresh_token cookie (per-session)
+   * - 'userId'       — the caller's SESSION: the session cookie, hashed (default)
    *
    * `userId` IS A HISTORICAL NAME. It used to read the decoded JWT `sub`, which is always undefined
-   * here: this guard is global and `JwtAuthGuard` is a route guard, so authentication has not run when
+   * here: this guard is global and `SessionAuthGuard` is a route guard, so authentication has not run when
    * the limiter executes. Every tier using it silently keyed on the IP instead — see the guard's own
    * docblock for what that cost. The name is kept because the tier table is append-only and renaming a
    * key changes every declaration; what it means is "per caller, not per network".
    */
-  keyBy?: 'ip' | 'userId' | 'refreshToken';
+  keyBy?: 'ip' | 'userId';
 }
 
 /**
  * Named tiers for intent-based rate limiting.
- * Append-only — never remove or change semantics of an existing tier name.
+ * Append-only — never change the semantics of an existing tier name. (`AUTH_REFRESH` was removed with the
+ * refresh-token endpoint it limited: identity 8 has no such route, and no code names the tier.)
  */
 export const RATE_LIMIT_TIERS = {
   /**
@@ -41,12 +41,6 @@ export const RATE_LIMIT_TIERS = {
   STRICT: { name: 'STRICT', windowMs: 60_000, limit: 60 },
   /** Auth login: brute-force protection — 5 attempts / 15 min per IP */
   AUTH_LOGIN: { name: 'AUTH_LOGIN', windowMs: 15 * 60_000, limit: 5, keyBy: 'ip' },
-  /**
-   * Token refresh — 30 req/min per session (keyed by refresh token hash).
-   * Per-session keying is NAT-safe: each browser session gets its own bucket,
-   * so 300 employees behind the same corporate proxy each still get 30/min.
-   */
-  AUTH_REFRESH: { name: 'AUTH_REFRESH', windowMs: 60_000, limit: 30, keyBy: 'refreshToken' },
   /** AI chat — LLM calls are expensive; 10 req/min per session to cap inference cost. */
   AI: { name: 'AI', windowMs: 60_000, limit: 10, keyBy: 'userId' },
   /** File upload presign/confirm — S3 PUT costs; 30 req/min per session. */

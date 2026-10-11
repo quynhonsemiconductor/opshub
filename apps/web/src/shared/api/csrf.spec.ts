@@ -44,7 +44,7 @@ describe('withCsrfHeader', () => {
   });
 
   it('adds nothing when no token has been issued', () => {
-    // A Bearer caller is never issued one, and an unauthenticated page has not bootstrapped
+    // A request with no session cookie is never issued one, and an unauthenticated page has not bootstrapped
     // yet — neither should get an empty header, which the server would reject as invalid.
     expect(withCsrfHeader('POST')).toEqual({});
   });

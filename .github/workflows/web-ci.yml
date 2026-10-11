@@ -224,22 +224,20 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
       DATABASE_MIGRATION_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
       VALKEY_URL: redis://localhost:6379
-      # The BFF session lives in Valkey, so the cache is NOT optional here — a run without it
-      # would log in successfully and then lose the session on the next request.
-      JWT_ISSUER: opshub-api
-      JWT_AUDIENCE: opshub-web
-      JWT_ACCESS_EXPIRY: 8h
-      JWT_REFRESH_EXPIRY_DAYS: '7'
+      # The identity 8 session cache lives in Valkey and the cookie is verified against this secret. The
+      # cache degrades to Postgres, but a run without it would exercise a path production does not.
+      BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
       COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
       CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
       CORS_ORIGINS: http://localhost:5173
       # 3001, because apps/web/vite.config.ts proxies /v1 there. A different port here means
       # every request 502s through the proxy and every spec fails on its first assertion.
       PORT: '3001'
-      # `POST /v1/bff/dev-login` is refused under NODE_ENV=production by design, and it is how
-      # global-setup signs in — OpsHub's login page is a single Entra SSO button, and CI has no
-      # Entra tenant.
+      # `POST /api/auth/test-login` (identity 8) loads only with IDENTITY_TEST_LOGIN=enabled AND NODE_ENV
+      # exactly `test` or `development`, and it is how global-setup signs in — OpsHub's login page is a
+      # single Entra SSO button, and CI has no Entra tenant.
       NODE_ENV: test
+      IDENTITY_TEST_LOGIN: enabled
       # The suite drives ~50 specs through four seeded identities in three minutes, and each page load
       # costs about fifteen calls — so the DEFAULT tier's 200/min per user is crossed and whichever
       # request lands next fails a spec that was testing something else. Measured here twice after
@@ -271,29 +269,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
-      - name: Generate ephemeral JWT keypair
-        # Fresh EC P-256 keypair per run — never a static secret, matching Backend · CI.
-        # JWT_PUBLIC_KEY is derived from the private key at boot, so only the private one is
-        # strictly required; both are exported to keep the two workflows readable side by side.
-        run: |
-          node - << 'EOF'
-          const { generateKeyPairSync } = require('crypto');
-          const fs = require('fs');
-          const { privateKey, publicKey } = generateKeyPairSync('ec', {
-            namedCurve: 'P-256',
-            privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-            publicKeyEncoding:  { type: 'spki',  format: 'pem' },
-          });
-          fs.appendFileSync(process.env.GITHUB_ENV, `JWT_PRIVATE_KEY=${Buffer.from(privateKey).toString('base64')}\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `JWT_PUBLIC_KEY=${Buffer.from(publicKey).toString('base64')}\n`);
-          console.log('JWT keypair generated');
-          EOF
-
       # `pnpm db:migrate` always ensures the RBAC catalogue, but the login-able DEMO EMPLOYEES
       # are fixtures behind `SEED_ON_DEPLOY` — and `admin@opshub.local`, the principal
       # global-setup signs in as, is one of them. Without this the migrate step succeeds and
-      # dev-login then answers `401 AUTH_INVALID_CREDENTIALS: No active account exists for this
-      # email`, which is what the first run of this workflow did.
+      # test-login finds no `identity.user` for the email, so it mints one with a NEW id that matches no employee
+      # and every request is refused (the fixtures also create the identity users, with the employees' ids).
       #
       # Safe here, and it has to be explicit: `db/migrate.ts` refuses the fixtures whenever
       # `NODE_ENV=production`, which only deployed migrator tasks set. Backend · CI needs no

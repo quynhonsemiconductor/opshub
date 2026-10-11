@@ -13,8 +13,8 @@ describe('buildUpstreamUrl', () => {
   });
 
   it('handles the prefix root with no extra path or query', () => {
-    const result = buildUpstreamUrl('https://opshub-dev.qnsc.vn/bff/login', API_ORIGIN);
-    expect(result).toBe('https://opshub-api-dev.qnsc.vn/bff/login');
+    const result = buildUpstreamUrl('https://opshub-dev.qnsc.vn/v1/livez', API_ORIGIN);
+    expect(result).toBe('https://opshub-api-dev.qnsc.vn/v1/livez');
   });
 });
 
@@ -32,7 +32,7 @@ describe('buildProxyRequest', () => {
       headers: {
         host: 'opshub-dev.qnsc.vn',
         'cf-connecting-ip': '203.0.113.7',
-        cookie: '__Host-opshub_session=abc',
+        cookie: '__Secure-opshub.session_token=abc',
       },
     });
     const proxied = buildProxyRequest(request, API_ORIGIN);
@@ -41,7 +41,7 @@ describe('buildProxyRequest', () => {
     expect(proxied.headers.get('x-forwarded-proto')).toBe('https');
     expect(proxied.headers.get('x-forwarded-host')).toBe('opshub-dev.qnsc.vn');
     // App headers must survive the hop.
-    expect(proxied.headers.get('cookie')).toBe('__Host-opshub_session=abc');
+    expect(proxied.headers.get('cookie')).toBe('__Secure-opshub.session_token=abc');
   });
 
   it('forwards the CSRF token header', () => {
@@ -51,7 +51,7 @@ describe('buildProxyRequest', () => {
       method: 'POST',
       headers: {
         'cf-connecting-ip': '203.0.113.7',
-        cookie: '__Host-opshub_session=abc; __Host-opshub_csrf=secret',
+        cookie: '__Secure-opshub.session_token=abc; opshub_csrf=secret',
         'x-csrf-token': 'tok-1',
         'content-type': 'application/json',
       },
@@ -60,7 +60,7 @@ describe('buildProxyRequest', () => {
     const proxied = buildProxyRequest(request, API_ORIGIN);
     expect(proxied.headers.get('x-csrf-token')).toBe('tok-1');
     expect(proxied.headers.get('cookie')).toBe(
-      '__Host-opshub_session=abc; __Host-opshub_csrf=secret',
+      '__Secure-opshub.session_token=abc; opshub_csrf=secret',
     );
   });
 
@@ -118,13 +118,13 @@ describe('buildClientResponse', () => {
   // assertion green. The stub-based test below is the one that kills that mutation.
   it('preserves multiple Set-Cookie headers individually', () => {
     const upstream = new Response(null, { status: 204 });
-    upstream.headers.append('set-cookie', '__Host-opshub_session=abc; Path=/; Secure');
-    upstream.headers.append('set-cookie', '__Host-bff_state=; Path=/; Max-Age=0');
+    upstream.headers.append('set-cookie', '__Secure-opshub.session_token=abc; Path=/; Secure');
+    upstream.headers.append('set-cookie', '__Secure-opshub.state=; Path=/; Max-Age=0');
     const result = buildClientResponse(upstream);
     const cookies = result.headers.getSetCookie?.() ?? [];
     expect(cookies).toHaveLength(2);
-    expect(cookies).toContain('__Host-opshub_session=abc; Path=/; Secure');
-    expect(cookies).toContain('__Host-bff_state=; Path=/; Max-Age=0');
+    expect(cookies).toContain('__Secure-opshub.session_token=abc; Path=/; Secure');
+    expect(cookies).toContain('__Secure-opshub.state=; Path=/; Max-Age=0');
   });
 
   // The fallback path, and the reason it exists. `getSetCookie` is skipped over in the
@@ -134,13 +134,15 @@ describe('buildClientResponse', () => {
   it('still forwards Set-Cookie when the runtime has no getSetCookie', () => {
     const upstream = new Response(null, {
       status: 204,
-      headers: { 'set-cookie': '__Host-opshub_session=abc; Path=/; Secure' },
+      headers: { 'set-cookie': '__Secure-opshub.session_token=abc; Path=/; Secure' },
     });
     Object.defineProperty(upstream.headers, 'getSetCookie', { value: undefined });
 
     const result = buildClientResponse(upstream);
 
-    expect(result.headers.get('set-cookie')).toBe('__Host-opshub_session=abc; Path=/; Secure');
+    expect(result.headers.get('set-cookie')).toBe(
+      '__Secure-opshub.session_token=abc; Path=/; Secure',
+    );
   });
 
   it('does not leak the fallback into the normal path', () => {
@@ -169,8 +171,8 @@ describe('buildClientResponse', () => {
   it('rebuilds every Set-Cookie individually, not via the Headers constructor', () => {
     const entries: Array<[string, string]> = [
       ['content-type', 'application/json'],
-      ['set-cookie', '__Host-opshub_session=abc; Path=/; Secure'],
-      ['set-cookie', '__Host-bff_state=; Path=/; Max-Age=0'],
+      ['set-cookie', '__Secure-opshub.session_token=abc; Path=/; Secure'],
+      ['set-cookie', '__Secure-opshub.state=; Path=/; Max-Age=0'],
     ];
     const headersLike = {
       forEach(cb: (value: string, key: string) => void) {
@@ -190,8 +192,8 @@ describe('buildClientResponse', () => {
 
     const cookies = result.headers.getSetCookie?.() ?? [];
     expect(cookies).toHaveLength(2);
-    expect(cookies).toContain('__Host-opshub_session=abc; Path=/; Secure');
-    expect(cookies).toContain('__Host-bff_state=; Path=/; Max-Age=0');
+    expect(cookies).toContain('__Secure-opshub.session_token=abc; Path=/; Secure');
+    expect(cookies).toContain('__Secure-opshub.state=; Path=/; Max-Age=0');
     // Non-cookie headers must still make it across.
     expect(result.headers.get('content-type')).toBe('application/json');
   });

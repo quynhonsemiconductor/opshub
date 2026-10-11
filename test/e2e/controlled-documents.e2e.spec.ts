@@ -25,7 +25,7 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 /** Holds documents.manage + documents.approve + documents.publish — the ISMS owner. */
@@ -45,7 +45,7 @@ async function post<T = Record<string, unknown>>(
   session: Session,
   payload: Record<string, unknown> = {},
 ): Promise<{ status: number; body: T }> {
-  const res = await app.inject({ method: 'POST', url, headers: bearer(session), payload });
+  const res = await app.inject({ method: 'POST', url, headers: authHeaders(session), payload });
   return { status: res.statusCode, body: JSON.parse(res.body) as T };
 }
 
@@ -53,7 +53,7 @@ async function get<T = Record<string, unknown>>(
   url: string,
   session: Session,
 ): Promise<{ status: number; body: T }> {
-  const res = await app.inject({ method: 'GET', url, headers: bearer(session) });
+  const res = await app.inject({ method: 'GET', url, headers: authHeaders(session) });
   return { status: res.statusCode, body: JSON.parse(res.body) as T };
 }
 
@@ -309,7 +309,7 @@ describe('superseding a published document', () => {
     const res = await app.inject({
       method: 'PUT',
       url: `/v1/documents/versions/${current.id}`,
-      headers: bearer(security),
+      headers: authHeaders(security),
       payload: { body: 'sneaky in-place edit' },
     });
 

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { and, eq, isNull } from 'drizzle-orm';
 import {
   AuthzService,
@@ -7,6 +7,8 @@ import {
   type DrizzleDB,
   RequestRegistry,
   RequestTypeDef,
+  SESSION_REVOKER,
+  type SessionRevoker,
 } from '@platform';
 import { AUDIT_ACTION, AUDIT_RESOURCE, AuditService } from '@modules/audit';
 import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
@@ -17,7 +19,8 @@ import {
   accessGrants,
   assetAssignments,
   assets,
-  refreshTokens,
+  session as identitySession,
+  user as identityUser,
 } from '../../../../../db/schema';
 
 export interface OffboardingPayload extends Record<string, unknown> {
@@ -35,7 +38,8 @@ export interface OffboardingPayload extends Record<string, unknown> {
  *   2. Removes all RBAC role assignments, and clears the cached role claims with them
  *   3. Revokes all active access grants
  *   4. Returns all assigned hardware assets (sets returnedAt, status → in_stock)
- *   5. Revokes all active refresh tokens (forces immediate logout)
+ *   5. Blocks the employee from signing in (identity user `banned`) and deletes every session row
+ *      (forces immediate logout); `afterApprove` then clears the cached sessions in Valkey
  *
  * All five operations share the same transaction, so either all succeed or none do.
  *
@@ -50,7 +54,7 @@ export interface OffboardingPayload extends Record<string, unknown> {
  * reads identically whether access was removed one row at a time or by this workflow.
  *
  * STILL A LAYER VIOLATION: the writes belong to `AuthzAdminService`, `AssetService`,
- * `AccessRequestService` and the refresh-token repository, and each of those exposes only a
+ * `AccessRequestService` and the identity session store, and each of those exposes only a
  * transaction-OWNING method, which cannot be called from inside the engine's `tx` without nesting.
  * The fix is a `tx`-accepting method on each, the way `RiskAcceptanceTypeDef` calls
  * `RisksService.applyAcceptance(..., tx)`. That is a wider change than the missing evidence, so it is
@@ -78,6 +82,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     private readonly graphTasks: GraphTaskQueue,
     private readonly authz: AuthzService,
     audit: AuditService,
+    @Optional() @Inject(SESSION_REVOKER) private readonly sessions?: SessionRevoker,
   ) {
     // One trail per resource the workflow touches, bound once — the same shape the owning services
     // use, so the entries this hook writes are indistinguishable from the ones they write.
@@ -185,16 +190,22 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
       });
     }
 
-    // 5. Revoke all refresh tokens (forces immediate logout across all sessions)
+    // 5. End the leaver's sessions. In the transaction, with everything else: the identity user is BANNED (a
+    // banned user cannot sign in, and identity refuses a banned user's session whenever it is read) and every
+    // session row is deleted. The cached copies in Valkey cannot be rolled back with these rows, so
+    // `afterApprove` clears them once the transaction has committed.
+    await tx
+      .update(identityUser)
+      .set({ banned: true, banReason: 'offboarded', updatedAt: now })
+      .where(eq(identityUser.id, employeeId));
     const revokedSessions = await tx
-      .update(refreshTokens)
-      .set({ revoked: true })
-      .where(and(eq(refreshTokens.employeeId, employeeId), eq(refreshTokens.revoked, false)))
-      .returning({ id: refreshTokens.id });
+      .delete(identitySession)
+      .where(eq(identitySession.userId, employeeId))
+      .returning({ id: identitySession.id });
 
     if (revokedSessions.length > 0) {
       /*
-       * ONE entry for the set, unlike the roles above — deliberately. A refresh token is not a thing
+       * ONE entry for the set, unlike the roles above — deliberately. A session is not a thing
        * anybody reviews individually; the reviewable fact is "every session was ended at this
        * moment". `session.revoked` rather than `auth.logout`, because the holder did not do this.
        */
@@ -230,7 +241,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
   }
 
   /**
-   * Post-commit work: drop the cached permissions.
+   * Post-commit work: drop the cached permissions, and the sessions cached in Valkey.
    *
    * THE CACHE INVALIDATION IS THE SECURITY-CRITICAL HALF, and it was missing entirely.
    * `AuthzService` caches a principal's resolved permissions for `CACHE_TTL_SECONDS = 300`, and every
@@ -247,5 +258,10 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
    */
   async afterApprove(payload: OffboardingPayload): Promise<void> {
     await this.authz.invalidate(payload.employeeId);
+    // The sessions cached in Valkey (the rows went with the transaction). Rejects while the cache is
+    // unavailable, which fails the post-commit step loudly instead of leaving a leaver's cached session behind:
+    // the ban is already committed, so they cannot sign in again either way. (The Entra account disable is
+    // a task queued in the transaction by `onApprove`, step 6.)
+    await this.sessions?.offboard(payload.employeeId, 'offboarded');
   }
 }

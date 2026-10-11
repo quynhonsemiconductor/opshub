@@ -24,7 +24,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AiService } from '../../libs/modules/ai/src/application/ai.service';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 let ai: AiService;
@@ -41,7 +41,7 @@ async function submitRequestAs(who: Session, justification: string): Promise<voi
   const res = await app.inject({
     method: 'POST',
     url: '/v1/access-requests',
-    headers: bearer(who),
+    headers: authHeaders(who),
     payload: {
       accessType: 'app_admin',
       target: 'jira',

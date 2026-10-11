@@ -47,6 +47,10 @@ import { resolveMigrationUrl } from './database-url';
  * Both are reconciled idempotently by `seedRbacCatalog` / `seed`, so they need no reset.
  */
 export const FIXTURE_TABLES = [
+  // identity 8 sessions (and verification rows): every test-login adds one, and nothing else ends them.
+  // `identity.user` and `identity.account` are deliberately NOT here: the users ARE the fixture set.
+  'identity.session',
+  'identity.verification',
   // workforce — what the isolation suite creates on every run
   'workforce.timesheets',
   'workforce.leave_requests',

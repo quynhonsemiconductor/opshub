@@ -278,15 +278,18 @@ export const AUDIT_ACTION = {
   WEBHOOK_DELIVERY_RETRIED: 'webhook_delivery.retried',
 
   /**
-   * ── Emitted by `@quynhonsemiconductor/identity`, NOT by this repo ──
+   * ── Authentication ──
    *
-   * These arrive as plain strings through `AuditServiceAdapter` and opshub cannot rename
-   * them; they are declared here so the adapter has something to narrow to and so the
-   * viewer's vocabulary is complete. `identity-audit-actions.spec.ts` reads the package's
-   * own dist and fails if it emits an action this list does not carry, which is what turns a
-   * package upgrade that adds one into a test failure rather than a silent type assertion.
+   * Written from identity 8's security events (`SecurityEventAuditSink`): `auth.login.sso` for a sign-in that
+   * succeeded and `auth.login.failed` for one that did not (ids and the client address only).
+   *
+   * The others are HISTORICAL: identity 7 wrote them (`auth.login.dev`, `auth.logout`, `auth.switch_workspace`,
+   * `auth.token_theft_detected`) and their rows are still in `audit_logs`, so the vocabulary keeps them. Nothing
+   * writes them any more: identity 8 has no dev login, no workspaces and no refresh tokens, and it raises no
+   * event for a sign-out.
    */
   AUTH_LOGIN_SSO: 'auth.login.sso',
+  AUTH_LOGIN_FAILED: 'auth.login.failed',
   AUTH_LOGIN_DEV: 'auth.login.dev',
   AUTH_LOGOUT: 'auth.logout',
   AUTH_SWITCH_WORKSPACE: 'auth.switch_workspace',

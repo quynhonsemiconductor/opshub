@@ -4,6 +4,7 @@
  */
 export * from './enums';
 export * from './identity';
+export * from './identity-auth';
 export * from './authz';
 export * from './requests';
 export * from './assets';

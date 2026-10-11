@@ -23,6 +23,8 @@ export default defineConfig(({ mode }) => ({
     host: '0.0.0.0',
     proxy: {
       '/v1': { target: 'http://localhost:3001', changeOrigin: true, secure: false },
+      // identity 8 (Better Auth): sign-in, the Microsoft callback and sign-out, same-origin with the SPA.
+      '/api/auth': { target: 'http://localhost:3001', changeOrigin: true, secure: false },
     },
   },
   resolve: {

@@ -18,13 +18,8 @@ const mockEmployeeRepo = {
   updatePhoto: vi.fn(),
   list: vi.fn(),
 };
-const mockRefreshTokenRepo = { revokeAllForEmployee: vi.fn() };
-const mockAuthCache = {
-  revokeUser: vi.fn(),
-  unrevokeUser: vi.fn(),
-  isUserRevoked: vi.fn(),
-  isTokenDenied: vi.fn(),
-};
+const mockUsers = { ensure: vi.fn() };
+const mockSessions = { offboard: vi.fn(), reinstate: vi.fn() };
 const mockStorage = {
   presignUpload: vi.fn(),
   confirmUpload: vi.fn(),
@@ -59,14 +54,14 @@ const EMPLOYEE = {
   createdAt: new Date(),
 };
 
-function makeService() {
+function makeService(sessions: typeof mockSessions | null = mockSessions) {
   return new EmployeeService(
     mockEmployeeRepo as never,
-    mockRefreshTokenRepo as never,
-    mockAuthCache as never,
+    mockUsers as never,
     mockStorage as never,
     mockDb as never,
     mockAudit as never,
+    sessions ?? undefined,
   );
 }
 
@@ -90,6 +85,9 @@ describe('EmployeeService.create()', () => {
       TX,
     );
     expect(mockEmployeeRepo.create).toHaveBeenCalledWith(expect.anything(), TX);
+    // The identity user is written in the SAME transaction, with the employee's id: otherwise the
+    // person's first Microsoft sign-in would create a user with a new id.
+    expect(mockUsers.ensure).toHaveBeenCalledWith(EMPLOYEE, TX);
   });
 
   it('lowercases email before checking uniqueness', async () => {
@@ -138,6 +136,7 @@ describe('EmployeeService.update()', () => {
       ACTOR,
     );
     expect(result.displayName).toBe('Jane Smith');
+    expect(mockUsers.ensure).toHaveBeenCalledWith(updated, TX); // the identity user follows
     expect(mockAudit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'employee.updated' }),
       TX,
@@ -174,14 +173,51 @@ describe('EmployeeService.updateStatus()', () => {
     expect(mockEmployeeRepo.updateStatus).not.toHaveBeenCalled();
   });
 
-  it('revokes refresh tokens when offboarded', async () => {
+  it('ends the sessions and blocks sign-in when offboarded, AFTER the commit', async () => {
     mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
     mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
-    mockRefreshTokenRepo.revokeAllForEmployee.mockResolvedValue(undefined);
+    const order: string[] = [];
+    mockDb.transaction.mockImplementationOnce(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const result = await fn(TX);
+      order.push('commit');
+      return result;
+    });
+    mockSessions.offboard.mockImplementation(() => {
+      order.push('offboard');
+      return Promise.resolve();
+    });
 
     await makeService().updateStatus('emp-1', 'offboarded', ACTOR);
-    expect(mockRefreshTokenRepo.revokeAllForEmployee).toHaveBeenCalledWith('emp-1');
-    expect(mockAuthCache.revokeUser).toHaveBeenCalledWith('emp-1', expect.any(Number));
+
+    expect(mockSessions.offboard).toHaveBeenCalledWith('emp-1', 'offboarded');
+    expect(order).toEqual(['commit', 'offboard']);
+  });
+
+  it('allows sign-in again when an offboarded employee is re-activated, or put on leave', async () => {
+    for (const status of ['active', 'on_leave'] as const) {
+      vi.clearAllMocks();
+      mockEmployeeRepo.findById.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+      mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status });
+      await makeService().updateStatus('emp-1', status, ACTOR);
+      expect(mockSessions.reinstate).toHaveBeenCalledWith('emp-1');
+      expect(mockSessions.offboard).not.toHaveBeenCalled();
+    }
+  });
+
+  it('touches no session for a change that is not into or out of offboarded', async () => {
+    mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
+    mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'on_leave' });
+    await makeService().updateStatus('emp-1', 'on_leave', ACTOR);
+    expect(mockSessions.offboard).not.toHaveBeenCalled();
+    expect(mockSessions.reinstate).not.toHaveBeenCalled();
+  });
+
+  it('fails loudly where no SessionRevoker is bound (the worker) rather than skipping the revocation', async () => {
+    mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
+    mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+    await expect(makeService(null).updateStatus('emp-1', 'offboarded', ACTOR)).rejects.toThrow(
+      /SessionRevoker/,
+    );
   });
 });
 

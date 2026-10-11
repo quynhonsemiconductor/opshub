@@ -22,6 +22,16 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    /**
+     * Identity 8's passwordless sign-in, which the harness' `login()` uses. It loads only with this AND
+     * NODE_ENV exactly `test` (vitest's default) or `development`; production refuses both the env value and
+     * the boot. `BETTER_AUTH_SECRET` is a throwaway: nothing outside this process ever verifies it.
+     */
+    env: {
+      IDENTITY_TEST_LOGIN: 'enabled',
+      BETTER_AUTH_SECRET:
+        process.env['BETTER_AUTH_SECRET'] ?? 'e2e-better-auth-secret-minimum-32-chars!!',
+    },
     include: ['test/e2e/**/*.e2e.spec.ts'],
     /**
      * NOT `passWithNoTests`. It was true while the directory was empty, which made the
