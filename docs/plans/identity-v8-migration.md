@@ -10,6 +10,15 @@ the difference is called out, because several of them change the shape of the wo
 
 ---
 
+**Decisions recorded 2026-10-11 (reviewer):** Q1 add `hooks.onStaffSignIn` (every sign-in; a sync failure fails the sign-in) · Q2 separate prod Entra app, no
+cutover window for prod · Q3 SPA host (`https://opshub-dev.qnsc.vn/api/auth/callback/microsoft`; the Pages Function proxies `/api/auth/*`) · Q4 `staff.domains = ['qnsc.vn']` ·
+Q5 keep v7 behaviour · Q8 divergence declared in `docs/DIVERGENCE.md` · Q9 `platform-db` as a peer only, no SPA client library · Q10 audit `auth.login.failed` (ids and IP only) ·
+Q11 accept 12 h · Q6 and the Entra owner's steps are pending with the owner.
+**Environments (2026-10-11):** the identity-8 cutover happens on **ECS dev**, the only environment that exists, and M3 runs there. **Prod has never launched and launches directly
+on-prem (k3s/gitops) with identity 8: no ECS prod path is added.** Moving opshub dev from ECS to on-prem is a separate infra migration, not part of this plan.
+
+---
+
 ## 0. Read this first
 
 ### 0.1 What the generic guide gets wrong for opshub
@@ -160,7 +169,7 @@ only (§6).
 | M | `infra/modules/stack/main.tf` | Secrets: add `better-auth-secret`; keep `COOKIE_SECRET`, `CSRF_SECRET`; **later** (PR 3) remove `jwt-private`. Env: remove `ENTRA_REDIRECT_URI`; add `APP_URL = local.app_url`. `ENTRA_CLIENT_SECRET` is injected unconditionally (drop the `entra_client_secret_set` gate for staff sign-in). Alarm rewire (§1.5) |
 | M | `.github/workflows/backend-ci.yml`, `web-ci.yml` | Remove the "Generate ephemeral JWT keypair" steps and `JWT_PRIVATE_KEY`; add `BETTER_AUTH_SECRET` and `IDENTITY_TEST_LOGIN=enabled` for the e2e job |
 | M | `vitest.config.ts`, `test/vitest.e2e.config.ts` | Test env: remove `JWT_*`, add `BETTER_AUTH_SECRET` |
-| M | `gitops/values/opshub/*.yaml` (separate repo) | If opshub is already on the cluster: the same env/secret changes. Q7 |
+| — | `infra/live/prod`, `gitops/values/opshub/*.yaml` | **Not part of the dev cutover.** No ECS prod path is added (prod launches on-prem). The on-prem env and secrets are listed in §7.5 for the gitops/infra PR that launches prod |
 | M | `docs/DIVERGENCE.md` | Declare the new auth shape vs rally until rally follows (§8, Q8) |
 | M | `README.md`, `apps/web/README.md`, `docs/runbooks/*` | Login flow, env table |
 
@@ -202,7 +211,7 @@ FROM identity.employees e
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO identity.account (id, account_id, provider_id, user_id, created_at, updated_at)
-SELECT uuidv7(), s.provider_sub, 'microsoft', s.user_id, s.created_at, now()
+SELECT gen_random_uuid(), s.provider_sub, 'microsoft', s.user_id, s.created_at, now()
 FROM identity.sso_identities s
 JOIN identity."user" u ON u.id = s.user_id
 WHERE s.provider = 'entra'
@@ -212,7 +221,10 @@ COMMIT;
 
 - Employees created by HR **before** their first Entra login have no `sso_identities` row; they get a `user` row and no `account`. On first Microsoft sign-in
   Better Auth finds the user by email and links the account (a tenant member comes with a verified email), so **ids are preserved**. This is the case the guide's "copy users" did not have to consider.
-- `uuidv7()` needs PostgreSQL 18 (the dev compose uses 18; confirm the RDS/cluster engine, Q7). If not, generate ids in the migration runner.
+- **No `uuidv7()`.** It is PostgreSQL 18 only, and the engines this runs on are not 18 (read from the code on 2026-10-11): CI `postgres:17-alpine`; dev RDS is
+  `tf-modules` `rds-v2.3.0` with its default `engine_version = "17"` (opshub's stack does not override it); the on-prem shared instance is `engine_version = "16"`
+  (`infra/live/data-prod/main.tf`); only the local compose file is 18. The backfill therefore uses `gen_random_uuid()` (PostgreSQL 13+); a v4 id is as good as a v7 one
+  for a row id (Better Auth treats ids as opaque, and the app generates v7 ids itself for every new row). The generated DDL has no `uuidv7()` default.
 - The backfill is re-runnable (`ON CONFLICT`) and is also expressed as a test: after migration, `count(user) = count(employees)` and every `account.user_id` exists.
 
 ### 2.3 Keeping `user` and `employees` in step afterwards
@@ -296,19 +308,52 @@ Behaviour change to expect: an `X-Correlation-Id` that was not a UUID used to be
 
 ---
 
-## 5. Entra changes the OWNER must make (to relay)
+## 5. Entra and edge changes the OWNER must make (to relay)
 
-App registration **"OpsHub Dev"** (the only one that exists):
+### 5.1 Entra: app registration **"OpsHub Dev"** (the only one that exists; used by ECS dev)
 
-1. **Add the redirect URI** (type *Web*): `https://opshub-dev.qnsc.vn/api/auth/callback/microsoft`.
-   - This is the **SPA host**, not `opshub-api-dev.qnsc.vn`: see §0.1. Keep the v7 URI (`https://opshub-dev.qnsc.vn/v1/bff/callback`) registered until the 30-day rollback window ends.
-   - If the intended host really is the API host, say so: it needs a different cookie design and the Pages proxy plan changes (Q3).
-2. **Optional claim `email`** on the ID token: already added (confirm it is *ID token*, v2.0, and the manifest has `acceptedAccessTokenVersion` 2 or the app is v2 for sign-in). `oid` and `tid` are present by default in v2 id_tokens (ADR check M2).
-3. **App Roles** (`admin`, `it-admin`, `security`, `hr`, `manager`, `helpdesk`, `auditor`, `employee`): confirm the **values** equal the opshub role keys exactly (case-sensitive) and the users/groups are assigned in *Enterprise applications → Users and groups*. The `roles` claim needs nothing else.
-4. **Single-tenant** (*Accounts in this organizational directory only*), and **"Assignment required"** decision: v7 behaviour was "any member of the tenant gets `employee`". Keep it unless the owner says otherwise (Q5).
-5. **Client secret**: v7's `ENTRA_CLIENT_SECRET` was optional and the registration "has no secret minted yet" (infra comment). v8 sign-in cannot work without it: mint one, put it in Secrets Manager (`entra-client-secret`), note the expiry date and a rotation owner.
-6. **Separate prod app?** Only "OpsHub Dev" exists and production **has never launched** (`gitops/values/opshub/base.yaml`). Recommendation: **yes, a separate "OpsHub" registration for production**, with `https://opshub.qnsc.vn/api/auth/callback/microsoft` as its only redirect URI, its own secret and its own App Role assignments. Reusing the dev app puts localhost/dev redirect URIs and the dev secret's blast radius on production. Decision needed before the prod cutover (Q2).
-7. Cloudflare Access sits in front of the API (`expose: protected`): confirm the `/api/auth/callback/*` path is reachable for the browser's top-level redirect (Q6).
+1. **Add the redirect URI** (type *Web*): `https://opshub-dev.qnsc.vn/api/auth/callback/microsoft`: the **SPA host**, because the session cookie has to be set on the host the
+   browser uses and the Pages Function proxies `/api/auth/*` to the API (§1.6). Keep the v7 URI (`https://opshub-dev.qnsc.vn/v1/bff/callback`) registered until the 30-day
+   rollback window ends.
+2. **Optional claim `email`** on the ID token: already added (confirm it is *ID token*, v2.0). `oid` and `tid` are present by default in v2 id_tokens (ADR check M2).
+3. **App Roles** (`admin`, `it-admin`, `security`, `hr`, `manager`, `helpdesk`, `auditor`, `employee`): the **values** equal the opshub role keys exactly (case-sensitive), assigned in
+   *Enterprise applications → Users and groups*. The `roles` claim needs nothing else.
+4. **Single-tenant** (*Accounts in this organizational directory only*). **"Assignment required"** stays off: v7 behaviour was "any tenant member signs in and gets `employee`" (Q5, kept).
+5. **Client secret (required, unlike v7).** The v7 infra comment says the registration has no secret minted yet, and `ENTRA_CLIENT_SECRET` was optional. Better Auth's Microsoft
+   sign-in is a confidential-client authorization-code exchange: it cannot work without one. Mint it, record its expiry and a rotation owner, and store it
+   - on **ECS dev**: AWS Secrets Manager, the existing `entra-client-secret` secret (the stack already injects it as `ENTRA_CLIENT_SECRET` once `entra_client_secret_set` is true; in the
+     cutover PR that gate is removed, because a staff-only instance cannot start sign-in without it);
+   - on **on-prem prod**: a cluster secret (External Secrets from the vault, per the platform's convention), mounted as `ENTRA_CLIENT_SECRET`.
+   **Federated credentials are not the answer here.** They are for the on-prem Graph **mail** sender only (workload identity, no stored secret); they do not replace the client secret for user sign-in.
+
+### 5.2 Entra: the **production** app (does not exist yet)
+
+A **separate** registration for production (Q2): its own client id and secret, single-tenant, the same `email` optional claim and App Roles, and a single redirect URI
+`https://<prod SPA host>/api/auth/callback/microsoft` (`opshub.qnsc.vn` per `infra/live/prod`, to be confirmed against the on-prem hostname). No localhost or dev URIs on it.
+It is created before prod launches; nothing in the dev cutover depends on it.
+
+### 5.3 Cloudflare Access: what the code says, and the rules to make when Access exists
+
+**Checked in the infra code (2026-10-11):**
+- **ECS dev is not behind Cloudflare Access in code.** opshub's `infra/modules/stack` has no `cloudflare_access_*`/Zero Trust resource; the API is published as a Cloudflare **Tunnel**
+  public hostname (`module.tunnel`, `hostname = var.api_domain`, service `http://localhost:3000`, sidecar `cloudflared`) plus a proxied DNS record; the SPA is a Cloudflare Pages
+  project (`module.web`). Nothing in `tf-modules` (`cf-tunnel`, `pages-web`, `dns-record`, `cf-edge`) or in the `infra` repo defines an Access application.
+- `expose: protected` appears only in `gitops/values/opshub/base.yaml` (the **on-prem** values). The chart turns it into an HTTPRoute annotation, `qnsc.vn/access: cloudflare-access`, which
+  only **records the intent**; the chart's own comment says the enforcement is "Cloudflare Access with Entra behind it, configured in `infra`", and `infra` has no such resource yet.
+
+**Consequences:**
+1. **Dev cutover: no Access rule changes.** The callback is reachable through the Pages proxy as soon as the Function exists. The owner confirms in the Cloudflare dashboard that no Access
+   application covers `opshub-dev.qnsc.vn` or `opshub-api-dev.qnsc.vn` (a dashboard-made one would be invisible to the code; M3 step 1 would show it as a redirect to
+   `cloudflareaccess.com` instead of JSON).
+2. **Prod on-prem: when the Access application for opshub is written (in `infra`), these exact rules are needed, or sign-in breaks:**
+   - **Bypass policy for the callback**, on the SPA host: path `/api/auth/callback/microsoft` (exact; no wildcard needed), action *Bypass*. The browser arrives there by a top-level redirect from
+     `login.microsoftonline.com` carrying `?code&state`; if its Access session has lapsed during the Microsoft round trip, Access would answer with its own login redirect, drop
+     `code`/`state`, and the Better Auth state check fails. Bypass is safe: the callback is meaningless without the state cookie and PKCE verifier Better Auth set when the sign-in began.
+   - **The Pages Function → API hop must not be blocked.** The Function calls the API origin from Cloudflare, with no browser Access cookie. Either the API hostname is **not** an Access application
+     (only the SPA host is), or it has a *Service Auth* policy for a service token whose `CF-Access-Client-Id`/`-Secret` headers `functions/_lib/proxy.ts` adds. Recommendation: protect the
+     SPA host only; the API host then accepts nothing the Function did not forward, and Better Auth/`PolicyGuard` authorize it.
+   - **Do not put the Access cookie in the way of `Set-Cookie`:** Access must not strip or rewrite the API's `Set-Cookie`; the existing `proxy.ts` stub test already pins that multiple cookies survive.
+   M3 for prod repeats the dev check on the on-prem hostname (§6.2).
 
 ---
 
@@ -336,7 +381,7 @@ App registration **"OpsHub Dev"** (the only one that exists):
 
 **Playwright (`web-ci`)**: global-setup via `test-login`; the existing shell/permission specs unchanged.
 
-### 6.2 Manual check M3, after the deploy to **dev**
+### 6.2 Manual check M3, after the deploy to **ECS dev** (repeated on the on-prem hostname before prod is announced)
 
 Run by the owner with the engineer on a call; record the result in the PR. Pass/fail criteria:
 
@@ -353,37 +398,62 @@ Run by the owner with the engineer on a call; record the result in the PR. Pass/
 
 ## 7. Cutover, rollback, flag
 
+**Scope:** the cutover is on **ECS dev**. Production has never launched and launches directly **on-prem (k3s/gitops) on identity 8**, so there is no v7 production to migrate and **no ECS prod
+path is added or maintained**. Moving opshub dev from ECS to on-prem is a separate infra migration and is not planned here.
+
 ### 7.1 Why no runtime feature flag
 
 v7 and v8 are different majors of the same package with different guards, cookies and tables. A flag would need both loaded at once (an npm alias for v7), two guards on every route and two cookie
-families, and every test twice. For an internal tool with one environment in use and production not yet launched that is more risk than it removes. The cutover is **per environment, expand → switch → contract**.
+families, and every test twice. For an internal tool with one environment in use that is more risk than it removes. The cutover is **expand → switch → contract**, once, on dev.
 
 ### 7.2 Sequence of PRs
 
 | # | Repo | PR | Deploys on merge? | Reversible by |
 | --- | --- | --- | --- | --- |
-| 0a | app-platform | identity: `hooks.onStaffSignIn` (Entra claims) | release PR | not used until opshub adopts it |
-| 0b | app-platform | identity: `revokeUserSessions`, `setUserBanned` (+ optional `mail`) | release PR | idem |
-| 1 | opshub | `feat(identity): add the Better Auth tables and backfill them` (0035, 0036 only; no code reads them) | yes (migrator) | additive; ignore |
-| 2 | opshub | `feat(identity): move opshub to identity 8` (§1: api + worker split + web + infra env + CI + alarm) | api and web release PRs | redeploy the previous api and web images (7.3) |
-| 3 | opshub | `chore(identity): drop the v7 auth tables, columns and secrets` (contract step, ≥30 days later) | yes | restore from backup (don't need to) |
+| 0a | app-platform | `feat(identity): hooks.onStaffSignIn` (Entra claims) | release PR | not used until opshub adopts it |
+| 0b | app-platform | `feat(identity): revokeUserSessions, setUserBanned; mail optional` | release PR | idem |
+| 1 | opshub | `feat(identity): add the Better Auth tables and backfill them` (0035, 0036 only; no code reads them) | yes (migrator, ECS dev) | additive; ignore |
+| 2 | opshub | `feat(identity): move opshub to identity 8` (§1: api + worker split + web + dev infra env + CI + alarm) | api and web release PRs (ECS dev, Pages) | redeploy the previous images (7.4) |
+| 3 | opshub | `chore(identity): drop the v7 auth tables, columns and secrets` (contract step, ≥30 days later) | yes | restore from backup (not expected) |
+| P | gitops / infra | prod launch on-prem on identity 8 (§7.5): not an opshub-repo PR of this plan | on-prem pipeline | n/a, nothing live to roll back to |
 
-Entra: the redirect URI is registered **before** PR 2 is merged (the owner, §5). Secrets: `better-auth-secret` and `entra-client-secret` exist in Secrets Manager before PR 2's infra applies, because ECS cannot start a task whose secret has no value (the repo's own comment on `var.entra_client_secret_set`).
+Entra: the dev redirect URI and the client secret exist **before** PR 2 is merged (the owner, §5.1). Secrets: `better-auth-secret` and `entra-client-secret` have values in Secrets Manager before PR 2's infra
+applies, because ECS cannot start a task whose secret has no value (the repo's own comment on `var.entra_client_secret_set`).
 
-### 7.3 Cutover (dev first)
+`infra/modules/stack` is shared by `infra/live/develop` and `infra/live/prod`. PR 2 edits the module (env, secrets, alarm); `infra/live/prod` is **never applied** (prod does not run on ECS), and PR 2
+neither adds to it nor tests it beyond `tofu validate`. The contract PR (3) deletes the JWT secret from the module for both.
 
-1. Merge PR 1; migrator runs; verify counts (§6.1).
+### 7.3 Cutover on ECS dev
+
+1. Merge PR 1; the migrator runs; verify counts (§6.1).
 2. Announce the one-time sign-out (§2.4).
-3. Owner merges the PR 2 release PRs (api, web). **The two deploy separately**, so for a few minutes the old SPA may talk to the new API (login button gets 404 from `/v1/bff/login`). Acceptable for dev; for prod deploy the web release first only if the API still serves the old routes, which it will not. Prod has no users yet, so it needs no window (Q2).
-4. Run M3 (§6.2). Only then proceed to prod.
+3. The owner merges the PR 2 release PRs (api, web). **They deploy separately**, so for a few minutes the old SPA may talk to the new API (the login button gets a 404 from `/v1/bff/login`). Acceptable on dev.
+4. Run M3 on dev (§6.2). The result is recorded in PR 2.
 
-### 7.4 Rollback (until PR 3)
+### 7.4 Rollback (dev, until PR 3)
 
 - Redeploy the previous api and web images (the release PR revert is the owner's action, never mine). Nothing destructive ran: v7 tables, `employees.entra_oid`, v7 secrets and the v7 redirect URI are all still there.
-- Data written during the v8 window stays valid for v7: new employees exist in `employees` (JIT/HR create), role assignments are in the authz tables, offboarding set `employees.status`. The only v8-only data is `identity.user/account/session`, which v7 ignores.
-- **Sessions:** v8 sessions are dead after the rollback (users sign in on v7). v7 BFF sessions in Valkey were not deleted by the cutover and still honour their cookie until their TTL (30 days). For a security-motivated rollback the owner flushes the v7 BFF session keys under the `opshub:` Valkey prefix (the exact key pattern comes from `BffSessionStore` in identity 7.1; I have not verified it, the worktree has no `node_modules` yet). For the forward direction nothing needs flushing, but PR 2 should delete them once the 30 days pass (PR 3).
-- If the problem is Entra (secret expired, redirect URI removed), rollback is not needed: fix the registration; `ENTRA_CLIENT_SECRET` expiry has an alert/date (§5).
-- `test-login` can never be on in production: `IDENTITY_TEST_LOGIN` is only set in CI, identity refuses it unless `NODE_ENV` is `test` or `development`, and a boot-time test in opshub asserts that the production env schema rejects `IDENTITY_TEST_LOGIN`.
+- Data written during the v8 window stays valid for v7: new employees exist in `employees` (JIT/HR create), role assignments are in the authz tables, offboarding set `employees.status`. The only v8-only data is
+  `identity.user/account/session`, which v7 ignores.
+- **Sessions:** v8 sessions are dead after the rollback (users sign in on v7). v7 BFF sessions in Valkey were not deleted by the cutover and still honour their cookie until their TTL (30 days). For a
+  security-motivated rollback the owner flushes the v7 BFF session keys under the `opshub:` Valkey prefix (the exact key pattern comes from `BffSessionStore` in identity 7.1; not verified, the worktree has no `node_modules`).
+- If the problem is Entra (secret expired, redirect URI removed), rollback is not needed: fix the registration; the secret's expiry date is tracked (§5.1).
+- `test-login` can never be on in production: `IDENTITY_TEST_LOGIN` is only set in CI, identity refuses it unless `NODE_ENV` is `test` or `development`, and a boot-time test asserts the env schema rejects it in production.
+
+### 7.5 Prod on-prem: what the launch needs (handed to gitops/infra; nothing in this repo)
+
+| Item | Value |
+| --- | --- |
+| Entra | the separate prod registration (§5.2) |
+| Env | `NODE_ENV=production`, `APP_URL=https://<prod SPA host>`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `staff.domains` is code (`['qnsc.vn']`) |
+| Secrets (cluster, External Secrets) | `BETTER_AUTH_SECRET` (new, 32+ chars), `ENTRA_CLIENT_SECRET`, `COOKIE_SECRET`, `CSRF_SECRET`. **No** `JWT_PRIVATE_KEY`, no `IDENTITY_TEST_LOGIN` |
+| Graph mail | federated credential (workload identity), **separate from** sign-in; not used for Entra sign-in |
+| Database | PostgreSQL 16 shared instance: migrations 0035/0036 use `gen_random_uuid()` (§2.2); `opshub_app`/`opshub_worker` grants come from `0012`'s default privileges |
+| Edge | the Pages Function for `/api/auth/*` on the prod SPA project; Cloudflare Access rules per §5.3 if Access is created; `trustProxy` stays on for the client IP |
+| Probes | `/livez` (outside the prefix), `/v1/readyz` as in `base.yaml`; add identity's readiness check to `/v1/readyz` |
+| Order | migrations before the api; M3 on the prod hostname before announcing |
+
+Prod launches with an empty user base, so it needs no sign-out announcement and no cutover window (Q2).
 
 ---
 
@@ -393,17 +463,17 @@ Entra: the redirect URI is registered **before** PR 2 is merged (the owner, §5)
 
 | # | Question | My default |
 | --- | --- | --- |
-| Q1 | OK to add `hooks.onStaffSignIn` to identity (app-platform, before opshub can finish)? Or do you prefer Graph `appRoleAssignments` (not the same source, §3.2)? | Add the hook |
-| Q2 | Separate production Entra app, and does prod need a cutover window (no users yet)? | Separate app; no window |
-| Q3 | Confirm the redirect URI host is the **SPA** host (`opshub-dev.qnsc.vn`), not `opshub-api-dev.qnsc.vn`. Your note said `<opshub-api-host>`; same-origin design says SPA host | SPA host |
-| Q4 | `staff.domains`: which email domains do employees use (`qnsc.vn` only? aliases?) Anyone whose Entra email is off the list is refused; seed fixtures are `@opshub.local` (test-login only) | `['qnsc.vn']`, to be confirmed with a query on real `employees.email` |
-| Q5 | Keep "any tenant member may sign in and gets `employee`", or turn on Entra *Assignment required*? | Keep v7 behaviour |
-| Q6 | Cloudflare Access in front of the API (`expose: protected`): is the callback path exempt/handled? Is opshub running on ECS (Terraform) or the cluster (gitops) for the first cutover? Both exist in the repo | Ask owner |
-| Q7 | PostgreSQL engine version where the migration runs (`uuidv7()` is PG18) and pgbouncer mode (transaction pooling is fine for Better Auth's transactions) | PG18 |
-| Q8 | `libs/platform` is shared boilerplate with rally (`docs/DIVERGENCE.md`). opshub moves first (LMS, then opshub, then rova). OK to declare the divergence until rally follows? | Yes |
-| Q9 | Add `platform-db` only as an identity peer (types)? And is a `better-auth` client library in the SPA wanted? | Peer yes, client no |
-| Q10 | Audit failed sign-ins (`sign_in.failure` → new `auth.login.failed` action)? v7 did not | Yes, ids and IP only |
-| Q11 | Is a 12-hour session (was 30 days) acceptable, or does opshub need a different cap? The cap is a platform default; changing it is an app-platform decision | Accept 12 h |
+| Q1 | OK to add `hooks.onStaffSignIn` to identity (app-platform, before opshub can finish)? Or do you prefer Graph `appRoleAssignments` (not the same source, §3.2)? | Decided: add `hooks.onStaffSignIn`, every sign-in, a sync failure fails the sign-in |
+| Q2 | ~~Separate prod Entra app~~ **Decided: yes, separate; prod launches on-prem on identity 8 with no cutover window; no ECS prod path** | resolved |
+| Q3 | Confirm the redirect URI host is the **SPA** host (`opshub-dev.qnsc.vn`), not `opshub-api-dev.qnsc.vn`. Your note said `<opshub-api-host>`; same-origin design says SPA host | Decided: SPA host |
+| Q4 | `staff.domains`: which email domains do employees use (`qnsc.vn` only? aliases?) Anyone whose Entra email is off the list is refused; seed fixtures are `@opshub.local` (test-login only) | Decided: `['qnsc.vn']` |
+| Q5 | Keep "any tenant member may sign in and gets `employee`", or turn on Entra *Assignment required*? | Decided: keep v7 behaviour |
+| Q6 | Cloudflare Access: **answered from the code** (§5.3): dev is not behind Access in code (Tunnel + Pages only); `protected` is on-prem intent that `infra` does not yet enforce. Owner: confirm in the dashboard that no Access app covers the dev hostnames | pending (owner) |
+| Q7 | ~~PostgreSQL engine version~~ **Resolved from the infra code: 17 (dev RDS, CI), 16 (on-prem shared), 18 only locally.** No `uuidv7()` anywhere; `gen_random_uuid()` (§2.2). pgbouncer transaction pooling is fine for Better Auth's transactions | resolved |
+| Q8 | `libs/platform` is shared boilerplate with rally (`docs/DIVERGENCE.md`). opshub moves first (LMS, then opshub, then rova). OK to declare the divergence until rally follows? | Decided: yes, declared in `docs/DIVERGENCE.md` |
+| Q9 | Add `platform-db` only as an identity peer (types)? And is a `better-auth` client library in the SPA wanted? | Decided: `platform-db` as a peer only, no SPA client library |
+| Q10 | Audit failed sign-ins (`sign_in.failure` → new `auth.login.failed` action)? v7 did not | Decided: yes, `auth.login.failed`, ids and IP only |
+| Q11 | Is a 12-hour session (was 30 days) acceptable, or does opshub need a different cap? The cap is a platform default; changing it is an app-platform decision | Decided: accept 12 h |
 
 ### 8.2 Risks
 
@@ -430,8 +500,8 @@ renaming `JwtPayload`, moving rally.
 
 ---
 
-## 9. What I need from you to start Phase 2
+## 9. Status and next steps
 
-1. Answers to Q1–Q6 (the rest have defaults).
-2. A go to open the two app-platform PRs (0a, 0b).
-3. Confirmation that the owner will do §5 items 1, 3, 5 before PR 2 is merged, and that merging the opshub release PRs stays with the owner.
+1. Decisions Q1-Q5 and Q7-Q11 are recorded (header and §8.1). Q6 (Cloudflare Access) is answered from the code in §5.3; the dashboard check is the owner's.
+2. **0a and 0b** (app-platform, one PR each) come first. Nothing in opshub changes until both are merged and released.
+3. Then opshub **PR 1** (the expand-only migration, §2.1-2.2). The owner merges all opshub PRs and release PRs; the Entra and Secrets Manager steps (§5.1) are done by the owner before PR 2 is merged.
