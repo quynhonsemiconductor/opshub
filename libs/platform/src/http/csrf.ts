@@ -20,11 +20,14 @@ const SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS', 'TR
  *  - `/api/auth/` is identity 8's own surface (sign-in, sign-out). It is mounted outside `/v1` and runs
  *    BEFORE any session exists for a sign-in, so there is no token to issue; Better Auth enforces its own
  *    Origin check on every state-changing request there (`disableOriginCheck: false`, explicit), with
- *    `trustedOrigins` the SPA origin only;
- *  - the inbound webhook receiver is called by a service, not a browser: it carries
- *    no cookie and is authenticated by signature.
+ *    `trustedOrigins` the SPA origin only.
+ *
+ * Nothing else is exempt. (A `/v1/webhooks/inbound` entry used to be here for a receiver that was never
+ * built; no such route exists, and an exemption for a path that does not exist is a hole waiting for someone
+ * to add one. A route that really is called by a service carries no session cookie, so this gate already
+ * does not apply to it.)
  */
-const EXEMPT_PATHS: readonly string[] = ['/api/auth', '/v1/webhooks/inbound'];
+const EXEMPT_PATHS: readonly string[] = ['/api/auth'];
 
 /** True when `url`'s path (query stripped) is an exempt route. */
 function isExemptPath(url: string): boolean {

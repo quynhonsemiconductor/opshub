@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
-import { user } from '../../../../../../db/schema';
+import { session, user } from '../../../../../../db/schema';
 
 /** The slice of an employee the identity user is made from. */
 export interface DirectoryEmployee {
@@ -53,5 +53,38 @@ export class UserDirectory {
           updatedAt: sql`now()`,
         },
       });
+  }
+
+  /**
+   * Block the employee from signing in and end every session they hold, IN THE CALLER'S TRANSACTION.
+   *
+   * This is the authoritative half of offboarding, and it is deliberately Postgres-only: it needs neither
+   * Valkey nor identity. A leaver stays signed in or able to sign in again if this is left to the call that
+   * clears the cache (`SessionRevoker`), because that call REFUSES while Valkey is down, after the status has
+   * already committed. With the ban and the session rows in the same transaction as the status, the
+   * database can never say "offboarded" while the identity user says otherwise. Safe to repeat.
+   *
+   * Returns how many session rows were deleted. Cached copies in Valkey are cleared afterwards by the
+   * revoker; they are harmless in the meantime, because identity refuses a banned user whenever it reads a
+   * session.
+   */
+  async ban(employeeId: string, reason: string, tx: DbExecutor): Promise<number> {
+    await tx
+      .update(user)
+      .set({ banned: true, banReason: reason, banExpires: null, updatedAt: sql`now()` })
+      .where(eq(user.id, employeeId));
+    const removed = await tx
+      .delete(session)
+      .where(eq(session.userId, employeeId))
+      .returning({ id: session.id });
+    return removed.length;
+  }
+
+  /** Allow the employee to sign in again (a re-activation), in the caller's transaction. Touches no session. */
+  async unban(employeeId: string, tx: DbExecutor): Promise<void> {
+    await tx
+      .update(user)
+      .set({ banned: false, banReason: null, banExpires: null, updatedAt: sql`now()` })
+      .where(eq(user.id, employeeId));
   }
 }

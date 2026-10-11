@@ -9,9 +9,43 @@
 -- account, and the first Microsoft sign-in links the account to that user by email (a tenant member comes
 -- with a verified address), so the id is preserved.
 --
--- Precondition (asserted by the migration job): no two employees collide once lower-cased.
+-- Precondition, ASSERTED by the first statement below (a clear error before anything is written): no two
+-- employees share an address once lower-cased, none has an empty address, and no existing identity user holds
+-- an employee's address under another id (Entra object ids are already unique: uq_employee_entra_oid).
+-- identity matches a sign-in on the lower-cased address, so a collision would otherwise surface as an
+-- opaque unique-key violation halfway through, or worse, as one person signing in as another.
 -- gen_random_uuid(), not uuidv7(): PostgreSQL 16 (on-prem) and 17 (dev, CI) have no uuidv7().
 
+DO $$
+DECLARE
+  dup_emails text;
+  empty_count integer;
+  clash text;
+BEGIN
+  SELECT count(*) INTO empty_count
+  FROM identity.employees
+  WHERE email IS NULL OR btrim(email) = '';
+  IF empty_count > 0 THEN
+    RAISE EXCEPTION 'identity v8 backfill: % employee(s) have no email address; fix or remove them in identity.employees, then re-run', empty_count;
+  END IF;
+
+  SELECT string_agg(k, ', ') INTO dup_emails FROM (
+    SELECT lower(email) AS k FROM identity.employees GROUP BY lower(email) HAVING count(*) > 1 LIMIT 20
+  ) d;
+  IF dup_emails IS NOT NULL THEN
+    RAISE EXCEPTION 'identity v8 backfill: employees collide once their email is lower-cased (%); make them distinct in identity.employees, then re-run', dup_emails;
+  END IF;
+
+  -- a user that already holds an employee's address under a DIFFERENT id would split one person in two
+  SELECT string_agg(lower(e.email), ', ') INTO clash
+  FROM identity.employees e
+  JOIN identity."user" u ON lower(u.email) = lower(e.email) AND u.id <> e.id;
+  IF clash IS NOT NULL THEN
+    RAISE EXCEPTION 'identity v8 backfill: identity.user already has these addresses under another id (%); remove those users, then re-run', clash;
+  END IF;
+END
+$$;
+--> statement-breakpoint
 INSERT INTO identity."user" (id, name, email, email_verified, banned, ban_reason, created_at, updated_at)
 SELECT e.id,
        e.display_name,

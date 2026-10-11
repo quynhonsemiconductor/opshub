@@ -54,8 +54,8 @@ export interface PermissionRequirement {
  * Mark a route as unauthenticated.
  *
  * Sets BOTH keys: opshub's own (read by {@link SessionAuthGuard}, the rate limiter and the route audit) and
- * identity's, which its global `SessionGuard` reads. Setting only ours would answer 401 on health probes and
- * the inbound webhook before our guard is ever reached.
+ * identity's, which its global `SessionGuard` reads. Setting only ours would answer 401 on the health probes
+ * before our guard is ever reached.
  */
 export const Public = () => applyDecorators(SetMetadata(IS_PUBLIC_KEY, true), IdentityPublic());
 

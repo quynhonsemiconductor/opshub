@@ -18,7 +18,7 @@ const mockEmployeeRepo = {
   updatePhoto: vi.fn(),
   list: vi.fn(),
 };
-const mockUsers = { ensure: vi.fn() };
+const mockUsers = { ensure: vi.fn(), ban: vi.fn(), unban: vi.fn() };
 const mockSessions = { offboard: vi.fn(), reinstate: vi.fn() };
 const mockStorage = {
   presignUpload: vi.fn(),
@@ -152,7 +152,10 @@ describe('EmployeeService.update()', () => {
 });
 
 describe('EmployeeService.updateStatus()', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUsers.ban.mockResolvedValue(0);
+  });
 
   it('updates status and emits audit', async () => {
     mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
@@ -173,10 +176,14 @@ describe('EmployeeService.updateStatus()', () => {
     expect(mockEmployeeRepo.updateStatus).not.toHaveBeenCalled();
   });
 
-  it('ends the sessions and blocks sign-in when offboarded, AFTER the commit', async () => {
+  it('bans the user and deletes the sessions IN the transaction, then clears the cache AFTER the commit', async () => {
     mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
     mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
     const order: string[] = [];
+    mockUsers.ban.mockImplementation(() => {
+      order.push('ban');
+      return Promise.resolve(2);
+    });
     mockDb.transaction.mockImplementationOnce(async (fn: (tx: unknown) => Promise<unknown>) => {
       const result = await fn(TX);
       order.push('commit');
@@ -189,20 +196,61 @@ describe('EmployeeService.updateStatus()', () => {
 
     await makeService().updateStatus('emp-1', 'offboarded', ACTOR);
 
+    expect(mockUsers.ban).toHaveBeenCalledWith('emp-1', 'offboarded', TX);
     expect(mockSessions.offboard).toHaveBeenCalledWith('emp-1', 'offboarded');
-    expect(order).toEqual(['commit', 'offboard']);
+    expect(order).toEqual(['ban', 'commit', 'offboard']);
+    expect(mockAudit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'session.revoked' }),
+      TX,
+    );
   });
 
-  it('allows sign-in again when an offboarded employee is re-activated, or put on leave', async () => {
-    for (const status of ['active', 'on_leave'] as const) {
-      vi.clearAllMocks();
+  it('leaves the leaver banned when the cache clear FAILS after the commit (Valkey down)', async () => {
+    mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
+    mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+    mockSessions.offboard.mockRejectedValue(new Error('SessionStoreUnavailableError'));
+
+    await expect(makeService().updateStatus('emp-1', 'offboarded', ACTOR)).rejects.toThrow(
+      'SessionStoreUnavailableError',
+    );
+
+    // the authoritative step ran, in the transaction, before the failing call
+    expect(mockUsers.ban).toHaveBeenCalledWith('emp-1', 'offboarded', TX);
+    expect(mockEmployeeRepo.updateStatus).toHaveBeenCalled();
+  });
+
+  it('offboarded → offboarded RE-APPLIES the ban and the cache clear instead of returning early', async () => {
+    // the retry after the failure above: the status is already `offboarded`
+    mockEmployeeRepo.findById.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+    mockSessions.offboard.mockResolvedValue(undefined);
+
+    const result = await makeService().updateStatus('emp-1', 'offboarded', ACTOR);
+
+    expect(result.status).toBe('offboarded');
+    expect(mockUsers.ban).toHaveBeenCalledWith('emp-1', 'offboarded', TX);
+    expect(mockSessions.offboard).toHaveBeenCalledWith('emp-1', 'offboarded');
+    // nothing about the employee row changed, so no status write and no status audit entry
+    expect(mockEmployeeRepo.updateStatus).not.toHaveBeenCalled();
+    expect(mockAudit.record).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'employee.status_changed' }),
+      expect.anything(),
+    );
+  });
+
+  it.each(['active', 'on_leave'] as const)(
+    'offboarded → %s lifts the ban in the transaction, then drops identity’s memory of it',
+    async (status) => {
       mockEmployeeRepo.findById.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
       mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status });
+
       await makeService().updateStatus('emp-1', status, ACTOR);
+
+      expect(mockUsers.unban).toHaveBeenCalledWith('emp-1', TX);
       expect(mockSessions.reinstate).toHaveBeenCalledWith('emp-1');
+      expect(mockUsers.ban).not.toHaveBeenCalled();
       expect(mockSessions.offboard).not.toHaveBeenCalled();
-    }
-  });
+    },
+  );
 
   it('touches no session for a change that is not into or out of offboarded', async () => {
     mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
@@ -210,6 +258,8 @@ describe('EmployeeService.updateStatus()', () => {
     await makeService().updateStatus('emp-1', 'on_leave', ACTOR);
     expect(mockSessions.offboard).not.toHaveBeenCalled();
     expect(mockSessions.reinstate).not.toHaveBeenCalled();
+    expect(mockUsers.ban).not.toHaveBeenCalled();
+    expect(mockUsers.unban).not.toHaveBeenCalled();
   });
 
   it('fails loudly where no SessionRevoker is bound (the worker) rather than skipping the revocation', async () => {
@@ -218,6 +268,9 @@ describe('EmployeeService.updateStatus()', () => {
     await expect(makeService(null).updateStatus('emp-1', 'offboarded', ACTOR)).rejects.toThrow(
       /SessionRevoker/,
     );
+    // refused BEFORE anything was changed
+    expect(mockEmployeeRepo.updateStatus).not.toHaveBeenCalled();
+    expect(mockUsers.ban).not.toHaveBeenCalled();
   });
 });
 

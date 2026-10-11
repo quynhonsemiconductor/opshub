@@ -8,10 +8,15 @@ export const SESSION_REVOKER = Symbol('SESSION_REVOKER');
  */
 export interface SessionRevoker {
   /**
-   * End every session of the employee (database AND cache) and block them from signing in. Effective on the
-   * next request. Rejects while the session cache is unavailable, rather than leaving cached sessions behind.
+   * Ban the employee and end every session (database AND cache), through identity. Called AFTER the caller's
+   * transaction has already banned them and deleted the session rows (the authoritative step, Postgres only),
+   * so what this adds is clearing the cached copies. Rejects while the session cache is unavailable, rather
+   * than leaving cached sessions behind; calling it again once the cache is healthy finishes the job.
    */
   offboard(employeeId: string, reason: string): Promise<void>;
-  /** Allow the employee to sign in again (a re-activation). Touches no session. */
+  /**
+   * Allow the employee to sign in again (a re-activation): drops identity's in-process memory of the ban.
+   * The caller's transaction has already lifted it in the database. Touches no session; needs no cache.
+   */
   reinstate(employeeId: string): Promise<void>;
 }

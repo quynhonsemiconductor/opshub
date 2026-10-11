@@ -75,14 +75,17 @@ describe('requiresCsrfProtection', () => {
       '/api/auth/sign-in/social',
       '/api/auth/sign-out',
       '/api/auth/callback/microsoft',
-      // Called by a service, not a browser: no cookie, authenticated by signature.
-      '/v1/webhooks/inbound',
     ])('exempts %s', (url) => {
       expect(requiresCsrfProtection(req({ url }))).toBe(false);
     });
 
     it('exempts a sub-path of an exempt route', () => {
-      expect(requiresCsrfProtection(req({ url: '/v1/webhooks/inbound/github' }))).toBe(false);
+      expect(requiresCsrfProtection(req({ url: '/api/auth/sign-in/social' }))).toBe(false);
+    });
+
+    it('exempts nothing under /v1: the webhook-receiver exemption is gone with the receiver that never existed', () => {
+      expect(requiresCsrfProtection(req({ url: '/v1/webhooks/inbound' }))).toBe(true);
+      expect(requiresCsrfProtection(req({ url: '/v1/webhooks/inbound/github' }))).toBe(true);
     });
 
     it('ignores the query string when matching', () => {
@@ -95,7 +98,6 @@ describe('requiresCsrfProtection', () => {
     // exempted by accident just by being named similarly.
     it('does not exempt a route that merely starts with the same characters', () => {
       expect(requiresCsrfProtection(req({ url: '/api/authority' }))).toBe(true);
-      expect(requiresCsrfProtection(req({ url: '/v1/webhooks/inbound-all' }))).toBe(true);
     });
 
     it('does not exempt a route that only CONTAINS an exempt path', () => {

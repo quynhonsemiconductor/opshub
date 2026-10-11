@@ -36,11 +36,34 @@ test.describe('sign in', () => {
     await expect.poll(() => reachedEntra, { timeout: 15_000 }).toBeDefined();
     expect(startRequests).toHaveLength(1);
     expect(startRequests[0]?.method).toBe('POST');
-    expect(startRequests[0]?.body).toEqual({ provider: 'microsoft', callbackURL: '/assets' });
+    expect(startRequests[0]?.body).toEqual({
+      provider: 'microsoft',
+      callbackURL: '/assets',
+      errorCallbackURL: '/login',
+    });
     const authorize = new URL(reachedEntra!);
     // the redirect URI is the SPA host's /api/auth/callback/microsoft: the one registered on the Entra app
     expect(authorize.searchParams.get('redirect_uri')).toMatch(/\/api\/auth\/callback\/microsoft$/);
     expect(authorize.searchParams.get('code_challenge'), 'PKCE').toBeTruthy();
+  });
+
+  test('shows why a refused sign-in came back, with the code to quote', async ({ page }) => {
+    await page.goto('/login?error=BANNED_USER');
+
+    const alert = page.getByRole('alert');
+    await expect(alert).toContainText(/disabled/i);
+    await expect(alert).toContainText('BANNED_USER');
+  });
+
+  test('shows no error when there is none, and ignores a value that is not a code', async ({
+    page,
+  }) => {
+    await page.goto('/login');
+    await expect(page.getByRole('button', { name: /sign in with microsoft/i })).toBeVisible();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+
+    await page.goto('/login?error=%3Cb%3Ex%3C%2Fb%3E');
+    await expect(page.getByRole('alert')).toHaveCount(0);
   });
 
   test('refuses to carry an off-site returnTo into the flow', async ({ page }) => {
@@ -54,7 +77,7 @@ test.describe('sign in', () => {
     await page.getByRole('button', { name: /sign in with microsoft/i }).click();
 
     await expect.poll(() => body, { timeout: 15_000 }).toBeDefined();
-    expect(body).toEqual({ provider: 'microsoft', callbackURL: '/' });
+    expect(body).toEqual({ provider: 'microsoft', callbackURL: '/', errorCallbackURL: '/login' });
   });
 });
 

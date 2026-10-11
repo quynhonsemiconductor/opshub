@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { employees } from '../../../../../../db/schema';
-import { DEFAULT_ROLE_KEY, StaffSignInHandler } from './staff-sign-in.handler';
+import {
+  DEFAULT_ROLE_KEY,
+  StaffSignInHandler,
+  StaffSignInRefusedError,
+} from './staff-sign-in.handler';
 
 /**
  * identity's `hooks.onStaffSignIn`: the product's half of a Microsoft sign-in. It runs on EVERY sign-in and a
@@ -9,13 +13,22 @@ import { DEFAULT_ROLE_KEY, StaffSignInHandler } from './staff-sign-in.handler';
 
 const USER = { id: 'user-1', email: 'Jane@QNSC.vn', name: 'Jane' };
 
-function setup(sync = vi.fn().mockResolvedValue(undefined)) {
+function setup(
+  sync = vi.fn().mockResolvedValue(undefined),
+  existing: Array<{ status: string }> = [],
+) {
   const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
   const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
   const insert = vi.fn().mockReturnValue({ values });
+  const limit = vi.fn().mockResolvedValue(existing);
+  const select = vi.fn().mockReturnValue({
+    from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit }) }),
+  });
   const handler = new StaffSignInHandler(
-    { insert } as never,
-    { syncUserRolesByKeys: sync } as never,
+    { insert, select } as never,
+    {
+      syncUserRolesByKeys: sync,
+    } as never,
   );
   return { handler, insert, values, onConflictDoUpdate, sync };
 }
@@ -83,5 +96,31 @@ describe('StaffSignInHandler', () => {
       handler.handle({ user: USER, claims: { oid: 'o', roles: ['hr'] } }),
     ).rejects.toThrow('db down');
     expect(sync).not.toHaveBeenCalled();
+  });
+
+  it('REFUSES an offboarded employee, before writing or syncing anything', async () => {
+    const { handler, insert, sync } = setup(undefined, [{ status: 'offboarded' }]);
+
+    await expect(
+      handler.handle({ user: USER, claims: { oid: 'o', roles: ['admin'] } }),
+    ).rejects.toBeInstanceOf(StaffSignInRefusedError);
+    expect(insert).not.toHaveBeenCalled();
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  it.each(['active', 'on_leave'])('lets a %s employee in', async (status) => {
+    const { handler, sync } = setup(undefined, [{ status }]);
+
+    await handler.handle({ user: USER, claims: { oid: 'o', roles: ['hr'] } });
+
+    expect(sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refuse a person with no employee row: v7’s just-in-time provisioning is kept', async () => {
+    const { handler, insert } = setup(undefined, []);
+
+    await handler.handle({ user: USER, claims: { oid: 'o', roles: [] } });
+
+    expect(insert).toHaveBeenCalledWith(employees);
   });
 });

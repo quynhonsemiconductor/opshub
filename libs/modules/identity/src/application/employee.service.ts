@@ -52,6 +52,7 @@ export interface Actor {
 @Injectable()
 export class EmployeeService {
   private readonly trail: ResourceAuditTrail;
+  private readonly sessionTrail: ResourceAuditTrail;
 
   constructor(
     @Inject(EMPLOYEE_REPOSITORY) private readonly employeeRepo: IEmployeeRepository,
@@ -66,6 +67,7 @@ export class EmployeeService {
     @Optional() @Inject(SESSION_REVOKER) private readonly sessions?: SessionRevoker,
   ) {
     this.trail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE);
+    this.sessionTrail = audit.forResource(AUDIT_RESOURCE.SESSION);
   }
 
   async create(input: CreateEmployeeInput, actor: Actor): Promise<Employee> {
@@ -147,30 +149,57 @@ export class EmployeeService {
 
   /**
    * Change employee status.
-   * - Offboarding: ends every session of the employee at once (database AND cache) and blocks them from
-   *   signing in (`SessionRevoker.offboard`: identity 8's `revokeUserSessions` + `setUserBanned`).
-   * - Leaving `offboarded` (to `active` or `on_leave`, both of which may sign in): allows sign-in again.
-   *   Nothing is re-created; the person signs in with Microsoft as before.
+   *
+   * - Offboarding: IN THE SAME TRANSACTION as the status, the identity user is banned and every session row
+   *   is deleted (`UserDirectory.ban`). That is the authoritative step and needs only Postgres. After the
+   *   commit, `SessionRevoker.offboard` clears the sessions cached in Valkey (identity 8's `setUserBanned`).
+   *   That second step REFUSES while Valkey is down (`SessionStoreUnavailableError`) and the request then
+   *   fails, but by then the leaver is already banned with no session rows, so they cannot sign in again and
+   *   a cached copy that comes back is refused on its first read.
+   * - Offboarding an employee who is ALREADY offboarded re-applies the ban and the cache clear instead of
+   *   returning early. That is what makes the retry after the failure above work: the status is already
+   *   `offboarded`, so a no-op would leave the cached sessions behind for good.
+   * - Leaving `offboarded` (to `active` or `on_leave`, both of which may sign in): the ban is lifted in the
+   *   transaction. Nothing is re-created; the person signs in with Microsoft as before.
    */
   async updateStatus(id: string, status: EmployeeStatus, actor: Actor): Promise<Employee> {
     const employee = await this.employeeRepo.findById(id);
     if (!employee) throw new NotFoundException(ErrorCodes.EMPLOYEE_NOT_FOUND, 'Employee not found');
-    if (employee.status === status) return employee;
+
+    const wasOffboarded = employee.status === 'offboarded';
+    const toOffboarded = status === 'offboarded';
+    if (employee.status === status && !toOffboarded) return employee;
+
+    // Refuse BEFORE changing anything where no revoker is bound (the worker): a wiring error, not a no-op.
+    const revoker = toOffboarded || wasOffboarded ? this.revoker() : undefined;
 
     const updated = await this.db.transaction(async (tx) => {
-      const row = await this.employeeRepo.updateStatus(id, status, tx);
-      await this.trail.record(AUDIT_ACTION.EMPLOYEE_STATUS_CHANGED, id, actor, tx, {
-        before: { status: employee.status },
-        after: { status },
-      });
+      let row = employee;
+      if (employee.status !== status) {
+        row = await this.employeeRepo.updateStatus(id, status, tx);
+        await this.trail.record(AUDIT_ACTION.EMPLOYEE_STATUS_CHANGED, id, actor, tx, {
+          before: { status: employee.status },
+          after: { status },
+        });
+      }
+      if (toOffboarded) {
+        const ended = await this.users.ban(id, 'offboarded', tx);
+        if (ended > 0) {
+          await this.sessionTrail.record(AUDIT_ACTION.SESSION_REVOKED, id, actor, tx, {
+            after: { revokedSessions: ended, reason: 'offboarding' },
+          });
+        }
+      } else if (wasOffboarded) {
+        await this.users.unban(id, tx);
+      }
       return row;
     });
 
-    // AFTER the commit, and outside it: Valkey and the session table cannot be rolled back with the row.
-    if (status === 'offboarded') {
-      await this.revoker().offboard(id, 'offboarded');
-    } else if (employee.status === 'offboarded') {
-      await this.revoker().reinstate(id);
+    // AFTER the commit, and outside it: Valkey cannot be rolled back with the row. Cache-only now.
+    if (toOffboarded) {
+      await revoker!.offboard(id, 'offboarded');
+    } else if (wasOffboarded) {
+      await revoker!.reinstate(id);
     }
 
     return updated;

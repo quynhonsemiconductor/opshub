@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB } from '@platform';
 import { AuthzAdminService } from '@modules/authz';
 import { newId } from '@shared-kernel';
@@ -7,6 +7,14 @@ import { employees } from '../../../../../../db/schema';
 
 /** Fallback role granted to any signed-in person Entra asserts with no mapped App Role. */
 export const DEFAULT_ROLE_KEY = 'employee';
+
+/**
+ * Thrown to refuse a sign-in: identity redirects the browser with `?error=STAFF_SIGN_IN_REFUSED` and mints no
+ * session. The message reaches the log, never the browser.
+ */
+export class StaffSignInRefusedError extends Error {
+  override readonly name = 'StaffSignInRefusedError';
+}
 
 /** What identity's `hooks.onStaffSignIn` hands over (see `StaffSignInClaims` in the package). */
 export interface StaffSignIn {
@@ -28,7 +36,13 @@ export interface StaffSignIn {
  *     (an unmapped Entra role never grants access). Authorization itself is not read from the token: `PolicyGuard`
  *     resolves permissions from the database on every request.
  *
- * A failure of either step fails the sign-in, which is the right way round: a session with stale roles is the
+ * 0. AN OFFBOARDED EMPLOYEE IS REFUSED, before anything is written. The identity ban already stops them, but
+ *    the ban and the employee status are two rows and this is the cheap, independent second check: whatever
+ *    left them out of step (a failed cache clear, a hand edit, a restore), Entra still lets a leaver in until
+ *    their account is disabled, and the product must not. A person with NO employee row is not refused:
+ *    that is v7's just-in-time provisioning, kept on purpose (any member of the tenant signs in; see 1).
+ *
+ * A failure of any step fails the sign-in, which is the right way round: a session with stale roles is the
  * one thing this must not produce.
  */
 @Injectable()
@@ -39,12 +53,24 @@ export class StaffSignInHandler {
   ) {}
 
   async handle({ user, claims }: StaffSignIn): Promise<void> {
+    await this.refuseIfOffboarded(user);
     await this.ensureEmployee(user, claims.oid);
     const roleKeys = claims.roles.length > 0 ? claims.roles : [DEFAULT_ROLE_KEY];
     await this.authzAdmin.syncUserRolesByKeys(user.id, roleKeys, {
       sub: user.id,
       email: user.email,
     });
+  }
+
+  private async refuseIfOffboarded(user: { id: string; email: string }): Promise<void> {
+    const [row] = await this.db
+      .select({ status: employees.status })
+      .from(employees)
+      .where(eq(employees.id, user.id))
+      .limit(1);
+    if (row?.status === 'offboarded') {
+      throw new StaffSignInRefusedError(`sign-in refused: employee ${user.id} is offboarded`);
+    }
   }
 
   private async ensureEmployee(

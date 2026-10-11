@@ -10,8 +10,7 @@
  *  - the v7 tables are gone, and `employees.entra_oid` (read by the employee API and the Graph code) is not;
  *  - the runtime roles can use the new tables (default privileges, migration 0012), because a table the
  *    app role cannot read is a sign-in that fails only on a deployed database;
- *  - the unauthenticated surface is exactly what it was: probes and the signed inbound webhook, and nothing
- *    else, now that identity's guard is global.
+ *  - the unauthenticated surface is exactly what it was: the health probes, and nothing else, now that identity's guard is global.
  *
  * Prereqs: `docker compose -f docker-compose.dev.yml up -d`, `pnpm db:migrate`, `pnpm db:seed`.
  */
@@ -117,17 +116,6 @@ describe('the unauthenticated surface', () => {
   it.each(['/livez', '/v1/healthz', '/v1/readyz'])('%s answers without a session', async (url) => {
     const res = await app.inject({ method: 'GET', url });
     expect(res.statusCode, res.body).toBe(200);
-  });
-
-  it('the signed inbound webhook is reachable without a session (it is authenticated by signature)', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/webhooks/inbound/e2e-unknown-source',
-      payload: {},
-    });
-    // refused for its missing signature or unknown source: anything but "sign in" or a CSRF refusal
-    expect(res.statusCode).not.toBe(401);
-    expect(res.body.toLowerCase()).not.toContain('csrf');
   });
 
   it.each([

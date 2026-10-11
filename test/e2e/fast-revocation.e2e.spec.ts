@@ -25,7 +25,11 @@
  * Prereqs: `docker compose -f docker-compose.dev.yml up -d`, `pnpm db:migrate`, `pnpm db:seed`.
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { CacheService } from '@quynhonsemiconductor/platform-cache';
+import { DRIZZLE, type DrizzleDB } from '@platform';
+import { employees, session as identitySession, user as identityUser } from '../../db/schema';
 import {
   FIXTURE,
   authHeaders,
@@ -37,6 +41,7 @@ import {
 
 let app: NestFastifyApplication;
 let admin: Session;
+let db: DrizzleDB;
 
 const RUN = Date.now().toString(36).toUpperCase().slice(-6);
 let seq = 0;
@@ -81,6 +86,7 @@ async function meWithCookie(cookieHeader: string): Promise<number> {
 
 beforeAll(async () => {
   app = await createTestApp();
+  db = app.get<DrizzleDB>(DRIZZLE);
   admin = await login(app, FIXTURE.ADMIN);
 });
 
@@ -172,5 +178,119 @@ describe('fast revocation on offboarding', () => {
       await meWithCookie(session.cookieHeader),
       'a reinstated employee is still banned, so they cannot sign back in',
     ).toBe(200);
+  });
+});
+
+describe('offboarding while the session cache (Valkey) is down', () => {
+  /*
+   * THE FAILURE THIS GUARDS. The ban used to run only AFTER the status committed, through identity's
+   * `setUserBanned`, which REFUSES while Valkey is unavailable (SessionStoreUnavailableError) before changing
+   * anything. With Valkey down the status committed and nothing else did: the leaver was `offboarded` but not
+   * banned, their sessions were still served from Postgres, and they could sign in again. A retry did nothing,
+   * because the status already matched. So the ban and the session rows are now written in the status
+   * transaction, and the call that needs Valkey only clears its cached copies.
+   */
+  async function withCacheDown<T>(run: () => Promise<T>): Promise<T> {
+    const cache = app.get(CacheService);
+    const down = vi.spyOn(cache, 'isAvailable', 'get').mockReturnValue(false);
+    try {
+      return await run();
+    } finally {
+      down.mockRestore();
+    }
+  }
+
+  async function userRow(id: string) {
+    const [row] = await db
+      .select({ banned: identityUser.banned })
+      .from(identityUser)
+      .where(eq(identityUser.id, id));
+    return row;
+  }
+
+  async function sessionRows(id: string): Promise<number> {
+    return (await db.select().from(identitySession).where(eq(identitySession.userId, id))).length;
+  }
+
+  async function patchStatus(id: string, status: string) {
+    return app.inject({
+      method: 'PATCH',
+      url: `/v1/employees/${id}/status`,
+      headers: authHeaders(admin),
+      payload: { status },
+    });
+  }
+
+  it('still bans the user and deletes the sessions; the leaver cannot use or renew them', async () => {
+    const employee = await throwaway();
+    const session = await login(app, employee);
+    expect(await meWithCookie(session.cookieHeader), 'the cookie did not work even before').toBe(
+      200,
+    );
+    expect(await sessionRows(employee.id)).toBeGreaterThan(0);
+
+    const res = await withCacheDown(() => patchStatus(employee.id, 'offboarded'));
+
+    // The cache half could not run, so the request reports the failure ...
+    expect(res.statusCode, res.body).toBeGreaterThanOrEqual(500);
+    // ... but the authoritative half committed with the status: banned, no session rows.
+    expect((await userRow(employee.id))?.banned, 'the leaver was left unbanned').toBe(true);
+    expect(await sessionRows(employee.id), 'the leaver kept session rows').toBe(0);
+    const [emp] = await db.select().from(employees).where(eq(employees.id, employee.id));
+    expect(emp?.status).toBe('offboarded');
+
+    // Valkey is back. A new sign-in is refused. (The OLD cookie is not asserted here: a copy cached in Valkey
+    // can be believed for up to 30 s by a process that last saw the user unbanned, until the retry below
+    // clears it. That bounded window is the price of Valkey being down, and identity documents it.)
+    const again = await app.inject({
+      method: 'POST',
+      url: '/api/auth/test-login',
+      payload: { email: employee.email },
+    });
+    expect(again.statusCode, again.body).toBe(403);
+    expect(again.json<{ code?: string }>().code).toBe('BANNED_USER');
+  });
+
+  it('a retry is not a no-op: it finishes the job once the cache is back', async () => {
+    const employee = await throwaway();
+    const session = await login(app, employee);
+    expect(await meWithCookie(session.cookieHeader)).toBe(200); // cached in Valkey, and believed unbanned
+    const failed = await withCacheDown(() => patchStatus(employee.id, 'offboarded'));
+    expect(failed.statusCode).toBeGreaterThanOrEqual(500);
+
+    // offboarded → offboarded, cache healthy: the ban and the cache clear are re-applied, and it succeeds.
+    const retried = await patchStatus(employee.id, 'offboarded');
+
+    expect(retried.statusCode, retried.body).toBe(200);
+    expect((await userRow(employee.id))?.banned).toBe(true);
+    expect(await sessionRows(employee.id)).toBe(0);
+    // and the cached copy of the old session is gone, at once (the retry cleared it and the ban memory)
+    expect(
+      await meWithCookie(session.cookieHeader),
+      'the retry left the leaver’s cached session alive',
+    ).toBe(401);
+  });
+
+  it('re-activating lifts the ban (and needs no cache), and the person can sign in again', async () => {
+    const employee = await throwaway();
+    await offboard(employee.id);
+    expect((await userRow(employee.id))?.banned).toBe(true);
+
+    const res = await withCacheDown(() => patchStatus(employee.id, 'active'));
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect((await userRow(employee.id))?.banned).toBe(false);
+    const session = await login(app, employee);
+    expect(await meWithCookie(session.cookieHeader)).toBe(200);
+  });
+
+  it('on_leave also lifts the ban: that person may sign in', async () => {
+    const employee = await throwaway();
+    await offboard(employee.id);
+
+    const res = await patchStatus(employee.id, 'on_leave');
+
+    expect(res.statusCode, res.body).toBe(200);
+    expect((await userRow(employee.id))?.banned).toBe(false);
   });
 });

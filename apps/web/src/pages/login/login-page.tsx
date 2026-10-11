@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { ENV } from '@/shared/config/env';
 import { sessionFetch } from '@/shared/api/session-fetch';
+import { signInErrorFrom } from './sign-in-error';
 
 function OpsHubMark({ size = 32 }: { size?: number }) {
   return (
@@ -47,6 +48,7 @@ function MicrosoftMark() {
  */
 export function LoginPage() {
   const [loading, setLoading] = useState(false);
+  const signInError = signInErrorFrom(window.location.search);
 
   async function onSignIn() {
     setLoading(true);
@@ -59,7 +61,9 @@ export function LoginPage() {
     try {
       const res = await sessionFetch(`${ENV.API_BASE_URL}/api/auth/sign-in/social`, {
         method: 'POST',
-        body: JSON.stringify({ provider: 'microsoft', callbackURL }),
+        // errorCallbackURL: without it a refused sign-in (a banned user, the wrong tenant, a refusal by the
+        // product hook) lands on the API's own /api/auth/error page. Back here, the code is shown.
+        body: JSON.stringify({ provider: 'microsoft', callbackURL, errorCallbackURL: '/login' }),
       });
       if (!res.ok) throw new Error(`login start failed (${res.status})`);
       const { url } = (await res.json()) as { url?: string };
@@ -139,6 +143,16 @@ export function LoginPage() {
                 <p className="text-sm text-fg-muted">Use your company Microsoft account</p>
               </div>
             </div>
+
+            {signInError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-md border border-danger bg-danger-bg p-3 text-sm text-fg"
+              >
+                <p>{signInError.message}</p>
+                <p className="mt-1 text-xs text-fg-muted">Error code: {signInError.code}</p>
+              </div>
+            )}
 
             <button
               type="button"

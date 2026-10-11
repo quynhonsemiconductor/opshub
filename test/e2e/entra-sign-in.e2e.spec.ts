@@ -34,7 +34,7 @@ import {
   type MockIdp,
 } from '@quynhonsemiconductor/identity/testing';
 import { AppConfigService, DRIZZLE, SESSION_COOKIE, type DrizzleDB, type Env } from '@platform';
-import { employees } from '../../db/schema';
+import { employees, user as identityUser } from '../../db/schema';
 import { createOpshubIdentity } from '../../libs/modules/identity/src/infrastructure/auth/create-opshub-identity';
 import { SecurityEventAuditSink } from '../../libs/modules/identity/src/infrastructure/auth/security-events.audit';
 import { StaffSignInHandler } from '../../libs/modules/identity/src/infrastructure/auth/staff-sign-in.handler';
@@ -73,8 +73,13 @@ function person(roles: string[] | undefined, over: Partial<IdpIdentity> = {}): I
   };
 }
 
-/** Sign in through the mock Entra, every hop visible. Returns the `cookie` header, or undefined if refused. */
-async function microsoftSignIn(who: IdpIdentity): Promise<{ cookie?: string; status: number }> {
+/**
+ * Sign in through the mock Entra, every hop visible. Returns the `cookie` header (undefined if refused), the
+ * callback's status, and the `error` code identity redirected the browser with (undefined on success).
+ */
+async function microsoftSignIn(
+  who: IdpIdentity,
+): Promise<{ cookie?: string; status: number; error?: string }> {
   idp.loginAs(who);
   const client = new TestClient(appUrl, identity.handler, { origin: appUrl });
   const start = await client.post('/api/auth/sign-in/social', {
@@ -85,8 +90,12 @@ async function microsoftSignIn(who: IdpIdentity): Promise<{ cookie?: string; sta
   const authz = await client.get(start.json<{ url: string }>().url);
   const callback = await client.get(authz.location ?? '');
   const value = client.cookies[SESSION_COOKIE];
+  const error = callback.location
+    ? (new URL(callback.location, appUrl).searchParams.get('error') ?? undefined)
+    : undefined;
   return {
     status: callback.status,
+    ...(error ? { error } : {}),
     ...(value ? { cookie: `${SESSION_COOKIE}=${value}` } : {}),
   };
 }
@@ -198,16 +207,37 @@ describe('Microsoft sign-in with the staff preset', () => {
     expect(row.entraOid).toBe(who.oid);
   });
 
-  it('refuses another tenant: no session', async () => {
-    const { cookie } = await microsoftSignIn(person(['admin'], { tid: OTHER_TENANT }));
-    expect(cookie, 'a foreign tenant was given a session').toBeUndefined();
+  /*
+   * THE REFUSALS ASSERT THE REASON, not only the absence of a cookie: "no cookie" is also what a 500 from a
+   * broken handler looks like. identity ends a refused callback with a redirect to the error page carrying a
+   * stable `?error=` code, and a crash would carry none.
+   */
+  it('refuses another tenant: redirected with an error, no session', async () => {
+    const refused = await microsoftSignIn(person(['admin'], { tid: OTHER_TENANT }));
+    expect(refused.cookie, 'a foreign tenant was given a session').toBeUndefined();
+    expect(refused.status).toBe(302);
+    expect(refused.error).toBe('unable_to_get_user_info');
   });
 
-  it('refuses an address outside qnsc.vn: no session', async () => {
-    const { cookie } = await microsoftSignIn(
+  it('refuses an address outside qnsc.vn: redirected with an error, no session', async () => {
+    const refused = await microsoftSignIn(
       person(['admin'], { email: `outsider.${RUN}@example.com` }),
     );
-    expect(cookie, 'an address off the staff domain was given a session').toBeUndefined();
+    expect(refused.cookie, 'an address off the staff domain was given a session').toBeUndefined();
+    expect(refused.status).toBe(302);
+    expect(refused.error).toBe('unable_to_get_user_info');
+  });
+
+  it('refuses a B2B guest of the tenant (allowGuests is false): redirected with an error, no session', async () => {
+    // Entra marks a guest with `acct: 1` (or an `idp` that is not the issuer, or `#EXT#` in the UPN)
+    const who = person(['employee']);
+    const refused = await microsoftSignIn({
+      ...who,
+      claims: { roles: ['employee'], acct: 1 },
+    });
+    expect(refused.cookie, 'a guest was given a session').toBeUndefined();
+    expect(refused.status).toBe(302);
+    expect(refused.error).toBe('unable_to_get_user_info');
   });
 
   it('refuses an offboarded employee (banned), even though Entra still lets them in', async () => {
@@ -221,8 +251,31 @@ describe('Microsoft sign-in with the staff preset', () => {
     });
     expect(status.statusCode, status.body).toBe(200);
 
-    const { cookie } = await microsoftSignIn(who);
+    const refused = await microsoftSignIn(who);
 
-    expect(cookie, 'an offboarded employee was given a session').toBeUndefined();
+    expect(refused.cookie, 'an offboarded employee was given a session').toBeUndefined();
+    expect(refused.status).toBe(302);
+    expect(refused.error).toBe('BANNED_USER');
+  });
+
+  it('refuses an offboarded employee even if nothing banned the user: the sign-in hook is the second check', async () => {
+    const who = person(['employee']);
+    const created = await createEmployee(who.email!);
+    // The two rows out of step, however it happened (a failed clear, a hand edit, a restore): the employee
+    // is offboarded and the identity user is not banned.
+    await db.update(employees).set({ status: 'offboarded' }).where(eq(employees.id, created.id));
+    await db.update(identityUser).set({ banned: false }).where(eq(identityUser.id, created.id));
+
+    let refused: Awaited<ReturnType<typeof microsoftSignIn>>;
+    try {
+      refused = await microsoftSignIn(who);
+    } finally {
+      // leave the database consistent for the suites that assert the invariant (offboarded => banned)
+      await db.update(identityUser).set({ banned: true }).where(eq(identityUser.id, created.id));
+    }
+
+    expect(refused.cookie, 'a leaver signed in because only the ban was checked').toBeUndefined();
+    expect(refused.status).toBe(302);
+    expect(refused.error).toBe('STAFF_SIGN_IN_REFUSED');
   });
 });
