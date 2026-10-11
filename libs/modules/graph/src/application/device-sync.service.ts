@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB } from '@platform';
 import { newId } from '@shared-kernel';
 import { complianceFindings, graphSyncState } from '../../../../../db/schema';
@@ -172,7 +172,7 @@ export class DeviceSyncService {
     return created;
   }
 
-  /** Inserts a finding unless one with this source key exists. Returns 1 if it inserted. */
+  /** Inserts a finding unless a LIVE (not resolved) one with this source key exists. Returns 1 if it inserted. */
   private async raise(
     device: GraphDevice,
     sourceKey: string,
@@ -181,7 +181,13 @@ export class DeviceSyncService {
     const existing = await this.db
       .select({ id: complianceFindings.id })
       .from(complianceFindings)
-      .where(eq(complianceFindings.source, sourceKey))
+      // Against every finding that is still LIVE — open, acknowledged, or a risk someone accepted — but
+      // not a RESOLVED one: once it is closed, the same condition returning (a device goes silent
+      // again, falls out of compliance again) is a new problem and must be raised again. An accepted
+      // risk is a decision, not a closed finding, so it is not re-raised over.
+      .where(
+        and(eq(complianceFindings.source, sourceKey), ne(complianceFindings.status, 'resolved')),
+      )
       .limit(1);
     if (existing.length > 0) return 0;
 

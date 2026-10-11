@@ -72,11 +72,25 @@ interface Violation {
   why: string;
 }
 
+/**
+ * A CommonJS `require('…')` of the Graph module or SDK. TypeScript's module resolution follows `import`
+ * and `import()` but NOT a plain `require()` call, so the closure cannot see one; this reads the text of
+ * every first-party file the closure DOES reach.
+ */
+const REQUIRES_GRAPH =
+  /\brequire\(\s*['"`][^'"`]*(?:@azure\/|@microsoft\/microsoft-graph|modules\/graph\/(?!index['"`]|src\/index['"`]|graph-task)|@modules\/graph\/(?!index['"`]|graph-task))[^'"`]*['"`]\s*\)/;
+
 /** Everything under libs/modules/graph the API process could load, and any Graph SDK file at all. */
 function violationsIn(program: ts.Program): Violation[] {
   const out: Violation[] = [];
   for (const sf of program.getSourceFiles()) {
     const f = sf.fileName;
+    if (!f.includes('/node_modules/') && REQUIRES_GRAPH.test(sf.text)) {
+      out.push({
+        file: relative(ROOT, f),
+        why: 'require() of Graph code or SDK reachable from the API',
+      });
+    }
     if (f.startsWith(GRAPH_DIR) && !API_MAY_LOAD.test(f)) {
       out.push({ file: relative(ROOT, f), why: 'Graph module code reachable from the API' });
     } else if (FORBIDDEN_PACKAGE.test(f)) {
@@ -159,6 +173,22 @@ describe('the closure check fails when an API file does what it forbids (mutatio
       "import { ClientCertificateCredential } from '@azure/identity';\nexport const m = ClientCertificateCredential;\n",
     ],
     [
+      'a CommonJS require() of an Azure credential',
+      "const azure = require('@azure/identity');\nexport const m = azure;\n",
+    ],
+    [
+      'a CommonJS require() of the Graph SDK',
+      "const sdk = require('@microsoft/microsoft-graph-client');\nexport const m = sdk;\n",
+    ],
+    [
+      'a CommonJS require() of the Graph credential through an alias',
+      "const c = require('@modules/graph/graph-credential');\nexport const m = c;\n",
+    ],
+    [
+      'a CommonJS require() of the Graph client by relative path',
+      "const c = require('../../../libs/modules/graph/src/graph-client.service');\nexport const m = c;\n",
+    ],
+    [
       'reaching a Graph service through a barrel re-export',
       "export * from '@modules/graph/application/entra-account.service';\n",
     ],
@@ -181,6 +211,12 @@ describe('the closure check fails when an API file does what it forbids (mutatio
     const diagnostics = ts.getPreEmitDiagnostics(program, program.getSourceFile(MUTANT));
 
     expect(diagnostics.length, 'ApiConfigService.get accepted a Graph variable').toBeGreaterThan(0);
+  }, 120_000);
+
+  it('control: requiring the ALLOWED task queue is fine', () => {
+    const source = "const q = require('@modules/graph');\nexport const m = q;\n";
+    const program = makeProgram([API_MAIN, MUTANT], { [MUTANT]: source });
+    expect(violationsIn(program)).toEqual([]);
   }, 120_000);
 
   it('control: a harmless API file leaves the closure clean', () => {

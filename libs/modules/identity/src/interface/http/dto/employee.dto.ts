@@ -13,7 +13,9 @@ export const CreateEmployeeSchema = z.object({
   department: z.string().max(120).optional(),
   jobTitle: z.string().max(120).optional(),
   managerId: z.string().uuid().optional(),
-  entraOid: z.string().max(64).optional(),
+  // A directory object id is a GUID. The Graph worker builds a URL from it and acts on that account, so
+  // nothing else is accepted (and the worker still checks the object belongs to this employee).
+  entraOid: z.string().uuid().optional(),
 });
 
 export class CreateEmployeeDto extends createZodDto(CreateEmployeeSchema) {}

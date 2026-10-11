@@ -17,9 +17,13 @@ import type { DrizzleDB, DrizzleTx } from '@platform';
 import { AbstractOutboxRelay } from '@platform';
 import type { Claimed, OutboxLeaseTable } from '@platform';
 import { EmailService } from '@platform/email';
+import { EMAIL_SEND_TIMEOUT_MS } from '@platform/email';
 import type { EmailTemplateName, EmailTemplateVars } from '@platform/email';
 import { NotificationPubSubService } from '@platform/notifications';
 import { emailOutbox } from '../../../../../db/schema';
+
+/** Database round trips and scheduling slack on top of the send itself. */
+export const EMAIL_LEASE_MARGIN_MS = 60_000;
 
 type EmailOutboxRow = {
   id: string;
@@ -76,6 +80,15 @@ export class EmailRelayService
     lockedUntil: emailOutbox.lockedUntil,
     seq: emailOutbox.seq,
   };
+
+  /**
+   * One provider send, bounded by EMAIL_SEND_TIMEOUT_MS, plus a margin for the database and scheduling.
+   * The lease must outlive the call it covers: a send still in flight after the lease lapsed is a send
+   * another relay can repeat, and a row the reaper dead-letters while it is being delivered.
+   */
+  protected leaseMsFor(): number {
+    return EMAIL_SEND_TIMEOUT_MS + EMAIL_LEASE_MARGIN_MS;
+  }
 
   protected async selectDue(tx: DrizzleTx, limit: number, now: Date): Promise<EmailOutboxRow[]> {
     return tx

@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
-import type { EmailPayload, EmailSendResult, IEmailProvider } from '../email.provider';
+import {
+  EMAIL_SEND_TIMEOUT_MS,
+  type EmailPayload,
+  type EmailSendResult,
+  type IEmailProvider,
+} from '../email.provider';
 
 /**
  * AWS SES transport, on the v2 API.
@@ -79,6 +84,9 @@ export class SesEmailProvider implements IEmailProvider {
             },
           },
         }),
+        // One deadline for the WHOLE send, SDK retries included: they would otherwise run three
+        // attempts with no overall bound, past the email relay's lease (see EMAIL_SEND_TIMEOUT_MS).
+        { abortSignal: AbortSignal.timeout(EMAIL_SEND_TIMEOUT_MS) },
       );
 
       /*

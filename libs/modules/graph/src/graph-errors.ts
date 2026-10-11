@@ -1,4 +1,4 @@
-import { NonRetryableError, RetryAfterError } from '@platform';
+import { MAX_RETRY_AFTER_MS, NonRetryableError, RetryAfterError } from '@platform';
 
 interface GraphErrorLike {
   statusCode?: number;
@@ -6,6 +6,11 @@ interface GraphErrorLike {
   headers?: { get(name: string): string | null } | Record<string, string> | undefined;
 }
 
+/**
+ * The Retry-After hint in milliseconds, or `undefined` when it is absent, malformed, non-finite or
+ * negative. Seconds ("120") or an HTTP date; anything else is ignored (ordinary backoff applies).
+ * The caller clamps the result — see MAX_RETRY_AFTER_MS.
+ */
 function retryAfterMs(headers: GraphErrorLike['headers']): number | undefined {
   if (!headers) return undefined;
   const raw =
@@ -14,9 +19,10 @@ function retryAfterMs(headers: GraphErrorLike['headers']): number | undefined {
       : ((headers as Record<string, string>)['retry-after'] ??
         (headers as Record<string, string>)['Retry-After']);
   if (!raw) return undefined;
-  const seconds = Number(raw);
-  if (Number.isFinite(seconds)) return Math.max(0, seconds) * 1000;
-  const date = Date.parse(raw);
+  const text = raw.trim();
+  const seconds = Number(text);
+  if (text !== '' && Number.isFinite(seconds)) return seconds < 0 ? undefined : seconds * 1000;
+  const date = Date.parse(text);
   return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
 }
 
@@ -26,7 +32,8 @@ function retryAfterMs(headers: GraphErrorLike['headers']): number | undefined {
  *   400, 403, 404  -> {@link NonRetryableError}: a malformed request, a missing permission or a deleted
  *                     user will not heal in 30 seconds. Dead-letter now, so the alarm fires on the first
  *                     attempt instead of the fifth.
- *   429, 503, 504  -> {@link RetryAfterError} when the server says how long (the `Retry-After` header).
+ *   429, 503, 504  -> {@link RetryAfterError} when the server says how long (the `Retry-After` header),
+ *                     clamped to {@link MAX_RETRY_AFTER_MS}; a malformed, negative or non-finite hint is ignored.
  *   anything else  -> unchanged: the relay's ordinary backoff.
  */
 export function classifyGraphError(err: unknown): unknown {
@@ -38,7 +45,10 @@ export function classifyGraphError(err: unknown): unknown {
   if (status === 429 || status === 503 || status === 504) {
     const wait = retryAfterMs(e.headers);
     if (wait !== undefined) {
-      return new RetryAfterError(`Graph ${status}: ${e.message ?? 'throttled'}`, wait);
+      return new RetryAfterError(
+        `Graph ${status}: ${e.message ?? 'throttled'}`,
+        Math.min(wait, MAX_RETRY_AFTER_MS),
+      );
     }
   }
   return err;

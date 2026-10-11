@@ -3,6 +3,7 @@ import { Client } from '@microsoft/microsoft-graph-client';
 import { TokenCredentialAuthenticationProvider } from '@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials/index.js';
 import { WorkerConfigService } from '@platform';
 import { buildGraphCredential, graphCredentialKind } from './graph-credential';
+import { buildGraphMiddleware } from './graph-http';
 
 /**
  * The `.default` scope: "every application permission this app registration has been granted".
@@ -64,9 +65,10 @@ export class GraphClientService {
     if (this.cached) return this.cached;
     const credential = buildGraphCredential(this.credentialConfig());
     this.cached = Client.initWithMiddleware({
-      authProvider: new TokenCredentialAuthenticationProvider(credential, {
-        scopes: [GRAPH_SCOPE],
-      }),
+      // Our own chain: no SDK retry loop, a hard deadline per request. See graph-http.ts.
+      middleware: buildGraphMiddleware(
+        new TokenCredentialAuthenticationProvider(credential, { scopes: [GRAPH_SCOPE] }),
+      ),
     });
     this.logger.log(
       `Microsoft Graph client initialised (${graphCredentialKind(this.credentialConfig())} credential)`,

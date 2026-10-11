@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDrizzle, type DrizzleDB } from '@platform';
 import { GraphClientService } from '../graph-client.service';
+import { MAX_SCAN_PAGES } from '../graph-task';
 import { newId } from '@shared-kernel';
 import { eq, and } from 'drizzle-orm';
 import { complianceFindings, softwareCatalog } from '../../../../../db/schema';
@@ -51,7 +52,18 @@ export class ShadowItScanService {
     let totalScanned = 0;
     let totalFindings = 0;
 
+    let pages = 0;
     while (url) {
+      // The scan's lease is derived from this bound (graph-task.ts): a run that could read for ever
+      // could outlive it. 100 pages of 100 apps is far above any real tenant.
+      if (pages >= MAX_SCAN_PAGES) {
+        this.logger.warn(
+          `Shadow IT scan stopped at ${MAX_SCAN_PAGES} pages (${totalScanned} apps): the lease is sized ` +
+            `for that many calls. Narrow the query if a tenant really has more.`,
+        );
+        break;
+      }
+      pages += 1;
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const page: { value: GraphDetectedApp[]; '@odata.nextLink'?: string } = await client
         .api(url)

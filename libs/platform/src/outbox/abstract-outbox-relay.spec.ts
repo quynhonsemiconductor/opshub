@@ -13,6 +13,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AbstractOutboxRelay,
   DEAD_LETTER_FIELD,
+  DeferError,
+  MAX_RETRY_AFTER_MS,
   NonRetryableError,
   RetryAfterError,
   type Claimed,
@@ -26,7 +28,15 @@ interface TestRow {
   /** Attempts BEFORE the claim; the claim spends one. */
   attempts: number;
   /** What `deliver` does. */
-  deliver?: 'ok' | 'fail' | 'non-retryable' | 'retry-after' | 'slow';
+  deliver?:
+    | 'ok'
+    | 'fail'
+    | 'non-retryable'
+    | 'retry-after'
+    | 'huge-retry-after'
+    | 'bad-retry-after'
+    | 'defer'
+    | 'slow';
   /** `settle` throws (a database error in the finish transaction). */
   settleFails?: boolean;
   postCommit?: PostCommitTask;
@@ -71,6 +81,7 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
   /** Ids whose lease was already gone when this relay tried to renew it. */
   lostAtRenew = new Set<string>();
   markFailedThrows = false;
+  refunded: string[] = [];
 
   constructor(
     db: DrizzleDB,
@@ -112,6 +123,11 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
     return Promise.resolve(!this.lostAtFinish.has(row.id));
   }
 
+  protected refundAttempt(_tx: DrizzleTx, row: Claimed<TestRow>): Promise<void> {
+    this.refunded.push(row.id);
+    return Promise.resolve();
+  }
+
   protected releaseLease(): Promise<void> {
     return Promise.resolve();
   }
@@ -126,6 +142,12 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
         throw new NonRetryableError(`row ${row.id} is malformed`);
       case 'retry-after':
         throw new RetryAfterError(`row ${row.id} throttled`, 5 * 60_000);
+      case 'huge-retry-after':
+        throw new RetryAfterError('throttled for ever', 1e13 * 1000);
+      case 'bad-retry-after':
+        throw new RetryAfterError('throttled by NaN', Number.NaN);
+      case 'defer':
+        throw new DeferError('another run holds the lock', 5 * 60_000);
       case 'slow':
         await new Promise((resolve) => setTimeout(resolve, 5));
         return `msg-${row.id}`;
@@ -277,6 +299,52 @@ describe('AbstractOutboxRelay — failure classification', () => {
     expect(relay.failed[0].nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
       before + 5 * 60_000 - 1_000,
     );
+  });
+});
+
+describe('AbstractOutboxRelay — Retry-After is clamped, never an Invalid Date', () => {
+  it('clamps a huge hint to the maximum', async () => {
+    const { relay } = make();
+    relay.load([{ id: 'a', attempts: 0, deliver: 'huge-retry-after' }]);
+    const before = Date.now();
+
+    await relay.relay();
+
+    const at = relay.failed[0].nextAttemptAt;
+    expect(Number.isNaN(at.getTime())).toBe(false);
+    expect(at.getTime()).toBeLessThanOrEqual(before + MAX_RETRY_AFTER_MS + 2_000);
+    expect(at.getTime()).toBeGreaterThanOrEqual(before + MAX_RETRY_AFTER_MS - 2_000);
+  });
+
+  it('falls back to ordinary backoff for a non-finite hint, and still records the failure', async () => {
+    const { relay } = make();
+    relay.load([{ id: 'a', attempts: 0, deliver: 'bad-retry-after' }]);
+    const before = Date.now();
+
+    await relay.relay();
+
+    expect(relay.failed).toHaveLength(1);
+    const at = relay.failed[0].nextAttemptAt.getTime();
+    expect(Number.isNaN(at)).toBe(false);
+    expect(at).toBeGreaterThanOrEqual(before + 29_000);
+    expect(at).toBeLessThanOrEqual(before + 31_000);
+  });
+});
+
+describe('AbstractOutboxRelay — DeferError is not an attempt', () => {
+  it('puts the row back to pending, REFUNDS the attempt, and does not dead-letter however many times', async () => {
+    const { relay } = make();
+    relay.load([{ id: 'a', attempts: 4, deliver: 'defer' }]); // the claim makes it the 5th (the last)
+    const before = Date.now();
+
+    await relay.relay();
+
+    expect(relay.refunded).toEqual(['a']);
+    expect(relay.failed[0]).toMatchObject({ id: 'a', status: 'pending', attempts: 4 });
+    expect(relay.failed[0].nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
+      before + 5 * 60_000 - 1_000,
+    );
+    expect(relay.sent).toEqual([]);
   });
 });
 

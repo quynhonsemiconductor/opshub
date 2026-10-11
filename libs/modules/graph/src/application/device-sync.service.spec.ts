@@ -22,13 +22,26 @@ interface Opts {
   failInsertFor?: string;
 }
 
-/** The bound value of an `eq(column, value)` condition. */
-function paramOf(cond: { queryChunks?: unknown[] }): string | undefined {
-  for (const chunk of cond.queryChunks ?? []) {
-    const value = (chunk as { value?: unknown } | null)?.value;
-    if (typeof value === 'string') return value;
-  }
-  return undefined;
+/** Conditions the finding-dedupe query was built with, for the shape assertion. */
+const dedupeConditions: unknown[] = [];
+
+/** Every bound string parameter in a drizzle condition, depth first. */
+function paramsOf(cond: unknown): string[] {
+  const out: string[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    const chunks = (node as { queryChunks?: unknown[] }).queryChunks;
+    if (chunks) chunks.forEach(walk);
+    const value = (node as { value?: unknown }).value;
+    if (typeof value === 'string') out.push(value);
+  };
+  walk(cond);
+  return out;
+}
+
+/** The bound value of the first `eq(column, value)` in a condition. */
+function paramOf(cond: unknown): string | undefined {
+  return paramsOf(cond)[0];
 }
 
 function make(opts: Opts) {
@@ -53,6 +66,7 @@ function make(opts: Opts) {
         where: vi.fn((cond: { queryChunks?: unknown[] }) => ({
           limit: vi.fn(() => {
             const key = paramOf(cond);
+            if (lastWhere === 'finding') dedupeConditions.push(cond);
             if (lastWhere === 'state') {
               return Promise.resolve(key && key in state ? [{ cursor: state[key] }] : []);
             }
@@ -171,6 +185,19 @@ describe('DeviceSyncService', () => {
     await service.syncDevices(NOW);
 
     expect(inserted.map((r) => r['source'])).toEqual(['intune:same:unencrypted']);
+  });
+
+  it('dedupes against every LIVE finding but NOT a resolved one, so a recurrence is raised again', async () => {
+    dedupeConditions.length = 0;
+    const { service } = make({ pages: [{ value: [device('a', { isEncrypted: false })] }] });
+
+    await service.syncDevices(NOW);
+
+    const params = paramsOf(dedupeConditions[0]);
+    expect(params).toContain('intune:a:unencrypted');
+    // `status <> 'resolved'`: an open, acknowledged or risk-accepted finding still suppresses a duplicate.
+    expect(params).toContain('resolved');
+    expect(params).not.toContain('open');
   });
 
   it('does not duplicate a finding that already exists', async () => {

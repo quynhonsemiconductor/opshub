@@ -11,6 +11,7 @@
  * deployment-wide default must apply when nobody asks, and must lose when somebody does.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { EMAIL_SEND_TIMEOUT_MS } from './email.provider';
 import { EmailService } from './email.service';
 
 interface SentPayload {
@@ -104,5 +105,28 @@ describe('EmailService addresses', () => {
     const { service, sent } = makeService({ MAIL_FROM_NAME: 'OpsHub' });
     await send(service);
     expect(sent().from).toBeUndefined();
+  });
+});
+
+describe('EmailService.sendTemplate — a send has a deadline', () => {
+  it('rejects when the provider does not answer within EMAIL_SEND_TIMEOUT_MS', async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = { send: vi.fn(() => new Promise<never>(() => undefined)) };
+      const service = new EmailService(provider, { get: vi.fn() } as never);
+
+      const sending = service
+        .sendTemplate('a@example.com', 'notification', {
+          title: 't',
+          body: 'b',
+          appUrl: 'https://x',
+        })
+        .catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(EMAIL_SEND_TIMEOUT_MS + 1);
+
+      expect(((await sending) as Error).message).toMatch(/did not answer within 30 s/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { like } from 'drizzle-orm';
 import {
   ConflictException,
   ErrorCodes,
@@ -9,7 +9,7 @@ import {
 } from '@platform';
 import { graphSyncState, graphTaskOutbox } from '../../../../db/schema';
 import {
-  GRAPH_HEARTBEAT_STATE,
+  GRAPH_HEARTBEAT_PREFIX,
   HEARTBEAT_FRESH_MS,
   dedupeKeyFor,
   orderingKeyFor,
@@ -46,17 +46,17 @@ export class GraphTaskQueue {
   }
 
   /**
-   * Whether a worker with Graph enabled is up right now (its heartbeat is `enabled` and fresh).
+   * Whether ANY worker replica with Graph enabled is up right now (an `enabled` heartbeat, fresh).
    * For endpoints that would otherwise answer 202 for a scan nobody can run.
    */
   async isGraphAvailable(now: Date = new Date()): Promise<boolean> {
-    const [row] = await this.db
+    const rows = await this.db
       .select({ cursor: graphSyncState.cursor, updatedAt: graphSyncState.updatedAt })
       .from(graphSyncState)
-      .where(eq(graphSyncState.name, GRAPH_HEARTBEAT_STATE))
-      .limit(1);
-    return (
-      row?.cursor === 'enabled' && now.getTime() - row.updatedAt.getTime() < HEARTBEAT_FRESH_MS
+      .where(like(graphSyncState.name, `${GRAPH_HEARTBEAT_PREFIX}%`));
+    return rows.some(
+      (row) =>
+        row.cursor === 'enabled' && now.getTime() - row.updatedAt.getTime() < HEARTBEAT_FRESH_MS,
     );
   }
 

@@ -140,4 +140,18 @@ describe('SesEmailProvider', () => {
 
     await expect(provider.send(PAYLOAD)).rejects.toThrow('AccessDenied');
   });
+
+  it('bounds the WHOLE send, SDK retries included, with an abort signal', async () => {
+    /*
+     * Without a deadline the SDK retries up to three times with no overall bound, past the email relay's
+     * lease: another relay can then repeat the send, and the reaper can dead-letter a row that is still
+     * being delivered.
+     */
+    const { provider, send } = makeProvider();
+    await provider.send(PAYLOAD);
+
+    const options = send.mock.calls[0][1] as { abortSignal: AbortSignal };
+    expect(options.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(options.abortSignal.aborted).toBe(false);
+  });
 });

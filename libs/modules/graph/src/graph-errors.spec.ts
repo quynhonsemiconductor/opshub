@@ -35,3 +35,31 @@ describe('classifyGraphError', () => {
     expect(classifyGraphError(graphError(500))).not.toBeInstanceOf(NonRetryableError);
   });
 });
+
+describe('classifyGraphError — Retry-After is clamped and validated', () => {
+  const retry = (value: string) =>
+    classifyGraphError(graphError(429, { 'retry-after': value })) as RetryAfterError;
+
+  it('clamps an absurd value to one hour (1e13 seconds would be an Invalid Date)', () => {
+    expect(retry('1e13')).toBeInstanceOf(RetryAfterError);
+    expect(retry('1e13').retryAfterMs).toBe(60 * 60_000);
+    expect(retry('999999').retryAfterMs).toBe(60 * 60_000);
+  });
+
+  it('clamps an HTTP date far in the future', () => {
+    const farFuture = new Date(Date.now() + 365 * 86_400_000).toUTCString();
+    expect(retry(farFuture).retryAfterMs).toBe(60 * 60_000);
+  });
+
+  it.each(['Infinity', '-5', 'NaN', 'soon', ''])(
+    'ignores %j: ordinary backoff applies',
+    (value) => {
+      const throttled = graphError(429, { 'retry-after': value });
+      expect(classifyGraphError(throttled)).toBe(throttled);
+    },
+  );
+
+  it('passes a sane value through unchanged', () => {
+    expect(retry('90').retryAfterMs).toBe(90_000);
+  });
+});

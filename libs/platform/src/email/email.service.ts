@@ -1,6 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
-import { EMAIL_PROVIDER, type IEmailProvider, type EmailSendResult } from './email.provider';
+import {
+  EMAIL_PROVIDER,
+  EMAIL_SEND_TIMEOUT_MS,
+  type IEmailProvider,
+  type EmailSendResult,
+} from './email.provider';
 import { renderEmailTemplate, type EmailTemplateName, type EmailTemplateVars } from './templates';
 
 /**
@@ -57,20 +62,35 @@ export class EmailService {
     try {
       // Returned so the relay can persist the provider's message id at acceptance —
       // that id is the feedback loop's only exact match key for a later verdict.
-      return await this.provider.send({
-        to,
-        from: this.from,
-        replyTo: opts?.replyTo ?? this.replyTo,
-        subject: rendered.subject,
-        html: rendered.html,
-        text: rendered.text,
-        category: 'transactional',
-        idempotencyKey: opts?.idempotencyKey,
-      });
+      return await withDeadline(
+        this.provider.send({
+          to,
+          from: this.from,
+          replyTo: opts?.replyTo ?? this.replyTo,
+          subject: rendered.subject,
+          html: rendered.html,
+          text: rendered.text,
+          category: 'transactional',
+          idempotencyKey: opts?.idempotencyKey,
+        }),
+        EMAIL_SEND_TIMEOUT_MS,
+      );
     } catch (err) {
       // Log and re-throw — the relay will catch this and update the outbox row.
       this.logger.error({ err, to, template }, 'Failed to send email');
       throw err;
     }
   }
+}
+
+/** Rejects if `work` has not settled within `ms`. Does not cancel `work`; see EMAIL_SEND_TIMEOUT_MS. */
+function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Email provider did not answer within ${Math.round(ms / 1000)} s`)),
+      ms,
+    );
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
 }

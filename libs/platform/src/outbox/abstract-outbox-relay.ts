@@ -90,6 +90,28 @@ export class RetryAfterError extends Error {
   }
 }
 
+/**
+ * "Not now, and this was not an attempt": the row goes back to pending after `delayMs` and the attempt the
+ * claim spent is REFUNDED. For a precondition outside the row's control (a lock another run holds), where
+ * counting attempts would dead-letter work that never got a chance to run.
+ */
+export class DeferError extends Error {
+  override readonly name = 'DeferError';
+  constructor(
+    message: string,
+    readonly delayMs: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * The longest a server-supplied Retry-After is honoured. A hostile or buggy value (1e13 seconds) must
+ * neither park a row for ever nor become an Invalid Date that makes `markFailed` throw. With per-key
+ * ordering, one huge hint would also hold back every later task for that key.
+ */
+export const MAX_RETRY_AFTER_MS = 60 * 60_000;
+
 /** The table a relay works on and the columns the base class needs to lease, fence and dead-letter it. */
 export interface OutboxLeaseTable {
   table: PgTable;
@@ -283,6 +305,15 @@ export abstract class AbstractOutboxRelay<
     return (renewed as unknown[]).length > 0;
   }
 
+  /** Give back the attempt the claim spent (see {@link DeferError}). */
+  protected async refundAttempt(tx: DrizzleTx, row: Claimed<TRow>): Promise<void> {
+    const o = this.outbox;
+    await tx
+      .update(o.table)
+      .set({ attempts: sql`GREATEST(${o.attempts} - 1, 0)` })
+      .where(sql`${o.id} = ${row.id}`);
+  }
+
   protected async releaseLease(tx: DrizzleTx, row: Claimed<TRow>): Promise<void> {
     const o = this.outbox;
     await tx
@@ -399,7 +430,7 @@ export abstract class AbstractOutboxRelay<
   }
 
   /** One row, start to finish. Never throws: one row cannot take the others down with it. */
-  private async handle(row: Claimed<TRow>): Promise<'sent' | 'failed' | 'lost'> {
+  private async handle(row: Claimed<TRow>): Promise<'sent' | 'failed' | 'lost' | 'deferred'> {
     try {
       if (!(await this.renewLease(row))) {
         this.logger.warn({ rowId: row.id }, 'Relay lost the lease before delivering — skipping');
@@ -453,15 +484,50 @@ export abstract class AbstractOutboxRelay<
     });
   }
 
-  private async fail(row: Claimed<TRow>, err: unknown): Promise<'failed' | 'lost'> {
+  /** Put the row back to pending after `delayMs`, refunding the attempt. */
+  private async defer(row: Claimed<TRow>, err: DeferError): Promise<'deferred' | 'lost'> {
+    const delayMs = Number.isFinite(err.delayMs)
+      ? Math.min(Math.max(err.delayMs, 0), MAX_RETRY_AFTER_MS)
+      : 5 * 60_000;
+    const nextAttemptAt = new Date(Date.now() + delayMs);
+    try {
+      const done = await this.finish(row, async (tx) => {
+        await this.refundAttempt(tx, row);
+        await this.markFailed(
+          tx,
+          { ...row, attempts: Math.max(row.attempts - 1, 0) },
+          'pending',
+          err.message,
+          nextAttemptAt,
+        );
+      });
+      if (done === LEASE_LOST) return 'lost';
+    } catch (markErr) {
+      this.logger.error(
+        { rowId: row.id, err: markErr },
+        'Relay could not defer a row — the lease will lapse and it will be claimed again',
+      );
+    }
+    this.logger.log(
+      { rowId: row.id },
+      `Relay deferred a row for ${Math.round(delayMs / 1000)} s: ${err.message}`,
+    );
+    return 'deferred';
+  }
+
+  private async fail(row: Claimed<TRow>, err: unknown): Promise<'failed' | 'lost' | 'deferred'> {
+    if (err instanceof DeferError) return this.defer(row, err);
     const errMsg = err instanceof Error ? err.message : String(err);
     const nonRetryable = err instanceof NonRetryableError;
     const newStatus: 'pending' | 'failed' =
       nonRetryable || row.attempts >= this.maxAttempts ? 'failed' : 'pending';
-    const delayMs =
-      err instanceof RetryAfterError
-        ? Math.max(err.retryAfterMs, this.backoffDelayMs(row.attempts))
-        : this.backoffDelayMs(row.attempts);
+    // A hint is honoured up to a clamp and only if it is a real number: a non-finite or absurd value
+    // falls back to ordinary backoff rather than producing an Invalid Date.
+    const hinted =
+      err instanceof RetryAfterError && Number.isFinite(err.retryAfterMs)
+        ? Math.min(Math.max(err.retryAfterMs, 0), MAX_RETRY_AFTER_MS)
+        : 0;
+    const delayMs = Math.max(hinted, this.backoffDelayMs(row.attempts));
     const nextAttemptAt = new Date(Date.now() + delayMs);
 
     try {

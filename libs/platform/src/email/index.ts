@@ -1,5 +1,6 @@
 export {
   EMAIL_PROVIDER,
+  EMAIL_SEND_TIMEOUT_MS,
   type IEmailProvider,
   type EmailPayload,
   type EmailCategory,

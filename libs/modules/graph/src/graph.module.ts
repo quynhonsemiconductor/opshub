@@ -2,7 +2,10 @@ import { Module } from '@nestjs/common';
 import { DeviceSyncService } from './application/device-sync.service';
 import { EntraAccountService } from './application/entra-account.service';
 import { GraphSyncCron } from './application/graph-sync.cron';
-import { GraphTaskRelayService } from './application/graph-task-relay.service';
+import {
+  GraphAccountRelayService,
+  GraphScanRelayService,
+} from './application/graph-task-relay.service';
 import { SecureScoreSyncService } from './application/secure-score-sync.service';
 import { ShadowItScanService } from './application/shadow-it-scan.service';
 import { GraphClientService } from './graph-client.service';
@@ -21,7 +24,8 @@ import { GraphClientService } from './graph-client.service';
     DeviceSyncService,
     ShadowItScanService,
     SecureScoreSyncService,
-    GraphTaskRelayService,
+    GraphAccountRelayService,
+    GraphScanRelayService,
     GraphSyncCron,
   ],
 })

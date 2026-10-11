@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ExclusiveJob, InjectDrizzle, type DrizzleDB } from '@platform';
+import { hostname } from 'node:os';
+import { and, like, lt } from 'drizzle-orm';
 import { graphSyncState } from '../../../../../db/schema';
-import { GRAPH_HEARTBEAT_STATE } from '../graph-task';
+import { GRAPH_HEARTBEAT_PREFIX } from '../graph-task';
 import { GraphClientService } from '../graph-client.service';
 import { GRAPH_LOCK } from '../graph-locks';
 import { DeviceSyncService } from './device-sync.service';
@@ -30,21 +32,30 @@ export class GraphSyncCron {
   ) {}
 
   /**
-   * Tells the API whether this worker can run Graph work (see GRAPH_HEARTBEAT_STATE). Every replica
-   * writes it — an idempotent upsert, so no lock — and a worker that is down stops writing, which the
-   * API reads as "not available".
+   * Tells the API whether this replica can run Graph work (see GRAPH_HEARTBEAT_PREFIX). One row per
+   * replica — an idempotent upsert, so no lock — and a replica that is down stops writing. Rows of
+   * replicas that have been gone a day are removed so pod names do not accumulate.
    */
   @Cron('*/30 * * * * *', { name: 'graph-heartbeat' })
   async heartbeat(): Promise<void> {
     try {
       const cursor = this.graph.isEnabled() ? 'enabled' : 'disabled';
+      const name = `${GRAPH_HEARTBEAT_PREFIX}${process.env['HOSTNAME'] ?? hostname()}`;
       await this.db
         .insert(graphSyncState)
-        .values({ name: GRAPH_HEARTBEAT_STATE, cursor })
+        .values({ name, cursor })
         .onConflictDoUpdate({
           target: graphSyncState.name,
           set: { cursor, updatedAt: new Date() },
         });
+      await this.db
+        .delete(graphSyncState)
+        .where(
+          and(
+            like(graphSyncState.name, `${GRAPH_HEARTBEAT_PREFIX}%`),
+            lt(graphSyncState.updatedAt, new Date(Date.now() - 86_400_000)),
+          ),
+        );
     } catch (err) {
       this.logger.warn(
         `Graph heartbeat not written: ${err instanceof Error ? err.message : String(err)}`,
