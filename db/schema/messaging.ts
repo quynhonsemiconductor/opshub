@@ -4,6 +4,8 @@
  * notification_outbox  — in-app notification queue, relayed every 5s by cron
  * email_outbox         — email send queue, relayed every 5s by cron
  * webhook_deliveries   — outbound webhook queue, relayed every 10s by cron
+ * graph_task_outbox    — Microsoft Graph work the API requests and only the worker performs
+ * graph_sync_state     — resume position of the Intune device sync (not an outbox)
  *
  * All three follow the same pattern: written in the caller's DB transaction, relayed by a
  * cron service using SELECT … FOR UPDATE SKIP LOCKED, and every one of them has a real
@@ -159,3 +161,51 @@ export const webhookDeliveries = messagingSchema.table(
     subIdx: index('ix_webhook_del_sub').on(t.subscriptionId),
   }),
 );
+
+// ── Graph task outbox ────────────────────────────────────────────────────────
+
+/**
+ * Work that needs Microsoft Graph, written by the API and executed ONLY by the worker.
+ *
+ * The API holds no Graph credential. A request that needs Graph — disabling an Entra account when an
+ * offboarding is approved, revoking that person's sessions, an on-demand shadow-IT scan — writes a row
+ * here, in the SAME transaction as the business change, and the worker's `GraphTaskRelayService`
+ * performs it with retries. Roll the transaction back and the task never exists; commit it and the
+ * task survives a crash of either process.
+ *
+ * `kind` is a varchar, not an enum: the set is owned by `libs/modules/graph` and a new kind should not
+ * need a migration. The relay refuses a kind it does not know and dead-letters the row.
+ */
+export const graphTaskOutbox = messagingSchema.table(
+  'graph_task_outbox',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    kind: varchar('kind', { length: 100 }).notNull(),
+    payload: jsonb('payload').notNull().$type<Record<string, unknown>>(),
+    /** At most one PENDING row per key; null for tasks where two in a row are both meant. */
+    dedupeKey: varchar('dedupe_key', { length: 255 }),
+    status: outboxStatusEnum('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+  },
+  (t) => ({
+    pendingIdx: index('ix_graph_task_pending').on(t.status, t.nextAttemptAt),
+    dedupeIdx: uniqueIndex('uq_graph_task_pending_dedupe')
+      .on(t.dedupeKey)
+      .where(sql`dedupe_key IS NOT NULL AND status = 'pending'`),
+  }),
+);
+
+/**
+ * Where the Intune device sync resumes. One row per sync name, so the position survives a worker
+ * restart or a new task: an in-memory link restarted every sync from the full device list.
+ */
+export const graphSyncState = messagingSchema.table('graph_sync_state', {
+  name: varchar('name', { length: 100 }).primaryKey(),
+  /** The `lastSyncDateTime` high-water mark of the last COMPLETE pass. */
+  cursor: text('cursor'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

@@ -9,6 +9,7 @@ import {
   RequestTypeDef,
 } from '@platform';
 import { AUDIT_ACTION, AUDIT_RESOURCE, AuditService } from '@modules/audit';
+import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
 import { REQUEST_TYPE } from '@shared-kernel';
 import {
   employees,
@@ -18,7 +19,6 @@ import {
   assets,
   refreshTokens,
 } from '../../../../../db/schema';
-import { GraphProvisioningService } from './graph-provisioning.service';
 
 export interface OffboardingPayload extends Record<string, unknown> {
   /** The employee being offboarded. */
@@ -75,7 +75,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
   constructor(
     private readonly registry: RequestRegistry,
     @InjectDrizzle() private readonly db: DrizzleDB,
-    private readonly graphProvisioning: GraphProvisioningService,
+    private readonly graphTasks: GraphTaskQueue,
     private readonly authz: AuthzService,
     audit: AuditService,
   ) {
@@ -202,6 +202,39 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
         after: { revokedSessions: revokedSessions.length, reason: 'offboarding' },
       });
     }
+
+    /*
+     * 6. Entra: disable the account, then end its sign-in sessions — QUEUED, IN THIS TRANSACTION.
+     *
+     * Both used to be a Graph call made by the API after the commit: best-effort, inside the
+     * approver's request, with a credential able to modify every user. Now the API has no Graph
+     * credential. The two task rows commit with the approval (roll it back and neither exists) and the
+     * worker performs them in order with retries, dead-lettering through the alarm already watching
+     * outbox rows. Disabling stops NEW sign-ins; revoking is what ends the refresh tokens already
+     * issued, which keep working after a disable.
+     */
+    const [entra] = await tx
+      .select({ entraOid: employees.entraOid })
+      .from(employees)
+      .where(eq(employees.id, employeeId))
+      .limit(1);
+    if (entra?.entraOid) {
+      await this.graphTasks.enqueue(
+        {
+          kind: GRAPH_TASK.ACCOUNT_SET_ENABLED,
+          payload: { entraOid: entra.entraOid, enabled: false },
+        },
+        tx,
+      );
+      await this.graphTasks.enqueue(
+        { kind: GRAPH_TASK.SESSIONS_REVOKE, payload: { entraOid: entra.entraOid } },
+        tx,
+      );
+    } else {
+      this.logger.warn(
+        `Offboarding approved: no Entra OID for employee ${employeeId}, no account to disable`,
+      );
+    }
   }
 
   async onReject(
@@ -214,7 +247,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
   }
 
   /**
-   * Post-commit work: drop the cached permissions, then disable the Entra account.
+   * Post-commit work: drop the cached permissions.
    *
    * THE CACHE INVALIDATION IS THE SECURITY-CRITICAL HALF, and it was missing entirely.
    * `AuthzService` caches a principal's resolved permissions for `CACHE_TTL_SECONDS = 300`, and every
@@ -223,34 +256,13 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
    * offboarded a leaver's requests were still authorised against the roles they no longer held. Their
    * session was revoked, but an access token already in hand keeps working until it expires.
    *
-   * AFTER THE COMMIT, NOT INSIDE IT. `afterApprove` is the engine's post-commit hook, which is where
-   * this belongs: invalidating inside the transaction leaves a window in which a concurrent request
-   * misses the cache, re-resolves from rows that have not yet committed, and caches the OLD
-   * permissions again — arriving at the same stale state by a longer route. Rally's `removeMember`
-   * records the same ordering rule for the same reason.
+   * AFTER THE COMMIT, NOT INSIDE IT. Invalidating inside the transaction leaves a window in which a
+   * concurrent request misses the cache, re-resolves from rows that have not yet committed, and caches
+   * the OLD permissions again. Rally's `removeMember` records the same ordering rule.
    *
-   * ORDERED BEFORE THE GRAPH CALL, and outside its early return. The previous body opened with
-   * `if (!this.graphProvisioning.isEnabled()) return`, so anything added after it would silently not
-   * run in every environment without Graph configured — which is all of them by default.
+   * The Entra disable is not here any more: it is a task queued by `onApprove`, in the transaction.
    */
   async afterApprove(payload: OffboardingPayload): Promise<void> {
     await this.authz.invalidate(payload.employeeId);
-
-    if (!this.graphProvisioning.isEnabled()) return;
-
-    const [row] = await this.db
-      .select({ entraOid: employees.entraOid })
-      .from(employees)
-      .where(eq(employees.id, payload.employeeId))
-      .limit(1);
-
-    if (!row?.entraOid) {
-      this.logger.warn(
-        `Offboarding afterApprove: no Entra OID for employee ${payload.employeeId}, skipping Graph disable`,
-      );
-      return;
-    }
-
-    await this.graphProvisioning.disableEntraUser(row.entraOid);
   }
 }

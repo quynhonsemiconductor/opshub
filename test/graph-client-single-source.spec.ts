@@ -5,36 +5,43 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * One place builds a Microsoft Graph client.
+ * Microsoft Graph lives in the worker, and in one place.
  *
- * WHAT WAS WRONG. Five services — PIM elevation, Entra provisioning, Intune device sync, shadow-IT
- * detection and Secure Score — each carried a private `buildClient()` reading the same three env vars,
- * constructing the same credential with the same `.default` scope, plus a public `isEnabled()` written
- * three different ways (`Boolean(a && b && c)`, `!!(a && b && c)`, and a three-`const` version).
- *
- * The duplication was not the expensive part. `buildClient()` was called PER OPERATION and
- * `ClientSecretCredential` caches its access token in the instance, so every Graph call paid a fresh
- * client-credentials round trip to Entra for a token it already had. Entra throttles that endpoint;
- * the symptom of reaching the limit is a failed offboarding, not a slow one.
+ * THE RULES, each a test below:
+ *   1. One factory builds the client and its credential (`libs/modules/graph`). A client built per call
+ *      throws away the credential's token cache — a client-credentials round trip to Entra per
+ *      operation, and Entra throttles that endpoint.
+ *   2. Only that module reads GRAPH_* configuration, so there is one answer to "is Graph on".
+ *   3. THE API CANNOT REACH GRAPH. Nothing under `apps/api` imports the Graph module, and nothing
+ *      outside the module injects `GraphClientService`: an API request that needs Graph writes a
+ *      `graph_task_outbox` row through `GraphTaskQueue` and the worker performs it. The API task is not
+ *      given any GRAPH_* variable, so a compromised API process has no Graph credential to steal.
+ *   4. The barrel (`@modules/graph`) the API may import does not export the client or the module.
+ *   5. No source file asks for the Entra directory role-management permission. The PIM client that did
+ *      had no caller and would have put a tenant-takeover permission on an unattended app.
  *
  * WHY A RATCHET. The next Graph integration is written by copying the nearest one, which is how five
- * copies happened. `GraphClientService` is injectable and global, so there is nothing left for a sixth
- * copy to do that it cannot — and this fails the moment one appears.
+ * copies of `buildClient()` happened. This fails the moment a sixth, or an API-side call, appears.
  *
  * __dirname, not import.meta.dirname: this suite runs as CommonJS.
  */
 
 const ROOT = join(__dirname, '..');
 
-/** The one file allowed to construct a credential and a client. */
-const OWNER = 'libs/platform/src/graph/graph-client.service.ts';
+const MODULE_DIR = 'libs/modules/graph/';
+/** The two files allowed to construct a client and a credential. */
+const OWNERS = [
+  'libs/modules/graph/src/graph-client.service.ts',
+  'libs/modules/graph/src/graph-credential.ts',
+];
+const OWNER = OWNERS[0];
 
 /** Constructing the client, or the credential it wraps, or naming the scope. */
 const BUILDS_CLIENT =
-  /Client\.initWithMiddleware|new ClientSecretCredential|graph\.microsoft\.com\/\.default/;
+  /Client\.initWithMiddleware|new (ClientSecret|ClientCertificate|WorkloadIdentity|ClientAssertion)Credential|graph\.microsoft\.com\/\.default/;
 
 /** The env vars that make up the answer, read directly rather than asked for. */
-const READS_GRAPH_CONFIG = /config\.get\('GRAPH_CLIENT_SECRET'\)/;
+const READS_GRAPH_CONFIG = /config\.get\('GRAPH_[A-Z_]+'\)/;
 
 interface Offender {
   file: string;
@@ -61,10 +68,18 @@ function sourceFiles(): string[] {
   );
 }
 
-function scan(pattern: RegExp): Offender[] {
+interface ScanOptions {
+  /** Files to look at; default all. */
+  only?: (file: string) => boolean;
+  /** Files exempt from this rule; default none. */
+  except?: (file: string) => boolean;
+}
+
+function scan(pattern: RegExp, { only, except }: ScanOptions = {}): Offender[] {
   const offenders: Offender[] = [];
   for (const file of sourceFiles()) {
-    if (file === OWNER) continue;
+    if (only && !only(file)) continue;
+    if (except?.(file)) continue;
     readFileSync(join(ROOT, file), 'utf8')
       .split('\n')
       .forEach((line, index) => {
@@ -78,20 +93,26 @@ function scan(pattern: RegExp): Offender[] {
   return offenders;
 }
 
-describe('Graph client single source', () => {
+function report(offenders: Offender[]): string {
+  return offenders.map((o) => `  ${o.file}:${o.line}\n      ${o.text}`).join('\n');
+}
+
+const inModule = (f: string) => f.startsWith(MODULE_DIR);
+
+describe('Graph lives in the worker, in one place', () => {
   it('finds the factory it claims to guard', () => {
     /*
-     * The floor. A check on an ABSENT pattern passes trivially when the thing it protects is gone: if
-     * the factory were deleted, every consumer would fail to compile, but this file would go green. So
-     * the floor is the factory's existence, that it still builds a client, that it still caches one,
-     * and that the five consumers still ask it — measured through the same file list the scan uses.
+     * The floor. A check on an ABSENT pattern passes trivially when the thing it protects is gone:
+     * if the factory were deleted, every consumer would fail to compile, but this file would go
+     * green. So the floor is the factory's existence, that it still builds a client, that it still
+     * caches one, and that its consumers still ask it.
      */
     const files = sourceFiles();
     expect(files.length, 'the scanner sees almost no source files').toBeGreaterThan(100);
-    expect(files, 'the Graph factory is gone').toContain(OWNER);
+    for (const owner of OWNERS) expect(files, `${owner} is gone`).toContain(owner);
 
     const owner = readFileSync(join(ROOT, OWNER), 'utf8');
-    expect(owner).toMatch(BUILDS_CLIENT);
+    expect(owner).toMatch(/Client\.initWithMiddleware/);
     expect(owner, 'the factory no longer caches the client').toMatch(/this\.cached/);
 
     const consumers = files.filter(
@@ -103,36 +124,54 @@ describe('Graph client single source', () => {
     ).toBeGreaterThanOrEqual(5);
   });
 
-  it('has no second place building a Graph client', () => {
-    const offenders = scan(BUILDS_CLIENT);
-
-    if (offenders.length > 0) {
-      const report = offenders.map((o) => `  ${o.file}:${o.line}\n      ${o.text}`).join('\n');
-      throw new Error(
-        `${offenders.length} place(s) building a Graph client outside ${OWNER}.\n` +
-          `A client built per call throws away the credential's token cache, so every Graph ` +
-          `operation costs a client-credentials round trip to Entra — which is throttled. Inject ` +
-          `\`GraphClientService\` and call \`client()\`.\n\n${report}`,
-      );
-    }
-
-    expect(offenders.length).toBe(0);
+  it('has no second place building a Graph client or credential', () => {
+    const offenders = scan(BUILDS_CLIENT, { except: (f) => OWNERS.includes(f) });
+    expect(
+      offenders,
+      `place(s) building a Graph client outside ${OWNERS.join(' / ')}:\n${report(offenders)}`,
+    ).toEqual([]);
   });
 
   it('has no second answer to whether Graph is configured', () => {
-    // `isEnabled()` gates every Graph path, so two implementations of it can disagree about whether
-    // the integration is on — and the failure mode is a silent skip, which reports success.
-    const offenders = scan(READS_GRAPH_CONFIG);
+    // `isEnabled()` gates every Graph path, so two implementations of it can disagree about whether the
+    // integration is on — and the failure mode is a silent skip, which reports success.
+    const offenders = scan(READS_GRAPH_CONFIG, { except: inModule });
+    expect(
+      offenders,
+      `place(s) reading GRAPH_* config outside ${MODULE_DIR}:\n${report(offenders)}`,
+    ).toEqual([]);
+  });
 
-    if (offenders.length > 0) {
-      const report = offenders.map((o) => `  ${o.file}:${o.line}\n      ${o.text}`).join('\n');
-      throw new Error(
-        `${offenders.length} place(s) reading GRAPH_CLIENT_SECRET outside ${OWNER}.\n` +
-          `Ask \`GraphClientService.isEnabled()\` instead — five copies of this boolean, in three ` +
-          `spellings, is what this replaced.\n\n${report}`,
-      );
-    }
+  it('keeps Graph out of the API: only the worker imports the Graph module or injects the client', () => {
+    const importsModule = scan(/\bGraphModule\b|modules\/graph\/graph\.module/, {
+      except: (f) => inModule(f) || f.startsWith('apps/worker/'),
+    });
+    expect(
+      importsModule,
+      `The Graph module is worker-only — the API asks via GraphTaskQueue:\n${report(importsModule)}`,
+    ).toEqual([]);
 
-    expect(offenders.length).toBe(0);
+    const injectsClient = scan(/\bGraphClientService\b/, { except: inModule });
+    expect(
+      injectsClient,
+      `Only libs/modules/graph may use GraphClientService:\n${report(injectsClient)}`,
+    ).toEqual([]);
+  });
+
+  it('exports nothing from the barrel that could reach Graph', () => {
+    const barrel = readFileSync(join(ROOT, MODULE_DIR, 'src/index.ts'), 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*\/\//.test(line))
+      .join('\n');
+    expect(barrel).not.toMatch(/GraphClientService|GraphModule\b|graph\.module|graph-client/);
+    expect(barrel).toMatch(/GraphTaskQueue/);
+  });
+
+  it('asks for no Entra directory role-management permission or endpoint', () => {
+    const offenders = scan(/roleManagement|RoleManagement/);
+    expect(
+      offenders,
+      `Tier-0 permission/endpoint referenced — the Graph worker app must not hold it:\n${report(offenders)}`,
+    ).toEqual([]);
   });
 });

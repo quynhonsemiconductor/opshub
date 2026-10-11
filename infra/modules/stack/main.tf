@@ -165,23 +165,30 @@ locals {
     # minted in someone else's console, so there is no window where it cannot be set.
     { name = "CSRF_SECRET", secret_arn = module.secrets.secret_arns["csrf-secret"] },
     ],
-    # The BFF's confidential-client secret. Gated for the same reason as Graph's: an
+    # The BFF's confidential-client secret. Gated for the same reason as the Graph certificate's: an
     # empty Secrets Manager value cannot be injected at all, so wiring it before the
     # Entra app registration has one would stop every task from starting. While it is
     # off, the login START still works and the callback's token exchange is what fails —
     # the app boots, and the Bearer path is unaffected.
     var.entra_client_secret_set ? [
       { name = "ENTRA_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["entra-client-secret"] },
-    ] : [],
-    # Injected only once populated — see the variable. ECS cannot inject a secret that
-    # holds no value: the task fails to start with
-    # "ResourceInitializationError ... can't find the specified secret value for staging
-    # label: AWSCURRENT". So wiring an OPTIONAL integration unconditionally makes it
-    # mandatory in the worst way, and that is precisely what kept develop from ever
-    # booting.
-    var.graph_client_secret_set ? [
-      { name = "GRAPH_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["graph-client-secret"] },
   ] : [])
+
+  # Microsoft Graph is the WORKER's alone. The API task is given no GRAPH_* variable and no Graph
+  # secret: an API request that needs Graph writes a graph_task_outbox row and the worker performs it
+  # (libs/modules/graph). The Graph app is its own Entra registration, authenticated with a
+  # certificate — there is no client secret for it to leak.
+  #
+  # The certificate is injected only once populated — see the variable. ECS cannot inject a secret
+  # that holds no value: the task fails to start with "ResourceInitializationError ... can't find
+  # the specified secret value for staging label: AWSCURRENT". Unset GRAPH_CLIENT_ID is the "off"
+  # switch the app understands; every Graph feature then skips with one info log.
+  worker_graph_secrets = var.graph_client_certificate_set ? [
+    { name = "GRAPH_CLIENT_CERTIFICATE", secret_arn = module.secrets.secret_arns["graph-client-certificate"] },
+  ] : []
+  worker_graph_env = var.graph_client_id == "" ? [] : [
+    { name = "GRAPH_CLIENT_ID", value = var.graph_client_id },
+  ]
 
   # Env both services need. Same reasoning as app_secrets: the queue URL, the bucket
   # and the cache endpoint are the contract between them, so they cannot be allowed to
@@ -264,8 +271,8 @@ module "secrets" {
     # now owns the tunnel's whole lifecycle (module.tunnel) and creates its OWN separate
     # aws_secretsmanager_secret.tunnel_token, populated automatically from the tunnel
     # resource's own token output. Nothing reads this bundle's key any more.
-    "entra-client-secret" = "Entra confidential-client secret for the BFF server-side code exchange"
-    "graph-client-secret" = "Microsoft Graph app client secret (client-credentials flow for Graph sync jobs)"
+    "entra-client-secret"      = "Entra confidential-client secret for the BFF server-side code exchange"
+    "graph-client-certificate" = "Graph worker app credential: PEM holding the private key and certificate (no client secret exists for that app). Injected into the worker only."
     # Passwords for the least-privilege roles migration 0012 creates. The CONTAINERS exist
     # unconditionally so `secret_arns["db-app-password"]` always resolves and the IAM list
     # keeps a plan-time-known length; what is gated is the INJECTION — see
@@ -573,11 +580,11 @@ module "worker" {
     module.firelens_agent_worker.secret_arns,
   )
   kms_key_arn = local.kms_key_arn
-  secrets     = concat(local.app_secrets, local.worker_db_secrets)
+  secrets     = concat(local.app_secrets, local.worker_db_secrets, local.worker_graph_secrets)
 
   # Not plain `local.shared_env`: the pool ceiling is per-SERVICE, because it divides
   # the shared budget by this service's own autoscaling ceiling.
-  environment_vars = concat(local.shared_env, local.worker_db_env, [
+  environment_vars = concat(local.shared_env, local.worker_db_env, local.worker_graph_env, [
     { name = "DATABASE_POOL_MAX", value = tostring(local.worker_pool_max) },
     { name = "OTEL_SERVICE_NAME", value = "${var.product}-worker" },
     { name = "OTEL_ENABLED", value = tostring(module.otel_agent_worker.enabled) },

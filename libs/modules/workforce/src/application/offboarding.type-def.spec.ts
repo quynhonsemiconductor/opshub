@@ -3,7 +3,8 @@
  *
  * Tests that the 5 cleanup operations (employee status, role assignments,
  * access grants, asset assignments + asset status reset, refresh token
- * revocation) are all called with the correct table arguments.
+ * revocation) are all called with the correct table arguments, and that the Entra disable +
+ * session revoke are QUEUED in the same transaction rather than called.
  *
  * Tables are identified by object identity (imported singleton references),
  * not by name introspection.
@@ -32,6 +33,7 @@ function makeTx(
   assetReturnRows: Array<{ assetId: string }> = [],
   roleReturnRows: Array<{ id: string; roleId: string }> = [],
   sessionReturnRows: Array<{ id: string }> = [{ id: 'token-1' }],
+  entraOid: string | null = null,
 ) {
   const updateCalls: Array<{ table: unknown; chain: ReturnType<typeof makeUpdateChain> }> = [];
   const deleteCalls: Array<{ table: unknown }> = [];
@@ -69,7 +71,15 @@ function makeTx(
     return { where };
   });
 
+  // `select … from … where … limit` — the employee's Entra object id, read inside the transaction.
+  const selectChain = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(entraOid ? [{ entraOid }] : [{ entraOid: null }]),
+  };
+
   return {
+    select: vi.fn().mockReturnValue(selectChain),
     update: updateMock,
     delete: deleteMock,
     _updateCalls: updateCalls,
@@ -86,6 +96,7 @@ describe('OffboardingTypeDef.onApprove()', () => {
   let typeDef: OffboardingTypeDef;
   let record: ReturnType<typeof vi.fn>;
   let invalidate: ReturnType<typeof vi.fn>;
+  let enqueue: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     const mockDb = {
@@ -94,11 +105,7 @@ describe('OffboardingTypeDef.onApprove()', () => {
       where: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue([]),
     };
-    const mockGraph = {
-      isEnabled: vi.fn().mockReturnValue(false),
-      disableEntraUser: vi.fn(),
-      enableEntraUser: vi.fn(),
-    };
+    enqueue = vi.fn().mockResolvedValue(true);
     record = vi.fn().mockResolvedValue(undefined);
     invalidate = vi.fn().mockResolvedValue(undefined);
     // One recorder shared by every resource: these tests care WHICH action was recorded, and the
@@ -107,7 +114,7 @@ describe('OffboardingTypeDef.onApprove()', () => {
     typeDef = new OffboardingTypeDef(
       { register: vi.fn() } as never,
       mockDb as never,
-      mockGraph as never,
+      { enqueue } as never,
       { invalidate } as never,
       mockAudit as never,
     );
@@ -289,13 +296,37 @@ describe('OffboardingTypeDef.onApprove()', () => {
       expect(invalidate).not.toHaveBeenCalled();
     });
 
-    it('is invalidated after the commit, even with Graph disabled', async () => {
+    it('is invalidated after the commit', async () => {
       await typeDef.afterApprove(PAYLOAD);
 
-      // `afterApprove` used to open with `if (!graph.isEnabled()) return`, and Graph is disabled in
-      // this fixture — as it is by default everywhere. Anything ordered after that early return does
-      // not run, which is why the invalidation is ordered before it.
       expect(invalidate).toHaveBeenCalledWith(EMPLOYEE_ID);
+    });
+
+    it('afterApprove makes no Graph call and queues nothing — the API has no Graph credential', async () => {
+      await typeDef.afterApprove(PAYLOAD);
+
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the Entra account', () => {
+    it('is disabled and its sessions revoked by TASKS queued in the approval transaction, in that order', async () => {
+      const tx = makeTx([], [], [{ id: 'token-1' }], 'entra-oid-1');
+      await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
+
+      expect(enqueue.mock.calls.map((c: unknown[]) => c[0])).toEqual([
+        { kind: 'entra.account.set_enabled', payload: { entraOid: 'entra-oid-1', enabled: false } },
+        { kind: 'entra.sessions.revoke', payload: { entraOid: 'entra-oid-1' } },
+      ]);
+      // The SAME transaction: roll the approval back and neither task exists.
+      expect(enqueue.mock.calls.every((c: unknown[]) => c[1] === tx)).toBe(true);
+    });
+
+    it('queues nothing for an employee with no Entra object id', async () => {
+      const tx = makeTx();
+      await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
+
+      expect(enqueue).not.toHaveBeenCalled();
     });
   });
 

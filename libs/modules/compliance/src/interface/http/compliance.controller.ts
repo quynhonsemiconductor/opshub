@@ -10,7 +10,13 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiAcceptedResponse,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import {
   Auth,
   RequirePermission,
@@ -22,7 +28,8 @@ import {
 import type { JwtPayload, PagedResult } from '@platform';
 import { AuditService, AUDIT_ACTION, AUDIT_RESOURCE } from '@modules/audit';
 import { ComplianceService } from '../../application/compliance.service';
-import { ShadowItDetectionService } from '../../application/shadow-it-detection.service';
+import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
+import { ShadowItFindingsService } from '../../application/shadow-it-findings.service';
 import {
   AddSoftwareDto,
   UpdateSoftwareDto,
@@ -32,7 +39,7 @@ import {
   SoftwareResponseDto,
   FindingResponseDto,
   ShadowItListResponseDto,
-  ShadowItScanResponseDto,
+  ShadowItScanQueuedDto,
 } from './dto/compliance.dto';
 import type { ComplianceFinding, SoftwareCatalogEntry } from '../../domain/compliance.types';
 
@@ -72,7 +79,8 @@ export class ComplianceController {
   constructor(
     private readonly service: ComplianceService,
     private readonly audit: AuditService,
-    private readonly shadowIt: ShadowItDetectionService,
+    private readonly shadowIt: ShadowItFindingsService,
+    private readonly graphTasks: GraphTaskQueue,
   ) {}
 
   // ── Software catalog ───────────────────────────────────────────────────────
@@ -217,21 +225,25 @@ export class ComplianceController {
   }
 
   @Post('shadow-it/scan')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermission('compliance.manage')
-  @ApiOperation({ summary: 'Trigger an immediate Shadow IT detection scan' })
-  @ApiOkResponse({ type: ShadowItScanResponseDto })
+  @ApiOperation({
+    summary: 'Queue a Shadow IT detection scan (the worker runs it; 202 Accepted)',
+  })
+  @ApiAcceptedResponse({ type: ShadowItScanQueuedDto })
   @ApiCommonErrors(401, 403)
-  async triggerShadowItScan(@CurrentUser() user: JwtPayload): Promise<ShadowItScanResponseDto> {
-    const result = await this.shadowIt.detectShadowIt();
+  async triggerShadowItScan(@CurrentUser() user: JwtPayload): Promise<ShadowItScanQueuedDto> {
+    // Enqueued, not run: the API holds no Graph credential, and a scan walks the whole Intune inventory.
+    // A scan already waiting covers this request (`queued: false`).
+    const queued = await this.graphTasks.enqueue({ kind: GRAPH_TASK.SHADOW_IT_SCAN, payload: {} });
     void this.audit.record({
       actorId: user.sub,
       actorEmail: user.email,
       action: AUDIT_ACTION.SHADOW_IT_SCAN_TRIGGERED,
       resourceType: AUDIT_RESOURCE.COMPLIANCE,
       resourceId: 'shadow-it',
-      metadata: { scanned: result.scanned, newFindings: result.newFindings },
+      metadata: { queued },
     });
-    return result;
+    return { queued };
   }
 }

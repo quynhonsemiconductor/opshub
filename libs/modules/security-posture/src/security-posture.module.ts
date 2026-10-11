@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
-import { GraphSecureScoreService } from './application/graph-secure-score.service';
-import { SecurityPostureSyncCron } from './application/security-posture-sync.cron';
+import { GraphTasksModule } from '@modules/graph';
+import { SecureScoreQueryService } from './application/secure-score-query.service';
 import { SecurityPostureController } from './interface/http/security-posture.controller';
 
 @Module({
+  imports: [GraphTasksModule],
   controllers: [SecurityPostureController],
-  providers: [GraphSecureScoreService, SecurityPostureSyncCron],
-  exports: [GraphSecureScoreService],
+  providers: [SecureScoreQueryService],
+  exports: [SecureScoreQueryService],
 })
 export class SecurityPostureModule {}

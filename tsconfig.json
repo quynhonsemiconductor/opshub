@@ -66,6 +66,8 @@
       "@modules/catalog/*": ["./libs/modules/catalog/src/*"],
       "@modules/ai": ["./libs/modules/ai/src/index"],
       "@modules/ai/*": ["./libs/modules/ai/src/*"],
+      "@modules/graph": ["./libs/modules/graph/src/index"],
+      "@modules/graph/*": ["./libs/modules/graph/src/*"],
       "@modules/security-posture": ["./libs/modules/security-posture/src/index"],
       "@modules/security-posture/*": ["./libs/modules/security-posture/src/*"],
       "@platform/email": ["./libs/platform/src/email/index"],

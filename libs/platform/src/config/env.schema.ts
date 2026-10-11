@@ -80,8 +80,39 @@ export const EnvSchema = z
     // Entra ID SSO — required in production, optional in dev (enables entra-login endpoint).
     ENTRA_TENANT_ID: emptyToUndefined(z.string().uuid().optional()),
     ENTRA_CLIENT_ID: emptyToUndefined(z.string().uuid().optional()),
-    /** Microsoft Graph app client secret — client-credentials flow for Graph sync jobs (compliance, security-posture, workforce). Optional; features self-disable when unset. */
-    GRAPH_CLIENT_SECRET: z.string().min(1).optional(),
+    /**
+     * Client id of the Graph WORKER app — a different app registration from ENTRA_CLIENT_ID, which is
+     * the sign-in app and holds no application permissions. READ ONLY BY THE WORKER
+     * (`libs/modules/graph`); the API task is not given any GRAPH_* variable, so a compromised API
+     * process has no Graph credential to steal.
+     *
+     * UNSET MEANS OFF. Every Graph feature (Intune device sync, shadow-IT scan, Secure Score, Entra
+     * account disable/enable and session revoke) skips with one info log instead of failing against a
+     * tenant that never consented. The tenant is ENTRA_TENANT_ID: one directory, two apps.
+     */
+    GRAPH_CLIENT_ID: emptyToUndefined(z.string().uuid().optional()),
+    /**
+     * Credential, option 1 (ECS, now): PEM holding the app's private key AND its certificate, raw or
+     * base64. The public half is uploaded to the Graph worker app registration. No client secret exists
+     * for that app.
+     */
+    GRAPH_CLIENT_CERTIFICATE: emptyToUndefined(
+      z
+        .string()
+        .min(1)
+        .transform((v) =>
+          v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8'),
+        )
+        .refine((v) => v.includes('-----BEGIN'), 'GRAPH_CLIENT_CERTIFICATE must be a PEM')
+        .optional(),
+    ),
+    /**
+     * Credential, option 2 (k3s, later): path of the projected ServiceAccount token that Entra
+     * exchanges through a federated identity credential on the Graph worker app. No secret and no
+     * certificate. Wins over GRAPH_CLIENT_CERTIFICATE when both are set, so the cut-over is adding
+     * this variable.
+     */
+    GRAPH_FEDERATED_TOKEN_FILE: emptyToUndefined(z.string().min(1).optional()),
     // Used to sign fastify-cookie (required for CSRF signed cookies).
     COOKIE_SECRET: z.string().min(32),
     /** Short-lived access token — 15 min is enterprise standard (token theft window). */

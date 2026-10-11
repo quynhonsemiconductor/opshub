@@ -29,9 +29,9 @@ type Finding = components['schemas']['FindingResponseDto'];
  * integration is configured.
  *
  * A SCAN IS NOT A REFRESH. `POST /shadow-it/scan` walks the Intune device inventory, which costs Graph calls
- * and takes real time, so it is an explicit action gated on `compliance.manage` — and it reports what it
- * examined and what it CREATED, because "scanned 400 devices, 0 new findings" is a good outcome that a silent
- * refresh would make look like a failure.
+ * and takes real time, so it is an explicit action gated on `compliance.manage`. It does not run the scan: the
+ * API holds no Graph credential, so it QUEUES one (202) and the worker runs it. The answer is therefore "queued"
+ * or "one is already waiting", not a count — findings appear in the list when the worker finishes.
  */
 export function ShadowItPanel() {
   const { can } = usePermissions();
@@ -54,12 +54,11 @@ export function ShadowItPanel() {
       return data;
     },
     onSuccess: (result) => {
-      // Both numbers, always. `scanned: 0` means the integration is not configured rather than that
-      // everything is clean, and those need different responses from whoever clicked.
+      // `queued: false` means a scan was already waiting, which covers this request.
       toast.success(
-        result.scanned === 0
-          ? 'Nothing was scanned — the Intune integration is not configured'
-          : `Scanned ${result.scanned} device(s), ${result.newFindings} new finding(s)`,
+        result.queued
+          ? 'Scan queued — new findings appear here when it finishes'
+          : 'A scan is already queued — new findings appear here when it finishes',
       );
       void queryClient.invalidateQueries({ queryKey: ['compliance'] });
     },

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { desc } from 'drizzle-orm';
 import { complianceFindings } from '../../../../../db/schema';
-import { ShadowItDetectionService } from './shadow-it-detection.service';
+import { ShadowItFindingsService } from './shadow-it-findings.service';
 
 /**
  * WHAT THIS PINS, and why a unit test rather than a flow.
@@ -31,8 +31,7 @@ describe('listShadowItFindings', () => {
 
   it('takes the NEWEST findings, not the oldest', async () => {
     const { db, orderByCalls } = makeDb();
-    // (graph, db) — the graph client is untouched by this read path.
-    const service = new ShadowItDetectionService({} as never, db as never);
+    const service = new ShadowItFindingsService(db as never);
 
     await service.listShadowItFindings(50);
 

@@ -1,22 +1,23 @@
-import { Controller, Get, Post, Query } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
+import { ApiAcceptedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ApiCommonErrors, RequirePermission } from '@platform';
-import { GraphSecureScoreService } from '../../application/graph-secure-score.service';
-import { SecurityPostureSyncCron } from '../../application/security-posture-sync.cron';
+import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
+import { SecureScoreQueryService } from '../../application/secure-score-query.service';
 import {
   BaselineQueryDto,
   BaselineResponseDto,
   ScoreHistoryQueryDto,
   ScoreHistoryResponseDto,
   SecureScoreResponseDto,
+  SyncQueuedResponseDto,
 } from './dto/security-posture.dto';
 
 @ApiTags('security-posture')
 @Controller('security-posture')
 export class SecurityPostureController {
   constructor(
-    private readonly scoreService: GraphSecureScoreService,
-    private readonly syncCron: SecurityPostureSyncCron,
+    private readonly scoreService: SecureScoreQueryService,
+    private readonly graphTasks: GraphTaskQueue,
   ) {}
 
   @Get('score')
@@ -54,10 +55,15 @@ export class SecurityPostureController {
 
   @Post('sync')
   @RequirePermission('security.manage')
-  @ApiOperation({ summary: 'Manually trigger a security posture sync from Graph' })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Queue a security posture sync from Graph (the worker runs it; 202 Accepted)',
+  })
+  @ApiAcceptedResponse({ type: SyncQueuedResponseDto })
   @ApiCommonErrors(401, 403)
-  async triggerSync() {
-    await this.syncCron.syncSecurityPosture();
-    return { ok: true };
+  async triggerSync(): Promise<SyncQueuedResponseDto> {
+    // Enqueued, not run: the API holds no Graph credential. An equal sync already waiting covers this one.
+    const queued = await this.graphTasks.enqueue({ kind: GRAPH_TASK.POSTURE_SYNC, payload: {} });
+    return { queued };
   }
 }

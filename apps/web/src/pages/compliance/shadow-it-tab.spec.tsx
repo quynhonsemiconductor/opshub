@@ -6,11 +6,9 @@
  * the flag is a build-time constant — a Playwright run either has it for every spec or for none, so the
  * browser suite covers the upgrade gate (the shipped default) and this covers the panel behind the flag.
  *
- * WHAT IS WORTH ASSERTING. Two things the API's own numbers make ambiguous:
- *   - `scanned: 0` means the Intune integration is NOT CONFIGURED, not that every device came back clean.
- *     Reporting it as "0 new findings" would read as a good scan.
- *   - a scan reports what it examined AND what it created, because "400 devices, 0 new" is a success that a
- *     silent refresh would hide.
+ * WHAT IS WORTH ASSERTING. The scan does not run in the request — the API queues it (202) and the worker runs it:
+ *   - `queued: true` is a new scan; the screen must not claim results it does not have.
+ *   - `queued: false` means one was already waiting, which is a different answer from "nothing happened".
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -70,28 +68,28 @@ describe('ShadowItPanel', () => {
     expect(screen.getByText('asset-1')).toBeTruthy();
   });
 
-  it('reports what a scan examined AND what it created', async () => {
-    POST.mockResolvedValue({ data: { scanned: 400, newFindings: 0 }, error: undefined });
-    renderPanel();
-
-    fireEvent.click(await screen.findByRole('button', { name: /run a scan/i }));
-
-    await waitFor(() =>
-      expect(toastSuccess).toHaveBeenCalledWith('Scanned 400 device(s), 0 new finding(s)'),
-    );
-  });
-
-  it('says the integration is not configured when nothing was scanned', async () => {
-    // The API returns `{ scanned: 0, newFindings: 0 }` when Graph credentials are absent — identical in shape
-    // to a clean scan, and the opposite in meaning.
-    POST.mockResolvedValue({ data: { scanned: 0, newFindings: 0 }, error: undefined });
+  it('says a scan was queued, without claiming results', async () => {
+    POST.mockResolvedValue({ data: { queued: true }, error: undefined });
     renderPanel();
 
     fireEvent.click(await screen.findByRole('button', { name: /run a scan/i }));
 
     await waitFor(() =>
       expect(toastSuccess).toHaveBeenCalledWith(
-        'Nothing was scanned — the Intune integration is not configured',
+        'Scan queued — new findings appear here when it finishes',
+      ),
+    );
+  });
+
+  it('says so when a scan was already waiting', async () => {
+    POST.mockResolvedValue({ data: { queued: false }, error: undefined });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: /run a scan/i }));
+
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith(
+        'A scan is already queued — new findings appear here when it finishes',
       ),
     );
   });

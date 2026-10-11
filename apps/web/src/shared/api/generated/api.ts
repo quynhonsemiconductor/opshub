@@ -920,7 +920,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Trigger an immediate Shadow IT detection scan */
+    /** Queue a Shadow IT detection scan (the worker runs it; 202 Accepted) */
     post: operations['ComplianceController_triggerShadowItScan'];
     delete?: never;
     options?: never;
@@ -5103,7 +5103,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Manually trigger a security posture sync from Graph */
+    /** Queue a security posture sync from Graph (the worker runs it; 202 Accepted) */
     post: operations['SecurityPostureController_triggerSync'];
     delete?: never;
     options?: never;
@@ -5458,11 +5458,9 @@ export interface components {
       /** @description The number returned, which is capped — not the number that exists. */
       total: number;
     };
-    ShadowItScanResponseDto: {
-      /** @description Devices examined. `0` also means the integration is not configured: no Intune, nothing to scan. */
-      scanned: number;
-      /** @description Findings the scan created. Re-detecting known software is not a new finding. */
-      newFindings: number;
+    ShadowItScanQueuedDto: {
+      /** @description True when a new scan was queued; false when one was already waiting, which covers this request. */
+      queued: boolean;
     };
     TimesheetResponseDto: {
       /** @enum {string} */
@@ -7848,6 +7846,10 @@ export interface components {
       summary: {
         [key: string]: components['schemas']['BaselineCategorySummaryDto'];
       };
+    };
+    SyncQueuedResponseDto: {
+      /** @description True when a new sync task was queued; false when one was already waiting, which covers this request. */
+      queued: boolean;
     };
   };
   responses: never;
@@ -10493,12 +10495,12 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      200: {
+      202: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ShadowItScanResponseDto'];
+          'application/json': components['schemas']['ShadowItScanQueuedDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -23411,11 +23413,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      201: {
+      202: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SyncQueuedResponseDto'];
+        };
       };
       /** @description Unauthorized — missing or invalid authentication */
       401: {
