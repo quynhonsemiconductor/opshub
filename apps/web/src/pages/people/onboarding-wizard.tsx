@@ -40,7 +40,7 @@ const ACCESS_OPTIONS = [
   'AWS / Azure console',
   'Database access',
   'Local admin rights',
-  'Azure AD PIM role',
+  'Entra admin role (manual: activate in PIM)',
 ];
 
 interface OnboardingWizardProps {

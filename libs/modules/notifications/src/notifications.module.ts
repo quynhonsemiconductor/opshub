@@ -12,14 +12,21 @@ import { NOTIFICATION_REPOSITORY } from './domain/ports/notification.repository'
 import { NOTIFICATION_PREFERENCE_REPOSITORY } from './domain/ports/notification-preference.repository';
 
 @Module({
-  controllers: [NotificationsController, NotificationSseController, NotificationPreferencesController],
+  controllers: [
+    NotificationsController,
+    NotificationSseController,
+    NotificationPreferencesController,
+  ],
   providers: [
     NotificationsService,
     NotificationRelayService,
     EmailRelayService,
     NotificationPreferencesService,
     { provide: NOTIFICATION_REPOSITORY, useClass: NotificationDrizzleRepository },
-    { provide: NOTIFICATION_PREFERENCE_REPOSITORY, useClass: NotificationPreferenceDrizzleRepository },
+    {
+      provide: NOTIFICATION_PREFERENCE_REPOSITORY,
+      useClass: NotificationPreferenceDrizzleRepository,
+    },
   ],
   exports: [NotificationsService],
 })

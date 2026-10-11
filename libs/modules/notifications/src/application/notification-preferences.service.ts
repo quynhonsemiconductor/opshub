@@ -3,7 +3,11 @@ import {
   NOTIFICATION_PREFERENCE_REPOSITORY,
   type INotificationPreferenceRepository,
 } from '../domain/ports/notification-preference.repository';
-import type { NotificationPreference, UpsertPreferenceInput, NotificationChannel } from '../domain/notification-preference.types';
+import type {
+  NotificationPreference,
+  UpsertPreferenceInput,
+  NotificationChannel,
+} from '../domain/notification-preference.types';
 
 @Injectable()
 export class NotificationPreferencesService {

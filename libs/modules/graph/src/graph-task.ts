@@ -44,3 +44,15 @@ export function dedupeKeyFor(task: GraphTask): string | null {
 export function orderingKeyFor(task: GraphTask): string | null {
   return task.kind === GRAPH_TASK.ACCOUNT_RECONCILE ? task.payload.employeeId : null;
 }
+
+/**
+ * The worker's heartbeat, in `graph_sync_state`. The worker writes `enabled` or `disabled` every 30
+ * seconds; the API reads it to tell a caller the truth: asking for a scan when no worker can run one
+ * would answer 202 for work that never happens. A heartbeat older than {@link HEARTBEAT_FRESH_MS} means
+ * no worker is up, which is the same answer.
+ *
+ * Account tasks do NOT consult it: an approved offboarding must queue even while Graph is off, and
+ * waits for the worker app.
+ */
+export const GRAPH_HEARTBEAT_STATE = 'graph-worker-heartbeat';
+export const HEARTBEAT_FRESH_MS = 3 * 60_000;

@@ -60,8 +60,10 @@ export class SecurityPostureController {
     summary: 'Queue a security posture sync from Graph (the worker runs it; 202 Accepted)',
   })
   @ApiAcceptedResponse({ type: SyncQueuedResponseDto })
-  @ApiCommonErrors(401, 403)
+  @ApiCommonErrors(401, 403, 409)
   async triggerSync(): Promise<SyncQueuedResponseDto> {
+    // 409 GRAPH_DISABLED when no worker can run it: a 202 would promise a sync that never happens.
+    await this.graphTasks.requireGraphAvailable();
     // Enqueued, not run: the API holds no Graph credential. An equal sync already waiting covers this one.
     const queued = await this.graphTasks.enqueue({ kind: GRAPH_TASK.POSTURE_SYNC, payload: {} });
     return { queued };

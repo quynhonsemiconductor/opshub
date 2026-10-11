@@ -42,7 +42,10 @@ import type {
 
 const ACCESS_TYPE_OPTIONS = [
   { value: 'local_admin', label: 'Local Admin' },
-  { value: 'pim_role', label: 'PIM Role (JIT elevation)' },
+  // The enum value stays `pim_role` (existing grants carry it). The LABEL says what actually happens:
+  // opshub records the approval; it does not elevate anything in Entra. The approver or the requester
+  // activates the role in PIM themselves.
+  { value: 'pim_role', label: 'Entra admin role (manual: activate in PIM)' },
   { value: 'app_admin', label: 'App Admin' },
   { value: 'vpn', label: 'VPN' },
   { value: 'other', label: 'Other' },

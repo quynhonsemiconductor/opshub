@@ -1,7 +1,4 @@
-import type {
-  accessRequestStatusEnum,
-  accessTypeEnum,
-} from '../../../../../db/schema';
+import type { accessRequestStatusEnum, accessTypeEnum } from '../../../../../db/schema';
 
 export type AccessRequestStatus = (typeof accessRequestStatusEnum.enumValues)[number];
 export type AccessType = (typeof accessTypeEnum.enumValues)[number];

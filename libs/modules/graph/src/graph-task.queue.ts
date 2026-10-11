@@ -1,7 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
-import { graphTaskOutbox } from '../../../../db/schema';
-import { dedupeKeyFor, orderingKeyFor, type GraphTask } from './graph-task';
+import { eq } from 'drizzle-orm';
+import {
+  ConflictException,
+  ErrorCodes,
+  InjectDrizzle,
+  type DbExecutor,
+  type DrizzleDB,
+} from '@platform';
+import { graphSyncState, graphTaskOutbox } from '../../../../db/schema';
+import {
+  GRAPH_HEARTBEAT_STATE,
+  HEARTBEAT_FRESH_MS,
+  dedupeKeyFor,
+  orderingKeyFor,
+  type GraphTask,
+} from './graph-task';
 
 /**
  * The API's side of Graph: write a task row, never call Graph.
@@ -30,5 +43,31 @@ export class GraphTaskQueue {
       .onConflictDoNothing()
       .returning({ id: graphTaskOutbox.id });
     return rows.length > 0;
+  }
+
+  /**
+   * Whether a worker with Graph enabled is up right now (its heartbeat is `enabled` and fresh).
+   * For endpoints that would otherwise answer 202 for a scan nobody can run.
+   */
+  async isGraphAvailable(now: Date = new Date()): Promise<boolean> {
+    const [row] = await this.db
+      .select({ cursor: graphSyncState.cursor, updatedAt: graphSyncState.updatedAt })
+      .from(graphSyncState)
+      .where(eq(graphSyncState.name, GRAPH_HEARTBEAT_STATE))
+      .limit(1);
+    return (
+      row?.cursor === 'enabled' && now.getTime() - row.updatedAt.getTime() < HEARTBEAT_FRESH_MS
+    );
+  }
+
+  /** 409 GRAPH_DISABLED unless a worker with Graph is up: the UI must not promise a scan that never runs. */
+  async requireGraphAvailable(): Promise<void> {
+    if (!(await this.isGraphAvailable())) {
+      throw new ConflictException(
+        ErrorCodes.GRAPH_DISABLED,
+        'Microsoft Graph is not enabled on the worker, so this cannot run. It is turned on by ' +
+          'configuring the Graph worker app (docs/graph-worker-app.md).',
+      );
+    }
   }
 }

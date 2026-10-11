@@ -3,12 +3,13 @@ import { InjectDrizzle, type DrizzleDB } from '@platform';
 import { eq, and, inArray } from 'drizzle-orm';
 import { notificationPreferences } from '../../../../../../db/schema';
 import type { INotificationPreferenceRepository } from '../../domain/ports/notification-preference.repository';
-import type { NotificationPreference, UpsertPreferenceInput } from '../../domain/notification-preference.types';
+import type {
+  NotificationPreference,
+  UpsertPreferenceInput,
+} from '../../domain/notification-preference.types';
 
 @Injectable()
-export class NotificationPreferenceDrizzleRepository
-  implements INotificationPreferenceRepository
-{
+export class NotificationPreferenceDrizzleRepository implements INotificationPreferenceRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDB) {}
 
   async listForUser(userId: string): Promise<NotificationPreference[]> {
@@ -23,7 +24,9 @@ export class NotificationPreferenceDrizzleRepository
     const [row] = await this.db
       .select()
       .from(notificationPreferences)
-      .where(and(eq(notificationPreferences.userId, userId), eq(notificationPreferences.type, type)))
+      .where(
+        and(eq(notificationPreferences.userId, userId), eq(notificationPreferences.type, type)),
+      )
       .limit(1);
     return row ? this.map(row) : null;
   }
@@ -46,15 +49,15 @@ export class NotificationPreferenceDrizzleRepository
       .insert(notificationPreferences)
       .values({
         userId: input.userId,
-        type:   input.type,
-        inApp:  input.inApp  ?? true,
-        email:  input.email  ?? true,
+        type: input.type,
+        inApp: input.inApp ?? true,
+        email: input.email ?? true,
       })
       .onConflictDoUpdate({
         target: [notificationPreferences.userId, notificationPreferences.type],
         set: {
-          ...(input.inApp  !== undefined && { inApp:  input.inApp }),
-          ...(input.email  !== undefined && { email:  input.email }),
+          ...(input.inApp !== undefined && { inApp: input.inApp }),
+          ...(input.email !== undefined && { email: input.email }),
           updatedAt: new Date(),
         },
       })
@@ -65,16 +68,18 @@ export class NotificationPreferenceDrizzleRepository
   async delete(userId: string, type: string): Promise<void> {
     await this.db
       .delete(notificationPreferences)
-      .where(and(eq(notificationPreferences.userId, userId), eq(notificationPreferences.type, type)));
+      .where(
+        and(eq(notificationPreferences.userId, userId), eq(notificationPreferences.type, type)),
+      );
   }
 
   private map(row: typeof notificationPreferences.$inferSelect): NotificationPreference {
     return {
-      id:        row.id,
-      userId:    row.userId,
-      type:      row.type,
-      inApp:     row.inApp,
-      email:     row.email,
+      id: row.id,
+      userId: row.userId,
+      type: row.type,
+      inApp: row.inApp,
+      email: row.email,
       updatedAt: row.updatedAt,
     };
   }

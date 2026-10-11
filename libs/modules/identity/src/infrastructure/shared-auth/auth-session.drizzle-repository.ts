@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB, type DbExecutor } from '@platform';
-import type { AuthSession, CreateSessionInput, IAuthSessionRepository } from '@quynhonsemiconductor/identity';
+import type {
+  AuthSession,
+  CreateSessionInput,
+  IAuthSessionRepository,
+} from '@quynhonsemiconductor/identity';
 import { refreshTokens } from '../../../../../../db/schema';
 
 type RefreshTokenRow = typeof refreshTokens.$inferSelect;

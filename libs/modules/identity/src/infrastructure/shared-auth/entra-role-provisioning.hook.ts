@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import type { ISsoProvisioningHook, SsoProvisioningContext, User } from '@quynhonsemiconductor/identity';
+import type {
+  ISsoProvisioningHook,
+  SsoProvisioningContext,
+  User,
+} from '@quynhonsemiconductor/identity';
 import { AuthzAdminService } from '@modules/authz';
 
 /** Fallback role granted to any SSO user Entra asserts with no mapped App Role. */

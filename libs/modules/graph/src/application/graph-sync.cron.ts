@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { ExclusiveJob } from '@platform';
+import { ExclusiveJob, InjectDrizzle, type DrizzleDB } from '@platform';
+import { graphSyncState } from '../../../../../db/schema';
+import { GRAPH_HEARTBEAT_STATE } from '../graph-task';
 import { GraphClientService } from '../graph-client.service';
 import { GRAPH_LOCK } from '../graph-locks';
 import { DeviceSyncService } from './device-sync.service';
@@ -24,7 +26,31 @@ export class GraphSyncCron {
     private readonly shadowIt: ShadowItScanService,
     private readonly posture: SecureScoreSyncService,
     private readonly exclusive: ExclusiveJob,
+    @InjectDrizzle() private readonly db: DrizzleDB,
   ) {}
+
+  /**
+   * Tells the API whether this worker can run Graph work (see GRAPH_HEARTBEAT_STATE). Every replica
+   * writes it — an idempotent upsert, so no lock — and a worker that is down stops writing, which the
+   * API reads as "not available".
+   */
+  @Cron('*/30 * * * * *', { name: 'graph-heartbeat' })
+  async heartbeat(): Promise<void> {
+    try {
+      const cursor = this.graph.isEnabled() ? 'enabled' : 'disabled';
+      await this.db
+        .insert(graphSyncState)
+        .values({ name: GRAPH_HEARTBEAT_STATE, cursor })
+        .onConflictDoUpdate({
+          target: graphSyncState.name,
+          set: { cursor, updatedAt: new Date() },
+        });
+    } catch (err) {
+      this.logger.warn(
+        `Graph heartbeat not written: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   @Cron(CronExpression.EVERY_30_MINUTES, { name: 'compliance-device-sync' })
   async syncDeviceCompliance(): Promise<void> {

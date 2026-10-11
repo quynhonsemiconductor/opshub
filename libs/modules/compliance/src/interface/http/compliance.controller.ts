@@ -231,8 +231,10 @@ export class ComplianceController {
     summary: 'Queue a Shadow IT detection scan (the worker runs it; 202 Accepted)',
   })
   @ApiAcceptedResponse({ type: ShadowItScanQueuedDto })
-  @ApiCommonErrors(401, 403)
+  @ApiCommonErrors(401, 403, 409)
   async triggerShadowItScan(@CurrentUser() user: JwtPayload): Promise<ShadowItScanQueuedDto> {
+    // 409 GRAPH_DISABLED when no worker can run it: a 202 would promise a scan that never happens.
+    await this.graphTasks.requireGraphAvailable();
     // Enqueued, not run: the API holds no Graph credential, and a scan walks the whole Intune inventory.
     // A scan already waiting covers this request (`queued: false`).
     const queued = await this.graphTasks.enqueue({ kind: GRAPH_TASK.SHADOW_IT_SCAN, payload: {} });

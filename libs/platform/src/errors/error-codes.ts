@@ -17,6 +17,8 @@ export const ErrorCodes = {
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   UNSUPPORTED_MEDIA_TYPE: 'UNSUPPORTED_MEDIA_TYPE',
   PRECONDITION_FAILED: 'PRECONDITION_FAILED',
+  /** The worker has no Graph credential: a scan or sync request would wait for ever. */
+  GRAPH_DISABLED: 'GRAPH_DISABLED',
 
   // Auth / Identity
   AUTH_INVALID_CREDENTIALS: 'AUTH_INVALID_CREDENTIALS',
