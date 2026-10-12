@@ -123,12 +123,20 @@ describe('EXISTING mixed-case employees keep working, against PostgreSQL', () =>
     )
       .split('--> statement-breakpoint')
       .filter((st) => st.includes('"identity"."employees"'));
-    expect(statements).toHaveLength(3); // preflight, normalise, index
+    // The ORDER is the point: preflight, then normalise, then the index that needs normalised data.
+    expect(statements).toHaveLength(3);
+    const [preflight, normalise, index] = statements as [string, string, string];
+    expect(preflight).toMatch(/RAISE EXCEPTION/);
+    expect(normalise).toMatch(
+      /UPDATE "identity"\."employees" SET "email" = lower\(btrim\("email"\)\)/,
+    );
+    expect(index).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS "uq_employee_email_lower"/);
 
+    // The DML steps run for real, in a transaction that is rolled back. (The index is DDL, which the
+    // runtime role this suite connects as cannot run; it is covered by the migration upgrade path job.)
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('DROP INDEX IF EXISTS identity.uq_employee_email_lower');
       const ids: string[] = [];
       for (const email of [`Mixed.${suffix}@QNSC.vn`, ` padded.${suffix}@qnsc.vn `]) {
         const { rows } = await client.query<{ id: string }>(
@@ -138,7 +146,8 @@ describe('EXISTING mixed-case employees keep working, against PostgreSQL', () =>
         ids.push(rows[0].id);
       }
 
-      for (const st of statements) await client.query(st);
+      await client.query(preflight);
+      await client.query(normalise);
 
       const { rows } = await client.query<{ email: string }>(
         'SELECT email FROM identity.employees WHERE id = ANY($1) ORDER BY email',
@@ -149,13 +158,11 @@ describe('EXISTING mixed-case employees keep working, against PostgreSQL', () =>
         `padded.${suffix}@qnsc.vn`,
       ]);
 
-      // A pair that collides only once lower-cased and trimmed: the preflight must refuse, naming it.
-      await client.query('DROP INDEX identity.uq_employee_email_lower');
-      await client.query('SAVEPOINT collide');
+      // Collides only once lower-cased AND trimmed (the plain unique indexes cannot see it): refused.
       await client.query(`INSERT INTO identity.employees (email, display_name) VALUES ($1, 'x')`, [
         ` MIXED.${suffix}@qnsc.vn`,
       ]);
-      await expect(client.query(statements[0])).rejects.toThrow(
+      await expect(client.query(preflight)).rejects.toThrow(
         /collide once their email is lower-cased/,
       );
     } finally {
