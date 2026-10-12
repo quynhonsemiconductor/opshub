@@ -258,10 +258,20 @@ export class AuthzAdminService {
    *
    * Unknown role keys are ignored (fail-safe: an unmapped Entra role never
    * grants access). Scoped (non-global) assignments are left untouched.
+   *
+   * `fallbackKey` is what the person holds when NONE of `roleKeys` names a role that exists (an empty claim, or
+   * only roles opshub has never heard of). It is a floor, never an addition: it applies only when the
+   * reconciliation would otherwise leave them with no global role at all, and it can never exceed what the
+   * caller names. The sign-in passes `employee`, the role with no permissions of its own.
    * This bypasses the interactive escalation guard by design: it runs as the
    * system during SSO provisioning, mirroring what the IdP already asserts.
    */
-  async syncUserRolesByKeys(userId: string, roleKeys: string[], actor: Actor): Promise<string[]> {
+  async syncUserRolesByKeys(
+    userId: string,
+    roleKeys: string[],
+    actor: Actor,
+    fallbackKey?: string,
+  ): Promise<string[]> {
     const allRoles = await this.roleRepo.list();
     const idByKey = new Map(allRoles.map((r) => [r.key, r.id]));
     const keyById = new Map(allRoles.map((r) => [r.id, r.key]));
@@ -269,6 +279,10 @@ export class AuthzAdminService {
     const desiredRoleIds = new Set(
       roleKeys.map((k) => idByKey.get(k)).filter((id): id is string => !!id),
     );
+    if (desiredRoleIds.size === 0 && fallbackKey) {
+      const fallbackId = idByKey.get(fallbackKey);
+      if (fallbackId) desiredRoleIds.add(fallbackId);
+    }
 
     const current = await this.assignmentRepo.listForUser(userId);
     const currentGlobal = current.filter((a) => a.scopeType === 'global');

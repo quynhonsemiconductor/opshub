@@ -24,7 +24,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { eq } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Identity } from '@quynhonsemiconductor/identity';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import {
@@ -277,5 +277,240 @@ describe('Microsoft sign-in with the staff preset', () => {
     expect(refused.cookie, 'a leaver signed in because only the ban was checked').toBeUndefined();
     expect(refused.status).toBe(302);
     expect(refused.error).toBe('STAFF_SIGN_IN_REFUSED');
+  });
+});
+
+/*
+ * THE ACCESS MODEL (owner decision). "Assignment required" is OFF on the Entra app because the whole company
+ * uses OpsHub, so just-in-time provisioning IS the access path:
+ *   - any member of the tenant with a qnsc.vn address signs in and is provisioned as `employee`;
+ *   - elevated roles come ONLY from Entra App Role assignments, reconciled on every sign-in;
+ *   - opshub itself refuses guests, other tenants, other domains and offboarded employees.
+ */
+describe('the access model', () => {
+  async function provisioned(email: string): Promise<{ employee: boolean; user: boolean }> {
+    const [e] = await db
+      .select({ id: employees.id })
+      .from(employees)
+      .where(eq(employees.email, email));
+    const [u] = await db
+      .select({ id: identityUser.id })
+      .from(identityUser)
+      .where(eq(identityUser.email, email));
+    return { employee: Boolean(e), user: Boolean(u) };
+  }
+
+  describe('(a) just-in-time access never grants more than `employee` without a role claim', () => {
+    it('a newcomer with NO roles claim holds `employee` and no permission at all', async () => {
+      const who = person(undefined);
+
+      const { cookie } = await microsoftSignIn(who);
+
+      const principal = await me(cookie!);
+      expect(principal.status).toBe(200);
+      expect(principal.body.roles).toEqual(['employee']);
+      expect(principal.body.permissions, 'JIT granted a permission with no role claim').toEqual([]);
+    });
+
+    it('only roles opshub has never heard of are no claim either: `employee`, not nothing and not more', async () => {
+      const who = person(['SuperUser', 'Global Administrator']);
+
+      const { cookie } = await microsoftSignIn(who);
+
+      const principal = await me(cookie!);
+      expect(principal.body.roles).toEqual(['employee']);
+      expect(principal.body.permissions).toEqual([]);
+    });
+
+    it('a roles claim that is not a list grants nothing: `employee`', async () => {
+      const who = { ...person(undefined), claims: { roles: 'admin' } };
+
+      const { cookie } = await microsoftSignIn(who);
+
+      expect((await me(cookie!)).body.roles).toEqual(['employee']);
+    });
+  });
+
+  describe('(b) an offboarded employee is refused even when their identity user is gone', () => {
+    /**
+     * These tests break the employee/user invariant ON PURPOSE, and the refused sign-ins leave behind the NEW
+     * user Better Auth made. Put the database back as the invariant suite (`identity-v8-data`) expects it: drop
+     * the stray user, restore the employee's own with the same id.
+     */
+    async function restoreUser(employeeId: string): Promise<void> {
+      const [emp] = await db.select().from(employees).where(eq(employees.id, employeeId));
+      if (!emp) return;
+      await db.delete(identityUser).where(eq(identityUser.email, emp.email.toLowerCase()));
+      await db
+        .insert(identityUser)
+        .values({
+          id: emp.id,
+          name: emp.displayName,
+          email: emp.email.toLowerCase(),
+          emailVerified: true,
+          banned: emp.status === 'offboarded',
+        })
+        .onConflictDoNothing();
+    }
+
+    const touched: string[] = [];
+    afterEach(async () => {
+      for (const id of touched.splice(0)) await restoreUser(id);
+    });
+
+    async function offboardedEmployee(who: IdpIdentity) {
+      const created = await createEmployee(who.email!);
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/v1/employees/${created.id}/status`,
+        headers: authHeaders(admin),
+        payload: { status: 'offboarded' },
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      touched.push(created.id);
+      return created;
+    }
+
+    it('the identity.user row was DELETED: the returning leaver gets a fresh user, and is refused by email', async () => {
+      const who = person(['employee']);
+      const created = await offboardedEmployee(who);
+      await db.delete(identityUser).where(eq(identityUser.id, created.id));
+
+      const refused = await microsoftSignIn(who);
+
+      expect(refused.cookie, 'a leaver signed in because their user row was gone').toBeUndefined();
+      expect(refused.error).toBe('STAFF_SIGN_IN_REFUSED');
+      const [row] = await db.select().from(employees).where(eq(employees.id, created.id));
+      expect(row?.status, 'the refusal must not touch the employee').toBe('offboarded');
+    });
+
+    it('never backfilled, matched by the Entra oid alone (their address changed since)', async () => {
+      const who = person(['employee']);
+      const created = await offboardedEmployee(who);
+      await db.update(employees).set({ entraOid: who.oid }).where(eq(employees.id, created.id));
+      await db.delete(identityUser).where(eq(identityUser.id, created.id));
+
+      const refused = await microsoftSignIn({
+        ...who,
+        email: `renamed.${RUN}.${seq}@qnsc.vn`,
+      });
+
+      expect(refused.cookie, 'a leaver signed in under a new address').toBeUndefined();
+      expect(refused.error).toBe('STAFF_SIGN_IN_REFUSED');
+    });
+
+    it('an ACTIVE employee whose user row is gone fails closed too, rather than get a second identity', async () => {
+      const who = person(['employee']);
+      const created = await createEmployee(who.email!);
+      touched.push(created.id);
+      await db.delete(identityUser).where(eq(identityUser.id, created.id));
+
+      const refused = await microsoftSignIn(who);
+
+      expect(refused.cookie).toBeUndefined();
+      expect(refused.error).toBe('STAFF_SIGN_IN_REFUSED');
+      // and no second employee row was made for the same person
+      const rows = await db.select().from(employees).where(eq(employees.email, who.email!));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(created.id);
+    });
+  });
+
+  describe('(c) guests and other domains are refused BEFORE anything is provisioned', () => {
+    it.each([
+      ['acct = 1', { acct: 1 }],
+      ['#EXT# in the UPN', { upn: 'jane_gmail.com#EXT#@qnsc.onmicrosoft.com' }],
+      ['an idp that is not the issuer', { idp: 'https://sts.windows.net/some-other-tenant/' }],
+    ])('a guest marked by %s', async (_label, marker) => {
+      const who = person(['admin']);
+
+      const refused = await microsoftSignIn({ ...who, claims: { roles: ['admin'], ...marker } });
+
+      expect(refused.cookie, 'a guest was given a session').toBeUndefined();
+      expect(refused.error).toBe('unable_to_get_user_info');
+      expect(await provisioned(who.email!), 'a refused guest was provisioned').toEqual({
+        employee: false,
+        user: false,
+      });
+    });
+
+    it.each(['jane@gmail.com', 'jane@qnsc.vn.evil.example', 'jane@evilqnsc.vn'])(
+      'an address off qnsc.vn: %s',
+      async (address) => {
+        const email = `${RUN}.${address}`;
+        const who = person(['admin'], { email });
+
+        const refused = await microsoftSignIn(who);
+
+        expect(
+          refused.cookie,
+          'an address off the staff domain was given a session',
+        ).toBeUndefined();
+        expect(refused.error).toBe('unable_to_get_user_info');
+        expect(await provisioned(email)).toEqual({ employee: false, user: false });
+      },
+    );
+
+    it('a SUBDOMAIN of qnsc.vn: identity’s own domain match lets it through, so the sign-in hook is what refuses it', async () => {
+      // Found by writing this suite: `staff.domains` matches subdomains, so identity accepts
+      // jane@sub.qnsc.vn and creates a user for it. The hook's exact-domain check stops it before any
+      // employee, role or session exists.
+      const email = `${RUN}.jane@sub.qnsc.vn`;
+      const who = person(['admin'], { email });
+
+      const refused = await microsoftSignIn(who);
+
+      expect(refused.cookie, 'a subdomain address was given a session').toBeUndefined();
+      expect(refused.error).toBe('STAFF_SIGN_IN_REFUSED');
+      expect((await provisioned(email)).employee, 'a subdomain address was provisioned').toBe(
+        false,
+      );
+    });
+
+    it('another tenant is refused before provisioning too', async () => {
+      const who = person(['admin'], { tid: OTHER_TENANT });
+
+      const refused = await microsoftSignIn(who);
+
+      expect(refused.cookie).toBeUndefined();
+      expect(await provisioned(who.email!)).toEqual({ employee: false, user: false });
+    });
+  });
+
+  describe('(d) roles are re-synced from the claim on every sign-in', () => {
+    it('removing an App Role in Entra demotes the person at their next sign-in, ALL their sessions at once', async () => {
+      const who = person(['admin']);
+
+      const first = await microsoftSignIn(who);
+      const asAdmin = await me(first.cookie!);
+      expect(asAdmin.body.roles).toEqual(['admin']);
+      expect(asAdmin.body.permissions).toContain('*');
+
+      // The assignment is removed in Entra. NOTHING changes for the session already open: the sync runs at
+      // sign-in, and a session carries no role. This is the window the PR body states.
+      const stillAdmin = await me(first.cookie!);
+      expect(stillAdmin.body.permissions, 'demoted without a sign-in').toContain('*');
+
+      // Their next sign-in carries no role: demoted to `employee`...
+      const second = await microsoftSignIn({ ...who, claims: {} });
+      const demoted = await me(second.cookie!);
+      expect(demoted.body.roles).toEqual(['employee']);
+      expect(demoted.body.permissions).toEqual([]);
+
+      // ...and, because roles live in the database and not in the session, the OLD session is demoted too
+      const oldSession = await me(first.cookie!);
+      expect(oldSession.status).toBe(200);
+      expect(oldSession.body.roles).toEqual(['employee']);
+      expect(oldSession.body.permissions, 'the old admin session kept admin rights').toEqual([]);
+    });
+
+    it('promotes at the next sign-in too, and a role HR assigned by hand in OpsHub is not Entra’s to keep', async () => {
+      const who = person(undefined);
+      const first = await microsoftSignIn(who);
+      expect((await me(first.cookie!)).body.roles).toEqual(['employee']);
+
+      const promoted = await microsoftSignIn({ ...who, claims: { roles: ['hr'] } });
+      expect((await me(promoted.cookie!)).body.roles).toEqual(['hr']);
+    });
   });
 });

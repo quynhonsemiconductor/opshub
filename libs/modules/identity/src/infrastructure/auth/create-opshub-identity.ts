@@ -12,13 +12,8 @@ import { failOpenLog } from '@quynhonsemiconductor/observability';
 import type { PinoLogger } from 'nestjs-pino';
 import { IDENTITY_PRODUCT, type AppConfigService, type DrizzleDB } from '@platform';
 import * as identityAuthSchema from '../../../../../../db/schema/identity-auth';
+import { STAFF_EMAIL_DOMAINS } from './staff-domains';
 import type { StaffSignInHandler } from './staff-sign-in.handler';
-
-/**
- * Email domain(s) of the company: the staff preset refuses a Microsoft sign-in whose address is outside them,
- * and password sign-up for them (there is none here). Decided with the owner: `qnsc.vn`.
- */
-export const STAFF_EMAIL_DOMAINS = ['qnsc.vn'];
 
 const UNCONFIGURED_ID = '00000000-0000-4000-8000-000000000000';
 
@@ -73,7 +68,7 @@ export function createOpshubIdentity(deps: OpshubIdentityDeps): Identity {
       tenantId: config.get('ENTRA_TENANT_ID') || UNCONFIGURED_ID,
       clientId: config.get('ENTRA_CLIENT_ID') || UNCONFIGURED_ID,
       clientSecret: config.get('ENTRA_CLIENT_SECRET') || 'unconfigured',
-      domains: STAFF_EMAIL_DOMAINS,
+      domains: [...STAFF_EMAIL_DOMAINS],
       allowGuests: false,
       ...(deps.staffAuthority ? { authority: deps.staffAuthority } : {}),
     },
