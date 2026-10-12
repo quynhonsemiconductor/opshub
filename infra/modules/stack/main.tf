@@ -46,8 +46,14 @@ locals {
   api_log_group    = "/ecs/${local.name}-api"
   worker_log_group = "/ecs/${local.name}-worker"
 
-  kms_key_arn        = data.terraform_remote_state.shared.outputs.kms_key_arn
-  cloudflare_zone_id = try(data.terraform_remote_state.shared.outputs.cloudflare_zone_id, "")
+  kms_key_arn = data.terraform_remote_state.shared.outputs.kms_key_arn
+
+  # The zone id is read ONLY when DNS is switched on, and then WITHOUT a fallback: if the shared stack
+  # lacks the output this fails the plan, and `terraform_data.dns_zone_id_is_valid` fails it again if the
+  # value is not a zone id. The old `try(..., "")` turned a missing/empty id into "DNS is off", and the
+  # modules below turned that into "destroy the records" (develop, 2026-10-12). Whether DNS exists is
+  # decided by `var.dns_enabled`, never inferred from this value.
+  cloudflare_zone_id = var.dns_enabled ? data.terraform_remote_state.shared.outputs.cloudflare_zone_id : ""
 
   # ── Connection-pool budget ──────────────────────────────────────────────────
   # `DATABASE_POOL_MAX` defaults to 20 per PROCESS in env.schema.ts, and nothing here
@@ -816,8 +822,8 @@ module "web" {
   account_id  = var.cloudflare_account_id
   name        = "${local.name}-web"
   zone_id     = local.cloudflare_zone_id
-  domain      = local.cloudflare_zone_id != "" ? var.app_domain : ""
-  record_name = local.cloudflare_zone_id != "" ? var.web_record : ""
+  domain      = var.dns_enabled ? var.app_domain : ""
+  record_name = var.dns_enabled ? var.web_record : ""
   comment     = "${local.name} web SPA → Cloudflare Pages (managed by ${var.product}-infra ${var.env})"
 
   # Upstream for the Pages Functions at apps/web/functions/v1/[[path]].ts and
@@ -835,13 +841,40 @@ module "web" {
   }
 }
 
+# ── Guard: when DNS is on, the zone id must be a zone id ──────────────────────
+# A resource precondition, not a variable validation (the value is read from remote state, which a
+# validation block cannot see) and not a `check` block (a failed check is a warning and the plan still
+# exits 0). `input` is bound to the value so it re-evaluates on every plan.
+#
+# PROTECTION AGAINST DESTROY. `lifecycle { prevent_destroy }` on the API CNAME, the web CNAME and the
+# Pages domain is NOT set here, deliberately: those resources live inside tf-modules (`dns-record`,
+# `pages-web`), and `prevent_destroy` must be a literal on the resource itself, so it can only be set
+# there — for every consumer. That would also make `dns_enabled = false` and any environment teardown
+# (which those modules document as removing the records, so none is left to collide on a rebuild)
+# impossible without editing the module. What stops THIS class of incident is the cause: DNS is decided
+# by an explicit boolean, never by the zone value, and an invalid zone id fails the plan. The
+# plan-level backstop is the destructive-guard (see .github/workflows/infra-apply.yml, TODO).
+resource "terraform_data" "dns_zone_id_is_valid" {
+  input = {
+    dns_enabled = var.dns_enabled
+    zone_id     = local.cloudflare_zone_id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !var.dns_enabled || can(regex("^[0-9a-f]{32}$", local.cloudflare_zone_id))
+      error_message = "dns_enabled is true but the shared stack's cloudflare_zone_id is not a 32-hex zone id (empty or missing). Refusing to plan: with it, the API and web DNS records and the Pages domain would be destroyed. Re-apply infra/live/_shared with TF_VAR_cloudflare_zone_id set (CI: vars.CLOUDFLARE_ZONE_ID)."
+    }
+  }
+}
+
 # ── DNS — the API's public edge ───────────────────────────────────────────────
 # Cloudflare-proxied (orange cloud): the ALB security group in runtime-<env> only
 # admits Cloudflare edge ranges, so a grey-clouded record would simply time out.
 module "dns_api" {
   source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/dns-record?ref=dns-record-v1.1.0"
 
-  enabled = local.cloudflare_zone_id != ""
+  enabled = var.dns_enabled
   zone_id = local.cloudflare_zone_id
   name    = var.api_record
   type    = "CNAME"

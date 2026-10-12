@@ -589,6 +589,17 @@ variable "uploads" {
   default = {}
 }
 
+variable "dns_enabled" {
+  description = <<-EOT
+    Whether this environment owns its public DNS: the API CNAME, the web CNAME and the Pages custom
+    domain. REQUIRED, no default, so every environment states it. Set it to false only to decommission
+    DNS on purpose: it is the one switch that removes the records, and it is never inferred from the
+    zone id (an empty id used to mean "off", which silently destroyed the records). When true, the
+    shared stack must export a valid 32-hex `cloudflare_zone_id` or the plan fails.
+  EOT
+  type        = bool
+}
+
 variable "cloudflare_account_id" {
   description = "Cloudflare account that owns the Pages project (public identifier). Empty skips the Pages project entirely."
   type        = string
