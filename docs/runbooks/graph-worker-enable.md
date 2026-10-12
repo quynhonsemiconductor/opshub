@@ -23,6 +23,14 @@ You need:
 One registration **per environment**: develop first, production later, each with its own credential. Do the
 whole runbook for develop, check it, then repeat it for prod with `env=prod` and prod's `infra/live/prod`.
 
+**Leftover from before the split: the `graph-client-secret` key of the `opshub/<env>/app` secret.** The
+previous setup kept the Graph client secret as a key inside that shared bundle, which the API and migrator
+roles can read. The task definitions no longer reference it (the 2026-10-12 apply removed the reference), but
+Terraform does not manage the bundle's contents, so the value stayed. **The owner is removing that key now.**
+This runbook does not depend on it and never reads it. When it is gone, also delete the client secret on the
+old, over-privileged registration (the one that held `RoleManagement.ReadWrite.Directory` and
+`User.ReadWrite.All`): a secret that is no longer stored anywhere should not stay valid in Entra.
+
 Order matters in exactly one place, and getting it wrong takes the worker down: **the secret must hold a
 value before `graph_client_certificate_set` is flipped** (Part 4). ECS cannot start a task whose injected
 secret has no value (`ResourceInitializationError … can't find the specified secret value for staging label:
