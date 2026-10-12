@@ -226,6 +226,10 @@ module "stack" {
 
   cloudflare_account_id = var.cloudflare_account_id
 
+  // This environment owns its public DNS (API and web CNAMEs, Pages custom domain). An explicit
+  // switch, never inferred from the zone id; the zone id itself is validated in the stack module.
+  dns_enabled = true
+
   // Dormant until otlp_endpoint is set — see develop. Production would want a probability
   // BELOW 1 for cost once a backend exists; be aware that head sampling drops most ERROR
   // traces too, so keeping all errors needs tail sampling at a gateway that sees whole traces.
