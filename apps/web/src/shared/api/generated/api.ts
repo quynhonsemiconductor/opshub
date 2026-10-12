@@ -5190,6 +5190,7 @@ export interface components {
       jobTitle?: string;
       /** Format: uuid */
       managerId?: string;
+      /** Format: uuid */
       entraOid?: string;
     };
     UpdateEmployeeDto: {
