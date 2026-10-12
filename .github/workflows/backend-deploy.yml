@@ -54,7 +54,7 @@ on:
   # Safe on both refs, and the gates below are why: nothing here branches on the TRIGGER,
   # only on the ref. `wait-for-infra` keys off whether this sha touched infra/**;
   # `wait-for-ci` skips entirely on a tag and otherwise waits on the Backend · CI run for
-  # this sha — which, for an already-merged commit, is complete, so `gh run watch` returns
+  # this sha — which, for an already-merged commit, is complete, so the wait returns
   # at once. It fails CLOSED when no run exists, so dispatching a commit that never passed
   # CI blocks rather than deploys.
   workflow_dispatch:
@@ -121,38 +121,24 @@ jobs:
 
       - name: Wait for Infrastructure · Apply on this commit
         if: steps.touched.outputs.infra == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # The sibling run may not be registered the instant this job starts, so
-          # allow a grace period before concluding there is none.
-          #
-          # `|| ID=""` is not cosmetic: these runners use `set -e`, and an
-          # assignment takes its command substitution's exit status, so a
-          # rate-limited `gh run list` would skip the retry loop entirely and turn
-          # a recoverable blip into a failed gate.
-          for _ in $(seq 1 12); do
-            ID=$(gh run list --workflow=infra-apply.yml --commit "$GITHUB_SHA" \
-                   --limit 1 --json databaseId --jq '.[0].databaseId // empty') || ID=""
-            [ -n "$ID" ] && break
-            sleep 10
-          done
-
-          if [ -z "${ID:-}" ]; then
-            echo "::warning::infra changed but no Infrastructure · Apply run found for $GITHUB_SHA — proceeding."
-            exit 0
-          fi
-
-          echo "Waiting on infra-apply run $ID …"
-          gh run watch "$ID" --exit-status
-          echo "Infrastructure applied; deploy may proceed."
+        # The retry-then-poll logic, and the rule that a rate limit is not a verdict on the
+        # awaited run, live in the shared action — see `quynhonsemiconductor/ci`. This was
+        # hand-written here, with `gh run watch --exit-status`, which reports a 403 the same
+        # way it reports a failed run: rova lost both deploys on 2026-09-13 to exactly that.
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        with:
+          workflow: infra-apply.yml
+          label: Infrastructure · Apply
+          # Warn: infra changed but no apply run exists. See the block comment above.
+          if-missing: warn
+          missing-message: >-
+            infra changed but no Infrastructure · Apply run was found for this commit.
 
   # ───────────────────────────────────────────────────────────────────────────
   # CI gate — a red main must not deploy.
   #
-  #   - push to main → wait for Backend · CI on this sha; `gh run watch
-  #     --exit-status` propagates its conclusion, so a failed CI blocks deploy.
+  #   - push to main → wait for Backend · CI on this sha; the shared `wait-for-run` action
+  #     propagates its conclusion, so a failed CI blocks deploy.
   #   - tag push → wait for the DEVELOP deploy of this sha instead. See below.
   #
   # Fails CLOSED: if no CI run is found for the sha, block rather than ship blind.
@@ -177,7 +163,7 @@ jobs:
   # cut a release slow enough to expose it.
   #
   # Waiting on the whole develop RUN, not just its build jobs, is deliberate: it is the
-  # documented contract, it is one `gh run watch` rather than per-job polling, and it means
+  # documented contract, it is ONE run's conclusion rather than per-job polling, and it means
   # prod can never ship an image develop itself failed to deploy.
   #
   # NOT-FOUND WARNS RATHER THAN BLOCKING, unlike the main branch below. A release tag
@@ -202,62 +188,39 @@ jobs:
     steps:
       - name: Wait for Backend · CI on this commit
         if: github.ref_type != 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # This job does not check out the repo, so `gh` cannot infer it from a
-          # local remote — pass it explicitly.
-          for _ in $(seq 1 12); do
-            ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow backend-ci.yml \
-                   --branch main --commit "$GITHUB_SHA" \
-                   --limit 1 --json databaseId --jq '.[0].databaseId // empty') || ID=""
-            [ -n "$ID" ] && break
-            sleep 10
-          done
-          if [ -z "${ID:-}" ]; then
-            echo "::error::No Backend · CI run found for $GITHUB_SHA — blocking deploy (fail closed)."
-            exit 1
-          fi
-          echo "Waiting on Backend · CI run $ID …"
-          gh run watch --repo "$GITHUB_REPOSITORY" "$ID" --exit-status
-          echo "Backend · CI succeeded; deploy may proceed."
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        with:
+          workflow: backend-ci.yml
+          # `main` and not the tag ref: Backend · CI only runs on main.
+          branch: main
+          label: Backend · CI
+          # Fail closed: no CI run for this sha means shipping blind.
+          if-missing: fail
+          missing-message: >-
+            No Backend · CI run was found for this commit.
 
       # Prod promotes the image the develop deploy pushed, so this is the tag run's real
       # precondition. See the block comment above this job for the race it closes.
       - name: Wait for the develop deploy of this commit
         if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # `--branch main` is what excludes THIS run: the develop deploy's headBranch is
-          # `main` while the tag run's is the tag ref, so the two never match each other
-          # despite sharing a workflow file and a commit. Without it this would find
-          # itself and wait forever.
-          #
-          # `|| ID=""` on the assignment, matching wait-for-infra above and for the same
-          # reason: runners use `set -e`, an assignment takes its command substitution's
-          # exit status, so a rate-limited `gh run list` would skip the retry loop.
-          for _ in $(seq 1 12); do
-            ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow backend-deploy.yml \
-                   --branch main --commit "$GITHUB_SHA" \
-                   --limit 1 --json databaseId --jq '.[0].databaseId // empty') || ID=""
-            [ -n "$ID" ] && break
-            sleep 10
-          done
-
-          if [ -z "${ID:-}" ]; then
-            echo "::warning::No develop Backend · Deploy run found for $GITHUB_SHA — proceeding, the promote step's ECR poll is the backstop."
-            exit 0
-          fi
-
-          echo "Waiting on develop Backend · Deploy run $ID …"
-          if ! gh run watch --repo "$GITHUB_REPOSITORY" "$ID" --exit-status; then
-            echo "::error::The develop deploy of $GITHUB_SHA did not succeed (run $ID). Prod promotes the image that run pushes, so there is nothing to promote. Fix develop, then re-run this deploy."
-            exit 1
-          fi
-          echo "Develop deployed this commit; the sha image exists and prod may promote it."
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        with:
+          workflow: backend-deploy.yml
+          # `main` is what excludes THIS run: the develop deploy's headBranch is `main` while
+          # the tag run's is the tag ref, so the two never match despite sharing a workflow
+          # file and a commit. Without it this would find itself and wait forever.
+          branch: main
+          label: develop Backend · Deploy
+          # Warn, unlike the CI gate above: a hand-cut tag on a docs-only commit produces no
+          # develop run, and the promote step's ECR poll is still the backstop. Blocking would
+          # turn this gate into a new way to make a release un-shippable.
+          if-missing: warn
+          missing-message: >-
+            No develop Backend · Deploy run was found for this commit; the promote step's ECR
+            poll is the backstop.
+          failure-message: >-
+            The develop deploy of this commit did not succeed. Prod promotes the image that run
+            pushes, so there is nothing to promote. Fix develop, then re-run this deploy.
 
   deploy:
     needs: [wait-for-infra, wait-for-ci]
