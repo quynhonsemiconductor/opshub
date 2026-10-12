@@ -111,9 +111,17 @@ jobs:
         working-directory: infra/live/_shared
         run: tofu validate
 
+      # TODO(destructive-guard): once quynhonsemiconductor/ci publishes actions/destructive-guard, run it
+      # between a saved `tofu plan -out` and `tofu apply <plan>` here and in apply-develop / apply-prod, so
+      # a plan that deletes or replaces DNS or identity resources is refused unless the PR carries an
+      # explicit label. This workflow applies with -auto-approve and no saved plan today. Tracked with
+      # quynhonsemiconductor/infra#163, which has the same guard as a local composite action.
       - name: tofu apply
         working-directory: infra/live/_shared
         run: tofu apply -input=false -auto-approve
+        env:
+          # REQUIRED by infra/live/_shared (validated, no default). An organisation variable.
+          TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
 
   # ───────────────────────────────────────────────────────────────────────────
   # Develop — only on a branch push to main (NOT on tag pushes).

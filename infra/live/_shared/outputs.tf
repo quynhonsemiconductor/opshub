@@ -23,9 +23,18 @@ output "artifacts_bucket_name" {
   description = "Shared artifacts bucket from qnsc-infra — use in publish-openapi-spec CI"
 }
 
+# From a REQUIRED, validated variable (var.cloudflare_zone_id), not from the platform's remote state: that
+# read went through try(..., "") and exported "" when the platform output was empty, which made the env
+# stacks plan the destruction of their DNS records. Never empty here: the variable's validation stops the
+# plan, and the precondition below is the same check on the value that is actually exported.
 output "cloudflare_zone_id" {
-  value       = try(data.terraform_remote_state.platform.outputs.cloudflare_zone_id, "")
-  description = "Cloudflare Zone ID for qnsc.vn from qnsc-infra — env stacks pass to the dns-record module"
+  value       = var.cloudflare_zone_id
+  description = "Cloudflare Zone ID for qnsc.vn — env stacks pass it to the dns-record and pages-web modules. Never empty."
+
+  precondition {
+    condition     = can(regex("^[0-9a-f]{32}$", var.cloudflare_zone_id))
+    error_message = "Refusing to export an empty or malformed cloudflare_zone_id: every env stack that reads it would replace its DNS records."
+  }
 }
 output "cloudflare_ipv4" {
   value       = try(data.terraform_remote_state.platform.outputs.cloudflare_ipv4, [])
