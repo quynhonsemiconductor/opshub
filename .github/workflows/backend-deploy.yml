@@ -255,8 +255,12 @@ jobs:
       # NATIVE ARM RUNNER, not QEMU: emulating an arm64 pnpm + Nest compile on an x86
       # runner multiplies build minutes by enough to outweigh the Fargate saving, which is
       # the reusable workflow's own stated reason for having a separate runner input.
-      build_runner: ubuntu-24.04-arm
-      image_platforms: linux/arm64
+      #
+      # MULTI-ARCH (2026-10-13): the on-prem k3s host is amd64, so the image is now built for BOTH architectures: linux/amd64 on
+      # ubuntu-24.04 and linux/arm64 on ubuntu-24.04-arm, natively, merged into one manifest by the reusable's `merge` job.
+      # ECS stays on Graviton (cpu_architecture = ARM64 above) and pulls the arm64 entry of the same tag; `build_runner` and
+      # `image_platforms` are ignored while multi_arch is true. Drop this when the product has left ECS.
+      multi_arch: true
 
       # ── Build cache: GHA, not the `registry` default ─────────────────────────
       # The registry backend writes a `:buildcache` tag to ECR with `mode=max` and PULLS it
