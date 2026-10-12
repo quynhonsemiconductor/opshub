@@ -102,7 +102,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18.6-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -115,10 +115,10 @@ jobs:
           --health-retries 10
 
       redis:
-        image: redis:7-alpine
+        image: valkey/valkey:8.1.10-alpine
         ports: ['6379:6379']
         options: >-
-          --health-cmd "redis-cli ping"
+          --health-cmd "valkey-cli ping"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
@@ -296,7 +296,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18.6-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -422,7 +422,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18.6-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -431,9 +431,9 @@ jobs:
         options: --health-cmd pg_isready --health-interval 5s --health-retries 10
 
       redis:
-        image: redis:7-alpine
+        image: valkey/valkey:8.1.10-alpine
         ports: ['6379:6379']
-        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 5
+        options: --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 5
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
