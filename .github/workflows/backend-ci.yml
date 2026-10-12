@@ -547,16 +547,20 @@ jobs:
           artifact-name: openapi-spec-${{ github.sha }}
           retention-days: "30"
 
-      # On PRs: download the base-branch spec and diff for breaking changes.
-      - name: Download base spec
+      # On PRs: fetch the base branch's spec, then diff it for breaking changes.
+      #
+      # This used to be `dawidd6/action-download-artifact` with `continue-on-error`. It took the latest
+      # SUCCESSFUL run on the base branch, which is the PREVIOUS commit whenever a pull request meets a merge
+      # whose own push run is still going; the artifact it looked for is named after the base commit, so
+      # nothing matched, the failure was swallowed, and the check below skipped (runs 37887725836 and
+      # 37887654403; 5 of the last 39 pull-request runs). The shared action skips only when the base branch has
+      # no successful push run; otherwise it finds the base commit's spec, or the nearest first-parent ancestor's
+      # (warning, naming it), or FAILS. See its README in quynhonsemiconductor/ci.
+      - name: Fetch the base spec
         if: github.event_name == 'pull_request'
-        uses: dawidd6/action-download-artifact@d63b86af1b34672e53c440b1b83979861906bad7  # v24
-        continue-on-error: true   # first PR has no base artifact yet
+        uses: quynhonsemiconductor/ci/actions/fetch-openapi-base-spec@v1
         with:
           workflow: backend-ci.yml
-          branch: ${{ github.base_ref }}
-          name: openapi-spec-${{ github.event.pull_request.base.sha }}
-          path: base-spec/
 
       - name: Check for breaking API changes (PR only)
         if: github.event_name == 'pull_request'
