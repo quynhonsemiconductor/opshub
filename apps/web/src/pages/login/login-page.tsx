@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { ENV } from '@/shared/config/env';
 import { sessionFetch } from '@/shared/api/session-fetch';
+import { signInErrorFrom } from './sign-in-error';
 
 function OpsHubMark({ size = 32 }: { size?: number }) {
   return (
@@ -32,10 +33,14 @@ function MicrosoftMark() {
 /**
  * Sign-in page. One button, because there is one directory: the company Entra tenant.
  *
- * The SPA never sees a token. `POST /v1/bff/login` starts the Authorization-Code + PKCE
- * flow SERVER-side and returns the Entra authorize URL; the browser is then handed to
- * Microsoft, and comes back to `/v1/bff/callback`, which mints a server-side session and
- * sets the opaque `__Host-opshub_session` cookie before redirecting here-ward.
+ * The SPA never sees a token. `POST /api/auth/sign-in/social` (identity 8, Better Auth) starts the
+ * Authorization-Code + PKCE flow SERVER-side and returns the Microsoft authorize URL; the browser is then
+ * handed to Microsoft, and comes back to `/api/auth/callback/microsoft`, which creates the session and
+ * sets the opaque `__Secure-opshub.session_token` cookie before redirecting to `callbackURL`.
+ *
+ * `/api/auth/*` is same-origin with the SPA like `/v1/*`: the Vite proxy locally, a Cloudflare Pages
+ * Function deployed (apps/web/functions/api/auth/[[path]].ts). Same-origin is a requirement, not a
+ * preference: the cookie is set on the response the browser lands on, on the SPA host.
  *
  * `window.location.assign`, not the router: this is a top-level navigation to a different
  * origin, and it must be a real document load so Entra can set its own cookies and return
@@ -43,23 +48,27 @@ function MicrosoftMark() {
  */
 export function LoginPage() {
   const [loading, setLoading] = useState(false);
+  const signInError = signInErrorFrom(window.location.search);
 
   async function onSignIn() {
     setLoading(true);
-    // returnTo is validated server-side against an open-redirect guard, so a hostile
-    // value cannot bounce the browser off-site — it falls back to BFF_POST_LOGIN_REDIRECT.
-    const returnTo = new URLSearchParams(window.location.search).get('returnTo') ?? '/';
-    // Raw fetch, not the generated client: the BFF controller is @ApiExcludeController,
-    // so these browser-redirect routes are deliberately absent from the OpenAPI document
-    // and from the typed client built off it.
+    // `callbackURL` is the attempted path, which Better Auth validates against its trusted origins, so a
+    // hostile value cannot bounce the browser off-site. Only a same-site path is ever forwarded.
+    const requested = new URLSearchParams(window.location.search).get('returnTo') ?? '/';
+    const callbackURL = requested.startsWith('/') && !requested.startsWith('//') ? requested : '/';
+    // Raw fetch, not the generated client: identity's routes are not part of the OpenAPI document
+    // (they are not Nest controllers), so they are absent from the typed client built off it.
     try {
-      const res = await sessionFetch(`${ENV.API_BASE_URL}/v1/bff/login`, {
+      const res = await sessionFetch(`${ENV.API_BASE_URL}/api/auth/sign-in/social`, {
         method: 'POST',
-        body: JSON.stringify({ returnTo }),
+        // errorCallbackURL: without it a refused sign-in (a banned user, the wrong tenant, a refusal by the
+        // product hook) lands on the API's own /api/auth/error page. Back here, the code is shown.
+        body: JSON.stringify({ provider: 'microsoft', callbackURL, errorCallbackURL: '/login' }),
       });
       if (!res.ok) throw new Error(`login start failed (${res.status})`);
-      const { authorizeUrl } = (await res.json()) as { authorizeUrl: string };
-      window.location.assign(authorizeUrl);
+      const { url } = (await res.json()) as { url?: string };
+      if (!url) throw new Error('login start returned no authorize URL');
+      window.location.assign(url);
     } catch {
       setLoading(false);
       toast.error('Could not start sign-in. Please try again or contact IT.');
@@ -134,6 +143,16 @@ export function LoginPage() {
                 <p className="text-sm text-fg-muted">Use your company Microsoft account</p>
               </div>
             </div>
+
+            {signInError && (
+              <div
+                role="alert"
+                className="mb-4 rounded-md border border-danger bg-danger-bg p-3 text-sm text-fg"
+              >
+                <p>{signInError.message}</p>
+                <p className="mt-1 text-xs text-fg-muted">Error code: {signInError.code}</p>
+              </div>
+            )}
 
             <button
               type="button"

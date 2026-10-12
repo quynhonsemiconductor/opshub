@@ -115,7 +115,7 @@ export function assertEveryRouteDeclaresAuthz(discovery: DiscoveryService): void
         undeclared.map((r) => `  ${r}`).join('\n') +
         `\n\nEvery route needs exactly one of @RequirePermission(...), @Public(), ` +
         `@SelfScoped(reason) or @AuthorizedInService(reason, pinnedBy). Without one, ` +
-        `JwtAuthGuard proves who the caller is and nothing checks whether they may.`,
+        `SessionAuthGuard proves who the caller is and nothing checks whether they may.`,
     );
   }
 

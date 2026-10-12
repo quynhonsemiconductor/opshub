@@ -17,8 +17,8 @@ import {
   RATE_LIMIT_TIERS,
   type RateLimitTierName,
 } from './rate-limit.constants';
-import type { JwtPayload } from '../auth/jwt.strategy';
-import { BFF_SESSION_COOKIE } from '../auth/bff-session-resolver';
+import type { JwtPayload } from '../auth/principal';
+import { SESSION_COOKIE } from '../auth/session-cookie';
 import { failOpenLog } from '@quynhonsemiconductor/observability';
 
 /**
@@ -28,31 +28,29 @@ import { failOpenLog } from '@quynhonsemiconductor/observability';
  *
  * WHY THIS DOES NOT READ `req.user`, AND WHY IT USED TO TRY.
  *
- * This is a GLOBAL guard (`APP_GUARD`). `JwtAuthGuard` is a ROUTE guard, mounted by `@Auth()` and
+ * This is a GLOBAL guard (`APP_GUARD`). `SessionAuthGuard` is a ROUTE guard, mounted by `@Auth()` and
  * `@RequirePermission()`. Nest runs global guards first, so authentication has not happened yet when
  * this executes and `req.user` is always undefined — on every request, including fully authenticated
  * ones.
  *
- * The identifier therefore fell through to the IP for every tier except `refreshToken`, and the three
+ * The identifier therefore fell through to the IP for every tier, and the three
  * docblocks describing a "NAT-safe per-user bucket" described something that never happened. What
  * actually happened: everybody behind one office NAT shared a single 200-requests-a-minute bucket. At
  * roughly a dozen API calls per page load that is about fifteen simultaneous page loads for the whole
  * company before the next person gets a 429 — and the refusal lands on whichever request is next, so it
  * presents as an unrelated feature breaking.
  *
- * SO THE IDENTITY COMES FROM THE CREDENTIAL, not from the decoded principal. The session cookie and the
- * bearer token are both per-session secrets the caller has already sent, and hashing one gives a stable
- * bucket without verifying anything — which is exactly the trick `AUTH_REFRESH` was already using on the
- * refresh cookie. A forged or garbage credential simply gets its own bucket rather than somebody else's.
+ * SO THE IDENTITY COMES FROM THE CREDENTIAL, not from the decoded principal. The session cookie is a
+ * per-session secret the caller has already sent, and hashing it gives a stable bucket without verifying
+ * anything. A forged or garbage credential simply gets its own bucket rather than somebody else's.
  *
  * PER SESSION, NOT PER USER, and that is the honest description: one person in two browsers holds two
  * sessions and gets two buckets. For a limiter whose job is to bound the damage one client can do, the
  * client is the session.
  *
  * Key strategy (controlled by tier.keyBy):
- *  - 'userId'       — the caller's session or bearer credential, hashed; NAT-safe (default)
+ *  - 'userId'       — the caller's session cookie, hashed; NAT-safe (default)
  *  - 'ip'           — pre-auth requests where no credential exists yet (AUTH_LOGIN)
- *  - 'refreshToken' — SHA-256 of the HttpOnly refresh cookie (AUTH_REFRESH)
  *  - fallback: the credential if one was sent, else the IP
  *
  *  - Graceful degradation: if Redis is unavailable, allow request through
@@ -71,23 +69,14 @@ function hashCredential(secret: string): string {
 }
 
 /**
- * The caller's credential, hashed — session cookie first, then bearer token.
+ * The caller's credential, hashed: the identity session cookie, the only credential there is.
  *
- * COOKIE BEFORE HEADER because the SPA is cookie-only and is the overwhelming majority of traffic; a
- * bearer token is what an API consumer or a test harness sends. A request carrying both is the SPA on a
- * path that also forwards a token, and either answer is a correct bucket for it.
- *
- * Returns undefined when neither is present, which is a genuine pre-auth request — a login attempt, a
- * health probe — and those belong on the IP.
+ * Returns undefined when it is absent, which is a genuine pre-auth request (a sign-in attempt, a health
+ * probe), and those belong on the IP.
  */
 function credentialOf(req: FastifyRequest): string | undefined {
-  const session = (req.cookies as Record<string, string> | undefined)?.[BFF_SESSION_COOKIE];
-  if (session) return hashCredential(session);
-
-  const authorization = req.headers.authorization;
-  if (authorization?.startsWith('Bearer ')) return hashCredential(authorization.slice(7));
-
-  return undefined;
+  const session = (req.cookies as Record<string, string> | undefined)?.[SESSION_COOKIE];
+  return session ? hashCredential(session) : undefined;
 }
 
 @Injectable()
@@ -145,13 +134,6 @@ export class RateLimitGuard implements CanActivate {
       case 'ip':
         identifier = ip;
         break;
-      case 'refreshToken': {
-        // Hash the HttpOnly cookie so the raw token never appears in Redis keys.
-        // Falls back to IP if the cookie is absent (unauthenticated probe).
-        const rawCookie = (req.cookies as Record<string, string> | undefined)?.['refresh_token'];
-        identifier = rawCookie ? hashCredential(rawCookie) : ip;
-        break;
-      }
       case 'userId':
       default:
         /*

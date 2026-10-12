@@ -10,6 +10,7 @@ import { shutdownOtel } from './otel';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import { enableCorrelationId } from '@quynhonsemiconductor/platform-http';
 import { AppModule } from './app.module';
 import { AppConfigService } from '@platform';
 import { bootstrapApp } from './bootstrap/app.bootstrap';
@@ -28,6 +29,9 @@ async function main(): Promise<void> {
     { bufferLogs: true },
   );
 
+  // Before anything else in the Nest pipeline: one correlation id per request, from its first byte (also
+  // the `/api/auth/*` mount, which no Nest middleware sees), in observability's request context.
+  enableCorrelationId(app);
   await bootstrapApp(app);
 
   const config = app.get(AppConfigService);

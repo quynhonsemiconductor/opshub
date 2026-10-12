@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
  * Ratchet: every HTTP route handler must DECLARE how it is authorized. Baseline 0.
  *
  * This used to be a debt counter at 43, because `PolicyGuard` returned `true` on missing
- * metadata: a handler nobody decorated was allowed, to any authenticated caller. `JwtAuthGuard`
+ * metadata: a handler nobody decorated was allowed, to any authenticated caller. `SessionAuthGuard`
  * proved *who* you were and nothing then checked *whether you may*, so forgetting a decorator
  * was not a 500 and not a 403 — it was a silently world-readable endpoint that every test
  * still passed.
@@ -19,12 +19,12 @@ import { describe, expect, it } from 'vitest';
  *
  * FIVE declarations satisfy it, and every route has exactly one:
  *   `@RequirePermission(code, scope?)`   a permission, resolved from the database
- *   `@Public()`                          no principal exists yet (login, refresh, HMAC webhook)
+ *   `@Public()`                          no principal exists yet (probes, HMAC webhook)
  *   `@SelfScoped(reason)`                the subject IS the caller
  *   `@AuthorizedInService(reason, test)` resolved at run time, pinned by a named test
  *   `@AuthzGap(reason)`                  a KNOWN missing check, counted below
  *
- * `@Auth()` is NOT one of them. It mounts JwtAuthGuard and nothing else, so treating it as
+ * `@Auth()` is NOT one of them. It mounts SessionAuthGuard and nothing else, so treating it as
  * authorization would make this ratchet report zero while changing nothing about who may call
  * what — which is exactly the state that produced the 43.
  *

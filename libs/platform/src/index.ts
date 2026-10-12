@@ -1,6 +1,7 @@
 export * from './platform.module';
 export * from './config/index';
-export * from './context/index';
+/** ONE request-context store, shared with the worker and with platform-http's correlation id middleware. */
+export { RequestContextService } from '@quynhonsemiconductor/observability';
 export * from './database/index';
 export * from './errors/index';
 export * from './http/index';

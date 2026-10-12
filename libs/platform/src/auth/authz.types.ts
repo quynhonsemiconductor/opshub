@@ -2,7 +2,7 @@
  * Authorization domain types shared by the enforcement layer (PolicyGuard,
  * AuthzService, ScopeEvaluator) and the authz management module.
  */
-import type { JwtPayload } from './jwt.strategy';
+import type { JwtPayload } from './principal';
 
 /** Scope dimensions a role assignment can be constrained to. */
 export type ScopeType = 'global' | 'self' | 'team' | 'dept' | 'region';

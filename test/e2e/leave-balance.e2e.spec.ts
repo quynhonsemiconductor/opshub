@@ -26,7 +26,7 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 /** Holds NO permission codes — the tier every rule here must constrain. */
@@ -77,7 +77,7 @@ async function balances(
   const res = await app.inject({
     method: 'GET',
     url: `/v1/workforce/leave/balance?year=${YEAR}${query}`,
-    headers: bearer(session),
+    headers: authHeaders(session),
   });
   expect(res.statusCode, res.body).toBe(200);
   return JSON.parse(res.body) as never;
@@ -93,7 +93,7 @@ async function submitLeave(
   const res = await app.inject({
     method: 'POST',
     url: '/v1/workforce/leave',
-    headers: bearer(session),
+    headers: authHeaders(session),
     payload: {
       leaveType,
       startDate: start,
@@ -122,7 +122,7 @@ describe('leave entitlement and balances', () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/v1/workforce/leave/entitlement',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: {
         employeeId: FIXTURE.NO_PERMISSIONS.id,
         leaveType: 'annual',
@@ -148,7 +148,7 @@ describe('leave entitlement and balances', () => {
     const holiday = await app.inject({
       method: 'POST',
       url: '/v1/workforce/holidays',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: { date: wednesday, name: `E2E holiday ${YEAR}` },
     });
     expect(holiday.statusCode, holiday.body).toBe(201);
@@ -181,7 +181,7 @@ describe('leave entitlement and balances', () => {
     const holiday = await app.inject({
       method: 'POST',
       url: '/v1/workforce/holidays',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: { date: monday, name: `Retro holiday ${YEAR}` },
     });
     expect(holiday.statusCode, holiday.body).toBe(201);
@@ -189,7 +189,7 @@ describe('leave entitlement and balances', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/workforce/leave?employeeId=${FIXTURE.NO_PERMISSIONS.id}&limit=50`,
-      headers: bearer(hr),
+      headers: authHeaders(hr),
     });
     expect(res.statusCode).toBe(200);
     const rows = (JSON.parse(res.body) as { data: { startDate: string; workingDays: number }[] })
@@ -253,7 +253,7 @@ describe('part-day leave', () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/v1/workforce/leave/entitlement',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: {
         employeeId: FIXTURE.NO_PERMISSIONS.id,
         leaveType: 'annual',
@@ -405,7 +405,7 @@ describe('accrual and carry-over', () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/v1/workforce/leave/entitlement',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: { employeeId: FIXTURE.NO_PERMISSIONS.id, leaveType, year, grantedDays: days },
     });
     expect(res.statusCode, res.body).toBe(204);
@@ -415,7 +415,7 @@ describe('accrual and carry-over', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/workforce/leave/balance?year=${year}`,
-      headers: bearer(employee),
+      headers: authHeaders(employee),
     });
     expect(res.statusCode, res.body).toBe(200);
     return JSON.parse(res.body) as Awaited<ReturnType<typeof balances>>;
@@ -425,7 +425,7 @@ describe('accrual and carry-over', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/workforce/leave/policies',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
     });
     expect(res.statusCode, res.body).toBe(200);
     const policies = JSON.parse(res.body) as {
@@ -508,7 +508,7 @@ describe('accrual and carry-over', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workforce/leave',
-      headers: bearer(employee),
+      headers: authHeaders(employee),
       payload: {
         leaveType: 'annual',
         startDate: december,
@@ -529,7 +529,7 @@ describe('accrual and carry-over', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workforce/leave',
-      headers: bearer(employee),
+      headers: authHeaders(employee),
       payload: {
         leaveType: 'annual',
         startDate: `${year}-01-05`,
@@ -553,7 +553,7 @@ describe('accrual and carry-over', () => {
     const run = await app.inject({
       method: 'POST',
       url: '/v1/workforce/leave/carry-over',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: { year: to },
     });
     expect(run.statusCode, run.body).toBe(200);
@@ -581,7 +581,7 @@ describe('accrual and carry-over', () => {
       const run = await app.inject({
         method: 'POST',
         url: '/v1/workforce/leave/carry-over',
-        headers: bearer(hr),
+        headers: authHeaders(hr),
         payload: { year: to },
       });
       expect(run.statusCode, `attempt ${attempt}: ${run.body}`).toBe(200);
@@ -599,7 +599,7 @@ describe('accrual and carry-over', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/workforce/leave/carry-over',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: { year: to },
     });
     const target = (await balancesFor(to)).find((b) => b.leaveType === 'sick')!;
@@ -618,7 +618,7 @@ describe('accrual and carry-over', () => {
     const run = await app.inject({
       method: 'POST',
       url: '/v1/workforce/leave/carry-over',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: { year: to },
     });
     expect(run.statusCode, run.body).toBe(200);
@@ -638,7 +638,7 @@ describe('accrual and carry-over', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workforce/leave/carry-over',
-      headers: bearer(employee),
+      headers: authHeaders(employee),
       payload: { year: 2030 },
     });
     expect(res.statusCode).toBe(403);
@@ -650,7 +650,7 @@ describe('leave policy authorization', () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/v1/workforce/leave/entitlement',
-      headers: bearer(employee),
+      headers: authHeaders(employee),
       payload: {
         employeeId: FIXTURE.NO_PERMISSIONS.id,
         leaveType: 'annual',
@@ -665,7 +665,7 @@ describe('leave policy authorization', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workforce/holidays',
-      headers: bearer(employee),
+      headers: authHeaders(employee),
       payload: { date: `${YEAR}-12-25`, name: 'Self-declared day off' },
     });
     expect(res.statusCode, res.body).toBe(403);
@@ -677,7 +677,7 @@ describe('leave policy authorization', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/workforce/holidays?year=${YEAR}`,
-      headers: bearer(employee),
+      headers: authHeaders(employee),
     });
     expect(res.statusCode, res.body).toBe(200);
   });
@@ -686,7 +686,7 @@ describe('leave policy authorization', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/workforce/leave/balance?year=${YEAR}&employeeId=${FIXTURE.HR.id}`,
-      headers: bearer(employee),
+      headers: authHeaders(employee),
     });
 
     // Denied, NOT silently narrowed to their own numbers — a plausible page of the wrong person's

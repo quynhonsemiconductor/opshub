@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '@modules/audit';
 import { GraphTasksModule } from '@modules/graph';
-import { IdentityModule } from '@modules/identity';
+import { EmployeesModule } from '@modules/identity';
 import { LeaveBalanceService } from './application/leave-balance.service';
 import { WorkforceService } from './application/workforce.service';
 import { LeaveRequestTypeDef } from './application/leave-request.type-def';
@@ -13,7 +13,7 @@ import { WorkforceDrizzleRepository } from './infrastructure/persistence/workfor
 import { WORKFORCE_REPOSITORY } from './domain/ports/workforce.repository';
 
 @Module({
-  imports: [AuditModule, IdentityModule, GraphTasksModule],
+  imports: [AuditModule, EmployeesModule, GraphTasksModule],
   controllers: [WorkforceController],
   providers: [
     WorkforceService,

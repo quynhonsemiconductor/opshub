@@ -3,7 +3,7 @@ import { DomainException as SharedDomainException } from '@quynhonsemiconductor/
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
-import { RequestContextService } from '../context/request-context';
+import { RequestContextService } from '@quynhonsemiconductor/observability';
 import { albReceivedAtMs, albWaitMs, arrivalAtMs } from '@quynhonsemiconductor/platform-runtime';
 
 /** Health/readiness probes — suppress from access logs to avoid noise. */
@@ -60,7 +60,7 @@ function redactBody(body: unknown): unknown {
  *
  * Includes:
  *   - `ip`     — client IP (honouring X-Real-IP / X-Forwarded-For proxy headers)
- *   - `userId` — from ALS after JWT validation (undefined on unauthenticated routes)
+ *   - `userId` — from ALS after session authentication (undefined on unauthenticated routes)
  *   - `body`   — redacted request body on 4xx/5xx only (useful for debugging)
  */
 @Injectable()

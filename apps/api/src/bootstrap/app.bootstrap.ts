@@ -8,7 +8,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Logger } from 'nestjs-pino';
 import {
   AppConfigService,
-  BFF_SESSION_COOKIE,
+  SESSION_COOKIE,
   CSRF_HEADER,
   CSRF_SECRET_COOKIE,
   registerRequestTiming,
@@ -58,7 +58,7 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
       const header = req.headers[CSRF_HEADER];
       return Array.isArray(header) ? header[0] : header;
     },
-    getUserInfo: (req) => req.cookies?.[BFF_SESSION_COOKIE] ?? '',
+    getUserInfo: (req) => req.cookies?.[SESSION_COOKIE] ?? '',
     csrfOpts: { hmacKey: config.get('CSRF_SECRET'), userInfo: true },
   });
 
@@ -153,7 +153,11 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
           'running gets `IDEMPOTENCY_IN_FLIGHT` (409) — retry shortly.',
       )
       .setVersion(config.get('SERVICE_VERSION'))
-      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token')
+      .addCookieAuth(
+        SESSION_COOKIE,
+        { type: 'apiKey', in: 'cookie', name: SESSION_COOKIE },
+        'session',
+      )
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('api/docs', app, document, {

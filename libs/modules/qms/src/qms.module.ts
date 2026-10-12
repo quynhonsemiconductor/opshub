@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '@modules/audit';
-import { IdentityModule } from '@modules/identity';
+import { EmployeesModule } from '@modules/identity';
 import { DocumentsModule } from '@modules/documents';
 import { IsmsModule } from '@modules/isms';
 import { NonconformanceService } from './application/nonconformance.service';
@@ -23,7 +23,7 @@ import {
 } from './domain/ports/qms.repository';
 
 @Module({
-  // IdentityModule for EmployeeService: the controllers check an owner exists before writing, since
+  // EmployeesModule for EmployeeService: the controllers check an owner exists before writing, since
   // `owner_id` carries no cross-schema FK.
   //
   // The two services depend on each other's REPOSITORIES, not on each other — the closure gate reads
@@ -32,10 +32,10 @@ import {
   // IsmsModule for the management review's §9.3.2 agenda: the clause's inputs include the performance
   // of external providers and the effectiveness of actions on risks, which the vendor and control
   // services own. Composed rather than copied — a second copy of those numbers disagrees with the
-  // register within a day. No cycle: IsmsModule imports only AuditModule and IdentityModule.
+  // register within a day. No cycle: IsmsModule imports only AuditModule and EmployeesModule.
   // DocumentsModule for DocumentsService: an internal audit's report is a controlled document,
   // and the reference to it carries no cross-schema FK.
-  imports: [AuditModule, IdentityModule, IsmsModule, DocumentsModule],
+  imports: [AuditModule, EmployeesModule, IsmsModule, DocumentsModule],
   controllers: [
     NonconformanceController,
     CapaController,

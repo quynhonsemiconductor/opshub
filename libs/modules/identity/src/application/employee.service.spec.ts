@@ -18,13 +18,9 @@ const mockEmployeeRepo = {
   updatePhoto: vi.fn(),
   list: vi.fn(),
 };
-const mockRefreshTokenRepo = { revokeAllForEmployee: vi.fn() };
-const mockAuthCache = {
-  revokeUser: vi.fn(),
-  unrevokeUser: vi.fn(),
-  isUserRevoked: vi.fn(),
-  isTokenDenied: vi.fn(),
-};
+const mockUsers = { ensure: vi.fn(), ban: vi.fn(), unban: vi.fn() };
+const mockSessions = { offboard: vi.fn(), reinstate: vi.fn() };
+const mockGraphTasks = { enqueue: vi.fn() };
 const mockStorage = {
   presignUpload: vi.fn(),
   confirmUpload: vi.fn(),
@@ -59,14 +55,15 @@ const EMPLOYEE = {
   createdAt: new Date(),
 };
 
-function makeService() {
+function makeService(sessions: typeof mockSessions | null = mockSessions) {
   return new EmployeeService(
     mockEmployeeRepo as never,
-    mockRefreshTokenRepo as never,
-    mockAuthCache as never,
+    mockUsers as never,
     mockStorage as never,
     mockDb as never,
     mockAudit as never,
+    mockGraphTasks as never,
+    sessions ?? undefined,
   );
 }
 
@@ -90,6 +87,9 @@ describe('EmployeeService.create()', () => {
       TX,
     );
     expect(mockEmployeeRepo.create).toHaveBeenCalledWith(expect.anything(), TX);
+    // The identity user is written in the SAME transaction, with the employee's id: otherwise the
+    // person's first Microsoft sign-in would create a user with a new id.
+    expect(mockUsers.ensure).toHaveBeenCalledWith(EMPLOYEE, TX);
   });
 
   it('lowercases email before checking uniqueness', async () => {
@@ -138,6 +138,7 @@ describe('EmployeeService.update()', () => {
       ACTOR,
     );
     expect(result.displayName).toBe('Jane Smith');
+    expect(mockUsers.ensure).toHaveBeenCalledWith(updated, TX); // the identity user follows
     expect(mockAudit.record).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'employee.updated' }),
       TX,
@@ -153,7 +154,11 @@ describe('EmployeeService.update()', () => {
 });
 
 describe('EmployeeService.updateStatus()', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUsers.ban.mockResolvedValue(0);
+    mockGraphTasks.enqueue.mockResolvedValue(true);
+  });
 
   it('updates status and emits audit', async () => {
     mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
@@ -174,14 +179,159 @@ describe('EmployeeService.updateStatus()', () => {
     expect(mockEmployeeRepo.updateStatus).not.toHaveBeenCalled();
   });
 
-  it('revokes refresh tokens when offboarded', async () => {
+  it('bans the user and deletes the sessions IN the transaction, then clears the cache AFTER the commit', async () => {
     mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
     mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
-    mockRefreshTokenRepo.revokeAllForEmployee.mockResolvedValue(undefined);
+    const order: string[] = [];
+    mockUsers.ban.mockImplementation(() => {
+      order.push('ban');
+      return Promise.resolve(2);
+    });
+    mockDb.transaction.mockImplementationOnce(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const result = await fn(TX);
+      order.push('commit');
+      return result;
+    });
+    mockSessions.offboard.mockImplementation(() => {
+      order.push('offboard');
+      return Promise.resolve();
+    });
 
     await makeService().updateStatus('emp-1', 'offboarded', ACTOR);
-    expect(mockRefreshTokenRepo.revokeAllForEmployee).toHaveBeenCalledWith('emp-1');
-    expect(mockAuthCache.revokeUser).toHaveBeenCalledWith('emp-1', expect.any(Number));
+
+    expect(mockUsers.ban).toHaveBeenCalledWith('emp-1', 'offboarded', TX);
+    expect(mockSessions.offboard).toHaveBeenCalledWith('emp-1', 'offboarded');
+    expect(order).toEqual(['ban', 'commit', 'offboard']);
+    expect(mockAudit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'session.revoked' }),
+      TX,
+    );
+  });
+
+  it('leaves the leaver banned when the cache clear FAILS after the commit (Valkey down)', async () => {
+    mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
+    mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+    mockSessions.offboard.mockRejectedValue(new Error('SessionStoreUnavailableError'));
+
+    await expect(makeService().updateStatus('emp-1', 'offboarded', ACTOR)).rejects.toThrow(
+      'SessionStoreUnavailableError',
+    );
+
+    // the authoritative step ran, in the transaction, before the failing call
+    expect(mockUsers.ban).toHaveBeenCalledWith('emp-1', 'offboarded', TX);
+    expect(mockEmployeeRepo.updateStatus).toHaveBeenCalled();
+  });
+
+  it('offboarded → offboarded RE-APPLIES the ban and the cache clear instead of returning early', async () => {
+    // the retry after the failure above: the status is already `offboarded`
+    mockEmployeeRepo.findById.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+    mockSessions.offboard.mockResolvedValue(undefined);
+
+    const result = await makeService().updateStatus('emp-1', 'offboarded', ACTOR);
+
+    expect(result.status).toBe('offboarded');
+    expect(mockUsers.ban).toHaveBeenCalledWith('emp-1', 'offboarded', TX);
+    expect(mockSessions.offboard).toHaveBeenCalledWith('emp-1', 'offboarded');
+    // nothing about the employee row changed, so no status write and no status audit entry
+    expect(mockEmployeeRepo.updateStatus).not.toHaveBeenCalled();
+    expect(mockAudit.record).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'employee.status_changed' }),
+      expect.anything(),
+    );
+  });
+
+  it.each(['active', 'on_leave'] as const)(
+    'offboarded → %s lifts the ban in the transaction, then drops identity’s memory of it',
+    async (status) => {
+      mockEmployeeRepo.findById.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+      mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status });
+
+      await makeService().updateStatus('emp-1', status, ACTOR);
+
+      expect(mockUsers.unban).toHaveBeenCalledWith('emp-1', TX);
+      expect(mockSessions.reinstate).toHaveBeenCalledWith('emp-1');
+      expect(mockUsers.ban).not.toHaveBeenCalled();
+      expect(mockSessions.offboard).not.toHaveBeenCalled();
+    },
+  );
+
+  describe('the Entra account reconcile, queued in the status transaction', () => {
+    const RECONCILE = { kind: 'entra.account.reconcile', payload: { employeeId: 'emp-1' } };
+
+    it('is queued when an employee is OFFBOARDED, with the same tx, after the status write', async () => {
+      mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
+      mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+
+      await makeService().updateStatus('emp-1', 'offboarded', ACTOR);
+
+      expect(mockGraphTasks.enqueue).toHaveBeenCalledTimes(1);
+      expect(mockGraphTasks.enqueue).toHaveBeenCalledWith(RECONCILE, TX);
+      expect(mockEmployeeRepo.updateStatus.mock.invocationCallOrder[0]).toBeLessThan(
+        mockGraphTasks.enqueue.mock.invocationCallOrder[0],
+      );
+    });
+
+    it.each(['active', 'on_leave'] as const)(
+      'is queued when an offboarded employee is brought back to %s, so the account is enabled again',
+      async (status) => {
+        mockEmployeeRepo.findById.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+        mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status });
+
+        await makeService().updateStatus('emp-1', status, ACTOR);
+
+        expect(mockGraphTasks.enqueue).toHaveBeenCalledWith(RECONCILE, TX);
+      },
+    );
+
+    it('is queued again on the offboarded → offboarded retry: level-triggered, so repeating it is harmless', async () => {
+      mockEmployeeRepo.findById.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+
+      await makeService().updateStatus('emp-1', 'offboarded', ACTOR);
+
+      expect(mockGraphTasks.enqueue).toHaveBeenCalledWith(RECONCILE, TX);
+    });
+
+    it('is NOT queued for a change that neither enters nor leaves offboarded', async () => {
+      mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
+      mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'on_leave' });
+
+      await makeService().updateStatus('emp-1', 'on_leave', ACTOR);
+
+      expect(mockGraphTasks.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('rolls back with the status: a failing enqueue fails the whole change and no cache clear runs', async () => {
+      mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
+      mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+      mockGraphTasks.enqueue.mockRejectedValue(new Error('outbox unavailable'));
+
+      await expect(makeService().updateStatus('emp-1', 'offboarded', ACTOR)).rejects.toThrow(
+        'outbox unavailable',
+      );
+
+      expect(mockSessions.offboard).not.toHaveBeenCalled();
+    });
+  });
+
+  it('touches no session for a change that is not into or out of offboarded', async () => {
+    mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
+    mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'on_leave' });
+    await makeService().updateStatus('emp-1', 'on_leave', ACTOR);
+    expect(mockSessions.offboard).not.toHaveBeenCalled();
+    expect(mockSessions.reinstate).not.toHaveBeenCalled();
+    expect(mockUsers.ban).not.toHaveBeenCalled();
+    expect(mockUsers.unban).not.toHaveBeenCalled();
+  });
+
+  it('fails loudly where no SessionRevoker is bound (the worker) rather than skipping the revocation', async () => {
+    mockEmployeeRepo.findById.mockResolvedValue(EMPLOYEE);
+    mockEmployeeRepo.updateStatus.mockResolvedValue({ ...EMPLOYEE, status: 'offboarded' });
+    await expect(makeService(null).updateStatus('emp-1', 'offboarded', ACTOR)).rejects.toThrow(
+      /SessionRevoker/,
+    );
+    // refused BEFORE anything was changed
+    expect(mockEmployeeRepo.updateStatus).not.toHaveBeenCalled();
+    expect(mockUsers.ban).not.toHaveBeenCalled();
   });
 });
 

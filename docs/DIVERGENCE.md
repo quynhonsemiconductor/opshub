@@ -79,6 +79,25 @@ kept the shared `AbstractOutboxRelay`, its backoff and metrics, and the
 the consumer and an end-to-end test in the same change.** The failure above did not come
 from a missing feature; it came from a pipeline whose middle nothing exercised.
 
+## Allowed: authentication on identity 8
+
+Both products authenticate with `@quynhonsemiconductor/identity`; what each configures is product policy.
+
+| | opshub | rova (public product) |
+| --- | --- | --- |
+| presets | `staff` only: Microsoft Entra, single tenant, 12 h sessions, no password endpoints | `public` and `staff` |
+| B2B guests of the tenant | refused (`allowGuests: false`) | allowed, for vendors |
+| who may sign in | any member of the QNSC tenant with an address on `qnsc.vn`; no App Role means the `employee` role | by product policy |
+| person identity | `identity.employees.id` **is** `identity.user.id`: every foreign key in the product points at `employees`, so the identity user is created with the employee's id (`UserDirectory`) and a first sign-in finds that user by email | the identity user is the person |
+| roles | Entra **App Roles** are reconciled into `user_role_assignments` on every sign-in (`hooks.onStaffSignIn`, `StaffSignInHandler`); authorization is resolved from the database per request, never read from the session | product-assigned |
+| offboarding | `SessionRevoker` (`setUserBanned` + session deletion) after the status change commits; the workflow also bans and deletes in its own transaction | not applicable |
+| mail | none: the staff preset sends no mail, so `mail` is not configured | verification and reset mail |
+| tables | `identity.user`, `session`, `account`, `verification` only: no organization, member, SSO provider or two-factor tables | per preset |
+| sign-in surface | `/api/auth/*` through the Pages Function, same origin as the SPA; Entra's redirect URI is `${APP_URL}/api/auth/callback/microsoft` | per product |
+
+The sign-in app registration is **delegated-only** (OpenID scopes). Microsoft Graph runs under its own
+worker-only app (`GRAPH_CLIENT_ID`), so a stolen sign-in secret cannot call Graph.
+
 ## Temporary: rally is ahead, we should catch up
 
 Tracked as work, not as divergence. Ordered plan in the convergence spec.
@@ -87,8 +106,6 @@ Tracked as work, not as divergence. Ordered plan in the convergence spec.
 | --- | --- |
 | typed permission catalogue + contract specs | keys are `string`; a typo compiles |
 | single guard, declarative scope descriptors | `RoleGuard` (JWT roles, stale) coexists with `PolicyGuard`; scope via per-route closures |
-| BFF browser auth | MSAL in-page, access token in JS memory |
-| CSRF enforcement | only on `/v1/auth/refresh` |
 | shared cache in develop | per-task Valkey sidecar |
 | `infra/modules/stack` | develop and prod duplicate ~370 lines each |
 | deploy on infra change | `infra/**` still in `paths-ignore`, so a Terraform-owned env change registers a task definition nothing rolls onto |
@@ -103,7 +120,7 @@ Tracked as work, not as divergence. Ordered plan in the convergence spec.
 | --- | --- |
 | scoped authorization dimensions, delegation, grant expiry | workspace/project only |
 | IdP role mapping (`ISsoProvisioningHook`) | not bound; roles are app-assigned only |
-| cross-tab refresh coordination (Web Locks) | not applicable under BFF, but the idea is ours |
+| cross-tab refresh coordination (Web Locks) | not applicable: no token refreshes under identity 8, but the idea is ours |
 
 ## Not divergence — fix on sight
 

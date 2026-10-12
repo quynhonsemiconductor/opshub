@@ -21,14 +21,8 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
       DATABASE_URL: 'postgresql://test:test@localhost:5432/opshub_test',
-      // EC P-256 (ES256) test-only placeholder keys — must match algorithm: 'ES256' in platform.module.ts.
-      JWT_PRIVATE_KEY:
-        '-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQguroUP5ujCG9PaA7F\n+53M+ZEtNeuIunGs3mI6EEuD5qKhRANCAASZgAZjNEMAVYuVFiV1KfKFDRLVoJki\nokvGm4Kv+GReUvPaxoZPolxDcDmmdUfVHKrRxNbN7Kw8/x1o+2BibAO+\n-----END PRIVATE KEY-----',
-      JWT_PUBLIC_KEY:
-        '-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmYAGYzRDAFWLlRYldSnyhQ0S1aCZ\nIqJLxpuCr/hkXlLz2saGT6JcQ3A5pnVH1Ryq0cTWzeysPP8daPtgYmwDvg==\n-----END PUBLIC KEY-----',
-      JWT_ACCESS_EXPIRY: '8h',
-      JWT_ISSUER: 'opshub-test',
-      JWT_AUDIENCE: 'opshub-test-app',
+      // identity 8 signs and encrypts with this; test-only value (the schema wants >= 32 characters).
+      BETTER_AUTH_SECRET: 'test-better-auth-secret-minimum-32-chars!',
       CORS_ORIGINS: 'http://localhost:5173',
       LOG_LEVEL: 'fatal',
       LOG_PRETTY: 'false',
@@ -110,10 +104,16 @@ export default defineConfig({
       // functions 28.78; `check:coverage-floors` refused the old 37/37/29/25 (5 points behind). Set about
       // two and a half points under actual so run-to-run variance does not fail a branch that added no
       // code, and still inside the 3-point limit.
+      // Raised 2026-10-12 on the tree with identity 8 AND the Graph worker together. Removing the v7 auth code
+      // (the BFF, the refresh-token service, the JWT guard: large, thinly tested) and adding the identity 8 specs
+      // (session guard, sign-in hook, access model, offboarding, env schema) moved the measurement to lines
+      // 45.51 / statements 45.40 / branches 36.42 / functions 31.16, and `check:coverage-floors` refused the
+      // floors above (functions 4.16 and branches 4.42 behind, past the 3-point limit). Set about two and a
+      // half points under actual, as above. Neither branch's own figure applies once both are in.
       thresholds: {
         lines: 43,
-        functions: 27,
-        branches: 32,
+        functions: 29,
+        branches: 34,
         statements: 43,
       },
     },

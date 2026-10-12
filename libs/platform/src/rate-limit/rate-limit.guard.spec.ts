@@ -1,6 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { GlobalExceptionFilter } from '@quynhonsemiconductor/platform-http';
+import { SESSION_COOKIE } from '../auth/session-cookie';
 import { RateLimitGuard } from './rate-limit.guard';
 
 /**
@@ -25,7 +26,7 @@ function contextFor(
     headers,
     ip: over.ip ?? '203.0.113.9',
     // Undefined ON PURPOSE, and it is not a simplification of the fixture: this guard is global and
-    // `JwtAuthGuard` is a route guard, so authentication has not run when it executes. A fixture that
+    // `SessionAuthGuard` is a route guard, so authentication has not run when it executes. A fixture that
     // populated `user` would be testing a request shape the guard never sees.
     user: undefined,
     cookies: over.cookies ?? {},
@@ -48,8 +49,6 @@ function admittingCache() {
     }),
   };
 }
-
-const SESSION_COOKIE = '__Host-opshub_session';
 
 /** A cache that always refuses, which is the only interesting branch here. */
 const exhaustedCache = {
@@ -100,7 +99,7 @@ describe('RateLimitGuard, when the bucket is empty', () => {
  * WHO the bucket belongs to — the half that was silently wrong.
  *
  * The tier table says `DEFAULT` is "200 req/min per userId" and the guard read `req.user?.sub` to get
- * it. That is always undefined here, because this is a GLOBAL guard and `JwtAuthGuard` is a ROUTE guard:
+ * it. That is always undefined here, because this is a GLOBAL guard and `SessionAuthGuard` is a ROUTE guard:
  * Nest runs global guards first, so authentication has not happened yet. Every request therefore fell
  * through to the IP, and a whole office behind one NAT shared a single 200-a-minute bucket — about
  * fifteen simultaneous page loads at a dozen calls each, then everybody there gets 429s at once.
@@ -161,8 +160,9 @@ describe('RateLimitGuard identity', () => {
     expect(key).toMatch(/^DEFAULT:[0-9a-f]{32}$/);
   });
 
-  it('keys a bearer caller by its token, not by its network', async () => {
-    // API consumers and the e2e harness send a bearer token and no cookie. Before, they were the IP.
+  it('a Bearer header is not a credential any more: there is only the session cookie', async () => {
+    // identity 8 has no access token. A request that sends an Authorization header and no cookie is a
+    // pre-auth request as far as the limiter is concerned, and belongs to its network, like a sign-in attempt.
     const cache = admittingCache();
     const guard = new RateLimitGuard(reflector as never, cache as never);
 
@@ -170,31 +170,18 @@ describe('RateLimitGuard identity', () => {
     await guard.canActivate(contextFor({ authorization: 'Bearer token-two' }));
 
     const [first, second] = cache.consumeRateLimit.mock.calls.map((call) => call[0] as string);
-    expect(first).not.toBe(second);
+    expect(first).toBe(second);
+    expect(first).toContain('203.0.113.9');
     expect(first).not.toContain('token-one');
   });
 
-  it('prefers the session cookie when both are present', async () => {
-    // The SPA is cookie-only and is nearly all the traffic; a request carrying both is the SPA on a path
-    // that also forwards a token, and the cookie is the identity it actually authenticates with.
+  it('keys on identity 8’s cookie name, not v7’s', async () => {
     const cache = admittingCache();
     const guard = new RateLimitGuard(reflector as never, cache as never);
 
-    await guard.canActivate(
-      contextFor(
-        { authorization: 'Bearer token-one' },
-        { cookies: { [SESSION_COOKIE]: 'session-a' } },
-      ),
-    );
-    await guard.canActivate(
-      contextFor(
-        { authorization: 'Bearer token-two' },
-        { cookies: { [SESSION_COOKIE]: 'session-a' } },
-      ),
-    );
+    await guard.canActivate(contextFor({}, { cookies: { '__Host-opshub_session': 'session-a' } }));
 
-    const [first, second] = cache.consumeRateLimit.mock.calls.map((call) => call[0] as string);
-    expect(first).toBe(second);
+    expect(cache.consumeRateLimit.mock.calls[0][0] as string).toContain('203.0.113.9');
   });
 
   it('falls back to the IP when no credential was sent at all', async () => {

@@ -1,10 +1,10 @@
 /**
  * Same-origin reverse proxy used by the Cloudflare Pages Function that fronts
- * the opshub SPA. It forwards `/v1/*` (which includes the BFF auth routes
- * `/v1/bff/*`) from the SPA origin (`opshub-dev.qnsc.vn`) to the API origin
- * (`opshub-api-dev.qnsc.vn`), so the browser sees a single origin. That is what
- * lets the BFF issue a `__Host-opshub_session` cookie with `SameSite=Strict` and
- * drop CORS entirely.
+ * the opshub SPA. It forwards `/v1/*` and identity 8's `/api/auth/*` (sign-in, the
+ * Microsoft callback, sign-out) from the SPA origin (`opshub-dev.qnsc.vn`) to the API
+ * origin (`opshub-api-dev.qnsc.vn`), so the browser sees a single origin. That is what
+ * lets the API set its `__Secure-opshub.session_token` cookie on the host the SPA uses
+ * and drop CORS entirely.
  *
  * The logic here is pure and framework-agnostic (only web-standard `Request` /
  * `Response` / `Headers` / `URL`), so it is unit-testable under the web app's
@@ -12,7 +12,7 @@
  *
  * Requires the Pages project to expose `API_ORIGIN`, e.g.
  * `https://opshub-api-dev.qnsc.vn`. The SPA always talks to the API through this
- * same-origin proxy (the BFF flow depends on it).
+ * same-origin proxy (the session cookie depends on it).
  */
 
 /** Hop-by-hop headers that must never cross a proxy boundary (RFC 7230 §6.1). */
@@ -95,7 +95,7 @@ export function buildProxyRequest(request: Request, apiOrigin: string): Request 
  * unit suite will NOT stay green if you do — see the stub-based test in proxy.spec.ts,
  * which exists because every other assertion there passes against the naive version
  * (undici carries the set-cookie list through the constructor). The Workers runtime this
- * actually runs on historically does not, and a corrupted `__Host-` session cookie is a
+ * actually runs on historically does not, and a corrupted session cookie is a
  * silent login failure.
  */
 export function buildClientResponse(upstream: Response): Response {

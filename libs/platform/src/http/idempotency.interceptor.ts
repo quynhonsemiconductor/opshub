@@ -6,7 +6,7 @@ import { switchMap, tap } from 'rxjs/operators';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { ConflictException, ValidationException } from '../errors/exceptions';
 import { ErrorCodes } from '../errors/error-codes';
-import type { JwtPayload } from '../auth/jwt.strategy';
+import type { JwtPayload } from '../auth/principal';
 
 /** How long a completed response stays replayable. A retry window, not a cache. */
 const IDEMPOTENCY_TTL_SECONDS = 24 * 3600;

@@ -286,74 +286,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/v1/auth/entra-login': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** SSO login — validate Entra ID id_token, JIT-provision employee, mint internal JWT */
-    post: operations['AuthController_entraLogin'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/auth/dev-login': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Dev login (non-production) — mint a session for an active employee */
-    post: operations['AuthController_devLogin'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/auth/refresh': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Silently refresh the access token using the HttpOnly refresh cookie */
-    post: operations['AuthController_refresh'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/auth/logout': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Revoke the current session — invalidates both the refresh token and the active access token */
-    post: operations['AuthController_logout'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/v1/auth/me': {
     parameters: {
       query?: never;
@@ -5213,19 +5145,6 @@ export interface components {
       /** Format: uuid */
       fileId: string;
     };
-    EntraLoginDto: {
-      idToken: string;
-    };
-    AuthResponseDto: {
-      /** @description Short-lived access JWT. Store in memory only — never localStorage. */
-      accessToken: string;
-      /** @description Seconds until the access token expires. */
-      expiresIn: number;
-    };
-    DevLoginDto: {
-      /** Format: email */
-      email: string;
-    };
     MeResponseDto: {
       sub: string;
       email: string;
@@ -5238,11 +5157,10 @@ export interface components {
        */
       permissions: string[];
       /**
-       * @description Double-submit CSRF token, bound by HMAC to the session that requested it.
+       * @description Double-submit CSRF token, bound by HMAC to the session cookie that requested it. The SPA echoes it
+       *     in the `X-CSRF-Token` header on every state-changing request.
        *
-       *     Present ONLY for a request authenticated by the BFF session cookie — a Bearer
-       *     caller is not exposed to CSRF and is not issued one. The SPA echoes it in the
-       *     `X-CSRF-Token` header on every state-changing request.
+       *     Absent only for a request that carries no session cookie (there is nothing for a forged request to ride on).
        */
       csrfToken?: string;
     };
@@ -8698,109 +8616,6 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  AuthController_entraLogin: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['EntraLoginDto'];
-      };
-    };
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['AuthResponseDto'];
-        };
-      };
-      /** @description Unauthorized — missing or invalid authentication */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  AuthController_devLogin: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['DevLoginDto'];
-      };
-    };
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['AuthResponseDto'];
-        };
-      };
-      /** @description Unauthorized — missing or invalid authentication */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  AuthController_refresh: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['AuthResponseDto'];
-        };
-      };
-      /** @description Unauthorized — missing or invalid authentication */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  AuthController_logout: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      204: {
         headers: {
           [name: string]: unknown;
         };

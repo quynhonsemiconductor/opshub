@@ -5,9 +5,9 @@ import { withCsrfHeader } from './csrf';
 import { ENV } from '@/shared/config/env';
 
 /**
- * Cookie-authenticated middleware for the BFF flow.
+ * Cookie-authenticated middleware (identity 8 session cookie).
  *
- * Every request carries the opaque `__Host-opshub_session` cookie, and every
+ * Every request carries the opaque `__Secure-opshub.session_token` cookie, and every
  * state-changing one echoes the session-bound CSRF token. No Authorization header, no
  * token in the JS heap.
  *
@@ -50,7 +50,7 @@ const sessionMiddleware: Middleware = {
  *
  * `API_BASE_URL` is empty in every environment: locally the Vite proxy forwards `/v1`,
  * and deployed the Cloudflare Pages Function forwards it to the API origin. Same-origin
- * is a requirement of the `__Host-` cookie, not a convenience.
+ * is a requirement of the session cookie, not a convenience.
  */
 export const api = createClient<paths>({
   baseUrl: ENV.API_BASE_URL,

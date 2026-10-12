@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateKeyPairSync, createPublicKey } from 'node:crypto';
-import type { ApiConfigService, WorkerConfigService } from './app-config.service';
+import type { ApiConfigService, AppConfigService, WorkerConfigService } from './app-config.service';
 import {
   ApiEnvSchema,
   ApiEnvSchema as EnvSchema,
@@ -9,89 +8,94 @@ import {
 } from './env.schema';
 import { resetProcessRoleForTests, setProcessRole } from './process-role';
 
-const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-const publicPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
-
 /** Minimum that satisfies the rest of the schema, so each block tests one thing. */
 function env(overrides: Record<string, string | undefined> = {}) {
   return {
     DATABASE_URL: 'postgres://u:p@localhost:5432/opshub',
-    JWT_PRIVATE_KEY: privatePem,
+    BETTER_AUTH_SECRET: 'b'.repeat(32),
     COOKIE_SECRET: 'y'.repeat(32),
     CSRF_SECRET: 'z'.repeat(32),
     ...overrides,
   };
 }
 
-describe('EnvSchema — JWT key pair', () => {
-  // The point of the derivation: a mismatched pair is the one failure a key pair cannot
-  // otherwise have (signing succeeds, every verification rejects) and nothing upstream
-  // can detect it, because both halves are individually valid.
-  it('derives JWT_PUBLIC_KEY from JWT_PRIVATE_KEY when it is not supplied', () => {
-    const result = EnvSchema.safeParse(env());
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.data.JWT_PUBLIC_KEY).toBe(publicPem);
+/** The same, as the WORKER sees it: it has no sign-in secret (its schema refuses one). */
+function workerEnv(overrides: Record<string, string | undefined> = {}) {
+  const base: Record<string, string | undefined> = env();
+  delete base['BETTER_AUTH_SECRET'];
+  return { ...base, ...overrides };
+}
+
+describe('EnvSchema — identity 8 sign-in', () => {
+  const production = {
+    NODE_ENV: 'production',
+    APP_URL: 'https://opshub.example.test',
+    ENTRA_TENANT_ID: '11111111-1111-4111-8111-111111111111',
+    ENTRA_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
+    ENTRA_CLIENT_SECRET: 'client-secret',
+  };
+
+  it('requires BETTER_AUTH_SECRET, 32+ characters', () => {
+    expect(EnvSchema.safeParse(env({ BETTER_AUTH_SECRET: undefined })).success).toBe(false);
+    expect(EnvSchema.safeParse(env({ BETTER_AUTH_SECRET: 'short' })).success).toBe(false);
+    expect(EnvSchema.safeParse(env()).success).toBe(true);
   });
 
-  it('derives a key that actually matches the private half', () => {
-    const result = EnvSchema.safeParse(env());
-    if (!result.success) throw new Error('expected parse to succeed');
-    const fromPrivate = createPublicKey(result.data.JWT_PRIVATE_KEY)
-      .export({ type: 'spki', format: 'pem' })
-      .toString();
-    expect(result.data.JWT_PUBLIC_KEY).toBe(fromPrivate);
-  });
-
-  it('honours an explicitly supplied JWT_PUBLIC_KEY', () => {
-    const result = EnvSchema.safeParse(env({ JWT_PUBLIC_KEY: publicPem }));
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.data.JWT_PUBLIC_KEY).toBe(publicPem);
-  });
-
-  it('accepts a base64-encoded private key and still derives from it', () => {
+  it('the v7 variables are gone: setting them is harmless but they are not in the parsed config', () => {
     const result = EnvSchema.safeParse(
-      env({ JWT_PRIVATE_KEY: Buffer.from(privatePem).toString('base64') }),
+      env({
+        JWT_PRIVATE_KEY: 'x',
+        BFF_SESSION_TTL_SECONDS: '10',
+        ENTRA_REDIRECT_URI: 'https://x.test',
+      }),
     );
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.data.JWT_PUBLIC_KEY).toBe(publicPem);
+    if (!result.success) throw new Error('expected parse to succeed');
+    expect(Object.keys(result.data)).not.toEqual(
+      expect.arrayContaining(['JWT_PRIVATE_KEY', 'BFF_SESSION_TTL_SECONDS', 'ENTRA_REDIRECT_URI']),
+    );
   });
 
-  // A public key pasted into the private slot is well-formed PEM, so it passes the
-  // field-level refine and would otherwise fail much later, at the first sign().
-  it('fails naming JWT_PRIVATE_KEY when a public key is supplied as the private one', () => {
-    const result = EnvSchema.safeParse(env({ JWT_PRIVATE_KEY: publicPem }));
+  it('development and CI may leave Entra unset (test-login signs in)', () => {
+    expect(EnvSchema.safeParse(env()).success).toBe(true);
+    expect(
+      EnvSchema.safeParse(env({ NODE_ENV: 'test', IDENTITY_TEST_LOGIN: 'enabled' })).success,
+    ).toBe(true);
+  });
+
+  it('production accepts a complete configuration', () => {
+    expect(EnvSchema.safeParse(env(production)).success).toBe(true);
+  });
+
+  it.each(['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET'])(
+    'production refuses a boot without %s, naming it (an empty string counts as unset)',
+    (key) => {
+      for (const value of [undefined, '']) {
+        const result = EnvSchema.safeParse(env({ ...production, [key]: value }));
+        expect(result.success).toBe(false);
+        if (result.success) return;
+        expect(result.error.issues.some((i) => i.path.includes(key))).toBe(true);
+      }
+    },
+  );
+
+  it('production refuses IDENTITY_TEST_LOGIN (a passwordless sign-in), before identity itself would', () => {
+    const result = EnvSchema.safeParse(env({ ...production, IDENTITY_TEST_LOGIN: 'enabled' }));
     expect(result.success).toBe(false);
     if (result.success) return;
-    const issue = result.error.issues.find((i) => i.path.includes('JWT_PRIVATE_KEY'));
-    expect(issue?.message).toMatch(/not a PRIVATE key/);
+    expect(result.error.issues.some((i) => i.path.includes('IDENTITY_TEST_LOGIN'))).toBe(true);
   });
 
-  // ES256 is P-256 specifically. Another curve signs fine and every verifier rejects
-  // the result, which presents as a broken deploy with no obvious cause.
-  it('rejects an EC key on the wrong curve', () => {
-    const p384 = generateKeyPairSync('ec', { namedCurve: 'secp384r1' })
-      .privateKey.export({ type: 'pkcs8', format: 'pem' })
-      .toString();
-    const result = EnvSchema.safeParse(env({ JWT_PRIVATE_KEY: p384 }));
+  it('production refuses a non-https APP_URL: it is the origin Entra redirects to and that owns the cookie', () => {
+    const result = EnvSchema.safeParse(
+      env({ ...production, APP_URL: 'http://opshub.example.test' }),
+    );
     expect(result.success).toBe(false);
     if (result.success) return;
-    const issue = result.error.issues.find((i) => i.path.includes('JWT_PRIVATE_KEY'));
-    expect(issue?.message).toMatch(/must be an EC P-256 key for ES256/);
+    expect(result.error.issues.some((i) => i.path.includes('APP_URL'))).toBe(true);
   });
 
-  it('rejects an RSA key', () => {
-    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 })
-      .privateKey.export({ type: 'pkcs8', format: 'pem' })
-      .toString();
-    expect(EnvSchema.safeParse(env({ JWT_PRIVATE_KEY: rsa })).success).toBe(false);
-  });
-
-  it('still rejects a JWT_PRIVATE_KEY that is not PEM at all', () => {
-    expect(EnvSchema.safeParse(env({ JWT_PRIVATE_KEY: 'not-a-key' })).success).toBe(false);
+  it('IDENTITY_TEST_LOGIN accepts only "enabled"', () => {
+    expect(EnvSchema.safeParse(env({ IDENTITY_TEST_LOGIN: 'yes' })).success).toBe(false);
   });
 });
 
@@ -267,7 +271,14 @@ describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
 
   it('allows LOWERING it in production, because that is not a weakening', () => {
     const result = EnvSchema.safeParse(
-      env({ NODE_ENV: 'production', RATE_LIMIT_DEFAULT_LIMIT: '50' }),
+      env({
+        NODE_ENV: 'production',
+        RATE_LIMIT_DEFAULT_LIMIT: '50',
+        APP_URL: 'https://opshub.example.test',
+        ENTRA_TENANT_ID: '11111111-1111-4111-8111-111111111111',
+        ENTRA_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
+        ENTRA_CLIENT_SECRET: 'client-secret',
+      }),
     );
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -347,13 +358,13 @@ describe('role-specific schemas — the API and the worker hold different creden
   });
 
   it('the worker accepts the Graph variables', () => {
-    const result = WorkerEnvSchema.safeParse(env(GRAPH));
+    const result = WorkerEnvSchema.safeParse(workerEnv(GRAPH));
     expect(result.success).toBe(true);
     expect(result.data?.GRAPH_CLIENT_ID).toBe(GRAPH.GRAPH_CLIENT_ID);
   });
 
   it('the worker REFUSES TO START with ENTRA_CLIENT_SECRET set', () => {
-    const result = WorkerEnvSchema.safeParse(env({ ENTRA_CLIENT_SECRET: 'sign-in-secret' }));
+    const result = WorkerEnvSchema.safeParse(workerEnv({ ENTRA_CLIENT_SECRET: 'sign-in-secret' }));
 
     expect(result.success).toBe(false);
     expect(result.error?.issues.find((i) => i.path[0] === 'ENTRA_CLIENT_SECRET')?.message).toMatch(
@@ -361,9 +372,41 @@ describe('role-specific schemas — the API and the worker hold different creden
     );
   });
 
+  it('the worker REFUSES TO START with BETTER_AUTH_SECRET set: a worker holding it could forge a session cookie', () => {
+    const result = WorkerEnvSchema.safeParse(workerEnv({ BETTER_AUTH_SECRET: 'b'.repeat(32) }));
+
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues.find((i) => i.path[0] === 'BETTER_AUTH_SECRET');
+    expect(issue?.message).toMatch(/must not be set on the worker/);
+    expect(JSON.stringify(result.error?.issues)).not.toContain('b'.repeat(32));
+  });
+
+  it('the worker REFUSES TO START with IDENTITY_TEST_LOGIN set, and treats an empty one as unset', () => {
+    expect(WorkerEnvSchema.safeParse(workerEnv({ IDENTITY_TEST_LOGIN: 'enabled' })).success).toBe(
+      false,
+    );
+    expect(WorkerEnvSchema.safeParse(workerEnv({ IDENTITY_TEST_LOGIN: '' })).success).toBe(true);
+  });
+
+  it('the API REQUIRES BETTER_AUTH_SECRET and the worker does not need any sign-in variable', () => {
+    expect(ApiEnvSchema.safeParse(workerEnv()).success).toBe(false);
+    expect(WorkerEnvSchema.safeParse(workerEnv()).success).toBe(true);
+  });
+
+  it('the production sign-in rules belong to the API: a production worker needs no Entra secret and no https APP_URL', () => {
+    const production = workerEnv({ NODE_ENV: 'production', APP_URL: 'http://worker.internal' });
+    expect(WorkerEnvSchema.safeParse(production).success).toBe(true);
+    expect(
+      ApiEnvSchema.safeParse({ ...production, BETTER_AUTH_SECRET: 'b'.repeat(32) }).success,
+    ).toBe(false);
+  });
+
   it('both roles keep the shared rules (a worker still needs a database)', () => {
-    expect(WorkerEnvSchema.safeParse({ JWT_PRIVATE_KEY: privatePem }).success).toBe(false);
-    expect(WorkerEnvSchema.safeParse(env()).success).toBe(true);
+    expect(
+      WorkerEnvSchema.safeParse({ COOKIE_SECRET: 'y'.repeat(32), CSRF_SECRET: 'z'.repeat(32) })
+        .success,
+    ).toBe(false);
+    expect(WorkerEnvSchema.safeParse(workerEnv()).success).toBe(true);
   });
 
   it('a process that has not declared its role does not get to guess one', () => {
@@ -376,8 +419,10 @@ describe('role-specific schemas — the API and the worker hold different creden
     setProcessRole('api');
     expect(RoleAwareEnvSchema.safeParse(env(GRAPH)).success).toBe(false);
     setProcessRole('worker');
-    expect(RoleAwareEnvSchema.safeParse(env(GRAPH)).success).toBe(true);
-    expect(RoleAwareEnvSchema.safeParse(env({ ENTRA_CLIENT_SECRET: 'x' })).success).toBe(false);
+    expect(RoleAwareEnvSchema.safeParse(workerEnv(GRAPH)).success).toBe(true);
+    expect(RoleAwareEnvSchema.safeParse(workerEnv({ ENTRA_CLIENT_SECRET: 'x' })).success).toBe(
+      false,
+    );
   });
 
   it('is enforced by the TYPES too: the API cannot read a Graph variable, the worker cannot read the sign-in secret', () => {
@@ -385,10 +430,16 @@ describe('role-specific schemas — the API and the worker hold different creden
     const never = () => {
       const api = {} as ApiConfigService;
       const worker = {} as WorkerConfigService;
+      const common = {} as AppConfigService;
       // @ts-expect-error GRAPH_CLIENT_ID is not an API variable
       api.get('GRAPH_CLIENT_ID');
       // @ts-expect-error ENTRA_CLIENT_SECRET is not a worker variable
       worker.get('ENTRA_CLIENT_SECRET');
+      // @ts-expect-error BETTER_AUTH_SECRET is not a worker variable
+      worker.get('BETTER_AUTH_SECRET');
+      // @ts-expect-error BETTER_AUTH_SECRET is API-only, so not on the common config either
+      common.get('BETTER_AUTH_SECRET');
+      api.get('BETTER_AUTH_SECRET');
       api.get('ENTRA_CLIENT_SECRET');
       worker.get('GRAPH_CLIENT_ID');
     };

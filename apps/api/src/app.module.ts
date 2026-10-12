@@ -1,4 +1,4 @@
-import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { trace, isSpanContextValid } from '@opentelemetry/api';
 import { LoggerModule } from 'nestjs-pino';
@@ -10,12 +10,11 @@ import {
   REQUEST_CONTEXT,
   HttpLoggingInterceptor,
   IdempotencyInterceptor,
-  AsyncLocalStorageMiddleware,
   RequestContextService,
   RateLimitGuard,
   SanitizationPipe,
 } from '@platform';
-import { IdentityModule } from '@modules/identity';
+import { AuthModule, EmployeesModule } from '@modules/identity';
 import { AuthzModule } from '@modules/authz';
 import { AssetsModule } from '@modules/assets';
 import { AccessRequestsModule } from '@modules/access-requests';
@@ -73,7 +72,8 @@ import { SecurityPostureModule } from '@modules/security-posture';
     PlatformModule,
     AuditModule,
     NotificationsModule,
-    IdentityModule,
+    EmployeesModule,
+    AuthModule,
     AuthzModule,
     AssetsModule,
     AccessRequestsModule,
@@ -95,7 +95,8 @@ import { SecurityPostureModule } from '@modules/security-posture';
     SecurityPostureModule,
   ],
   providers: [
-    // Bind the shared filter's request-context port to opshub's ALS-backed service.
+    // Bind the shared filter's request-context port to observability's request-context store: the one
+    // `enableCorrelationId` (platform-http) seeds for every request, and the worker's `withJobContext` for jobs.
     { provide: REQUEST_CONTEXT, useExisting: RequestContextService },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: RateLimitGuard },
@@ -105,8 +106,4 @@ import { SecurityPostureModule } from '@modules/security-posture';
     { provide: APP_PIPE, useClass: ZodValidationPipe },
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(AsyncLocalStorageMiddleware).forRoutes('*');
-  }
-}
+export class AppModule {}

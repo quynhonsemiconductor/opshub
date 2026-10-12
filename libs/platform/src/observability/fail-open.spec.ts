@@ -67,12 +67,20 @@ describe('the metric filter matches what the app emits', () => {
   });
 
   it('both fail-open call sites use the helper rather than a bare object', () => {
-    // The two guards are the only places that fail open. A future one that logs
+    // The rate-limit guard and the identity factory (its sign-in rate limit fails open when Valkey is down) are
+    // the only places that fail open. A future one that logs
     // `{ securityFailOpen: 'x' }` by hand would work today and break on the next rename, so
     // this asserts the helper is the single source of the field.
     const callers = execFileSync(
       'git',
-      ['grep', '-l', 'failOpenLog(', '--', 'libs/platform/src/auth/jwt.guard.ts', 'libs/platform/src/rate-limit/rate-limit.guard.ts'],
+      [
+        'grep',
+        '-l',
+        'failOpenLog(',
+        '--',
+        'libs/modules/identity/src/infrastructure/auth/create-opshub-identity.ts',
+        'libs/platform/src/rate-limit/rate-limit.guard.ts',
+      ],
       { cwd: ROOT, encoding: 'utf8' },
     )
       .split('\n')

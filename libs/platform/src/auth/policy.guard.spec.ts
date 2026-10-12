@@ -2,7 +2,7 @@
  * PolicyGuard's fail-closed behaviour.
  *
  * The guard used to `return true` when it found no metadata, so a handler nobody decorated was
- * open to every authenticated caller — `JwtAuthGuard` proved who you were and then nothing
+ * open to every authenticated caller — `SessionAuthGuard` proved who you were and then nothing
  * checked whether you may. These tests pin the reversal, and the acceptance of the four
  * declaration shapes that legitimately carry no permission code.
  *
