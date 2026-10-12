@@ -401,6 +401,53 @@ describe('role-specific schemas — the API and the worker hold different creden
     ).toBe(false);
   });
 
+  describe('EDGE_CLIENT_IP_SECRET (the signed client address, API only)', () => {
+    const KEY = 'k'.repeat(40);
+
+    it('is optional on the API: development and CI have no Pages Function in front', () => {
+      expect(ApiEnvSchema.safeParse(env()).success).toBe(true);
+    });
+
+    it('the API accepts a key of 32+ characters, and an empty one counts as unset', () => {
+      expect(ApiEnvSchema.safeParse(env({ EDGE_CLIENT_IP_SECRET: KEY })).success).toBe(true);
+      expect(ApiEnvSchema.safeParse(env({ EDGE_CLIENT_IP_SECRET: '' })).success).toBe(true);
+    });
+
+    it.each(['short', ' '.repeat(40), `${'k'.repeat(31)} `])(
+      'the API refuses a key under 32 characters once trimmed (%j), without echoing it',
+      (value) => {
+        const result = ApiEnvSchema.safeParse(env({ EDGE_CLIENT_IP_SECRET: value }));
+        expect(result.success).toBe(false);
+        expect(JSON.stringify(result.error?.issues)).toMatch(/at least 32 characters/);
+      },
+    );
+
+    it('the API refuses a PREVIOUS key with no current one: a rotation half done', () => {
+      const result = ApiEnvSchema.safeParse(env({ EDGE_CLIENT_IP_SECRET_PREVIOUS: KEY }));
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.some((i) => i.path[0] === 'EDGE_CLIENT_IP_SECRET_PREVIOUS')).toBe(
+        true,
+      );
+      expect(
+        ApiEnvSchema.safeParse(
+          env({ EDGE_CLIENT_IP_SECRET: KEY, EDGE_CLIENT_IP_SECRET_PREVIOUS: 'p'.repeat(40) }),
+        ).success,
+      ).toBe(true);
+    });
+
+    it.each(['EDGE_CLIENT_IP_SECRET', 'EDGE_CLIENT_IP_SECRET_PREVIOUS'])(
+      'the worker REFUSES TO START with %s set',
+      (name) => {
+        const result = WorkerEnvSchema.safeParse(workerEnv({ [name]: KEY }));
+        expect(result.success).toBe(false);
+        expect(result.error?.issues.find((i) => i.path[0] === name)?.message).toMatch(
+          /must not be set on the worker/,
+        );
+        expect(JSON.stringify(result.error?.issues)).not.toContain(KEY);
+      },
+    );
+  });
+
   it('both roles keep the shared rules (a worker still needs a database)', () => {
     expect(
       WorkerEnvSchema.safeParse({ COOKIE_SECRET: 'y'.repeat(32), CSRF_SECRET: 'z'.repeat(32) })

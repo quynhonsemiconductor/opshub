@@ -6,6 +6,7 @@ import fastifyHelmet from '@fastify/helmet';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Logger } from 'nestjs-pino';
+import { assertEdgeClientIpEnv } from '@quynhonsemiconductor/platform-http';
 import {
   AppConfigService,
   SESSION_COOKIE,
@@ -22,6 +23,12 @@ import {
  */
 export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
   const config = app.get(AppConfigService);
+
+  // `clientIp()` (the rate limiter, the access log, idempotency and identity's mount all call it) reads
+  // EDGE_CLIENT_IP_SECRET lazily, on the first request. A bad key is refused HERE, at boot, naming the variable,
+  // instead of surfacing as a 500 on whichever request arrives first. (platform-http's own guard does the same
+  // in its bootstrap hook; opshub's guards are local, so the check is made explicitly.)
+  assertEdgeClientIpEnv();
 
   app.useLogger(app.get(Logger));
   app.flushLogs();

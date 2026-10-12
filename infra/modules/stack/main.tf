@@ -167,8 +167,9 @@ locals {
     { name = "CSRF_SECRET", secret_arn = module.secrets.secret_arns["csrf-secret"] },
   ])
 
-  # The API's ALONE: what only a sign-in needs. The worker never completes one, and its env schema REFUSES TO
-  # START with either of these set, so they must not be in `app_secrets`.
+  # The API's ALONE: what only a sign-in or a visitor's request needs. The worker never completes a sign-in or
+  # serves a visitor, and its env schema REFUSES TO START with any of these set, so they must not be in
+  # `app_secrets`.
   #
   #  - BETTER_AUTH_SECRET: identity 8 (Better Auth) signs its cookies and encrypts what it stores with it.
   #    Required by the API's env schema (>= 32 characters), so it is injected unconditionally: a random value
@@ -178,6 +179,15 @@ locals {
   #    schema refuses to boot NODE_ENV=production without it (a deployed environment with no way to sign in is
   #    a failed deploy, not a degraded one). The value must already be in Secrets Manager before the tasks
   #    start: ECS cannot inject an empty secret.
+  #  - EDGE_CLIENT_IP_SECRET: the key the Cloudflare Pages Function signs the visitor's address with
+  #    (`@quynhonsemiconductor/platform-http/edge`) and `clientIp()` verifies. Behind a Pages Function the API's
+  #    `cf-connecting-ip` is a Cloudflare address shared by every visitor, so without it the `AUTH_LOGIN` bucket (5
+  #    attempts per 15 minutes) would be the whole company's. A random value generated on this side
+  #    (`openssl rand -base64 48`), and the SAME value as the Pages project's secret of that name, which Terraform
+  #    does not manage (`production_env_vars` below carries plain variables only): it is set with
+  #    `wrangler pages secret put EDGE_CLIENT_IP_SECRET` or in the dashboard. Unconditional here for the same reason
+  #    as the two above; the API itself treats an absent key as "no signed address", and the Function answers 500
+  #    without its copy, so the two ends are set together (owner steps in the PR that introduced it).
   #
   # WHERE THE VALUES LIVE. Develop runs with `secrets_use_bundle = true`, so these are KEYS in the `app`
   # bundle's JSON (`opshub/develop/app`), not secrets of their own: no container is created for them and
@@ -187,6 +197,7 @@ locals {
   api_secrets = [
     { name = "BETTER_AUTH_SECRET", secret_arn = module.secrets.secret_arns["better-auth-secret"] },
     { name = "ENTRA_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["entra-client-secret"] },
+    { name = "EDGE_CLIENT_IP_SECRET", secret_arn = module.secrets.secret_arns["edge-client-ip-secret"] },
   ]
 
   # Microsoft Graph is the WORKER's alone. The API task is given no GRAPH_* variable and no Graph
@@ -275,9 +286,10 @@ module "secrets" {
   secret_names = merge(var.observability.otlp_endpoint == "" ? {} : {
     "observability-token" = "Authorization header for the OTLP backend (e.g. 'Basic <base64>')"
     }, {
-    "better-auth-secret" = "identity 8 (Better Auth) signing/encryption secret (min 32 chars; openssl rand -base64 48). Rotating it signs everyone out."
-    "cookie-secret"      = "Fastify cookie signing secret (min 32 chars)"
-    "csrf-secret"        = "HMAC key binding a CSRF token to its session (min 32 chars). Distinct from cookie-secret so the two rotate independently."
+    "edge-client-ip-secret" = "Key the Cloudflare Pages Function signs the visitor's address with, verified by the API (min 32 chars; openssl rand -base64 48). Same value as the Pages secret EDGE_CLIENT_IP_SECRET."
+    "better-auth-secret"    = "identity 8 (Better Auth) signing/encryption secret (min 32 chars; openssl rand -base64 48). Rotating it signs everyone out."
+    "cookie-secret"         = "Fastify cookie signing secret (min 32 chars)"
+    "csrf-secret"           = "HMAC key binding a CSRF token to its session (min 32 chars). Distinct from cookie-secret so the two rotate independently."
     # NOTE: no "tunnel-token" key here any more. It belonged to the OLD manual-tunnel
     # design (cloudflared tunnel create by hand, id pasted into a variable) — Terraform
     # now owns the tunnel's whole lifecycle (module.tunnel) and creates its OWN separate
@@ -836,6 +848,10 @@ module "web" {
   # The SPA is built with VITE_API_URL unset, so it calls relative /v1 paths and has
   # no knowledge of this hostname; setting VITE_API_URL would send the browser
   # straight to the API origin and break the cookie.
+  #
+  # The Functions also need the Pages SECRET `EDGE_CLIENT_IP_SECRET` (the same value as the API's key of that
+  # name), which is not set here: this module carries plain variables only. Without it a Function answers 500
+  # rather than forward unsigned (see apps/web/functions/_lib/proxy.ts).
   production_env_vars = {
     API_ORIGIN = "https://${var.api_domain}"
   }
