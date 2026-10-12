@@ -411,8 +411,7 @@ export abstract class AbstractOutboxRelay<
 
   private async claim(): Promise<Array<Claimed<TRow>>> {
     return this.db.transaction(async (tx) => {
-      const now = new Date();
-      const abandoned = await this.reapAbandoned(tx, now);
+      const abandoned = await this.reapAbandoned(tx, new Date());
       if (abandoned > 0) {
         this.logger.error(
           { abandoned, [DEAD_LETTER_FIELD]: this.reapLabel() },
@@ -421,6 +420,9 @@ export abstract class AbstractOutboxRelay<
       }
 
       await this.beforeSelect(tx);
+      // `now` is taken AFTER beforeSelect: a relay that serializes its claims may have waited for the lock,
+      // and a hold measured from before the wait would be shortened by it.
+      const now = new Date();
       const rows = await this.selectDue(tx, this.batchSize, now);
       if (!rows.length) return [];
 

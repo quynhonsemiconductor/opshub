@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB, type DbExecutor } from '@platform';
 import type {
   IUserRepository,
@@ -76,7 +76,11 @@ export class UserDrizzleRepository implements IUserRepository<DbExecutor> {
   constructor(@InjectDrizzle() private readonly db: DrizzleDB) {}
 
   async findByEmail(email: string): Promise<User | null> {
-    const [row] = await this.db.select().from(employees).where(eq(employees.email, email)).limit(1);
+    const [row] = await this.db
+      .select()
+      .from(employees)
+      .where(sql`lower(${employees.email}) = ${email.trim().toLowerCase()}`)
+      .limit(1);
     return row ? toUser(row) : null;
   }
 
@@ -150,7 +154,7 @@ export class UserDrizzleRepository implements IUserRepository<DbExecutor> {
       let [employee] = await db
         .select()
         .from(employees)
-        .where(eq(employees.email, providerEmail))
+        .where(sql`lower(${employees.email}) = ${providerEmail}`)
         .limit(1);
 
       if (!employee) {

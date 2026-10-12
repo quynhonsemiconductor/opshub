@@ -52,7 +52,7 @@ export class EmployeeDrizzleRepository implements IEmployeeRepository {
     const [row] = await this.db
       .select()
       .from(employees)
-      .where(eq(employees.email, email.toLowerCase()))
+      .where(sql`lower(${employees.email}) = ${email.trim().toLowerCase()}`)
       .limit(1);
     return row ?? null;
   }

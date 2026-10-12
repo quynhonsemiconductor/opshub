@@ -137,9 +137,14 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
     return this.leaseMs;
   }
 
-  protected beforeSelect(): Promise<void> {
+  /** How long the claim lock takes to acquire. */
+  beforeSelectWaitMs = 0;
+
+  protected async beforeSelect(): Promise<void> {
     this.beforeSelectCalls += 1;
-    return Promise.resolve();
+    if (this.beforeSelectWaitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.beforeSelectWaitMs));
+    }
   }
 
   protected renewLease(row: Claimed<TestRow>): Promise<Date | null> {
@@ -409,6 +414,20 @@ describe('AbstractOutboxRelay — a batch is held for the SUM of its leases', ()
     const held = relay.heldUntil[0].getTime() - before;
     expect(held).toBeGreaterThanOrEqual(270_000 - 1_000);
     expect(held).toBeLessThanOrEqual(270_000 + 2_000);
+  });
+
+  it('measures the hold from AFTER the claim lock was acquired, so waiting for it does not shorten the hold', async () => {
+    const { relay } = make();
+    relay.leaseMs = 90_000;
+    relay.beforeSelectWaitMs = 300;
+    relay.load([{ id: 'a', attempts: 0 }]);
+    const before = Date.now();
+
+    await relay.relay();
+
+    // Without the fix the hold was stamped from a `now` taken before the wait: ~90 s from `before`.
+    const held = relay.heldUntil[0].getTime() - before;
+    expect(held).toBeGreaterThanOrEqual(90_000 + 250);
   });
 
   it('keeps claiming until the queue is empty, so small batches cost no throughput', async () => {

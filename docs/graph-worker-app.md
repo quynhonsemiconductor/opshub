@@ -66,8 +66,10 @@ addresses (prefix stripped, case-insensitive) to equal the employee's email, and
 That stops a wrong or one-sided `entra_oid`. It does not stop someone who can write **both** the email and
 the `entra_oid` (`employee.write`) from pointing an employee at a directory object that has no employee
 row of its own; Microsoft's own limit on privileged roles, and the audit trail, bound that. Treat
-`employee.write` accordingly. Emails are stored lower-cased and are unique case-insensitively
-(`uq_employee_email_lower`).
+`employee.write` accordingly. Emails are stored lower-cased and trimmed and are unique case-insensitively
+(`uq_employee_email_lower`). Migration 0035 lower-cases the existing rows (after refusing, with the
+addresses named, if two would collide), and every lookup compares `lower(email)`, so an employee created
+before this change still matches at their first SSO login.
 
 ## Credential
 

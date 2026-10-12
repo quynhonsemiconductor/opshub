@@ -212,22 +212,34 @@ describe('EntraAccountService.reconcile — alias addresses', () => {
   });
 });
 
+const NOT_ENOUGH_LEASE = /of lease left/;
+
 describe('EntraAccountService.reconcile — will not START a change it may not finish', () => {
   const nearlyOver = () => new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS - 5_000);
 
-  it('defers (attempt refunded) instead of disabling when less than a full call deadline of lease is left', async () => {
+  it('fails as an ordinary RETRYABLE attempt (counted, so it cannot loop for ever) instead of disabling when less than a full call deadline of lease is left', async () => {
     const { service, patch, post } = make([employee({ status: 'offboarded' })]);
 
-    await expect(service.reconcile('emp-1', nearlyOver())).rejects.toBeInstanceOf(DeferError);
+    await expect(service.reconcile('emp-1', nearlyOver())).rejects.toThrow(NOT_ENOUGH_LEASE);
 
     expect(patch).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('defers before an ENABLE too', async () => {
+  it('is NOT a DeferError (that refunds the attempt with no limit) and NOT NonRetryable (a fresh lease may be enough)', async () => {
+    const { service } = make([employee({ status: 'offboarded' })]);
+
+    const err: unknown = await service.reconcile('emp-1', nearlyOver()).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(DeferError);
+    expect(err).not.toBeInstanceOf(NonRetryableError);
+  });
+
+  it('fails the same way before an ENABLE', async () => {
     const { service, patch } = make([employee(), employee()]);
 
-    await expect(service.reconcile('emp-1', nearlyOver())).rejects.toBeInstanceOf(DeferError);
+    await expect(service.reconcile('emp-1', nearlyOver())).rejects.toThrow(NOT_ENOUGH_LEASE);
     expect(patch).not.toHaveBeenCalled();
   });
 
@@ -239,7 +251,7 @@ describe('EntraAccountService.reconcile — will not START a change it may not f
       getTime: () => (calls++ === 0 ? Date.now() + 150_000 : Date.now() + 5_000),
     } as unknown as Date;
 
-    await expect(service.reconcile('emp-1', lease)).rejects.toBeInstanceOf(DeferError);
+    await expect(service.reconcile('emp-1', lease)).rejects.toThrow(NOT_ENOUGH_LEASE);
 
     expect(patch).toHaveBeenCalledTimes(1);
     expect(post).not.toHaveBeenCalled();

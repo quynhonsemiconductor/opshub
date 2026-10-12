@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { DeferError, InjectDrizzle, NonRetryableError, type DrizzleDB } from '@platform';
+import { InjectDrizzle, NonRetryableError, type DrizzleDB } from '@platform';
 import { employees } from '../../../../../db/schema';
 import { GraphClientService } from '../graph-client.service';
 import { MIN_LEASE_TO_MUTATE_MS } from '../graph-task';
@@ -32,8 +32,8 @@ interface DirectoryUser {
  *   - A task names an EMPLOYEE, never a directory object. The API cannot put an Entra id, or "enable" /
  *     "disable", in a task.
  *   - The object acted on is whatever `employees.entra_oid` holds, and that column is WRITABLE: through
- *     `POST` / `PATCH /employees` by a holder of `employee.write` (validated as a GUID, not as belonging
- *     to the person), and by SSO account linking.
+ *     `POST /employees` by a holder of `employee.write` (validated as a GUID, not as belonging to the
+ *     person) and by SSO account linking. `PATCH /employees` cannot change it (nor the email).
  *   - The worker therefore CHECKS before any change that the object's `mail`, `userPrincipalName` or one
  *     of its `smtp:` proxy addresses equals the employee's email (case-insensitive). That stops an
  *     accidental or one-sided mistake — an `entra_oid` pasted onto the wrong row, an object that
@@ -117,15 +117,16 @@ export class EntraAccountService {
 
   /**
    * Refuses to START a change when the lease is too close to its end for the call to finish inside it.
-   * A DeferError puts the task back to pending (attempt refunded); the next run has a fresh lease.
+   * An ordinary retryable failure, NOT a DeferError: the attempt is counted, so a task that keeps arriving
+   * here (its identity check always eats the lease) backs off, runs out of attempts and dead-letters with
+   * the alarm, instead of being refunded for ever.
    */
   private assertTimeToMutate(leaseExpiresAt: Date, employeeId: string): void {
     const remaining = leaseExpiresAt.getTime() - Date.now();
     if (remaining < MIN_LEASE_TO_MUTATE_MS) {
-      throw new DeferError(
+      throw new Error(
         `Account reconcile for employee ${employeeId}: ${Math.max(0, Math.round(remaining / 1000))} s of ` +
           `lease left, less than a call needs (${MIN_LEASE_TO_MUTATE_MS / 1000} s) — not starting a change`,
-        15_000,
       );
     }
   }

@@ -242,10 +242,6 @@ export class NotificationRelayService
     tx: DrizzleTx,
   ): Promise<void> {
     const emailEnabled = await this.prefs.isEmailEnabled(row.recipientId, row.type);
-    this.logger.warn(
-      { PROBE: 'cascade', recipientId: row.recipientId, type: row.type, emailEnabled },
-      'PROBE cascade entered',
-    );
     if (!emailEnabled) return;
 
     const [recipient] = await tx
