@@ -26,7 +26,7 @@ function contextFor(
     headers,
     ip: over.ip ?? '203.0.113.9',
     // Undefined ON PURPOSE, and it is not a simplification of the fixture: this guard is global and
-    // `JwtAuthGuard` is a route guard, so authentication has not run when it executes. A fixture that
+    // `SessionAuthGuard` is a route guard, so authentication has not run when it executes. A fixture that
     // populated `user` would be testing a request shape the guard never sees.
     user: undefined,
     cookies: over.cookies ?? {},
@@ -99,7 +99,7 @@ describe('RateLimitGuard, when the bucket is empty', () => {
  * WHO the bucket belongs to — the half that was silently wrong.
  *
  * The tier table says `DEFAULT` is "200 req/min per userId" and the guard read `req.user?.sub` to get
- * it. That is always undefined here, because this is a GLOBAL guard and `JwtAuthGuard` is a ROUTE guard:
+ * it. That is always undefined here, because this is a GLOBAL guard and `SessionAuthGuard` is a ROUTE guard:
  * Nest runs global guards first, so authentication has not happened yet. Every request therefore fell
  * through to the IP, and a whole office behind one NAT shared a single 200-a-minute bucket — about
  * fifteen simultaneous page loads at a dozen calls each, then everybody there gets 429s at once.

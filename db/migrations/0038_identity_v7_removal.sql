@@ -7,8 +7,8 @@
 --   * identity.refresh_tokens: v7 refresh-token sessions. identity 8 sessions are rows in identity.session.
 --   * identity.sso_identities: the Entra object id -> employee link. 0037 copied it to identity.account.
 --
--- `employees.entra_oid` STAYS: the employee API and the Graph PIM code read it, and the onStaffSignIn hook
--- keeps it in step at every sign-in.
+-- `employees.entra_oid` STAYS: the employee API and the Graph worker's account reconcile read it, and the
+-- onStaffSignIn hook keeps it in step at every sign-in.
 
 DROP TABLE IF EXISTS identity.refresh_tokens; -- expand-contract-ok: no users yet (owner, 2026-10-11)
 --> statement-breakpoint

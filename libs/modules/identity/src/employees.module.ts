@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '@modules/audit';
+import { GraphTasksModule } from '@modules/graph';
 import { EmployeeService } from './application/employee.service';
 import { EMPLOYEE_REPOSITORY } from './domain/ports/employee.repository';
 import { EmployeeDrizzleRepository } from './infrastructure/persistence/employee.drizzle-repository';
@@ -15,7 +16,7 @@ import { EmployeesController } from './interface/http/employees.controller';
  * (global) and is optional here.
  */
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, GraphTasksModule],
   controllers: [EmployeesController],
   providers: [
     EmployeeService,

@@ -114,6 +114,7 @@ describe('OffboardingTypeDef.onApprove()', () => {
       { enqueue } as never,
       { invalidate } as never,
       mockAudit as never,
+      { offboard: vi.fn().mockResolvedValue(undefined), reinstate: vi.fn() },
     );
   });
 
@@ -388,9 +389,20 @@ describe('OffboardingTypeDef.afterApprove(): the cached sessions', () => {
     await expect(typeDef.afterApprove(PAYLOAD)).rejects.toThrow('cache unavailable');
   });
 
-  it('is still correct where no revoker is bound (the worker): the permission cache is invalidated', async () => {
-    const { typeDef, invalidate } = build(undefined);
-    await typeDef.afterApprove(PAYLOAD);
-    expect(invalidate).toHaveBeenCalledWith(EMPLOYEE_ID);
+  it('REFUSES where no revoker is bound (the worker): afterApprove throws instead of skipping the cache clear', async () => {
+    const { typeDef } = build(undefined);
+    await expect(typeDef.afterApprove(PAYLOAD)).rejects.toThrow(/needs a SessionRevoker/);
+  });
+
+  it('onApprove refuses BEFORE changing anything where no revoker is bound', async () => {
+    const { typeDef } = build(undefined);
+    const tx = makeTx();
+
+    await expect(typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never)).rejects.toThrow(
+      /needs a SessionRevoker/,
+    );
+
+    expect(tx.update).not.toHaveBeenCalled();
+    expect(tx.delete).not.toHaveBeenCalled();
   });
 });

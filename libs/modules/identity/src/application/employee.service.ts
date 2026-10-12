@@ -10,6 +10,7 @@ import {
   type SessionRevoker,
 } from '@platform';
 import type { PresignUploadResult } from '@platform';
+import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
 import {
   AuditService,
   AUDIT_ACTION,
@@ -60,6 +61,8 @@ export class EmployeeService {
     private readonly storage: StorageService,
     @InjectDrizzle() private readonly db: DrizzleDB,
     audit: AuditService,
+    /** Queues the Entra account reconcile in the status transaction. Needs no Graph credential (see the queue). */
+    private readonly graphTasks: GraphTaskQueue,
     /**
      * Ends sessions and blocks sign-in. Bound by the API's AuthModule; ABSENT in the worker, which compiles
      * this service (contracts and training import it) but never changes an employee's status.
@@ -181,6 +184,17 @@ export class EmployeeService {
           before: { status: employee.status },
           after: { status },
         });
+      }
+      // Entering or leaving `offboarded` changes what Entra should say about this person: queue a reconcile, in
+      // THIS transaction, so the task exists if and only if the status change committed. LEVEL-TRIGGERED: the task
+      // carries the employee id and nothing else, and the worker reads the CURRENT status when it runs (offboarded:
+      // disable the account and revoke its sign-in sessions; otherwise: enable it), so a repeated task, a retry
+      // (`offboarded` → `offboarded`) or an older one run later all converge on the same state.
+      if (toOffboarded || wasOffboarded) {
+        await this.graphTasks.enqueue(
+          { kind: GRAPH_TASK.ACCOUNT_RECONCILE, payload: { employeeId: id } },
+          tx,
+        );
       }
       if (toOffboarded) {
         const ended = await this.users.ban(id, 'offboarded', tx);

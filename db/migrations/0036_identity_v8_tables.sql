@@ -3,7 +3,8 @@
 -- The product owns these (identity README, "Tables"), in the `identity` schema next to `employees`.
 -- Shape = `auth generate` for this createIdentity call, with the house adjustments: native uuid ids
 -- (identity generates uuidv7 in the application, so there is no database default and no uuidv7()
--- call here: the engines are PostgreSQL 16 / 17, not 18), timestamptz.
+-- call here: the deployed engines are PostgreSQL 16 on-prem and 17 on the develop RDS, which have no
+-- uuidv7(), even though CI now runs 18), timestamptz.
 --
 -- `identity."user".id` IS `identity.employees.id`: 0037 copies the employees with their ids, and the
 -- application keeps the two in step from then on (libs/modules/identity UserDirectory).

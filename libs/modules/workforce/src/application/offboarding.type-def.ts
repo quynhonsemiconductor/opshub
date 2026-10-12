@@ -82,6 +82,12 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     private readonly graphTasks: GraphTaskQueue,
     private readonly authz: AuthzService,
     audit: AuditService,
+    /**
+     * Bound by the API's AuthModule; ABSENT in the worker, which can compile this module but never approves an
+     * offboarding. Injected optionally so that compiling it there does not fail, and REQUIRED where it is used:
+     * `revoker()` throws, like `EmployeeService`, instead of skipping the cache clear and leaving a leaver's
+     * cached session behind.
+     */
     @Optional() @Inject(SESSION_REVOKER) private readonly sessions?: SessionRevoker,
   ) {
     // One trail per resource the workflow touches, bound once — the same shape the owning services
@@ -97,12 +103,24 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     this.registry.register(this);
   }
 
+  /** The port is bound in the API only; approving an offboarding anywhere else is a wiring error, not a no-op. */
+  private revoker(): SessionRevoker {
+    if (!this.sessions) {
+      throw new Error(
+        'OffboardingTypeDef needs a SessionRevoker: bind it in the API (AuthModule).',
+      );
+    }
+    return this.sessions;
+  }
+
   async onApprove(
     payload: OffboardingPayload,
     _requestId: string,
     approverId: string,
     tx: DbExecutor,
   ): Promise<void> {
+    // Refuse BEFORE changing anything where no revoker is bound: the cache clear after the commit is not optional.
+    this.revoker();
     const now = new Date();
     const { employeeId } = payload;
     // The APPROVER is the actor on every entry below: they authorised the removal. The engine hands
@@ -262,6 +280,6 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     // unavailable, which fails the post-commit step loudly instead of leaving a leaver's cached session behind:
     // the ban is already committed, so they cannot sign in again either way. (The Entra account disable is
     // a task queued in the transaction by `onApprove`, step 6.)
-    await this.sessions?.offboard(payload.employeeId, 'offboarded');
+    await this.revoker().offboard(payload.employeeId, 'offboarded');
   }
 }
