@@ -18,7 +18,7 @@ interface CommandPaletteStore {
 export const useCommandPaletteStore = create<CommandPaletteStore>()((set, get) => ({
   open: false,
   initialQuery: '',
-  show:   (initialQuery = '') => set({ open: true,  initialQuery }),
-  hide:   () => set({ open: false, initialQuery: '' }),
+  show: (initialQuery = '') => set({ open: true, initialQuery }),
+  hide: () => set({ open: false, initialQuery: '' }),
   toggle: () => (get().open ? get().hide() : get().show()),
 }));

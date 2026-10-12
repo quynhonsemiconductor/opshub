@@ -9,11 +9,11 @@ import { NotificationsService } from './notifications.service';
 
 const mockRepo = {
   existsBySourceEventId: vi.fn(),
-  create:                vi.fn(),
-  list:                  vi.fn(),
-  markRead:              vi.fn(),
-  markAllRead:           vi.fn(),
-  unreadCount:           vi.fn(),
+  create: vi.fn(),
+  list: vi.fn(),
+  markRead: vi.fn(),
+  markAllRead: vi.fn(),
+  unreadCount: vi.fn(),
 };
 
 const NOTIFICATION = {

@@ -98,9 +98,7 @@ export interface IInformationAssetRepository {
     deviceAssetId: string,
     tx?: DbExecutor,
   ): Promise<boolean>;
-  listDevicesFor(
-    informationAssetId: string,
-  ): Promise<
+  listDevicesFor(informationAssetId: string): Promise<
     {
       deviceAssetId: string;
       assetTag: string;

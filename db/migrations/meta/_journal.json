@@ -33,14 +33,14 @@
     {
       "idx": 4,
       "version": "7",
-      "when": 1751500000000,
+      "when": 1782600000000,
       "tag": "0004_refresh_token_auth_method",
       "breakpoints": true
     },
     {
       "idx": 5,
       "version": "7",
-      "when": 1751600000000,
+      "when": 1782700000000,
       "tag": "0005_outbox_retry",
       "breakpoints": true
     },
@@ -245,6 +245,13 @@
       "version": "7",
       "when": 1787411163374,
       "tag": "0034_vendor_review_due_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791729757635,
+      "tag": "0035_graph_task_outbox",
       "breakpoints": true
     }
   ]

@@ -9,13 +9,13 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "changelog-sections": [
-        { "type": "feat",     "section": "✨ Features" },
-        { "type": "fix",      "section": "🐛 Bug Fixes" },
-        { "type": "perf",     "section": "⚡ Performance" },
+        { "type": "feat", "section": "✨ Features" },
+        { "type": "fix", "section": "🐛 Bug Fixes" },
+        { "type": "perf", "section": "⚡ Performance" },
         { "type": "security", "section": "🔒 Security" },
-        { "type": "deps",     "section": "📦 Dependencies" },
-        { "type": "chore",    "section": "🔧 Chores", "hidden": true },
-        { "type": "ci",       "section": "👷 CI/CD",   "hidden": true }
+        { "type": "deps", "section": "📦 Dependencies" },
+        { "type": "chore", "section": "🔧 Chores", "hidden": true },
+        { "type": "ci", "section": "👷 CI/CD", "hidden": true }
       ]
     }
   },

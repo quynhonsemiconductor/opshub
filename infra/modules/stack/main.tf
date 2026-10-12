@@ -164,24 +164,36 @@ locals {
     # like the two below: it is a random key this side generates, not a credential
     # minted in someone else's console, so there is no window where it cannot be set.
     { name = "CSRF_SECRET", secret_arn = module.secrets.secret_arns["csrf-secret"] },
-    ],
-    # The BFF's confidential-client secret. Gated for the same reason as Graph's: an
-    # empty Secrets Manager value cannot be injected at all, so wiring it before the
-    # Entra app registration has one would stop every task from starting. While it is
-    # off, the login START still works and the callback's token exchange is what fails —
-    # the app boots, and the Bearer path is unaffected.
-    var.entra_client_secret_set ? [
-      { name = "ENTRA_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["entra-client-secret"] },
-    ] : [],
-    # Injected only once populated — see the variable. ECS cannot inject a secret that
-    # holds no value: the task fails to start with
-    # "ResourceInitializationError ... can't find the specified secret value for staging
-    # label: AWSCURRENT". So wiring an OPTIONAL integration unconditionally makes it
-    # mandatory in the worst way, and that is precisely what kept develop from ever
-    # booting.
-    var.graph_client_secret_set ? [
-      { name = "GRAPH_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["graph-client-secret"] },
-  ] : [])
+  ])
+
+  # The API's ALONE: the BFF's confidential-client secret. The worker never completes a sign-in, and its
+  # env schema REFUSES TO START with ENTRA_CLIENT_SECRET set, so this must not be in `app_secrets`.
+  # Gated: an empty Secrets Manager value cannot be injected at all, so wiring it before the Entra app
+  # registration has one would stop every task from starting. While it is off, the login START still
+  # works and the callback's token exchange is what fails — the app boots, and the Bearer path is
+  # unaffected.
+  api_secrets = var.entra_client_secret_set ? [
+    { name = "ENTRA_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["entra-client-secret"] },
+  ] : []
+
+  # Microsoft Graph is the WORKER's alone. The API task is given no GRAPH_* variable and no Graph
+  # secret: an API request that needs Graph writes a graph_task_outbox row and the worker performs it
+  # (libs/modules/graph). The Graph app is its own Entra registration, authenticated with a
+  # certificate — there is no client secret for it to leak.
+  #
+  # The certificate is injected only once populated — see the variable. ECS cannot inject a secret
+  # that holds no value: the task fails to start with "ResourceInitializationError ... can't find
+  # the specified secret value for staging label: AWSCURRENT". Unset GRAPH_CLIENT_ID is the "off"
+  # switch the app understands; every Graph feature then skips with one info log.
+  worker_graph_secrets = var.graph_client_certificate_set ? [
+    { name = "GRAPH_CLIENT_CERTIFICATE", secret_arn = aws_secretsmanager_secret.graph_client_certificate.arn },
+  ] : []
+  # The worker's execution role is the only one granted it: this secret is NOT in the app bundle, so
+  # `module.secrets.secret_iam_arns` (what the api and migrator roles are granted) does not include it.
+  worker_graph_secret_iam_arns = var.graph_client_certificate_set ? [aws_secretsmanager_secret.graph_client_certificate.arn] : []
+  worker_graph_env = var.graph_client_id == "" ? [] : [
+    { name = "GRAPH_CLIENT_ID", value = var.graph_client_id },
+  ]
 
   # Env both services need. Same reasoning as app_secrets: the queue URL, the bucket
   # and the cache endpoint are the contract between them, so they cannot be allowed to
@@ -265,7 +277,6 @@ module "secrets" {
     # aws_secretsmanager_secret.tunnel_token, populated automatically from the tunnel
     # resource's own token output. Nothing reads this bundle's key any more.
     "entra-client-secret" = "Entra confidential-client secret for the BFF server-side code exchange"
-    "graph-client-secret" = "Microsoft Graph app client secret (client-credentials flow for Graph sync jobs)"
     # Passwords for the least-privilege roles migration 0012 creates. The CONTAINERS exist
     # unconditionally so `secret_arns["db-app-password"]` always resolves and the IAM list
     # keeps a plan-time-known length; what is gated is the INJECTION — see
@@ -487,7 +498,7 @@ module "api" {
     module.firelens_agent_api.secret_arns,
   )
   kms_key_arn = local.kms_key_arn
-  secrets     = concat(local.app_secrets, local.api_db_secrets)
+  secrets     = concat(local.app_secrets, local.api_secrets, local.api_db_secrets)
 
   environment_vars = concat(local.shared_env, local.api_db_env, [
     { name = "PORT", value = "3000" },
@@ -571,13 +582,14 @@ module "worker" {
     module.secrets.secret_iam_arns,
     [module.rds.master_secret_arn],
     module.firelens_agent_worker.secret_arns,
+    local.worker_graph_secret_iam_arns,
   )
   kms_key_arn = local.kms_key_arn
-  secrets     = concat(local.app_secrets, local.worker_db_secrets)
+  secrets     = concat(local.app_secrets, local.worker_db_secrets, local.worker_graph_secrets)
 
   # Not plain `local.shared_env`: the pool ceiling is per-SERVICE, because it divides
   # the shared budget by this service's own autoscaling ceiling.
-  environment_vars = concat(local.shared_env, local.worker_db_env, [
+  environment_vars = concat(local.shared_env, local.worker_db_env, local.worker_graph_env, [
     { name = "DATABASE_POOL_MAX", value = tostring(local.worker_pool_max) },
     { name = "OTEL_SERVICE_NAME", value = "${var.product}-worker" },
     { name = "OTEL_ENABLED", value = tostring(module.otel_agent_worker.enabled) },
@@ -678,6 +690,20 @@ module "tunnel" {
 
   hostname = var.api_domain
   service  = "http://localhost:3000"
+}
+
+# The Graph worker app's credential (PEM: private key + certificate), STANDALONE and not a key in the
+# shared secrets bundle. The bundle's ARN is in the api and migrator execution roles' grants, so a key
+# inside it would be readable by both; a separate secret granted only to the worker's execution role is
+# not. Created empty (like the bundle's keys): the value is pasted out of band and never enters state.
+# See docs/graph-worker-app.md.
+resource "aws_secretsmanager_secret" "graph_client_certificate" {
+  name                    = "${var.product}/${var.env}/graph-client-certificate"
+  description             = "Graph worker app credential: PEM holding the private key and certificate. No client secret exists for that app. Granted to the worker only."
+  kms_key_id              = local.kms_key_arn
+  recovery_window_in_days = var.secrets_recovery_window_days
+
+  tags = local.tags
 }
 
 # The connector token, Terraform-managed — separate from the shared secrets bundle

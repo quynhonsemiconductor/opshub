@@ -94,9 +94,7 @@ export class ShadowItListResponseDto {
   total!: number;
 }
 
-export class ShadowItScanResponseDto {
-  /** Devices examined. `0` also means the integration is not configured: no Intune, nothing to scan. */
-  scanned!: number;
-  /** Findings the scan created. Re-detecting known software is not a new finding. */
-  newFindings!: number;
+export class ShadowItScanQueuedDto {
+  /** True when a new scan was queued; false when one was already waiting, which covers this request. */
+  queued!: boolean;
 }

@@ -5,7 +5,7 @@
  * backoff delay calculation — all without a real HTTP server or database.
  *
  * Strategy:
- *  - `processRow()` is protected, so we expose it via a thin test subclass.
+ *  - `deliver()` (the HTTP POST) is protected, so we expose it via a thin test subclass.
  *  - `markFailed()` and `markSent()` are similarly exposed.
  *  - `fetch` is replaced with a vi.stubGlobal() spy so we can control responses.
  */
@@ -34,31 +34,45 @@ import type { DrizzleTx } from '@platform';
 // ── Test subclass exposing protected methods ──────────────────────────────────
 
 class TestableRelayService extends WebhookRelayService {
-  public exposedProcessRow(row: Parameters<WebhookRelayService['processRow']>[0]) {
-    // This relay enqueues nothing, so the transaction argument goes unused. Passed as a stub rather
-    // than made optional on the base class: a relay that DOES chain must not be able to omit it.
-    return this.processRow(row, {} as DrizzleTx);
+  /** `deliver` is the HTTP POST; it runs with no transaction open, so it takes no `tx`. */
+  public exposedProcessRow(row: ReturnType<typeof makeRow>) {
+    return this.deliver({
+      ...row,
+      leaseToken: 'lease-1',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+    });
   }
 
   public exposedMarkSent(tx: DrizzleTx, rowId: string) {
-    return this.markSent(tx, rowId);
+    return this.markSent(tx, {
+      ...makeRow({ id: rowId }),
+      leaseToken: 'lease-1',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+    });
   }
 
+  /** `attempts` is the row's CLAIMED attempt count: the claim already spent it. */
   public exposedMarkFailed(
     tx: DrizzleTx,
     rowId: string,
-    newAttempts: number,
+    attempts: number,
     newStatus: 'pending' | 'failed',
     error: string,
   ) {
     // The base class's generic backoff, which this relay ignores in favour of its own
     // RETRY_DELAYS_SECONDS curve. A recognisable sentinel keeps that visible: if epoch 0 ever
     // shows up in an assertion below, the relay stopped honouring its own schedule.
-    return this.markFailed(tx, rowId, newAttempts, newStatus, error, new Date(0));
-  }
-
-  public exposedFetchBatch(tx: DrizzleTx) {
-    return this.fetchBatch(tx);
+    return this.markFailed(
+      tx,
+      {
+        ...makeRow({ id: rowId, attempts }),
+        leaseToken: 'lease-1',
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      },
+      newStatus,
+      error,
+      new Date(0),
+    );
   }
 }
 

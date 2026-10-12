@@ -98,12 +98,17 @@ module "stack" {
   entra_tenant_id = var.entra_tenant_id
   entra_client_id = var.entra_client_id
 
-  // Both secrets are populated in Secrets Manager (opshub/develop/entra-client-secret,
-  // opshub/develop/graph-client-secret) — this is the second, ordered step that actually
-  // wires them into api/worker. See the two variables' descriptions in modules/stack for
-  // why this is staged rather than unconditional.
+  // The sign-in secret is populated in Secrets Manager (opshub/develop/entra-client-secret) —
+  // this is the second, ordered step that actually wires it into api/worker. See the variable's
+  // description in modules/stack for why this is staged rather than unconditional.
   entra_client_secret_set = true
-  graph_client_secret_set = true
+
+  // Microsoft Graph is OFF: the "OpsHub Graph Worker" app does not exist yet (it is created at the
+  // on-prem move, with a federated credential), and the sign-in app holds no application
+  // permissions. With graph_client_id empty every Graph feature skips with one info log.
+  // docs/graph-worker-app.md has the app's exact permissions and credential setup.
+  graph_client_certificate_set = false
+  graph_client_id              = ""
 
   // qnsc.vn is a verified SES domain identity in this account (rally already sends from
   // it). A distinct local-part from rally's own noreply@qnsc.vn keeps bounce/reply

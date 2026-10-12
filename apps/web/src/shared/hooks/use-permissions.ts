@@ -40,14 +40,7 @@ const ROLE_PRIORITY: Record<string, number> = {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type AppRole =
-  | 'admin'
-  | 'it-admin'
-  | 'security'
-  | 'hr'
-  | 'helpdesk'
-  | 'auditor'
-  | 'manager'
-  | 'employee';
+  'admin' | 'it-admin' | 'security' | 'hr' | 'helpdesk' | 'auditor' | 'manager' | 'employee';
 
 export interface PermissionHelpers {
   /**

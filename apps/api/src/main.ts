@@ -3,6 +3,8 @@
 // late. See @quynhonsemiconductor/platform-runtime's own header: this MUST stay
 // above the OTel bootstrap, and MUST come from the subpath, not the package root.
 import '@quynhonsemiconductor/platform-runtime/load-env';
+// The process role, before anything that loads @platform (which validates the environment on import).
+import './role';
 // OTel must be imported before any other module — registers auto-instrumentation
 import { shutdownOtel } from './otel';
 import { NestFactory } from '@nestjs/core';

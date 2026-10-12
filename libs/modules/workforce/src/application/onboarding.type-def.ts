@@ -1,5 +1,4 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
 import {
   type ApprovalStepDef,
   type DbExecutor,
@@ -8,9 +7,8 @@ import {
   RequestRegistry,
   RequestTypeDef,
 } from '@platform';
+import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
 import { REQUEST_TYPE } from '@shared-kernel';
-import { employees } from '../../../../../db/schema';
-import { GraphProvisioningService } from './graph-provisioning.service';
 
 export interface OnboardingPayload extends Record<string, unknown> {
   /** The employee being onboarded. */
@@ -60,39 +58,29 @@ export class OnboardingTypeDef implements RequestTypeDef<OnboardingPayload>, OnM
   constructor(
     private readonly registry: RequestRegistry,
     @InjectDrizzle() private readonly db: DrizzleDB,
-    private readonly graphProvisioning: GraphProvisioningService,
+    private readonly graphTasks: GraphTaskQueue,
   ) {}
 
   onModuleInit(): void {
     this.registry.register(this);
   }
 
+  /**
+   * Final approval: queue an Entra account reconcile IN THE APPROVAL'S TRANSACTION.
+   *
+   * The task names the employee and nothing else. The worker reads their status and Entra object id when
+   * it runs and sets the account to match, so this can never enable an account whose owner has been
+   * offboarded since — the stale-enable race a "set enabled = true" payload would have.
+   */
   async onApprove(
-    _payload: OnboardingPayload,
+    payload: OnboardingPayload,
     _requestId: string,
     _approverId: string,
-    _tx: DbExecutor,
+    tx: DbExecutor,
   ): Promise<void> {
-    // No domain side-effects needed on final approval.
-    // The controller records the audit event after the engine call returns.
-  }
-
-  async afterApprove(payload: OnboardingPayload): Promise<void> {
-    if (!this.graphProvisioning.isEnabled()) return;
-
-    const [row] = await this.db
-      .select({ entraOid: employees.entraOid })
-      .from(employees)
-      .where(eq(employees.id, payload.employeeId))
-      .limit(1);
-
-    if (!row?.entraOid) {
-      this.logger.warn(
-        `Onboarding afterApprove: no Entra OID for employee ${payload.employeeId}, skipping Graph enable`,
-      );
-      return;
-    }
-
-    await this.graphProvisioning.enableEntraUser(row.entraOid);
+    await this.graphTasks.enqueue(
+      { kind: GRAPH_TASK.ACCOUNT_RECONCILE, payload: { employeeId: payload.employeeId } },
+      tx,
+    );
   }
 }

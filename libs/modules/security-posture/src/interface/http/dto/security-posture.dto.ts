@@ -122,3 +122,11 @@ export class BaselineResponseDto {
   })
   summary!: Record<string, BaselineCategorySummaryDto>;
 }
+
+export class SyncQueuedResponseDto {
+  @ApiProperty({
+    description:
+      'True when a new sync task was queued; false when one was already waiting, which covers this request.',
+  })
+  queued!: boolean;
+}

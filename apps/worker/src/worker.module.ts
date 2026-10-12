@@ -5,8 +5,10 @@ import { PlatformModule, AppConfigService } from '@platform';
 import { AuditModule } from '@modules/audit';
 import { NotificationsModule } from '@modules/notifications';
 import { WebhooksModule } from '@modules/webhooks';
-import { ComplianceModule, ComplianceSyncCron } from '@modules/compliance';
-import { SecurityPostureModule, SecurityPostureSyncCron } from '@modules/security-posture';
+import { ComplianceModule } from '@modules/compliance';
+// By path, not from the barrel: the API must not be able to import the module that holds the Graph client.
+import { GraphModule } from '@modules/graph/graph.module';
+import { SecurityPostureModule } from '@modules/security-posture';
 import { ContractsModule } from '@modules/contracts';
 import { IsmsModule } from '@modules/isms';
 import { RequestExpiryCron } from './cron/request-expiry.cron';
@@ -37,13 +39,12 @@ import { BounceFeedbackService } from './email/bounce-feedback.service';
     WebhooksModule,
     ComplianceModule,
     SecurityPostureModule,
+    GraphModule,
     ContractsModule,
     IsmsModule,
   ],
   providers: [
     BounceFeedbackService,
-    ComplianceSyncCron,
-    SecurityPostureSyncCron,
     RequestExpiryCron,
     SlaBreachCron,
     DelegationExpiryCron,

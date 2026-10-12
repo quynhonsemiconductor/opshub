@@ -13,7 +13,7 @@ variable "cloudflare_api_token" {
 // ── Public identifiers, held in git on purpose ────────────────────────────────
 // These are NOT secrets: an Entra tenant/client id appears in the browser's auth
 // redirect, and a Cloudflare account id identifies the account without authorising
-// anything. The corresponding SECRETS live in Secrets Manager (graph-client-secret)
+// anything. The corresponding SECRETS live in Secrets Manager (entra-client-secret)
 // and the Cloudflare API token stays a GitHub secret.
 //
 // They used to arrive as TF_VARs from GitHub Actions variables and secrets, which made

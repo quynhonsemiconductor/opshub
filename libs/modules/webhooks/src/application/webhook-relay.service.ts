@@ -3,7 +3,7 @@ import { and, asc, eq, lt, lte } from 'drizzle-orm';
 import { Cron } from '@nestjs/schedule';
 import { createHmac } from 'crypto';
 import { AbstractOutboxRelay, InjectDrizzle, Span, describeUnsafeResolvedTarget } from '@platform';
-import type { DrizzleDB, DrizzleTx, PostCommitTask } from '@platform';
+import type { Claimed, DrizzleDB, DrizzleTx, OutboxLeaseTable } from '@platform';
 import { webhookDeliveries, webhookSubscriptions } from '../../../../../db/schema';
 import { MS_PER_SEC } from '@shared-kernel';
 
@@ -41,7 +41,21 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     return super.relay();
   }
 
-  protected async fetchBatch(tx: DrizzleTx): Promise<DeliveryRow[]> {
+  /** Held for the SUM of the batch's leases (2 min each): 5 rows is 10 minutes if a worker dies. */
+  protected override readonly batchSize = 5;
+
+  protected readonly outbox: OutboxLeaseTable = {
+    table: webhookDeliveries,
+    id: webhookDeliveries.id,
+    status: webhookDeliveries.status,
+    attempts: webhookDeliveries.attempts,
+    lastError: webhookDeliveries.lastError,
+    leaseToken: webhookDeliveries.leaseToken,
+    lockedUntil: webhookDeliveries.lockedUntil,
+    seq: webhookDeliveries.seq,
+  };
+
+  protected async selectDue(tx: DrizzleTx, limit: number, now: Date): Promise<DeliveryRow[]> {
     return tx
       .select({
         id: webhookDeliveries.id,
@@ -64,24 +78,25 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
         and(
           eq(webhookDeliveries.status, 'pending'),
           lt(webhookDeliveries.attempts, this.maxAttempts),
-          lte(webhookDeliveries.nextAttemptAt, new Date()),
+          lte(webhookDeliveries.nextAttemptAt, now),
+          this.notLeased(now),
         ),
       )
-      .orderBy(asc(webhookDeliveries.nextAttemptAt), asc(webhookDeliveries.id))
-      .limit(this.batchSize)
-      .for('update', { skipLocked: true });
+      .orderBy(asc(webhookDeliveries.seq), asc(webhookDeliveries.id))
+      .limit(limit)
+      .for('update', { skipLocked: true, of: webhookDeliveries });
   }
 
-  protected async processRow(row: DeliveryRow, _tx: DrizzleTx): Promise<PostCommitTask | void> {
+  /** The HTTP POST, with NO transaction open: a slow receiver holds a connection, not row locks. */
+  protected async deliver(row: Claimed<DeliveryRow>): Promise<void> {
     /*
      * CHECKED HERE AS WELL AS AT WRITE TIME, because they are different moments. The DTO judged the
      * string when the subscription was saved; this resolves the name now. A host that pointed somewhere
      * public then can point at `10.0.0.5` today, and the stored URL is unchanged either way.
      *
-     * Thrown rather than skipped, so the row follows the ordinary failure path — attempts increment, the
-     * reason lands in `last_error` where the subscription's owner can read it, and it dead-letters like
-     * anything else. Silently dropping it would leave a subscription that looks healthy and delivers
-     * nothing.
+     * Thrown rather than skipped, so the row follows the ordinary failure path — the reason lands in
+     * `last_error` where the subscription's owner can read it, and it dead-letters like anything else.
+     * Silently dropping it would leave a subscription that looks healthy and delivers nothing.
      */
     const unsafe = await describeUnsafeResolvedTarget(row.url);
     if (unsafe) {
@@ -120,17 +135,16 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     }
   }
 
-  protected async markSent(tx: DrizzleTx, rowId: string): Promise<void> {
+  protected async markSent(tx: DrizzleTx, row: Claimed<DeliveryRow>): Promise<void> {
     await tx
       .update(webhookDeliveries)
       .set({ status: 'delivered', deliveredAt: new Date() })
-      .where(eq(webhookDeliveries.id, rowId));
+      .where(eq(webhookDeliveries.id, row.id));
   }
 
   protected async markFailed(
     tx: DrizzleTx,
-    rowId: string,
-    newAttempts: number,
+    row: Claimed<DeliveryRow>,
     newStatus: 'pending' | 'failed',
     error: string,
     // Deliberately IGNORED: webhook deliveries follow their own RETRY_DELAYS_SECONDS curve,
@@ -139,16 +153,15 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     _nextAttemptAt: Date,
   ): Promise<void> {
     const delaySeconds =
-      RETRY_DELAYS_SECONDS[Math.min(newAttempts - 1, RETRY_DELAYS_SECONDS.length - 1)] ?? 3600;
+      RETRY_DELAYS_SECONDS[Math.min(row.attempts - 1, RETRY_DELAYS_SECONDS.length - 1)] ?? 3600;
     const nextAttemptAt = new Date(Date.now() + delaySeconds * MS_PER_SEC);
     await tx
       .update(webhookDeliveries)
       .set({
         status: newStatus,
-        attempts: newAttempts,
         lastError: error.slice(0, MAX_DELIVERY_ERROR_LENGTH),
         nextAttemptAt: newStatus === 'failed' ? new Date() : nextAttemptAt,
       })
-      .where(eq(webhookDeliveries.id, rowId));
+      .where(eq(webhookDeliveries.id, row.id));
   }
 }

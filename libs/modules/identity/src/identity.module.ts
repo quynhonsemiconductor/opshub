@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { AuditModule } from '@modules/audit';
 import { AuthzModule } from '@modules/authz';
-import { AppConfigService, BFF_SESSION_RESOLVER } from '@platform';
+import { ApiConfigService, AppConfigService, BFF_SESSION_RESOLVER } from '@platform';
 import {
   BFF_OPTIONS,
   BffService,
@@ -63,8 +63,8 @@ import { sharedAuthProviders } from './infrastructure/shared-auth/shared-auth.pr
     { provide: BFF_SESSION_RESOLVER, useExisting: OpshubBffSessionResolver },
     {
       provide: BFF_OPTIONS,
-      inject: [AppConfigService],
-      useFactory: (config: AppConfigService): BffOptions => ({
+      inject: [AppConfigService, ApiConfigService],
+      useFactory: (config: AppConfigService, apiConfig: ApiConfigService): BffOptions => ({
         // Gates the passwordless dev-login shortcut. Both deployed environments run
         // NODE_ENV=production, so it is off in develop too — see the controller.
         nodeEnv: config.get('NODE_ENV'),
@@ -76,7 +76,7 @@ import { sharedAuthProviders } from './infrastructure/shared-auth/shared-auth.pr
           // Empty until the app registration has a secret minted. The login START
           // still works; the callback's token exchange is what fails, and it fails
           // closed with a generic 401.
-          clientSecret: config.get('ENTRA_CLIENT_SECRET') ?? '',
+          clientSecret: apiConfig.get('ENTRA_CLIENT_SECRET') ?? '',
           redirectUri: config.get('ENTRA_REDIRECT_URI') ?? '',
         },
       }),

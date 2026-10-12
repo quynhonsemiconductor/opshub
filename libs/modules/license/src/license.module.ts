@@ -8,10 +8,7 @@ import { LICENSE_REPOSITORY } from './domain/ports/license.repository';
 @Module({
   imports: [AuditModule],
   controllers: [LicensesController],
-  providers: [
-    LicenseService,
-    { provide: LICENSE_REPOSITORY, useClass: LicenseDrizzleRepository },
-  ],
+  providers: [LicenseService, { provide: LICENSE_REPOSITORY, useClass: LicenseDrizzleRepository }],
   exports: [LicenseService],
 })
 export class LicenseModule {}

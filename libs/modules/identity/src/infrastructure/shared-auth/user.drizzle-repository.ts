@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB, type DbExecutor } from '@platform';
-import type { IUserRepository, SsoIdentity, User, UserStatus } from '@quynhonsemiconductor/identity';
+import type {
+  IUserRepository,
+  SsoIdentity,
+  User,
+  UserStatus,
+} from '@quynhonsemiconductor/identity';
 import { employees, ssoIdentities } from '../../../../../../db/schema';
 
 type EmployeeRow = typeof employees.$inferSelect;
@@ -71,7 +76,11 @@ export class UserDrizzleRepository implements IUserRepository<DbExecutor> {
   constructor(@InjectDrizzle() private readonly db: DrizzleDB) {}
 
   async findByEmail(email: string): Promise<User | null> {
-    const [row] = await this.db.select().from(employees).where(eq(employees.email, email)).limit(1);
+    const [row] = await this.db
+      .select()
+      .from(employees)
+      .where(sql`lower(${employees.email}) = ${email.trim().toLowerCase()}`)
+      .limit(1);
     return row ? toUser(row) : null;
   }
 
@@ -132,17 +141,20 @@ export class UserDrizzleRepository implements IUserRepository<DbExecutor> {
   async upsertBySsoIdentity(
     provider: string,
     providerSub: string,
-    providerEmail: string,
+    rawProviderEmail: string,
     displayName: string,
     tx?: DbExecutor,
   ): Promise<User> {
+    // employees.email is stored lower-cased (uq_employee_email_lower): an IdP that returns `Ada@x` must
+    // find the employee `ada@x`, not create a second one.
+    const providerEmail = rawProviderEmail.trim().toLowerCase();
     const run = async (db: DbExecutor): Promise<User> => {
       // 1. Find-or-create the employee by email (the natural key for opshub's
       //    single-tenant directory).
       let [employee] = await db
         .select()
         .from(employees)
-        .where(eq(employees.email, providerEmail))
+        .where(sql`lower(${employees.email}) = ${providerEmail}`)
         .limit(1);
 
       if (!employee) {

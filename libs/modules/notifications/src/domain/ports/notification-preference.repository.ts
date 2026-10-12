@@ -1,4 +1,7 @@
-import type { NotificationPreference, UpsertPreferenceInput } from '../notification-preference.types';
+import type {
+  NotificationPreference,
+  UpsertPreferenceInput,
+} from '../notification-preference.types';
 
 export const NOTIFICATION_PREFERENCE_REPOSITORY = Symbol('NOTIFICATION_PREFERENCE_REPOSITORY');
 

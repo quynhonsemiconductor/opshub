@@ -34,7 +34,7 @@ import { and, asc, eq, lt, lte } from 'drizzle-orm';
 import { InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
 import { AbstractOutboxRelay } from '@platform';
-import type { PostCommitTask } from '@platform';
+import type { Claimed, OutboxLeaseTable, PostCommitTask } from '@platform';
 import { renderNotification, NotificationPubSubService } from '@platform/notifications';
 import type { NotificationTemplateName, NotificationTemplateVars } from '@platform/notifications';
 import { notificationOutbox } from '../../../../../db/schema';
@@ -94,7 +94,30 @@ export class NotificationRelayService
 
   // ── AbstractOutboxRelay implementation ────────────────────────────────────
 
-  protected async fetchBatch(tx: DrizzleTx): Promise<NotificationOutboxRow[]> {
+  /**
+   * Nothing leaves the database here, so a row takes milliseconds; the lease only has to cover the
+   * waiting behind earlier rows of the batch. 10 rows x 60 s = 10 minutes if a worker dies.
+   */
+  protected leaseMsFor(): number {
+    return 60_000;
+  }
+
+  protected readonly outbox: OutboxLeaseTable = {
+    table: notificationOutbox,
+    id: notificationOutbox.id,
+    status: notificationOutbox.status,
+    attempts: notificationOutbox.attempts,
+    lastError: notificationOutbox.lastError,
+    leaseToken: notificationOutbox.leaseToken,
+    lockedUntil: notificationOutbox.lockedUntil,
+    seq: notificationOutbox.seq,
+  };
+
+  protected async selectDue(
+    tx: DrizzleTx,
+    limit: number,
+    now: Date,
+  ): Promise<NotificationOutboxRow[]> {
     return tx
       .select({
         id: notificationOutbox.id,
@@ -111,16 +134,27 @@ export class NotificationRelayService
         and(
           eq(notificationOutbox.status, 'pending'),
           lt(notificationOutbox.attempts, this.maxAttempts),
-          lte(notificationOutbox.scheduledAt, new Date()),
+          lte(notificationOutbox.scheduledAt, now),
+          this.notLeased(now),
         ),
       )
-      .orderBy(asc(notificationOutbox.scheduledAt), asc(notificationOutbox.id))
-      .limit(this.batchSize)
+      .orderBy(asc(notificationOutbox.seq), asc(notificationOutbox.id))
+      .limit(limit)
       .for('update', { skipLocked: true });
   }
 
-  protected async processRow(
-    row: NotificationOutboxRow,
+  /**
+   * Nothing leaves the database here — the in-app row and the email cascade are database writes — so
+   * the whole body is `settle`, inside the fenced finish transaction, where it commits atomically with
+   * the outbox row going to sent. The SSE push is a post-commit task.
+   */
+  protected async deliver(): Promise<void> {
+    // intentionally empty: see settle()
+  }
+
+  protected async settle(
+    row: Claimed<NotificationOutboxRow>,
+    _result: void,
     tx: DrizzleTx,
   ): Promise<PostCommitTask | void> {
     // Check in-app preference before dispatching.
@@ -208,10 +242,6 @@ export class NotificationRelayService
     tx: DrizzleTx,
   ): Promise<void> {
     const emailEnabled = await this.prefs.isEmailEnabled(row.recipientId, row.type);
-    this.logger.warn(
-      { PROBE: 'cascade', recipientId: row.recipientId, type: row.type, emailEnabled },
-      'PROBE cascade entered',
-    );
     if (!emailEnabled) return;
 
     const [recipient] = await tx
@@ -240,27 +270,26 @@ export class NotificationRelayService
     );
   }
 
-  protected async markSent(tx: DrizzleTx, rowId: string): Promise<void> {
+  protected async markSent(tx: DrizzleTx, row: Claimed<NotificationOutboxRow>): Promise<void> {
     await tx
       .update(notificationOutbox)
       .set({ status: 'sent', dispatchedAt: new Date() })
-      .where(eq(notificationOutbox.id, rowId));
+      .where(eq(notificationOutbox.id, row.id));
   }
 
   protected async markFailed(
     tx: DrizzleTx,
-    rowId: string,
-    newAttempts: number,
+    row: Claimed<NotificationOutboxRow>,
     newStatus: 'pending' | 'failed',
     lastError: string,
     nextAttemptAt: Date,
   ): Promise<void> {
     await tx
       .update(notificationOutbox)
-      // scheduledAt IS the retry gate — fetchBatch selects on `scheduledAt <= now()`, so
-      // leaving it alone made every retry immediate and burned all five attempts inside
-      // ~25 seconds. A dependency blip therefore dead-lettered the row permanently.
-      .set({ attempts: newAttempts, status: newStatus, lastError, scheduledAt: nextAttemptAt })
-      .where(eq(notificationOutbox.id, rowId));
+      // scheduledAt IS the retry gate — selectDue selects on `scheduledAt <= now()`, so leaving it alone
+      // made every retry immediate and burned all five attempts inside ~25 seconds. A dependency blip
+      // therefore dead-lettered the row permanently.
+      .set({ status: newStatus, lastError, scheduledAt: nextAttemptAt })
+      .where(eq(notificationOutbox.id, row.id));
   }
 }

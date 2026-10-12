@@ -100,7 +100,7 @@ variable "entra_client_secret_set" {
     Inject `entra-client-secret` into api and worker, enabling the BFF's server-side
     code exchange.
 
-    OFF by default for the same mechanical reason as `graph_client_secret_set`: ECS
+    OFF by default for the same mechanical reason as `graph_client_certificate_set`: ECS
     cannot inject a Secrets Manager secret that holds no value — the task dies before the
     app runs — so wiring a credential that has not been minted yet takes the whole
     environment down.
@@ -117,24 +117,43 @@ variable "entra_client_secret_set" {
   default     = false
 }
 
-variable "graph_client_secret_set" {
+variable "graph_client_certificate_set" {
   description = <<-EOT
-    Inject `graph-client-secret` into api and worker.
+    Inject `graph-client-certificate` into the WORKER (never the api) as GRAPH_CLIENT_CERTIFICATE.
 
     OFF by default, and the default is the point. ECS cannot inject a Secrets Manager
     secret that holds no value — the task dies before the app runs with
     "ResourceInitializationError ... can't find the specified secret value for staging
     label: AWSCURRENT". So wiring an OPTIONAL integration unconditionally makes it
-    mandatory in the worst possible way: this single empty secret is why no opshub task
-    has ever started, even though the app treats the Graph features as self-disabling.
+    mandatory in the worst possible way.
 
-    While this is false the Graph-backed surfaces (compliance sync, security posture,
-    workforce provisioning, PIM) report themselves disabled and everything else runs.
-    Populate the secret in Secrets Manager first, then flip this — the same two-step
-    shape rally uses for credentials it cannot generate.
+    The Graph app is a SEPARATE Entra registration from the sign-in app (`entra_client_id`),
+    with no client secret: it authenticates with this certificate now and with a federated
+    credential when the worker moves to k3s. Order: create the app and upload the public
+    certificate, put the PEM (key + certificate) in Secrets Manager, set `graph_client_id`,
+    then flip this. See docs/graph-worker-app.md.
+
+    While it is false (or `graph_client_id` is empty) every Graph-backed feature — Intune
+    device sync, shadow-IT scan, Secure Score, Entra account disable/enable and session
+    revoke — skips with one info log, and tasks queued meanwhile wait in the outbox.
   EOT
   type        = bool
   default     = false
+}
+
+variable "graph_client_id" {
+  description = <<-EOT
+    Application (client) id of the Graph worker app — not `entra_client_id`, which is the
+    sign-in app and holds no application permissions. A public identifier, held in git like
+    the other Entra ids. Empty turns Graph off. Set on the worker only.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.graph_client_id == "" || can(regex("^[0-9a-fA-F-]{36}$", var.graph_client_id))
+    error_message = "graph_client_id must be empty or an Entra application (client) id (a UUID)."
+  }
 }
 
 variable "db_role_passwords_set" {
@@ -155,7 +174,7 @@ variable "db_role_passwords_set" {
     and worker would fail with 28P01 before the cutover task could run. Hence two flags,
     flipped in two applies.
 
-    OFF by default for the same reason `graph_client_secret_set` is: ECS cannot inject a
+    OFF by default for the same reason `graph_client_certificate_set` is: ECS cannot inject a
     Secrets Manager secret that holds no value, so turning this on before populating the
     secrets stops the migrator from starting at all.
 

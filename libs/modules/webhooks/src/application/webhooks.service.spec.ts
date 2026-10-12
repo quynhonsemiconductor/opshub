@@ -42,8 +42,20 @@ function makeDeliveryRow(overrides: Record<string, unknown> = {}) {
 /** Build a fluent Drizzle mock chain ending with the provided resolved value. */
 function makeChain(resolvedValue: unknown) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
-  const methods = ['select', 'insert', 'update', 'delete', 'from', 'where',
-    'set', 'values', 'returning', 'limit', 'orderBy', 'eq'];
+  const methods = [
+    'select',
+    'insert',
+    'update',
+    'delete',
+    'from',
+    'where',
+    'set',
+    'values',
+    'returning',
+    'limit',
+    'orderBy',
+    'eq',
+  ];
   for (const m of methods) {
     chain[m] = vi.fn().mockReturnValue(chain);
   }
@@ -62,11 +74,13 @@ function makeChain(resolvedValue: unknown) {
   return chain;
 }
 
-function buildService(opts: {
-  selectRows?: unknown[];
-  insertRow?: unknown;
-  updateRow?: unknown;
-} = {}) {
+function buildService(
+  opts: {
+    selectRows?: unknown[];
+    insertRow?: unknown;
+    updateRow?: unknown;
+  } = {},
+) {
   const { selectRows = [], insertRow = makeSubRow(), updateRow = makeSubRow() } = opts;
 
   const selectChain = makeChain(selectRows);
