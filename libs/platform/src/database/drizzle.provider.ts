@@ -1,5 +1,6 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
+import { DbPoolMetrics } from '@quynhonsemiconductor/observability';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
@@ -72,6 +73,14 @@ export class DrizzleProvider implements OnModuleInit, OnModuleDestroy {
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
     });
+
+    // Pool saturation (`db.pool.in_use` / `db.pool.waiting`), pulled by OpenTelemetry on each collection: the
+    // `db-pool-contention` alarm reads `db_pool_waiting`. Same reading as platform-db's own pool helper (which
+    // is not exported for a pool built here). Idempotent, and a no-op when OTel is off.
+    new DbPoolMetrics().register(() => ({
+      inUse: this.pool.totalCount - this.pool.idleCount,
+      waiting: this.pool.waitingCount,
+    }));
 
     this.db = drizzle(this.pool, { schema, logger: config.get('LOG_SQL') });
   }

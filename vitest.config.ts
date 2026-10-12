@@ -110,8 +110,11 @@ export default defineConfig({
       // 45.51 / statements 45.40 / branches 36.42 / functions 31.16, and `check:coverage-floors` refused the
       // floors above (functions 4.16 and branches 4.42 behind, past the 3-point limit). Set about two and a
       // half points under actual, as above. Neither branch's own figure applies once both are in.
+      // Raised 2026-10-13: lines 44. The platform-http adoption added specs (the access-log interceptor's metrics,
+      // the client-address keys, the Pages proxy's neighbours in the env schema) and deleted a local sanitiser; lines
+      // measured 46.02 and the 3-point limit refused 43.
       thresholds: {
-        lines: 43,
+        lines: 44,
         functions: 29,
         branches: 34,
         statements: 43,

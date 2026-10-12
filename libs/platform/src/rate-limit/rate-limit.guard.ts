@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { AppConfigService } from '../config/app-config.service';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
+import { clientIp } from '@quynhonsemiconductor/platform-http';
 import {
   RATE_LIMIT_TIER,
   SKIP_RATE_LIMIT,
@@ -123,11 +124,10 @@ export class RateLimitGuard implements CanActivate {
     const res = context.switchToHttp().getResponse<FastifyReply>();
 
     const userId = req.user?.sub;
-    const ip =
-      (req.headers['x-real-ip'] as string) ??
-      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
-      req.ip ??
-      'unknown';
+    // `clientIp()`, never a header read here: behind Cloudflare `x-real-ip` and the first `x-forwarded-for` entry
+    // are whatever the caller chose to send, so a forged one would pick its own rate-limit bucket. It returns the
+    // signed edge address when `EDGE_CLIENT_IP_SECRET` is set, else `cf-connecting-ip`, else the socket.
+    const ip = clientIp(req);
 
     let identifier: string;
     switch (tier.keyBy) {

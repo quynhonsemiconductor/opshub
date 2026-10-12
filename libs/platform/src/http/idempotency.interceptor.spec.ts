@@ -34,15 +34,27 @@ function makeCache(opts: { available?: boolean; stored?: Stored | null; lockFree
   };
 }
 
-function makeContext(over: { method?: string; url?: string; body?: unknown; key?: string } = {}) {
+function makeContext(
+  over: {
+    method?: string;
+    url?: string;
+    body?: unknown;
+    key?: string;
+    user?: { sub: string } | null;
+    headers?: Record<string, string>;
+  } = {},
+) {
   const header = vi.fn();
   const req = {
     method: over.method ?? 'POST',
     url: over.url ?? '/v1/assets',
     body: over.body ?? { assetTag: 'A-1' },
     ip: '203.0.113.7',
-    user: { sub: 'emp-1' },
-    headers: over.key === undefined ? {} : { 'idempotency-key': over.key },
+    user: over.user === null ? undefined : { sub: 'emp-1' },
+    headers: {
+      ...(over.key === undefined ? {} : { 'idempotency-key': over.key }),
+      ...(over.headers ?? {}),
+    },
   };
   return {
     ctx: {
@@ -224,5 +236,23 @@ describe('IdempotencyInterceptor', () => {
 
       expect(cache.releaseLock).toHaveBeenCalledWith('idem:emp-1:k:lock');
     });
+  });
+
+  it('scopes an UNauthenticated caller by clientIp(): the signed/cf address, never a header the caller sets', async () => {
+    const cache = makeCache();
+    const interceptor = new IdempotencyInterceptor(cache as never);
+    const { ctx } = makeContext({
+      key: 'k-1',
+      user: null,
+      headers: {
+        'cf-connecting-ip': '198.51.100.9',
+        'x-real-ip': '192.0.2.1',
+        'x-forwarded-for': '192.0.2.2',
+      },
+    });
+
+    await firstValueFrom(interceptor.intercept(ctx, handler()));
+
+    expect(cache.getJson).toHaveBeenCalledWith('idem:ip:198.51.100.9:k-1');
   });
 });
