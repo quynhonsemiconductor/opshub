@@ -38,12 +38,14 @@ const NON_UUID_PARAMS = new Set<string>([
 ]);
 
 function controllerFiles(): string[] {
-  return execFileSync('git', ['ls-files', '*.controller.ts'], { cwd: ROOT, encoding: 'utf8' })
-    .split('\n')
-    .filter(Boolean)
-    // `git ls-files` reports the INDEX, so a file deleted but not yet staged would throw
-    // ENOENT here and kill the check with an error that looks nothing like a param problem.
-    .filter((f) => existsSync(join(ROOT, f)));
+  return (
+    execFileSync('git', ['ls-files', '*.controller.ts'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n')
+      .filter(Boolean)
+      // `git ls-files` reports the INDEX, so a file deleted but not yet staged would throw
+      // ENOENT here and kill the check with an error that looks nothing like a param problem.
+      .filter((f) => existsSync(join(ROOT, f)))
+  );
 }
 
 describe('path parameters are validated before they reach the database', () => {

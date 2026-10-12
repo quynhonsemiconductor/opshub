@@ -10,9 +10,15 @@
  */
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Client, RetryHandler } from '@microsoft/microsoft-graph-client';
+import {
+  Client,
+  HTTPMessageHandler,
+  RetryHandler,
+  type Context,
+  type Middleware,
+} from '@microsoft/microsoft-graph-client';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildGraphMiddleware, TimeoutHandler } from './graph-http';
+import { buildGraphMiddleware, GraphDeadlineError, TimeoutHandler } from './graph-http';
 import {
   GRAPH_CALL_TIMEOUT_MS,
   GRAPH_TASK,
@@ -44,10 +50,11 @@ const clientFor = (baseUrl: string, timeoutMs?: number) =>
   Client.initWithMiddleware({ middleware: buildGraphMiddleware(auth, timeoutMs), baseUrl });
 
 describe('the Graph middleware chain', () => {
-  it('has no RetryHandler and does have a TimeoutHandler', () => {
+  it('has no RetryHandler, and the TimeoutHandler comes FIRST so its deadline covers the token', () => {
     const chain = buildGraphMiddleware(auth);
     expect(chain.some((m) => m instanceof RetryHandler)).toBe(false);
-    expect(chain.some((m) => m instanceof TimeoutHandler)).toBe(true);
+    expect(chain[0]).toBeInstanceOf(TimeoutHandler);
+    expect(chain.at(-1)).toBeInstanceOf(HTTPMessageHandler);
   });
 
   it.each([429, 503, 504])(
@@ -122,5 +129,91 @@ describe('leases outlive their calls', () => {
 
   it('the margin is not a rounding error', () => {
     expect(LEASE_MARGIN_MS).toBeGreaterThanOrEqual(GRAPH_CALL_TIMEOUT_MS);
+  });
+});
+
+/**
+ * A stand-in for AuthenticationHandler whose token takes as long as the test says. (The real handler
+ * attaches a token only to https Graph hosts, so it cannot be driven against a local server; what matters
+ * here is its position in the chain and that it awaits something that ignores an AbortSignal.)
+ */
+class StallingAuth implements Middleware {
+  next: Middleware | undefined;
+  private release!: () => void;
+  readonly gate = new Promise<void>((resolve) => (this.release = resolve));
+  setNext(next: Middleware): void {
+    this.next = next;
+  }
+  async execute(context: Context): Promise<void> {
+    await this.gate; // getAccessToken(): MSAL, no timeout, its own retries
+    await this.next!.execute(context);
+  }
+  tokenArrives(): void {
+    this.release();
+  }
+}
+
+describe('a token acquisition that stalls is inside the deadline', () => {
+  function stalledClient(baseUrl: string, timeoutMs: number) {
+    const auth = new StallingAuth();
+    const chain: Middleware[] = [new TimeoutHandler(timeoutMs), auth, new HTTPMessageHandler()];
+    chain[0].setNext!(chain[1]);
+    chain[1].setNext!(chain[2]);
+    return { auth, client: Client.initWithMiddleware({ middleware: chain, baseUrl }) };
+  }
+
+  it('REJECTS at the deadline even though the token never arrives', async () => {
+    const { baseUrl } = await serve((_req, res) => res.end('{}'));
+    const { client } = stalledClient(baseUrl, 150);
+    const started = Date.now();
+
+    const err: unknown = await client
+      .api('/users/x')
+      .patch({ accountEnabled: true })
+      .catch((e: unknown) => e);
+
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(String((err as Error).message)).toMatch(/deadline/);
+    expect(GraphDeadlineError).toBeDefined();
+  });
+
+  it('NEVER SENDS the request when the token finally arrives after the deadline (no stale PATCH)', async () => {
+    /*
+     * The race: the token stalls past the lease, another worker acts on newer state, then the token
+     * arrives and the first worker's PATCH lands on top. The request must not go out at all.
+     */
+    const { baseUrl, hits } = await serve((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{}');
+    });
+    const { client, auth } = stalledClient(baseUrl, 100);
+
+    await client
+      .api('/users/x')
+      .patch({ accountEnabled: true })
+      .catch(() => undefined);
+    auth.tokenArrives(); // too late
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(hits(), 'a request was sent after the deadline').toBe(0);
+  });
+
+  it('does not leave an unhandled rejection behind when the late token path then fails', async () => {
+    const { baseUrl } = await serve((_req, res) => res.end('{}'));
+    const { client, auth } = stalledClient(baseUrl, 80);
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', listener);
+    try {
+      await client
+        .api('/users/x')
+        .get()
+        .catch(() => undefined);
+      auth.tokenArrives();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+    expect(unhandled).toEqual([]);
   });
 });

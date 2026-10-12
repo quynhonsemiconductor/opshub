@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { InjectDrizzle, NonRetryableError, type DrizzleDB } from '@platform';
+import { DeferError, InjectDrizzle, NonRetryableError, type DrizzleDB } from '@platform';
 import { employees } from '../../../../../db/schema';
 import { GraphClientService } from '../graph-client.service';
+import { MIN_LEASE_TO_MUTATE_MS } from '../graph-task';
 
 /** Entra object ids are GUIDs. Anything else never reaches a URL. */
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -11,6 +12,8 @@ interface DirectoryUser {
   id?: string;
   userPrincipalName?: string | null;
   mail?: string | null;
+  /** `SMTP:primary@x`, `smtp:alias@x`, `x500:…`, `SIP:…` */
+  proxyAddresses?: string[] | null;
 }
 
 /**
@@ -20,21 +23,29 @@ interface DirectoryUser {
  *   verify          GET   /users/{id}                        User.Read.All
  *   setEnabled      PATCH /users/{id}                        User.EnableDisableAccount.All + User.Read.All
  *   revokeSessions  POST  /users/{id}/revokeSignInSessions   User.RevokeSessions.All
- * At most three calls per run (see GRAPH_TASK_MAX_CALLS), each with a hard deadline.
+ * At most three calls per run (see GRAPH_TASK_MAX_CALLS), each with a hard deadline that starts before
+ * the access token is requested.
  *
- * WHAT IS AND IS NOT GUARANTEED — stated precisely, because an earlier version of this comment claimed
+ * WHAT IS AND IS NOT GUARANTEED — stated precisely, because earlier versions of this comment claimed
  * more than the code delivers.
  *
  *   - A task names an EMPLOYEE, never a directory object. The API cannot put an Entra id, or "enable" /
  *     "disable", in a task.
- *   - The directory object acted on is whatever `employees.entra_oid` holds. That column is WRITABLE
- *     through `POST /employees` by anyone with `employee.write` (the value is validated as a GUID, not as
- *     belonging to the person), and by SSO account linking. So the API can influence WHICH object a
- *     task acts on, indirectly, by editing a row.
- *   - THE WORKER THEREFORE VERIFIES, before any change: it reads the object's `mail` and
- *     `userPrincipalName` and requires one of them to equal the employee's email (case-insensitive). An
- *     object that belongs to someone else is never touched: the task dead-letters, which raises the
- *     dead-letter alarm, and no PATCH or revoke is sent.
+ *   - The object acted on is whatever `employees.entra_oid` holds, and that column is WRITABLE: through
+ *     `POST` / `PATCH /employees` by a holder of `employee.write` (validated as a GUID, not as belonging
+ *     to the person), and by SSO account linking.
+ *   - The worker therefore CHECKS before any change that the object's `mail`, `userPrincipalName` or one
+ *     of its `smtp:` proxy addresses equals the employee's email (case-insensitive). That stops an
+ *     accidental or one-sided mistake — an `entra_oid` pasted onto the wrong row, an object that
+ *     belongs to someone else — and the task dead-letters (alarm) instead of touching it.
+ *   - It is NOT proof of ownership against a deliberate attacker who can edit BOTH fields. Whoever
+ *     holds `employee.write` can set an employee's email to the address of a directory object that has
+ *     no employee row of its own (a service account, an external guest) and `entra_oid` to its id; the
+ *     uniqueness of `employees.email` only protects addresses that already have an employee row. The
+ *     limits on the damage are Microsoft's: an application with these permissions cannot disable or
+ *     revoke a user who holds a privileged directory role (the call returns 403 and the task
+ *     dead-letters), and every change is in the audit trail of the approval that queued it. Treat
+ *     `employee.write` as able to influence which account an offboarding disables.
  *   - LEVEL-TRIGGERED. The account is set to match the employee's CURRENT status, read when the task
  *     runs, so a task queued earlier cannot override a later change of status.
  */
@@ -47,7 +58,12 @@ export class EntraAccountService {
     @InjectDrizzle() private readonly db: DrizzleDB,
   ) {}
 
-  async reconcile(employeeId: string): Promise<void> {
+  /**
+   * `leaseExpiresAt` is when this run's lease on the task lapses. Before each CHANGE, enough of it must
+   * remain for the call to finish (a full deadline plus a margin); otherwise the run steps aside (the
+   * attempt is refunded) rather than start a call that could land after another worker has taken over.
+   */
+  async reconcile(employeeId: string, leaseExpiresAt: Date): Promise<void> {
     const employee = await this.employee(employeeId);
 
     if (!employee) {
@@ -73,8 +89,10 @@ export class EntraAccountService {
     await this.assertBelongsTo(employee.entraOid, employee.email, employeeId);
 
     if (employee.status === 'offboarded') {
+      this.assertTimeToMutate(leaseExpiresAt, employeeId);
       await this.setEnabled(employee.entraOid, false);
       // Disabling stops NEW sign-ins; a refresh token already issued keeps working until revoked.
+      this.assertTimeToMutate(leaseExpiresAt, employeeId);
       await this.revokeSessions(employee.entraOid);
       return;
     }
@@ -93,7 +111,23 @@ export class EntraAccountService {
       );
       return;
     }
+    this.assertTimeToMutate(leaseExpiresAt, employeeId);
     await this.setEnabled(employee.entraOid, true);
+  }
+
+  /**
+   * Refuses to START a change when the lease is too close to its end for the call to finish inside it.
+   * A DeferError puts the task back to pending (attempt refunded); the next run has a fresh lease.
+   */
+  private assertTimeToMutate(leaseExpiresAt: Date, employeeId: string): void {
+    const remaining = leaseExpiresAt.getTime() - Date.now();
+    if (remaining < MIN_LEASE_TO_MUTATE_MS) {
+      throw new DeferError(
+        `Account reconcile for employee ${employeeId}: ${Math.max(0, Math.round(remaining / 1000))} s of ` +
+          `lease left, less than a call needs (${MIN_LEASE_TO_MUTATE_MS / 1000} s) — not starting a change`,
+        15_000,
+      );
+    }
   }
 
   private async employee(employeeId: string) {
@@ -106,8 +140,10 @@ export class EntraAccountService {
   }
 
   /**
-   * Requires the directory object's `mail` or `userPrincipalName` to equal the employee's email. The
-   * values are never logged or stored in the failure message: the row records only that they differ.
+   * Requires the directory object's `mail`, `userPrincipalName` or an `smtp:` proxy address (the
+   * `smtp:` / `SMTP:` prefix stripped) to equal the employee's email, case-insensitively — aliases are
+   * how people really sign in. The values are never logged or stored in the failure message: the row
+   * records only that none matched.
    */
   private async assertBelongsTo(
     entraOid: string,
@@ -117,17 +153,20 @@ export class EntraAccountService {
     const user = (await this.graph
       .client()
       .api(`/users/${encodeURIComponent(entraOid)}`)
-      .select(['id', 'userPrincipalName', 'mail'])
+      .select(['id', 'userPrincipalName', 'mail', 'proxyAddresses'])
       .get()) as DirectoryUser;
 
     const wanted = email.trim().toLowerCase();
-    const matches = [user.mail, user.userPrincipalName].some(
+    const aliases = (user.proxyAddresses ?? [])
+      .filter((a) => /^smtp:/i.test(a))
+      .map((a) => a.replace(/^smtp:/i, ''));
+    const matches = [user.mail, user.userPrincipalName, ...aliases].some(
       (candidate) => typeof candidate === 'string' && candidate.trim().toLowerCase() === wanted,
     );
     if (!matches) {
       throw new NonRetryableError(
-        `Entra object ${entraOid} does not belong to employee ${employeeId}: neither its mail nor its ` +
-          `userPrincipalName equals the employee's email. Nothing was changed. If entra_oid is wrong, ` +
+        `Entra object ${entraOid} does not belong to employee ${employeeId}: none of its mail, userPrincipalName ` +
+          `or smtp addresses equals the employee's email. Nothing was changed. If entra_oid is wrong, ` +
           `correct it and requeue.`,
       );
     }

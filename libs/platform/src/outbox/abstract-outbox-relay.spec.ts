@@ -98,9 +98,14 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
     this.due = rows;
   }
 
+  /** More batches for the same pass: each claim takes the next one. */
+  queuedBatches: TestRow[][] = [];
+
   protected selectDue(): Promise<TestRow[]> {
+    this.claims += 1;
     const rows = this.due;
-    this.due = [];
+    this.due = this.queuedBatches.shift() ?? [];
+    for (const r of this.due) this.byId.set(r.id, r);
     return Promise.resolve(rows);
   }
 
@@ -109,14 +114,38 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
   }
 
   /** The claim spends an attempt on each row. */
-  protected stampLeases(_tx: DrizzleTx, ids: string[]): Promise<Map<string, number>> {
+  protected stampLeases(
+    _tx: DrizzleTx,
+    ids: string[],
+    _token: string,
+    lockedUntil: Date,
+  ): Promise<Map<string, number>> {
     const map = new Map(ids.map((id) => [id, this.byId.get(id)!.attempts + 1]));
     this.stampedAttempts = map;
+    this.heldUntil.push(lockedUntil);
     return Promise.resolve(map);
   }
 
-  protected renewLease(row: Claimed<TestRow>): Promise<boolean> {
-    return Promise.resolve(!this.lostAtRenew.has(row.id));
+  /** The `locked_until` each claim stamped. */
+  heldUntil: Date[] = [];
+  /** How long each row's lease is (default 10 s). */
+  leaseMs = 10_000;
+  claims = 0;
+  beforeSelectCalls = 0;
+
+  protected leaseMsFor(): number {
+    return this.leaseMs;
+  }
+
+  protected beforeSelect(): Promise<void> {
+    this.beforeSelectCalls += 1;
+    return Promise.resolve();
+  }
+
+  protected renewLease(row: Claimed<TestRow>): Promise<Date | null> {
+    return Promise.resolve(
+      this.lostAtRenew.has(row.id) ? null : new Date(Date.now() + this.leaseMs),
+    );
   }
 
   protected holdsLease(_tx: DrizzleTx, row: Claimed<TestRow>): Promise<boolean> {
@@ -219,8 +248,8 @@ describe('AbstractOutboxRelay — no transaction across the external call', () =
 
     expect(relay.openDuringDeliver).toEqual([0, 0]);
     expect(relay.sent.map((s) => s.id)).toEqual(['a', 'b']);
-    // One claim transaction + one finish transaction per row; never more than one open at a time.
-    expect(state.commits).toBe(3);
+    // One claim, one finish per row, and the empty claim that ends the pass; never more than one open.
+    expect(state.commits).toBe(4);
     expect(state.maxOpen).toBe(1);
   });
 
@@ -332,7 +361,7 @@ describe('AbstractOutboxRelay — Retry-After is clamped, never an Invalid Date'
 });
 
 describe('AbstractOutboxRelay — DeferError is not an attempt', () => {
-  it('puts the row back to pending, REFUNDS the attempt, and does not dead-letter however many times', async () => {
+  it('puts the row back to pending and REFUNDS the attempt (the BOUND on deferring belongs to the caller)', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 4, deliver: 'defer' }]); // the claim makes it the 5th (the last)
     const before = Date.now();
@@ -345,6 +374,78 @@ describe('AbstractOutboxRelay — DeferError is not an attempt', () => {
       before + 5 * 60_000 - 1_000,
     );
     expect(relay.sent).toEqual([]);
+  });
+
+  it('logs every defer at WARN, so a row stuck waiting is visible', async () => {
+    const { relay } = make();
+    relay.load([{ id: 'a', attempts: 0, deliver: 'defer' }]);
+    const warn = vi.spyOn(
+      (relay as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger,
+      'warn',
+    );
+
+    await relay.relay();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][1])).toMatch(/deferred a row for 300 s/);
+  });
+});
+
+describe('AbstractOutboxRelay — a batch is held for the SUM of its leases', () => {
+  it("stamps locked_until = now + the sum of the rows' leases, because they are worked one after another", async () => {
+    const { relay } = make();
+    relay.leaseMs = 90_000;
+    relay.load([
+      { id: 'a', attempts: 0 },
+      { id: 'b', attempts: 0 },
+      { id: 'c', attempts: 0 },
+    ]);
+    const before = Date.now();
+
+    await relay.relay();
+
+    // Three rows x 90 s = 270 s. A hold of ONE lease (90 s) would lapse while the third row waits behind
+    // the first two, and another relay would re-claim it and burn an attempt.
+    const held = relay.heldUntil[0].getTime() - before;
+    expect(held).toBeGreaterThanOrEqual(270_000 - 1_000);
+    expect(held).toBeLessThanOrEqual(270_000 + 2_000);
+  });
+
+  it('keeps claiming until the queue is empty, so small batches cost no throughput', async () => {
+    const { relay } = make();
+    relay.load([{ id: 'a', attempts: 0 }]);
+    relay.queuedBatches = [[{ id: 'b', attempts: 0 }], [{ id: 'c', attempts: 0 }]];
+
+    await relay.relay();
+
+    expect(relay.sent.map((s) => s.id)).toEqual(['a', 'b', 'c']);
+    expect(relay.claims).toBe(4); // three batches, then the empty one that ends the pass
+  });
+
+  it('runs beforeSelect in every claim, ahead of the SELECT', async () => {
+    const { relay } = make();
+    relay.load([{ id: 'a', attempts: 0 }]);
+    await relay.relay();
+    expect(relay.beforeSelectCalls).toBe(relay.claims);
+  });
+
+  it('hands each delivery the lease expiry it was just renewed to', async () => {
+    const { relay } = make();
+    relay.leaseMs = 45_000;
+    relay.load([{ id: 'a', attempts: 0 }]);
+    const seen: number[] = [];
+    (relay as unknown as { deliver: (row: Claimed<TestRow>) => Promise<string> }).deliver = (
+      row,
+    ) => {
+      seen.push(row.leaseExpiresAt.getTime() - Date.now());
+      return Promise.resolve('x');
+    };
+
+    await relay.relay();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBeGreaterThan(40_000);
+    expect(seen[0]).toBeLessThanOrEqual(45_000);
   });
 });
 
@@ -452,7 +553,7 @@ describe('AbstractOutboxRelay — one row never takes the others down', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(seenOpen).toEqual([0]);
-    expect(commitsAtRun).toEqual([2]); // claim + finish
+    expect(commitsAtRun).toEqual([2]); // claim + finish (the empty claim that ends the pass comes later)
   });
 });
 

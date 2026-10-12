@@ -36,11 +36,19 @@ import type { DrizzleTx } from '@platform';
 class TestableRelayService extends WebhookRelayService {
   /** `deliver` is the HTTP POST; it runs with no transaction open, so it takes no `tx`. */
   public exposedProcessRow(row: ReturnType<typeof makeRow>) {
-    return this.deliver({ ...row, leaseToken: 'lease-1' });
+    return this.deliver({
+      ...row,
+      leaseToken: 'lease-1',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+    });
   }
 
   public exposedMarkSent(tx: DrizzleTx, rowId: string) {
-    return this.markSent(tx, { ...makeRow({ id: rowId }), leaseToken: 'lease-1' });
+    return this.markSent(tx, {
+      ...makeRow({ id: rowId }),
+      leaseToken: 'lease-1',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+    });
   }
 
   /** `attempts` is the row's CLAIMED attempt count: the claim already spent it. */
@@ -56,7 +64,11 @@ class TestableRelayService extends WebhookRelayService {
     // shows up in an assertion below, the relay stopped honouring its own schedule.
     return this.markFailed(
       tx,
-      { ...makeRow({ id: rowId, attempts }), leaseToken: 'lease-1' },
+      {
+        ...makeRow({ id: rowId, attempts }),
+        leaseToken: 'lease-1',
+        leaseExpiresAt: new Date(Date.now() + 60_000),
+      },
       newStatus,
       error,
       new Date(0),

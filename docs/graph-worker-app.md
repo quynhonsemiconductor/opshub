@@ -25,13 +25,13 @@ import the module that has one — `test/graph-client-single-source.spec.ts` fai
 
 ## Application permissions — exactly these five, admin-consented
 
-| Permission                                | Used by                                                   | Call                                                                         | Why this and not a broader one                                                                                                                                                                                                   |
-| ----------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SecurityEvents.Read.All`                 | `SecureScoreSyncService` (`secure-score-sync.service.ts`) | `GET /security/secureScores`, `GET /security/secureScoreControlProfiles`     | Least privileged for `secureScore` per Microsoft; `…ReadWrite.All` is the higher one. (Control profiles: same family; confirm on first run.)                                                                                     |
-| `DeviceManagementManagedDevices.Read.All` | `DeviceSyncService`, `ShadowItScanService`                | `GET /deviceManagement/managedDevices`, `GET /deviceManagement/detectedApps` | Least privileged for both; `…ReadWrite.All` can wipe and retire devices.                                                                                                                                                         |
-| `User.EnableDisableAccount.All`           | `EntraAccountService.setEnabled`                          | `PATCH /users/{id}` `{ accountEnabled }`                                     | Microsoft names `User.EnableDisableAccount.All` + `User.Read.All` the least-privileged pair for `accountEnabled`. `User.ReadWrite.All` also edits names, phones, licences.                                                       |
-| `User.Read.All`                           | same                                                      | same                                                                         | Required alongside the above for that call.                                                                                                                                                                                      |
-| `User.RevokeSessions.All`                 | `EntraAccountService.revokeSessions`                      | `POST /users/{id}/revokeSignInSessions`                                      | The only application permission that grants it. Disabling an account stops _new_ sign-ins; revoking ends the refresh tokens already issued. It does not apply to external (guest) users — their home tenant owns their sessions. |
+| Permission                                | Used by                                                   | Call                                                                              | Why this and not a broader one                                                                                                                                                                                                   |
+| ----------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SecurityEvents.Read.All`                 | `SecureScoreSyncService` (`secure-score-sync.service.ts`) | `GET /security/secureScores`, `GET /security/secureScoreControlProfiles`          | Least privileged for `secureScore` per Microsoft; `…ReadWrite.All` is the higher one. (Control profiles: same family; confirm on first run.)                                                                                     |
+| `DeviceManagementManagedDevices.Read.All` | `DeviceSyncService`, `ShadowItScanService`                | `GET /deviceManagement/managedDevices`, `GET /deviceManagement/detectedApps`      | Least privileged for both; `…ReadWrite.All` can wipe and retire devices.                                                                                                                                                         |
+| `User.EnableDisableAccount.All`           | `EntraAccountService.setEnabled`                          | `PATCH /users/{id}` `{ accountEnabled }`                                          | Microsoft names `User.EnableDisableAccount.All` + `User.Read.All` the least-privileged pair for `accountEnabled`. `User.ReadWrite.All` also edits names, phones, licences.                                                       |
+| `User.Read.All`                           | `EntraAccountService.assertBelongsTo`, `setEnabled`       | `GET /users/{id}?$select=id,userPrincipalName,mail,proxyAddresses`, and the above | The identity check before any change reads the object; also required alongside `User.EnableDisableAccount.All` for the `PATCH`.                                                                                                  |
+| `User.RevokeSessions.All`                 | `EntraAccountService.revokeSessions`                      | `POST /users/{id}/revokeSignInSessions`                                           | The only application permission that grants it. Disabling an account stops _new_ sign-ins; revoking ends the refresh tokens already issued. It does not apply to external (guest) users — their home tenant owns their sessions. |
 
 Verify after consent: decode an access token for the app and check the `roles` claim lists exactly these
 five values, nothing else.
@@ -52,6 +52,22 @@ An application token can disable an ordinary account. For an account that holds 
 refuses an app without a role of its own (expect a 403); that is a feature — offboarding an administrator
 is done by a human. The task dead-letters with the 403 in `last_error` and pages through the outbox
 dead-letter alarm.
+
+**Disabling or revoking a user who holds a privileged directory role returns 403 under these permissions
+and dead-letters. That is a manual IT step, by design:** the offboarding in opshub completes, the alarm
+fires, and IT disables the account and revokes its sessions in the Entra portal. Do not "fix" it by
+granting the app a directory role.
+
+### Which directory object a task may act on
+
+A task names an employee; the object is whatever `employees.entra_oid` holds. Before any change the
+worker reads that object and requires its `mail`, `userPrincipalName` or one of its `smtp:` proxy
+addresses (prefix stripped, case-insensitive) to equal the employee's email, and dead-letters otherwise.
+That stops a wrong or one-sided `entra_oid`. It does not stop someone who can write **both** the email and
+the `entra_oid` (`employee.write`) from pointing an employee at a directory object that has no employee
+row of its own; Microsoft's own limit on privileged roles, and the audit trail, bound that. Treat
+`employee.write` accordingly. Emails are stored lower-cased and are unique case-insensitively
+(`uq_employee_email_lower`).
 
 ## Credential
 
@@ -125,13 +141,18 @@ never overlap (see _Ordering_).
 **What this does and does not guarantee about which account is touched.** The API cannot put a directory
 object in a task. But the object acted on is whatever `employees.entra_oid` holds, and that column is
 writable through `POST /employees` (by a holder of `employee.write`; the value is validated as a GUID) and
-by SSO linking. So the worker VERIFIES before any change: `GET /users/{oid}?$select=id,userPrincipalName,mail`
-must return a `mail` or `userPrincipalName` equal to the employee's email (case-insensitive). If not, the
+by SSO linking. So the worker VERIFIES before any change:
+`GET /users/{oid}?$select=id,userPrincipalName,mail,proxyAddresses` must return a `mail`, a
+`userPrincipalName` or an `smtp:` proxy address equal to the employee's email (case-insensitive). If not, the
 task dead-letters (alarm), nothing is changed, and the failure message names neither address. The
 `entra_oid` must also be a GUID and is URL-encoded.
 
 **Calls cannot outlive their lease.** The SDK's default retry loop is removed (the relay is the only
-retry) and every request carries a hard 30 s deadline, body included. Each task kind declares its maximum
+retry) and every request carries a hard 30 s deadline that **starts before the access token is requested**
+(the timeout is the first handler in the chain, so a stalled token fetch is inside it; a token that
+arrives after the deadline meets an aborted signal and nothing is sent). Before each change (PATCH,
+revoke) the task also checks that at least one full call deadline plus a margin of its lease remains, and
+otherwise steps aside (attempt refunded) rather than start a call that could land after a takeover. Each task kind declares its maximum
 number of calls (`GRAPH_TASK_MAX_CALLS`: 3 for an account task, 2 for posture, a 100-page cap for a scan)
 and its lease is `maxCalls x 30 s + 60 s` (150 s, 120 s, 51 min). A test asserts the inequality for every
 kind. Without it: worker A's throttled enable retries inside the SDK past its lease, worker B re-claims,
@@ -140,17 +161,29 @@ The email relay is bounded the same way (a 30 s send deadline, SES cancelled by 
 90 s).
 
 **Two relays, so a scan never delays an offboarding.** Account tasks and scans/syncs are claimed by
-separate relays (`GraphAccountRelayService`: batches of 10, 150 s leases; `GraphScanRelayService`: one at a
+separate relays (`GraphAccountRelayService`: batches of 3, 150 s leases; `GraphScanRelayService`: one at a
 time, long lease), each its own claim and its own in-flight pass. An offboarding disable runs while a
 scan is still going, and a worker that crashes holding a scan strands that scan alone.
 
+**Batches are held for the sum of their leases.** A relay works its batch one row after another, so the
+claim holds the whole batch for the SUM of the rows' leases (otherwise a late row's lease lapses while it
+waits, another relay re-claims it, and an attempt is burned). A worker that dies holding a batch therefore
+strands it for `batch x lease`; batches are small (account 3 x 150 s, email 5 x 90 s, webhook 5 x 2 min,
+notification 10 x 60 s) and a pass keeps claiming until the queue is empty, so that costs no throughput.
+`test/outbox-batch-hold.spec.ts` caps it at 15 minutes.
+
 **Ordering.** A task is claimable only while no other task for the employee is earlier and pending, or
-holds a live lease (commit order can differ from `seq` order), and the claim takes a transaction-scoped
-advisory lock on the employee so two simultaneous claims cannot both succeed.
+holds a live lease (commit order can differ from `seq` order). Under READ COMMITTED two claims running at
+once cannot see each other's uncommitted leases, so every claim first takes
+`pg_advisory_xact_lock` in a statement _before_ its SELECT and holds it to commit; a second claim waits
+and its SELECT then sees the first one's leases. The live-lease guard stays as the rule; the lock makes it
+reliable.
 
 **A held cron lock defers, it does not complete.** A queued scan or sync takes the same `ExclusiveJob` lock
 as the cron. If the lock is held — possibly by a crashed run, whose lock lives for hours — the row stays
-pending with the attempt refunded and retries in 5 minutes; it is never marked done.
+pending with the attempt refunded and retries in 5 minutes (each defer is logged at warn); it is never
+marked done. Deferring is bounded: a request older than the lock's TTL plus 10 minutes has outlived any
+run that could legitimately hold the lock, so it dead-letters (alarm) instead of waiting for ever.
 
 **No transaction across a Graph call (lease-and-fence).** Every outbox relay (email, notifications,
 webhooks and these tasks) claims rows in a short transaction (`attempts + 1`, a fresh `lease_token`,

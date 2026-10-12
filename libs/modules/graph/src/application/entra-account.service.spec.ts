@@ -3,7 +3,8 @@
  * employee, then sets the account to match the employee's status as it is when the change is made.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { NonRetryableError } from '@platform';
+import { DeferError, NonRetryableError } from '@platform';
+import { MIN_LEASE_TO_MUTATE_MS } from '../graph-task';
 import { EntraAccountService } from './entra-account.service';
 
 const OID = '11111111-2222-3333-4444-555555555555';
@@ -14,6 +15,9 @@ interface Row {
   entraOid: string | null;
   email: string;
 }
+/** A lease with plenty of time left. */
+const LEASE_OK = () => new Date(Date.now() + 150_000);
+
 const employee = (over: Partial<Row> = {}): Row => ({
   status: 'active',
   entraOid: OID,
@@ -48,9 +52,14 @@ describe('EntraAccountService.reconcile — identity check', () => {
   it('reads mail + userPrincipalName of the object before changing anything', async () => {
     const { service, get, patch } = make([employee(), employee()]);
 
-    await service.reconcile('emp-1');
+    await service.reconcile('emp-1', LEASE_OK());
 
-    expect(get).toHaveBeenCalledWith(`/users/${OID}`, ['id', 'userPrincipalName', 'mail']);
+    expect(get).toHaveBeenCalledWith(`/users/${OID}`, [
+      'id',
+      'userPrincipalName',
+      'mail',
+      'proxyAddresses',
+    ]);
     expect(get.mock.invocationCallOrder[0]).toBeLessThan(patch.mock.invocationCallOrder[0]);
   });
 
@@ -62,7 +71,7 @@ describe('EntraAccountService.reconcile — identity check', () => {
     async (_field, directory) => {
       const { service, patch } = make([employee(), employee()], directory);
 
-      await service.reconcile('emp-1');
+      await service.reconcile('emp-1', LEASE_OK());
 
       expect(patch).toHaveBeenCalledWith(`/users/${OID}`, { accountEnabled: true });
     },
@@ -79,7 +88,7 @@ describe('EntraAccountService.reconcile — identity check', () => {
       userPrincipalName: 'ceo@example.com',
     });
 
-    await expect(service.reconcile('emp-1')).rejects.toBeInstanceOf(NonRetryableError);
+    await expect(service.reconcile('emp-1', LEASE_OK())).rejects.toBeInstanceOf(NonRetryableError);
 
     expect(patch).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
@@ -91,7 +100,7 @@ describe('EntraAccountService.reconcile — identity check', () => {
       userPrincipalName: 'ceo@example.com',
     });
 
-    const err = (await service.reconcile('emp-1').catch((e: unknown) => e)) as Error;
+    const err = (await service.reconcile('emp-1', LEASE_OK()).catch((e: unknown) => e)) as Error;
 
     expect(err.message).not.toContain('ceo@example.com');
     expect(err.message).not.toContain(EMAIL);
@@ -100,7 +109,7 @@ describe('EntraAccountService.reconcile — identity check', () => {
   it('refuses an entra_oid that is not a GUID without making any call', async () => {
     const { service, get } = make([employee({ entraOid: '../me' })]);
 
-    await expect(service.reconcile('emp-1')).rejects.toBeInstanceOf(NonRetryableError);
+    await expect(service.reconcile('emp-1', LEASE_OK())).rejects.toBeInstanceOf(NonRetryableError);
     expect(get).not.toHaveBeenCalled();
   });
 });
@@ -110,7 +119,7 @@ describe('EntraAccountService.reconcile — level-triggered', () => {
     // The task was queued at onboarding; the person is offboarded before it runs. It reads the row.
     const { service, patch } = make([employee({ status: 'offboarded' })]);
 
-    await service.reconcile('emp-1');
+    await service.reconcile('emp-1', LEASE_OK());
 
     expect(patch).toHaveBeenCalledTimes(1);
     expect(patch).toHaveBeenCalledWith(`/users/${OID}`, { accountEnabled: false });
@@ -120,7 +129,7 @@ describe('EntraAccountService.reconcile — level-triggered', () => {
     // First read: active. By the second read — after the identity check — they are offboarded.
     const { service, patch, post } = make([employee(), employee({ status: 'offboarded' })]);
 
-    await service.reconcile('emp-1');
+    await service.reconcile('emp-1', LEASE_OK());
 
     expect(patch).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
@@ -128,14 +137,14 @@ describe('EntraAccountService.reconcile — level-triggered', () => {
 
   it('skips the enable if the employee row vanished meanwhile', async () => {
     const { service, patch } = make([employee(), undefined]);
-    await service.reconcile('emp-1');
+    await service.reconcile('emp-1', LEASE_OK());
     expect(patch).not.toHaveBeenCalled();
   });
 
   it('disables an offboarded account AND revokes its sessions, in that order, after the check', async () => {
     const { service, get, patch, post } = make([employee({ status: 'offboarded' })]);
 
-    await service.reconcile('emp-1');
+    await service.reconcile('emp-1', LEASE_OK());
 
     expect(post).toHaveBeenCalledWith(`/users/${OID}/revokeSignInSessions`, {});
     expect(get.mock.invocationCallOrder[0]).toBeLessThan(patch.mock.invocationCallOrder[0]);
@@ -147,7 +156,7 @@ describe('EntraAccountService.reconcile — level-triggered', () => {
     async (status) => {
       const { service, patch, post } = make([employee({ status }), employee({ status })]);
 
-      await service.reconcile('emp-1');
+      await service.reconcile('emp-1', LEASE_OK());
 
       expect(patch).toHaveBeenCalledWith(`/users/${OID}`, { accountEnabled: true });
       expect(post).not.toHaveBeenCalled();
@@ -156,9 +165,9 @@ describe('EntraAccountService.reconcile — level-triggered', () => {
 
   it('does nothing for an employee with no Entra OID, or who no longer exists', async () => {
     const noOid = make([employee({ entraOid: null })]);
-    await noOid.service.reconcile('emp-1');
+    await noOid.service.reconcile('emp-1', LEASE_OK());
     const gone = make([undefined]);
-    await gone.service.reconcile('emp-2');
+    await gone.service.reconcile('emp-2', LEASE_OK());
 
     expect(noOid.patch).not.toHaveBeenCalled();
     expect(gone.patch).not.toHaveBeenCalled();
@@ -167,10 +176,78 @@ describe('EntraAccountService.reconcile — level-triggered', () => {
   it('never makes more calls than its declared budget (the lease is derived from it)', async () => {
     const { service, get, patch, post } = make([employee({ status: 'offboarded' })]);
 
-    await service.reconcile('emp-1');
+    await service.reconcile('emp-1', LEASE_OK());
 
     expect(
       get.mock.calls.length + patch.mock.calls.length + post.mock.calls.length,
     ).toBeLessThanOrEqual(3);
+  });
+});
+
+describe('EntraAccountService.reconcile — alias addresses', () => {
+  it.each([
+    ['an smtp: alias', ['SMTP:primary@example.com', `smtp:${EMAIL.toLowerCase()}`]],
+    ['an SMTP: primary', [`SMTP:${EMAIL}`]],
+    ['mixed-case prefixes', [`Smtp:${EMAIL.toUpperCase()}`]],
+  ])('accepts an object whose proxyAddresses hold %s', async (_name, proxyAddresses) => {
+    const { service, patch } = make([employee(), employee()], {
+      mail: 'primary@example.com',
+      userPrincipalName: 'primary@example.com',
+      proxyAddresses,
+    });
+
+    await service.reconcile('emp-1', LEASE_OK());
+
+    expect(patch).toHaveBeenCalledWith(`/users/${OID}`, { accountEnabled: true });
+  });
+
+  it('ignores non-smtp proxy addresses (x500, SIP): they are not mailboxes', async () => {
+    const { service, patch } = make([employee({ status: 'offboarded' })], {
+      mail: 'other@example.com',
+      proxyAddresses: [`x500:${EMAIL}`, `SIP:${EMAIL}`],
+    });
+
+    await expect(service.reconcile('emp-1', LEASE_OK())).rejects.toBeInstanceOf(NonRetryableError);
+    expect(patch).not.toHaveBeenCalled();
+  });
+});
+
+describe('EntraAccountService.reconcile — will not START a change it may not finish', () => {
+  const nearlyOver = () => new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS - 5_000);
+
+  it('defers (attempt refunded) instead of disabling when less than a full call deadline of lease is left', async () => {
+    const { service, patch, post } = make([employee({ status: 'offboarded' })]);
+
+    await expect(service.reconcile('emp-1', nearlyOver())).rejects.toBeInstanceOf(DeferError);
+
+    expect(patch).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('defers before an ENABLE too', async () => {
+    const { service, patch } = make([employee(), employee()]);
+
+    await expect(service.reconcile('emp-1', nearlyOver())).rejects.toBeInstanceOf(DeferError);
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('re-checks before the SECOND change: a slow disable must not be followed by a revoke that cannot finish', async () => {
+    const { service, patch, post } = make([employee({ status: 'offboarded' })]);
+    let calls = 0;
+    // Plenty of lease for the disable, then (after it) too little for the revoke.
+    const lease = {
+      getTime: () => (calls++ === 0 ? Date.now() + 150_000 : Date.now() + 5_000),
+    } as unknown as Date;
+
+    await expect(service.reconcile('emp-1', lease)).rejects.toBeInstanceOf(DeferError);
+
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('proceeds when a full call deadline plus the margin remains', async () => {
+    const { service, patch } = make([employee({ status: 'offboarded' })]);
+    await service.reconcile('emp-1', new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS + 5_000));
+    expect(patch).toHaveBeenCalledTimes(1);
   });
 });

@@ -21,7 +21,8 @@ export class EmployeeDrizzleRepository implements IEmployeeRepository {
       .insert(employees)
       .values({
         id: newId(),
-        email: input.email,
+        // The one choke point every create passes through: addresses are stored lower-cased.
+        email: input.email.trim().toLowerCase(),
         displayName: input.displayName,
         department: input.department ?? null,
         jobTitle: input.jobTitle ?? null,

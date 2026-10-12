@@ -12,6 +12,11 @@
 -- 4. compliance_findings.source 60 -> 255: `intune:<uuid>:noncompliant,unencrypted` is 70+ characters,
 --    so the insert failed with 22001 and, inside the old shared transaction, aborted the whole pass.
 --
+-- 5. identity.employees: a case-insensitive unique index on the email. The Graph worker and identity v8
+--    both compare addresses lower-cased; `Ada@x` and `ada@x` must not be two employees. A preflight
+--    refuses the migration, naming the addresses, if any two rows already collide that way — the same
+--    condition opshub#355's identity backfill requires, so the one fix serves both.
+--
 -- NO BACKFILL for the graph tables: nothing was queued before. `seq` on the existing tables is assigned
 -- to existing rows in physical order by ADD COLUMN ... bigserial; their ordering was never meaningful.
 
@@ -65,3 +70,18 @@ CREATE TABLE IF NOT EXISTS "messaging"."graph_sync_state" (
   "cursor" text,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+--> statement-breakpoint
+DO $$
+DECLARE
+  dup text;
+BEGIN
+  SELECT string_agg(k, ', ') INTO dup FROM (
+    SELECT lower(email) AS k FROM "identity"."employees" GROUP BY lower(email) HAVING count(*) > 1 LIMIT 20
+  ) d;
+  IF dup IS NOT NULL THEN
+    RAISE EXCEPTION 'employees collide once their email is lower-cased (%); make them distinct, then re-run', dup;
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_employee_email_lower"
+  ON "identity"."employees" USING btree (lower("email"));

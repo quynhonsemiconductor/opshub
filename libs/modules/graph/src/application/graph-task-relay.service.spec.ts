@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DeferError, NonRetryableError, RetryAfterError } from '@platform';
 import { GRAPH_TASK, graphLeaseMs } from '../graph-task';
 import { GRAPH_LOCK } from '../graph-locks';
+import { LOCK_WAIT_MARGIN_MS } from './graph-task-relay.service';
 import { GraphAccountRelayService, GraphScanRelayService } from './graph-task-relay.service';
 
 interface Row {
@@ -17,6 +18,7 @@ interface Row {
   attempts: number;
   createdAt: Date;
   leaseToken: string;
+  leaseExpiresAt: Date;
 }
 interface Internals {
   deliver(row: Row): Promise<void>;
@@ -24,6 +26,9 @@ interface Internals {
   leaseMsFor(row: { kind: string }): number;
   kinds: readonly string[];
   batchSize: number;
+  beforeSelect(tx: unknown): Promise<void>;
+  reapFilter(): unknown;
+  reapLabel(): string;
 }
 
 function make({ enabled = true, lockHeld = false } = {}) {
@@ -56,20 +61,21 @@ function make({ enabled = true, lockHeld = false } = {}) {
   };
 }
 
-const row = (kind: string, payload: Record<string, unknown> = {}): Row => ({
+const row = (kind: string, payload: Record<string, unknown> = {}, createdAt = new Date()): Row => ({
   id: 'r1',
   kind,
   payload,
   attempts: 1,
-  createdAt: new Date(),
+  createdAt,
   leaseToken: 't',
+  leaseExpiresAt: new Date(Date.now() + 150_000),
 });
 
 describe('Graph task relays — deliver', () => {
   it('reconciles an account by EMPLOYEE id — it is never given a directory object id', async () => {
     const { account, accounts } = make();
     await account.deliver(row(GRAPH_TASK.ACCOUNT_RECONCILE, { employeeId: 'emp-1' }));
-    expect(accounts.reconcile).toHaveBeenCalledWith('emp-1');
+    expect(accounts.reconcile).toHaveBeenCalledWith('emp-1', expect.any(Date));
   });
 
   it('runs a shadow-IT scan under the SAME lock the cron takes', async () => {
@@ -101,6 +107,43 @@ describe('Graph task relays — deliver', () => {
       expect(posture.runPostureSync).not.toHaveBeenCalled();
     },
   );
+
+  describe('deferring on a held lock is BOUNDED', () => {
+    const ttl = GRAPH_LOCK.SHADOW_IT.ttlMs;
+    const ago = (ms: number) => new Date(Date.now() - ms);
+
+    it('keeps deferring while the request is younger than the lock TTL + margin', async () => {
+      const { scanRelay } = make({ lockHeld: true });
+      await expect(
+        scanRelay.deliver(row(GRAPH_TASK.SHADOW_IT_SCAN, {}, ago(ttl))),
+      ).rejects.toBeInstanceOf(DeferError);
+    });
+
+    it('DEAD-LETTERS (alarm) once the request has waited longer than the TTL + margin: the lock is stuck, not busy', async () => {
+      const { scanRelay } = make({ lockHeld: true });
+
+      const err: unknown = await scanRelay
+        .deliver(row(GRAPH_TASK.SHADOW_IT_SCAN, {}, ago(ttl + LOCK_WAIT_MARGIN_MS + 60_000)))
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(NonRetryableError);
+      expect((err as Error).message).toMatch(/stayed held/);
+    });
+
+    it.each([GRAPH_TASK.SHADOW_IT_SCAN, GRAPH_TASK.POSTURE_SYNC])(
+      "%s: the bound uses ITS OWN lock's TTL",
+      async (kind) => {
+        const lock = kind === GRAPH_TASK.SHADOW_IT_SCAN ? GRAPH_LOCK.SHADOW_IT : GRAPH_LOCK.POSTURE;
+        const { scanRelay } = make({ lockHeld: true });
+        await expect(
+          scanRelay.deliver(row(kind, {}, ago(lock.ttlMs - 60_000))),
+        ).rejects.toBeInstanceOf(DeferError);
+        await expect(
+          scanRelay.deliver(row(kind, {}, ago(lock.ttlMs + LOCK_WAIT_MARGIN_MS + 60_000))),
+        ).rejects.toBeInstanceOf(NonRetryableError);
+      },
+    );
+  });
 
   it('dead-letters a payload with no employeeId, and an unknown kind, without retrying', async () => {
     const { account } = make();
@@ -174,4 +217,25 @@ describe('Graph task relays — separation, leases and claiming', () => {
       expect(tx.select).not.toHaveBeenCalled();
     },
   );
+
+  it('reaps ONLY its own kinds, and labels the alarm with the relay and kinds', () => {
+    const { account, scanRelay } = make();
+
+    expect(account.reapFilter()).toBeDefined();
+    expect(scanRelay.reapFilter()).toBeDefined();
+    expect(account.reapLabel()).toBe(`GraphAccountRelayService[${GRAPH_TASK.ACCOUNT_RECONCILE}]`);
+    expect(scanRelay.reapLabel()).toBe(
+      `GraphScanRelayService[${GRAPH_TASK.SHADOW_IT_SCAN},${GRAPH_TASK.POSTURE_SYNC}]`,
+    );
+  });
+
+  it('serializes claims with a transaction-scoped advisory lock taken BEFORE the select', async () => {
+    const { account } = make();
+    const tx = { execute: vi.fn().mockResolvedValue(undefined) };
+
+    await account.beforeSelect(tx);
+
+    expect(tx.execute).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(tx.execute.mock.calls[0][0])).toMatch(/pg_advisory_xact_lock/);
+  });
 });

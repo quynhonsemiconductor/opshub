@@ -93,6 +93,15 @@ export const GRAPH_TASK_MAX_CALLS: Record<GraphTask['kind'], number> = {
   [GRAPH_TASK.POSTURE_SYNC]: 2,
 };
 
+/**
+ * A mutating call (PATCH accountEnabled, revokeSignInSessions) is not STARTED unless at least a full
+ * per-call deadline plus this margin of the lease remains. Lease and deadline already guarantee a call
+ * cannot outlive the lease when it starts at the beginning of a run; this covers a run that spent time
+ * on earlier calls (a slow identity check) and is now close to the end of its lease.
+ */
+export const MUTATION_SAFETY_MARGIN_MS = 10_000;
+export const MIN_LEASE_TO_MUTATE_MS = GRAPH_CALL_TIMEOUT_MS + MUTATION_SAFETY_MARGIN_MS;
+
 /** How long a claimed row of this kind is hidden from other relays. */
 export function graphLeaseMs(kind: string): number {
   const calls = (GRAPH_TASK_MAX_CALLS as Record<string, number | undefined>)[kind] ?? 3;

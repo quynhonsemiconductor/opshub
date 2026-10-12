@@ -94,6 +94,14 @@ export class NotificationRelayService
 
   // ── AbstractOutboxRelay implementation ────────────────────────────────────
 
+  /**
+   * Nothing leaves the database here, so a row takes milliseconds; the lease only has to cover the
+   * waiting behind earlier rows of the batch. 10 rows x 60 s = 10 minutes if a worker dies.
+   */
+  protected leaseMsFor(): number {
+    return 60_000;
+  }
+
   protected readonly outbox: OutboxLeaseTable = {
     table: notificationOutbox,
     id: notificationOutbox.id,

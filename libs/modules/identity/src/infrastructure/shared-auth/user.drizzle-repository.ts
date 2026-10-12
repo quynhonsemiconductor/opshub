@@ -137,10 +137,13 @@ export class UserDrizzleRepository implements IUserRepository<DbExecutor> {
   async upsertBySsoIdentity(
     provider: string,
     providerSub: string,
-    providerEmail: string,
+    rawProviderEmail: string,
     displayName: string,
     tx?: DbExecutor,
   ): Promise<User> {
+    // employees.email is stored lower-cased (uq_employee_email_lower): an IdP that returns `Ada@x` must
+    // find the employee `ada@x`, not create a second one.
+    const providerEmail = rawProviderEmail.trim().toLowerCase();
     const run = async (db: DbExecutor): Promise<User> => {
       // 1. Find-or-create the employee by email (the natural key for opshub's
       //    single-tenant directory).

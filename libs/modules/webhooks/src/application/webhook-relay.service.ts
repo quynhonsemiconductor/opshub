@@ -41,6 +41,9 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     return super.relay();
   }
 
+  /** Held for the SUM of the batch's leases (2 min each): 5 rows is 10 minutes if a worker dies. */
+  protected override readonly batchSize = 5;
+
   protected readonly outbox: OutboxLeaseTable = {
     table: webhookDeliveries,
     id: webhookDeliveries.id,

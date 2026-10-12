@@ -47,7 +47,7 @@
 import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { QueueMetrics, withJobContext } from '@quynhonsemiconductor/observability';
-import { and, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, inArray, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import type { AnyPgColumn, PgTable } from 'drizzle-orm/pg-core';
 import type { DrizzleDB, DrizzleTx } from '../database/drizzle.provider';
 
@@ -125,9 +125,25 @@ export interface OutboxLeaseTable {
 }
 
 /** The row as the claim step hands it to the relay: `attempts` includes this attempt. */
-export type Claimed<TRow> = TRow & { leaseToken: string };
+export type Claimed<TRow> = TRow & {
+  leaseToken: string;
+  /**
+   * When this relay's lease on the row lapses, as of the last renewal. A delivery that is about to make
+   * a call it cannot take back (a mutation) must check that enough of the lease remains for the call to
+   * finish — see {@link remainingLeaseMs}.
+   */
+  leaseExpiresAt: Date;
+};
+
+/** Milliseconds of this row's lease still ahead of `now`. */
+export function remainingLeaseMs(row: { leaseExpiresAt: Date }, now: number = Date.now()): number {
+  return row.leaseExpiresAt.getTime() - now;
+}
 
 const DEFAULT_LEASE_MS = 2 * 60_000;
+
+/** A pass drains at most this many batches before yielding to the next tick. */
+export const MAX_BATCHES_PER_PASS = 50;
 
 export abstract class AbstractOutboxRelay<
   TRow extends { id: string; attempts: number },
@@ -135,7 +151,13 @@ export abstract class AbstractOutboxRelay<
 > {
   /** Override in subclass to tune per-relay. */
   protected readonly maxAttempts: number = 5;
-  protected readonly batchSize: number = 50;
+  /**
+   * Rows per claim. SMALL on purpose: a claim holds every row of the batch for the SUM of their leases
+   * (they are worked one after another), so a worker that dies holding a batch strands it for that long.
+   * A pass keeps claiming until the queue is empty (up to {@link MAX_BATCHES_PER_PASS}), so a small batch
+   * costs no throughput.
+   */
+  protected readonly batchSize: number = 10;
 
   protected readonly logger: Logger;
   /** The currently in-flight pass, or null when idle. */
@@ -235,6 +257,30 @@ export abstract class AbstractOutboxRelay<
     return Math.min(baseMs * 2 ** (newAttempts - 1), capMs);
   }
 
+  /**
+   * Restricts the abandoned-row reaper to THIS relay's own rows. A table shared by two relays (the Graph
+   * outbox: account tasks and scans) would otherwise be reaped by whichever relay claims first, and the
+   * dead-letter alarm would name the wrong one.
+   */
+  protected reapFilter(): SQL | undefined {
+    return undefined;
+  }
+
+  /** The label the dead-letter alarm carries for rows this relay abandons. */
+  protected reapLabel(): string {
+    return this.queueName;
+  }
+
+  /**
+   * Runs inside the claim transaction BEFORE the claim SELECT. A relay that must serialize concurrent
+   * claims takes a transaction-scoped advisory lock here: under READ COMMITTED every statement takes a
+   * fresh snapshot, so a SELECT that runs after the lock is acquired sees every lease the previous holder
+   * stamped and committed.
+   */
+  protected beforeSelect(_tx: DrizzleTx): Promise<void> {
+    return Promise.resolve();
+  }
+
   /** `lease is absent or has lapsed` — put this in every `selectDue` WHERE clause. */
   protected notLeased(now: Date) {
     return or(isNull(this.outbox.lockedUntil), lte(this.outbox.lockedUntil, now));
@@ -245,6 +291,7 @@ export abstract class AbstractOutboxRelay<
   /** Dead-letter rows whose attempts are spent and whose lease has lapsed: they were abandoned mid-call. */
   protected async reapAbandoned(tx: DrizzleTx, now: Date): Promise<number> {
     const o = this.outbox;
+    const own = this.reapFilter();
     const reaped = await tx
       .update(o.table)
       .set({
@@ -258,6 +305,7 @@ export abstract class AbstractOutboxRelay<
           sql`${o.status} = 'pending'`,
           sql`${o.attempts} >= ${this.maxAttempts}`,
           or(isNull(o.lockedUntil), lte(o.lockedUntil, now)),
+          ...(own ? [own] : []),
         ),
       )
       .returning({ id: o.id } as never);
@@ -294,15 +342,19 @@ export abstract class AbstractOutboxRelay<
     return (held as unknown[]).length > 0;
   }
 
-  /** Push the lease out before delivering: rows late in a batch have been waiting behind earlier ones. */
-  protected async renewLease(row: Claimed<TRow>): Promise<boolean> {
+  /**
+   * Push the lease out before delivering: rows late in a batch have been waiting behind earlier ones.
+   * Resolves to the new expiry, or `null` if the lease was lost.
+   */
+  protected async renewLease(row: Claimed<TRow>): Promise<Date | null> {
     const o = this.outbox;
+    const expiresAt = new Date(Date.now() + this.leaseMsFor(row));
     const renewed = await this.db
       .update(o.table)
-      .set({ lockedUntil: new Date(Date.now() + this.leaseMsFor(row)) })
+      .set({ lockedUntil: expiresAt })
       .where(and(sql`${o.id} = ${row.id}`, sql`${o.leaseToken} = ${row.leaseToken}`))
       .returning({ id: o.id } as never);
-    return (renewed as unknown[]).length > 0;
+    return (renewed as unknown[]).length > 0 ? expiresAt : null;
   }
 
   /** Give back the attempt the claim spent (see {@link DeferError}). */
@@ -363,11 +415,12 @@ export abstract class AbstractOutboxRelay<
       const abandoned = await this.reapAbandoned(tx, now);
       if (abandoned > 0) {
         this.logger.error(
-          { abandoned, [DEAD_LETTER_FIELD]: this.queueName },
+          { abandoned, [DEAD_LETTER_FIELD]: this.reapLabel() },
           `Relay dead-lettered ${abandoned} abandoned row(s): the lease lapsed with every attempt used`,
         );
       }
 
+      await this.beforeSelect(tx);
       const rows = await this.selectDue(tx, this.batchSize, now);
       if (!rows.length) return [];
 
@@ -382,37 +435,44 @@ export abstract class AbstractOutboxRelay<
         this.queueMetrics.recordLag(this.queueName, (Date.now() - oldest.getTime()) / 1000);
       }
 
-      // One token per claim. The batch is held until its slowest row's lease: a row late in the batch
-      // waits behind earlier ones, and a lease that lapsed while it waited would be re-claimed (and an
-      // attempt burned) by another relay. Each row renews its own lease right before it is delivered.
+      // One token per claim. The rows are worked ONE AFTER ANOTHER, so the batch is held for the SUM of
+      // their leases: a row late in the batch waits behind earlier ones, and a hold shorter than that
+      // would let its lease lapse while it waited, so another relay re-claims it and an attempt is
+      // burned. (A single lease, or the longest one, was not enough.) Each row renews its own lease
+      // right before it is delivered, so the hold only has to cover the waiting.
       const token = randomUUID();
-      const holdMs = Math.max(...rows.map((r) => this.leaseMsFor(r)));
+      const holdMs = rows.reduce((total, r) => total + this.leaseMsFor(r), 0);
+      const leaseExpiresAt = new Date(now.getTime() + holdMs);
       const attempts = await this.stampLeases(
         tx,
         rows.map((r) => r.id),
         token,
-        new Date(now.getTime() + holdMs),
+        leaseExpiresAt,
       );
       return rows.map((r) => ({
         ...r,
         attempts: attempts.get(r.id) ?? r.attempts + 1,
         leaseToken: token,
+        leaseExpiresAt,
       }));
     });
   }
 
   private async runOncePass(): Promise<void> {
     try {
-      const batch = await this.claim();
-      if (!batch.length) return;
-      this.logger.debug(`Relaying ${batch.length} row(s)`);
-
       let processed = 0;
       let failed = 0;
-      for (const row of batch) {
-        const outcome = await this.handle(row);
-        if (outcome === 'sent') processed += 1;
-        else if (outcome === 'failed') failed += 1;
+      // Keep claiming until the queue is empty: batches are small (see batchSize), so one pass drains
+      // as much as one big batch would, and a crash strands only the batch in hand.
+      for (let i = 0; i < MAX_BATCHES_PER_PASS; i += 1) {
+        const batch = await this.claim();
+        if (!batch.length) break;
+        this.logger.debug(`Relaying ${batch.length} row(s)`);
+        for (const row of batch) {
+          const outcome = await this.handle(row);
+          if (outcome === 'sent') processed += 1;
+          else if (outcome === 'failed') failed += 1;
+        }
       }
       this.queueMetrics.recordProcessed(this.queueName, processed);
       this.queueMetrics.recordFailure(this.queueName, failed);
@@ -430,12 +490,15 @@ export abstract class AbstractOutboxRelay<
   }
 
   /** One row, start to finish. Never throws: one row cannot take the others down with it. */
-  private async handle(row: Claimed<TRow>): Promise<'sent' | 'failed' | 'lost' | 'deferred'> {
+  private async handle(claimed: Claimed<TRow>): Promise<'sent' | 'failed' | 'lost' | 'deferred'> {
+    let row = claimed;
     try {
-      if (!(await this.renewLease(row))) {
+      const expiresAt = await this.renewLease(claimed);
+      if (!expiresAt) {
         this.logger.warn({ rowId: row.id }, 'Relay lost the lease before delivering — skipping');
         return 'lost';
       }
+      row = { ...claimed, leaseExpiresAt: expiresAt };
     } catch (err) {
       this.logger.error({ rowId: row.id, err }, 'Relay could not renew a lease — skipping the row');
       return 'lost';
@@ -508,7 +571,7 @@ export abstract class AbstractOutboxRelay<
         'Relay could not defer a row — the lease will lapse and it will be claimed again',
       );
     }
-    this.logger.log(
+    this.logger.warn(
       { rowId: row.id },
       `Relay deferred a row for ${Math.round(delayMs / 1000)} s: ${err.message}`,
     );

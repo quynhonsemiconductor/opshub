@@ -8,7 +8,9 @@ import { employeeStatusEnum } from '@db/schema/enums';
 // (POST /v1/authz/assignments, guarded by `role.assign` + escalation check).
 // This prevents privilege escalation via the directory/employee endpoints.
 export const CreateEmployeeSchema = z.object({
-  email: z.string().email(),
+  // Stored lower-cased and trimmed: an address is the identity the Graph worker checks a directory
+  // object against, and `Ada@x` / `ada@x` must be one person (uq_employee_email_lower).
+  email: z.string().trim().toLowerCase().email(),
   displayName: z.string().min(1).max(200),
   department: z.string().max(120).optional(),
   jobTitle: z.string().max(120).optional(),

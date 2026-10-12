@@ -111,10 +111,10 @@ export default defineConfig({
       // two and a half points under actual so run-to-run variance does not fail a branch that added no
       // code, and still inside the 3-point limit.
       thresholds: {
-        lines: 41,
+        lines: 43,
         functions: 27,
         branches: 32,
-        statements: 40,
+        statements: 43,
       },
     },
   },

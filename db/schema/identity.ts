@@ -37,6 +37,8 @@ export const employees = identitySchema.table(
   },
   (t) => ({
     emailIdx: uniqueIndex('uq_employee_email').on(t.email),
+    // Case-insensitive, matching how identity v8 and the Graph worker compare addresses.
+    emailLowerIdx: uniqueIndex('uq_employee_email_lower').on(sql`lower(${t.email})`),
     // Partial: only enforce uniqueness for non-null Entra OIDs.
     // Locally-created employees (no Entra sync) may all have entra_oid = NULL.
     entraIdx: uniqueIndex('uq_employee_entra_oid')

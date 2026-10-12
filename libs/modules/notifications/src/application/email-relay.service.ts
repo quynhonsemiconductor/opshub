@@ -86,6 +86,9 @@ export class EmailRelayService
    * The lease must outlive the call it covers: a send still in flight after the lease lapsed is a send
    * another relay can repeat, and a row the reaper dead-letters while it is being delivered.
    */
+  /** Held for the SUM of the batch's leases (90 s each): 5 rows is 7.5 minutes if a worker dies. */
+  protected override readonly batchSize = 5;
+
   protected leaseMsFor(): number {
     return EMAIL_SEND_TIMEOUT_MS + EMAIL_LEASE_MARGIN_MS;
   }

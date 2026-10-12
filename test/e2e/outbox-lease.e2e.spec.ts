@@ -37,7 +37,7 @@ let db: DrizzleDB;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface RelayOptions {
-  reconcile?: (employeeId: string) => Promise<void>;
+  reconcile?: (employeeId: string, leaseExpiresAt: Date) => Promise<void>;
   scan?: () => Promise<unknown>;
   /** The ExclusiveJob lock is held by another run (the cron). */
   lockHeld?: boolean;
@@ -202,7 +202,7 @@ describe('lease-and-fence relay, against PostgreSQL', () => {
 
     await relay.relay();
 
-    expect(reconcile).toHaveBeenCalledWith('emp-lapsed');
+    expect(reconcile).toHaveBeenCalledWith('emp-lapsed', expect.any(Date));
     const row = await load(lapsed.id);
     expect(row.status).toBe('sent');
     expect(row.attempts).toBe(2);
@@ -244,10 +244,8 @@ describe('per-employee ordering, against PostgreSQL', () => {
     });
 
     await relay.relay();
-    expect(calls).toEqual(['e1', 'e2']); // e1's SECOND task is held back by its first
-    expect((await load(e1b.id)).status).toBe('pending');
-
-    await relay.relay();
+    // The first batch is e1 and e2: e1's SECOND task is held back by its first (it would otherwise sit
+    // between them, [e1, e1, e2]) and is claimed by the NEXT batch of the same pass, after e1 finished.
     expect(calls).toEqual(['e1', 'e2', 'e1']);
     expect((await load(e1a.id)).status).toBe('sent');
     expect((await load(e1b.id)).status).toBe('sent');
@@ -275,7 +273,7 @@ describe('per-employee ordering, against PostgreSQL', () => {
 
     await relay.relay();
 
-    expect(reconcile).toHaveBeenCalledWith('e4');
+    expect(reconcile).toHaveBeenCalledWith('e4', expect.any(Date));
     expect((await load(later.id)).status).toBe('sent');
   });
 });
@@ -368,11 +366,14 @@ describe('overlap and ordering, against PostgreSQL', () => {
     const delivered: string[] = [];
     const { relay: first } = makeRelay({
       reconcile: () =>
-        new Promise<void>((resolve) => {
-          delivered.push('t2');
-          t2Started();
-          releaseT2 = resolve;
-        }),
+        // Only t2's call blocks; the pass drains, and t1 (claimable once t2 is done) goes straight through.
+        delivered.length > 0
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              delivered.push('t2');
+              t2Started();
+              releaseT2 = resolve;
+            }),
     });
     const running = first.relay(); // claims t2 and blocks in the call
     await started;
@@ -389,19 +390,29 @@ describe('overlap and ordering, against PostgreSQL', () => {
     expect((await load(t1)).attempts).toBe(0);
 
     releaseT2();
-    await running;
-    await second.relay(); // now t1 may go
-    expect(secondCalls).toHaveBeenCalledTimes(1);
+    await running; // t2 finishes, then the same pass claims t1
+    await second.relay();
+    expect((await load(t1)).attempts, 't1 was delivered once').toBe(1);
+    expect(secondCalls).not.toHaveBeenCalled();
     expect((await load(t1)).status).toBe('sent');
     expect((await load(t2)).status).toBe('sent');
   });
 
-  it('two relays claiming at the same instant never both take tasks for one employee', async () => {
+  it('two relays claiming at the same instant never run two tasks for one employee AT ONCE', async () => {
     for (let i = 0; i < 5; i++) await insertTask('e-concurrent');
-    const delivered: string[] = [];
+    let running = 0;
+    let overlapped = false;
+    const calls: string[] = [];
     const slow = (employeeId: string) => {
-      delivered.push(employeeId);
-      return new Promise<void>((resolve) => setTimeout(resolve, 150));
+      calls.push(employeeId);
+      running += 1;
+      if (running > 1) overlapped = true;
+      return new Promise<void>((resolve) =>
+        setTimeout(() => {
+          running -= 1;
+          resolve();
+        }, 100),
+      );
     };
     const a = makeRelay({ reconcile: slow }).relay;
     const b = makeRelay({ reconcile: slow }).relay;
@@ -409,31 +420,107 @@ describe('overlap and ordering, against PostgreSQL', () => {
 
     await Promise.all([a.relay(), b.relay(), c.relay()]);
 
-    // One task for the employee ran in that round; the others were held back.
-    expect(delivered).toHaveLength(1);
+    expect(overlapped, 'two tasks for one employee were in flight together').toBe(false);
+    // Every task ran exactly once, in turn.
+    expect(calls).toHaveLength(5);
+    const sent = await db.select().from(graphTaskOutbox);
+    expect(sent.map((r) => r.status)).toEqual(Array(5).fill('sent'));
+    expect(sent.map((r) => r.attempts)).toEqual(Array(5).fill(1));
   });
 
-  it('takes the per-employee advisory lock at claim: a claim racing another for the same key skips it', async () => {
+  it('SERIALIZES CLAIMS: a claim waits for the claim lock, then sees the leases the previous claim stamped', async () => {
     /*
-     * Two claims in flight at once cannot see each other's uncommitted lease, so ordering by `seq` and by
-     * visible leases is not enough. The claim also takes a transaction-scoped advisory lock on the key; a
-     * claim that cannot take it leaves the row alone. Modelled by holding that lock from another session.
+     * Under READ COMMITTED two claim transactions running at once cannot see each other's uncommitted
+     * leases. Each claim takes pg_advisory_xact_lock in a statement BEFORE its SELECT, so a second claim
+     * waits and its SELECT (a new statement, a new snapshot) sees the first one's committed leases.
+     * Modelled by holding that lock from another session.
      */
     const task = await insertTask('e-locked');
     const holder = await pool.connect();
-    await holder.query("SELECT pg_advisory_lock(hashtext('e-locked'))");
+    await holder.query("SELECT pg_advisory_lock(hashtext('messaging.graph_task_outbox:claim'))");
+    const { relay, reconcile } = makeRelay();
+    let finished = false;
+    const running = relay.relay().then(() => (finished = true));
     try {
-      const { relay, reconcile } = makeRelay();
-      await relay.relay();
-      expect(reconcile, 'claimed a row whose key another claim holds').not.toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(finished, 'a claim ran without taking the claim lock').toBe(false);
+      expect(reconcile).not.toHaveBeenCalled();
       expect((await load(task.id)).attempts).toBe(0);
     } finally {
-      await holder.query("SELECT pg_advisory_unlock(hashtext('e-locked'))");
+      await holder.query(
+        "SELECT pg_advisory_unlock(hashtext('messaging.graph_task_outbox:claim'))",
+      );
       holder.release();
     }
 
-    const { relay, reconcile } = makeRelay();
-    await relay.relay();
-    expect(reconcile).toHaveBeenCalledWith('e-locked');
+    await running;
+    expect(reconcile).toHaveBeenCalledWith('e-locked', expect.any(Date));
+    expect((await load(task.id)).status).toBe('sent');
+  });
+});
+
+describe('the abandoned-row reaper is scoped to its own relay, against PostgreSQL', () => {
+  it('each relay dead-letters only its own kinds', async () => {
+    const lapsed = {
+      attempts: 5,
+      leaseToken: '00000000-0000-4000-8000-0000000000aa',
+      lockedUntil: new Date(Date.now() - 60_000),
+    };
+    const accountRow = await insertTask('e-abandoned', lapsed);
+    const scanRow = await db
+      .insert(graphTaskOutbox)
+      .values({
+        kind: GRAPH_TASK.SHADOW_IT_SCAN,
+        payload: {},
+        dedupeKey: GRAPH_TASK.SHADOW_IT_SCAN,
+        ...lapsed,
+      })
+      .returning()
+      .then((r) => r[0]);
+    const { relay, scanRelay } = makeRelays();
+
+    await relay.relay(); // the ACCOUNT relay
+    expect((await load(accountRow.id)).status).toBe('failed');
+    expect((await load(scanRow.id)).status, 'the account relay reaped a scan row').toBe('pending');
+
+    await scanRelay.relay();
+    expect((await load(scanRow.id)).status).toBe('failed');
+  });
+});
+
+describe('deferring on a held lock is bounded, against PostgreSQL', () => {
+  const scanRow = (extra: Partial<typeof graphTaskOutbox.$inferInsert> = {}) =>
+    db
+      .insert(graphTaskOutbox)
+      .values({
+        kind: GRAPH_TASK.SHADOW_IT_SCAN,
+        payload: {},
+        dedupeKey: GRAPH_TASK.SHADOW_IT_SCAN,
+        ...extra,
+      })
+      .returning()
+      .then((r) => r[0]);
+
+  it('a young request behind a held lock goes back to pending with its attempt refunded', async () => {
+    const row = await scanRow();
+    const { scanRelay } = makeRelays({ lockHeld: true });
+
+    await scanRelay.relay();
+
+    const after = await load(row.id);
+    expect(after.status).toBe('pending');
+    expect(after.attempts).toBe(0);
+    expect(after.nextAttemptAt.getTime()).toBeGreaterThan(Date.now() + 4 * 60_000);
+  });
+
+  it('a request that has waited past the lock TTL + margin DEAD-LETTERS (alarm), not defers for ever', async () => {
+    const row = await scanRow({ createdAt: new Date(Date.now() - 6 * 3_600_000) });
+    const { scanRelay } = makeRelays({ lockHeld: true });
+
+    await scanRelay.relay();
+
+    const after = await load(row.id);
+    expect(after.status).toBe('failed');
+    expect(after.lastError).toMatch(/stayed held/);
   });
 });

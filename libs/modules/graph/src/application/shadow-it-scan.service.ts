@@ -3,7 +3,7 @@ import { InjectDrizzle, type DrizzleDB } from '@platform';
 import { GraphClientService } from '../graph-client.service';
 import { MAX_SCAN_PAGES } from '../graph-task';
 import { newId } from '@shared-kernel';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne } from 'drizzle-orm';
 import { complianceFindings, softwareCatalog } from '../../../../../db/schema';
 
 // ── Graph types ───────────────────────────────────────────────────────────────
@@ -110,11 +110,15 @@ export class ShadowItScanService {
       const severity = listing === 'blacklisted' ? 'high' : 'medium';
       const sourceKey = `shadow-it:${app.id}`;
 
-      // Deduplicate — skip if an open finding already exists for this app
+      // Deduplicate — skip if a live finding already exists for this app
       const existing = await this.db
         .select({ id: complianceFindings.id })
         .from(complianceFindings)
-        .where(and(eq(complianceFindings.source, sourceKey), eq(complianceFindings.status, 'open')))
+        // Against every LIVE finding (open, acknowledged, risk-accepted), not a RESOLVED one: the same
+        // condition returning after resolution is a new problem. Same rule as the device sync.
+        .where(
+          and(eq(complianceFindings.source, sourceKey), ne(complianceFindings.status, 'resolved')),
+        )
         .limit(1);
 
       if (existing.length > 0) continue;
