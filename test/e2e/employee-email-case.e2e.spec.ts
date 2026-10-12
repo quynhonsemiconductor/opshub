@@ -1,7 +1,7 @@
 /**
  * An employee's email is one identity however it is cased. `uq_employee_email_lower` (migration 0035)
- * makes `Ada@x` and `ada@x` collide; the Graph worker and identity v8 both compare addresses
- * lower-cased.
+ * makes `Ada@x` and `ada@x` collide; the Graph worker and the identity 8 sign-in hook both compare
+ * addresses lower-cased.
  *
  * Prereqs: `docker compose -f docker-compose.dev.yml up -d`, `pnpm db:migrate` (migration 0035).
  */
@@ -12,7 +12,10 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../db/schema';
-import { UserDrizzleRepository } from '../../libs/modules/identity/src/infrastructure/shared-auth/user.drizzle-repository';
+import {
+  StaffSignInHandler,
+  StaffSignInRefusedError,
+} from '../../libs/modules/identity/src/infrastructure/auth/staff-sign-in.handler';
 import { EmployeeDrizzleRepository } from '../../libs/modules/identity/src/infrastructure/persistence/employee.drizzle-repository';
 import type { DrizzleDB } from '@platform';
 
@@ -83,23 +86,35 @@ describe('EXISTING mixed-case employees keep working, against PostgreSQL', () =>
         .where(sql`lower(${schema.employees.email}) = ${lowered}`)
     ).length;
 
-  it('the first SSO login of a mixed-case employee with no link MATCHES the row: no second insert, no 23505', async () => {
+  /** The sign-in hook with a stub role sync: this suite is about WHICH employee it finds, not about roles. */
+  const hook = () =>
+    new StaffSignInHandler(db, { syncUserRolesByKeys: () => Promise.resolve([]) } as never);
+
+  it('the sign-in of a mixed-case employee MATCHES the row: no second insert, no 23505', async () => {
     const lowered = `ada.nguyen.${suffix}@qnsc.vn`;
     const row = await legacy(`Ada.Nguyen.${suffix}@QNSC.vn`);
-    const users = new UserDrizzleRepository(db);
 
-    const user = await users.upsertBySsoIdentity(
-      'entra',
-      `sub-${suffix}`,
-      `Ada.Nguyen.${suffix}@qnsc.vn`,
-      'Ada',
-    );
+    // identity gives the hook the lower-cased address and, by the migration's invariant, the employee's own id
+    await hook().handle({
+      user: { id: row.id, email: lowered, name: 'Ada' },
+      claims: { oid: `oid-${suffix}`, email: lowered, guest: false, roles: [] },
+    });
 
-    expect(user.id).toBe(row.id);
     expect(await count(lowered), 'a second employee was inserted').toBe(1);
-    await db
-      .delete(schema.ssoIdentities)
-      .where(eq(schema.ssoIdentities.providerSub, `sub-${suffix}`));
+  });
+
+  it('a user that is NOT the employee (a returning person whose user row is gone) is refused, and still no second row', async () => {
+    const lowered = `alan.kay.${suffix}@qnsc.vn`;
+    await legacy(`Alan.Kay.${suffix}@QNSC.vn`);
+
+    await expect(
+      hook().handle({
+        user: { id: '00000000-0000-4000-8000-0000000000aa', email: lowered, name: 'Alan' },
+        claims: { oid: `oid2-${suffix}`, email: lowered, guest: false, roles: [] },
+      }),
+    ).rejects.toBeInstanceOf(StaffSignInRefusedError);
+
+    expect(await count(lowered), 'a second employee was inserted').toBe(1);
   });
 
   it('findByEmail on the employee repository finds a mixed-case row by any casing', async () => {
@@ -107,12 +122,6 @@ describe('EXISTING mixed-case employees keep working, against PostgreSQL', () =>
     const found = await new EmployeeDrizzleRepository(db).findByEmail(
       `grace.HOPPER.${suffix}@qnsc.vn`,
     );
-    expect(found?.id).toBe(row.id);
-  });
-
-  it('findByEmail on the user repository finds a mixed-case row by any casing', async () => {
-    const row = await legacy(`Alan.Turing.${suffix}@QNSC.vn`);
-    const found = await new UserDrizzleRepository(db).findByEmail(`ALAN.turing.${suffix}@qnsc.vn`);
     expect(found?.id).toBe(row.id);
   });
 

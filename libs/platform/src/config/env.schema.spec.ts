@@ -21,8 +21,9 @@ function env(overrides: Record<string, string | undefined> = {}) {
 
 /** The same, as the WORKER sees it: it has no sign-in secret (its schema refuses one). */
 function workerEnv(overrides: Record<string, string | undefined> = {}) {
-  const { BETTER_AUTH_SECRET: _api, ...rest } = env();
-  return { ...rest, ...overrides };
+  const base: Record<string, string | undefined> = env();
+  delete base['BETTER_AUTH_SECRET'];
+  return { ...base, ...overrides };
 }
 
 describe('EnvSchema — identity 8 sign-in', () => {

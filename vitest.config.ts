@@ -104,10 +104,16 @@ export default defineConfig({
       // functions 28.78; `check:coverage-floors` refused the old 37/37/29/25 (5 points behind). Set about
       // two and a half points under actual so run-to-run variance does not fail a branch that added no
       // code, and still inside the 3-point limit.
+      // Raised 2026-10-12 on the tree with identity 8 AND the Graph worker together. Removing the v7 auth code
+      // (the BFF, the refresh-token service, the JWT guard: large, thinly tested) and adding the identity 8 specs
+      // (session guard, sign-in hook, access model, offboarding, env schema) moved the measurement to lines
+      // 45.51 / statements 45.40 / branches 36.42 / functions 31.16, and `check:coverage-floors` refused the
+      // floors above (functions 4.16 and branches 4.42 behind, past the 3-point limit). Set about two and a
+      // half points under actual, as above. Neither branch's own figure applies once both are in.
       thresholds: {
         lines: 43,
-        functions: 27,
-        branches: 32,
+        functions: 29,
+        branches: 34,
         statements: 43,
       },
     },

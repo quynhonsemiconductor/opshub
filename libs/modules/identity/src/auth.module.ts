@@ -2,7 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { IdentityModule } from '@quynhonsemiconductor/identity/nest';
 import { PinoLogger } from 'nestjs-pino';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { AppConfigService, DRIZZLE, SESSION_REVOKER, type DrizzleDB } from '@platform';
+import { ApiConfigService, DRIZZLE, SESSION_REVOKER, type DrizzleDB } from '@platform';
 import { AuditModule } from '@modules/audit';
 import { AuthzModule } from '@modules/authz';
 import { EmployeesModule } from './employees.module';
@@ -40,7 +40,7 @@ class IdentityBindingsModule {}
     IdentityModule.forRootAsync({
       imports: [IdentityBindingsModule],
       inject: [
-        AppConfigService,
+        ApiConfigService,
         DRIZZLE,
         CacheService,
         StaffSignInHandler,
@@ -48,7 +48,7 @@ class IdentityBindingsModule {}
         PinoLogger,
       ],
       useFactory: (
-        config: AppConfigService,
+        config: ApiConfigService,
         db: DrizzleDB,
         cache: CacheService,
         staffSignIn: StaffSignInHandler,

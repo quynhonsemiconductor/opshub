@@ -17,7 +17,7 @@
     "dev:web": "pnpm --filter opshub-web dev",
     "format": "prettier --write \"apps/api/**/*.ts\" \"apps/worker/**/*.ts\" \"libs/**/*.ts\" \"db/**/*.ts\"",
     "start:dev": "nest start api --watch",
-    "start:dev:worker": "nest start worker --watch",
+    "start:dev:worker": "BETTER_AUTH_SECRET= IDENTITY_TEST_LOGIN= ENTRA_CLIENT_SECRET= nest start worker --watch",
     "start:debug": "nest start api --debug --watch",
     "start:prod": "node dist/apps/api/apps/api/src/main.js",
     "start:prod:worker": "node dist/apps/worker/apps/worker/src/main.js",

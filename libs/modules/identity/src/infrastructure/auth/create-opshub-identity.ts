@@ -10,7 +10,7 @@ import {
 import type { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { failOpenLog } from '@quynhonsemiconductor/observability';
 import type { PinoLogger } from 'nestjs-pino';
-import { IDENTITY_PRODUCT, type AppConfigService, type DrizzleDB } from '@platform';
+import { IDENTITY_PRODUCT, type ApiConfigService, type DrizzleDB } from '@platform';
 import * as identityAuthSchema from '../../../../../../db/schema/identity-auth';
 import { STAFF_EMAIL_DOMAINS } from './staff-domains';
 import type { StaffSignInHandler } from './staff-sign-in.handler';
@@ -18,7 +18,8 @@ import type { StaffSignInHandler } from './staff-sign-in.handler';
 const UNCONFIGURED_ID = '00000000-0000-4000-8000-000000000000';
 
 export interface OpshubIdentityDeps {
-  config: AppConfigService;
+  /** The API's view of the environment: the sign-in secrets exist there and nowhere else. */
+  config: ApiConfigService;
   db: DrizzleDB;
   cache: CacheService;
   staffSignIn: StaffSignInHandler;

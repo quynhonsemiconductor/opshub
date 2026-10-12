@@ -33,7 +33,7 @@ import {
   type IdpIdentity,
   type MockIdp,
 } from '@quynhonsemiconductor/identity/testing';
-import { AppConfigService, DRIZZLE, SESSION_COOKIE, type DrizzleDB, type Env } from '@platform';
+import { ApiConfigService, DRIZZLE, SESSION_COOKIE, type ApiEnv, type DrizzleDB } from '@platform';
 import { employees, user as identityUser } from '../../db/schema';
 import { createOpshubIdentity } from '../../libs/modules/identity/src/infrastructure/auth/create-opshub-identity';
 import { SecurityEventAuditSink } from '../../libs/modules/identity/src/infrastructure/auth/security-events.audit';
@@ -122,18 +122,18 @@ async function createEmployee(email: string, roles: string[] = []): Promise<{ id
 beforeAll(async () => {
   app = await createTestApp();
   db = app.get<DrizzleDB>(DRIZZLE);
-  const real = app.get(AppConfigService);
+  const real = app.get(ApiConfigService);
   appUrl = real.get('APP_URL');
   idp = await startMockIdp();
 
   const config = {
-    get: (key: keyof Env) =>
+    get: (key: keyof ApiEnv) =>
       ({
         ENTRA_TENANT_ID: TENANT,
         ENTRA_CLIENT_ID: 'e2e-client',
         ENTRA_CLIENT_SECRET: 'e2e-secret',
       })[key as string] ?? real.get(key),
-  } as AppConfigService;
+  } as ApiConfigService;
 
   identity = createOpshubIdentity({
     config,
