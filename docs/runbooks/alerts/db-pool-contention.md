@@ -4,16 +4,16 @@
 app's own DB connection pool (this is the pool inside the Node process, not RDS's own
 connection count).
 
-## Currently dark
+## Wiring
 
-This alert cannot fire yet: `db_pool_in_use`/`db_pool_waiting` are only emitted by
-`@qnsc-vn/observability`'s `DbPoolMetrics` recorder, and opshub's `DatabaseModule` does
-not call it. It stays in this alert set and on the Overview dashboard for structural
-parity with rally — wiring `DbPoolMetrics` into `libs/platform/src/database` is a
-separate, application-code follow-up. Until then, treat RDS "DatabaseConnections"
-(CloudWatch) as the only pool-pressure signal available.
+`DrizzleProvider` registers observability's `DbPoolMetrics` (`libs/platform/src/database/drizzle.provider.ts`), so
+`db_pool_in_use` / `db_pool_waiting` are live in BOTH the API and the worker: the alert has no `service_name`
+selector, so a queue in either pool for 5 minutes fires it. `waiting` is a gauge read at each export (callers queued
+for a connection right now), which is why one sample is meaningful and the rule has no volume gate. The first thing to
+look at is which `service_name` the series carries. Before the metrics were wired (2026-10) this alert was dark and
+RDS "DatabaseConnections" was the only pool-pressure signal.
 
-## What this means, once wired
+## What this means
 
 The app is asking for more DB connections at once than the pool is configured to hand
 out. Either the pool is undersized, or something is holding connections too long

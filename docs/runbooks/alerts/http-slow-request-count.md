@@ -27,6 +27,10 @@ sum(increase(http_server_duration_milliseconds_bucket{le="+Inf",   ...}[30m]))
   - sum(increase(http_server_duration_milliseconds_bucket{le="1000", ...}[30m]))
 ```
 
+Both selectors also carry `otel_scope_name!="qnsc"`: the duration is recorded twice (instrumentation-http
+and observability's `HttpMetrics`) until observability stops the duplicate, and summing both would count
+every slow request twice. `!=` so that a missing label still selects the series instead of going blind.
+
 The `le` value is matched as a **string label**, so it must be one of the boundaries the
 service actually exports. A plausible-looking number that is not a real boundary — 2000,
 1500, 3000 — matches no series at all, the subtraction returns an empty result, and the

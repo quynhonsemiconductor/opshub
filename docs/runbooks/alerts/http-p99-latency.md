@@ -4,6 +4,11 @@ p99 of `http_server_duration_milliseconds` has stayed above the environment's
 threshold (1000ms prod / 2000ms develop) for 5 minutes straight, in a 5-minute window
 that held at least the environment's minimum request count (50 prod / 20 develop).
 
+**Series.** `http.server.duration` is recorded twice (`@opentelemetry/instrumentation-http`, and
+observability's `HttpMetrics` under the scope `qnsc`) until observability stops the duplicate. The query
+excludes the `qnsc` scope (`otel_scope_name!="qnsc"`), so it reads instrumentation-http's, which also
+covers requests a guard rejected and `/api/auth/*`. Drop the filter when the duplicate is gone.
+
 ## Read the number before you act on it
 
 Two things about this alert's value are not obvious from the notification, and both have

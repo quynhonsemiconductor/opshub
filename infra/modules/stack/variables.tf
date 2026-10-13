@@ -874,3 +874,21 @@ variable "cpu_architecture" {
     Defaults to X86_64 so a caller that has not moved its build keeps working.
   EOT
 }
+
+variable "edge_client_ip_secret_previous_set" {
+  description = <<-EOT
+    Inject `edge-client-ip-secret-previous` into the API as EDGE_CLIENT_IP_SECRET_PREVIOUS: the key being retired,
+    still accepted when the API verifies the Pages Function's signed client address. ONLY during a rotation.
+
+    OFF by default for the same mechanical reason as `graph_client_certificate_set`: ECS cannot resolve a bundle key that
+    is not there, and the task does not start. Rotation, in this order:
+      1. API first: set the bundle's `edge-client-ip-secret` to the NEW value, add `edge-client-ip-secret-previous`
+         with the OLD value, set this to true, apply, wait for the API to roll;
+      2. then the Pages secret `EDGE_CLIENT_IP_SECRET` = the new value, and redeploy the web (a Pages secret
+         applies to new deployments only);
+      3. when no signature under the old key can still arrive, set this back to false, apply, remove the bundle key.
+    The `edge-client-ip-rejected` alert must stay quiet throughout.
+  EOT
+  type        = bool
+  default     = false
+}

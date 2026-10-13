@@ -331,12 +331,20 @@ const refineApiAuth = (
   // login page that sends everyone to an error; in development and CI the Entra fields may stay unset
   // (test-login signs in).
   if (env.NODE_ENV !== 'production') return;
-  for (const key of ['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET'] as const) {
+  for (const key of [
+    'ENTRA_TENANT_ID',
+    'ENTRA_CLIENT_ID',
+    'ENTRA_CLIENT_SECRET',
+    'EDGE_CLIENT_IP_SECRET',
+  ] as const) {
     if (!env[key]) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [key],
-        message: `${key} is required when NODE_ENV=production: staff sign in with Microsoft Entra.`,
+        message:
+          key === 'EDGE_CLIENT_IP_SECRET'
+            ? "EDGE_CLIENT_IP_SECRET is required when NODE_ENV=production: every browser request reaches the API through the Pages Function, which signs the visitor address with it. Without it the API sees one shared Cloudflare address and the AUTH_LOGIN bucket is the whole company's."
+            : `${key} is required when NODE_ENV=production: staff sign in with Microsoft Entra.`,
       });
     }
   }
@@ -391,8 +399,9 @@ export const ApiEnvSchema = z
      * and `clientIp()` verifies. Behind a Pages Function the API's `cf-connecting-ip` is a Cloudflare address shared
      * by every visitor, so without a verifiable address one `AUTH_LOGIN` bucket (5 attempts per 15 minutes) would be
      * the whole company's. The SAME value as the Pages project's secret of that name; at least 32 characters.
-     * Optional so development and CI (no Pages Function in front) boot; the API reads it through `clientIp()`, which
-     * treats an absent secret as "no signed address, use cf-connecting-ip".
+     * Optional so development and CI (no Pages Function in front) boot, where `clientIp()` treats an absent secret as
+     * "no signed address, use cf-connecting-ip"; REQUIRED in production (`refineApiAuth`), where an empty value stops
+     * the boot: the only way a browser reaches the API is through the Function, and that means a shared address.
      */
     EDGE_CLIENT_IP_SECRET: emptyToUndefined(edgeSecret.optional()),
     /** The previous key, accepted for verification only while the Pages secret is being rotated. */
