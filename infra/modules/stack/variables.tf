@@ -72,9 +72,23 @@ variable "runtime_state_key" {
 // ── Application ─────────────────────────────────────────────────────────────────
 
 variable "image_tag" {
-  description = "Container image tag for api/worker/migrator. `latest` is acceptable in develop; production pins the release tag that triggered the apply."
+  description = <<-EOT
+    Container image tag for the BASELINE task definitions (api, worker, migrator). Required: no default.
+
+    NEVER `latest`: the ECR repositories are IMMUTABLE and the deploy pushes `sha-<commit>` / `v*` tags only, so `latest` does not
+    exist, and a task definition that references it cannot start (`CannotPullContainerError`). That is the bug that took qnsc-kb's
+    worker down in 2026-10: a Terraform-registered baseline pointing at a tag that was never pushed (qnsc-kb-backend#201).
+
+    Develop passes an obviously invalid placeholder, because the deploy rewrites the tag in the product container before it registers
+    the revision it rolls out, and the services ignore Terraform's task_definition (`ignore_changes`), so the baseline is never pulled.
+    Production pins the release tag that triggered the apply.
+  EOT
   type        = string
-  default     = "latest"
+
+  validation {
+    condition     = var.image_tag != "latest" && var.image_tag != ""
+    error_message = "image_tag must not be \"latest\" or empty: that tag does not exist in the immutable ECR repositories. Use the release tag, or in develop the placeholder \"set-by-the-deploy-never-a-real-tag\"."
+  }
 }
 
 variable "entra_tenant_id" {
