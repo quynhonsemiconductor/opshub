@@ -113,11 +113,13 @@ export default defineConfig({
       // Raised 2026-10-13: lines 44. The platform-http adoption added specs (the access-log interceptor's metrics,
       // the client-address keys, the Pages proxy's neighbours in the env schema) and deleted a local sanitiser; lines
       // measured 46.02 and the 3-point limit refused 43.
+      // Raised again 2026-10-13 after the health controller (untested boilerplate) went to platform-runtime and the
+      // shutdown / readiness / pool specs landed: lines 46.34 / statements 46.24 / branches 37.06 / functions 31.75.
       thresholds: {
         lines: 44,
         functions: 29,
-        branches: 34,
-        statements: 43,
+        branches: 35,
+        statements: 44,
       },
     },
   },

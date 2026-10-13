@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { DbPoolMetrics } from '@quynhonsemiconductor/observability';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import type { OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import * as schema from '../../../../db/schema';
 import { pgOptions } from '../../../../db/pg-ssl';
@@ -23,7 +23,7 @@ export type DbExecutor = DrizzleDB | DrizzleTx;
 export const InjectDrizzle = () => Inject(DRIZZLE);
 
 @Injectable()
-export class DrizzleProvider implements OnModuleInit, OnModuleDestroy {
+export class DrizzleProvider implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(DrizzleProvider.name);
   private readonly pool: Pool;
   private readonly db: DrizzleDB;
@@ -87,6 +87,11 @@ export class DrizzleProvider implements OnModuleInit, OnModuleDestroy {
 
   get instance(): DrizzleDB {
     return this.db;
+  }
+
+  /** The `pg.Pool` itself: what platform-runtime's `/readyz` pings (see `DatabaseModule`). */
+  get rawPool(): Pool {
+    return this.pool;
   }
 
   /**
@@ -169,7 +174,13 @@ export class DrizzleProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
+  /**
+   * `onApplicationShutdown`, not `onModuleDestroy`. Nest runs `onModuleDestroy` -> `beforeApplicationShutdown` ->
+   * (HTTP server) -> `onApplicationShutdown`, and the relays and crons that use this pool stop in
+   * `onModuleDestroy` (`@quynhonsemiconductor/platform-runtime`'s `enableGracefulShutdown` documents the order). A
+   * pool closed in the same phase as the work that uses it is gone while a relay still has a query in flight.
+   */
+  async onApplicationShutdown(): Promise<void> {
     await this.pool.end();
   }
 }

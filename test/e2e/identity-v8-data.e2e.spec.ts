@@ -113,9 +113,32 @@ describe('the runtime roles can use the identity tables', () => {
 });
 
 describe('the unauthenticated surface', () => {
-  it.each(['/livez', '/v1/healthz', '/v1/readyz'])('%s answers without a session', async (url) => {
-    const res = await app.inject({ method: 'GET', url });
+  it.each(['/livez', '/readyz', '/v1/healthz', '/v1/readyz'])(
+    '%s answers without a session',
+    async (url) => {
+      const res = await app.inject({ method: 'GET', url });
+      expect(res.statusCode, res.body).toBe(200);
+    },
+  );
+
+  it('/readyz checks the database and the cache and reports each, without leaking a cause', async () => {
+    const res = await app.inject({ method: 'GET', url: '/readyz' });
+    const body = res.json<{
+      status: string;
+      shuttingDown: boolean;
+      checks: Record<string, string>;
+    }>();
+
     expect(res.statusCode, res.body).toBe(200);
+    expect(body.shuttingDown).toBe(false);
+    expect(body.checks['database']).toBe('up');
+    expect(Object.values(body.checks).every((v) => v === 'up' || v === 'down')).toBe(true);
+    expect(res.body).not.toMatch(/postgres|password|ECONN/i);
+  });
+
+  it('/livez touches no dependency and is outside the /v1 prefix', async () => {
+    expect((await app.inject({ method: 'GET', url: '/v1/livez' })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: '/livez' })).statusCode).toBe(200);
   });
 
   it.each([

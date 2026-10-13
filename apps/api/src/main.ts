@@ -6,11 +6,12 @@ import '@quynhonsemiconductor/platform-runtime/load-env';
 // The process role, before anything that loads @platform (which validates the environment on import).
 import './role';
 // OTel must be imported before any other module — registers auto-instrumentation
-import { shutdownOtel } from './otel';
+import './otel';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { enableCorrelationId } from '@quynhonsemiconductor/platform-http';
+import { enableGracefulShutdown } from '@quynhonsemiconductor/platform-runtime';
 import { AppModule } from './app.module';
 import { AppConfigService } from '@platform';
 import { bootstrapApp } from './bootstrap/app.bootstrap';
@@ -39,31 +40,15 @@ async function main(): Promise<void> {
   const port = config.get('PORT');
   const host = config.get('HOST');
 
+  // SIGTERM / SIGINT (ECS and Kubernetes send one on task replacement; Ctrl-C the other): /readyz answers 503, the
+  // endpoint-removal delay, HTTP drains, `app.close()` runs the close hooks (pool, cache), telemetry is flushed and
+  // the process exits, all bounded by SHUTDOWN_TIMEOUT_MS. The ONE owner of shutdown: no `app.enableShutdownHooks()`
+  // (it would close the app on the signal at once, outside this sequence) and no handler of our own (that closed the
+  // application a second time). Before `listen()`, as the package requires.
+  enableGracefulShutdown(app);
+
   await app.listen(port, host);
   logger.log(`OpsHub API listening on http://${host}:${port} (docs: /api/docs)`);
-
-  // ── Process signal handlers ────────────────────────────────────────────────
-  // ECS sends SIGTERM on task replacement; Docker Ctrl-C sends SIGINT.
-  // Order: flush OTel spans FIRST, then close NestJS (drains DB pool, Redis, etc.).
-  const shutdown = async (signal: string): Promise<void> => {
-    logger.log(`Received ${signal} — shutting down gracefully`, 'Bootstrap');
-    try {
-      await shutdownOtel();
-      await app.close();
-      logger.log('Shutdown complete', 'Bootstrap');
-    } catch (err) {
-      logger.error({ msg: 'Error during shutdown', err }, 'Bootstrap');
-    } finally {
-      process.exit(0);
-    }
-  };
-
-  process.on('SIGTERM', () => {
-    void shutdown('SIGTERM');
-  });
-  process.on('SIGINT', () => {
-    void shutdown('SIGINT');
-  });
 
   process.on('unhandledRejection', (reason: unknown) => {
     logger.error({ msg: 'Unhandled promise rejection', reason }, 'Bootstrap');

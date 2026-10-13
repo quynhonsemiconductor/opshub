@@ -16,13 +16,10 @@
  * that lived beside the local copy is gone: the behaviour it pinned is the package's now,
  * and duplicating the assertion here would only pin our copy of someone else's decision.
  *
- * Shutdown: call `shutdownOtel()` from the main.ts signal handler BEFORE `app.close()`, so
- * in-flight spans are exported rather than dropped. Do NOT register a second SIGTERM
- * handler here — main.ts owns the shutdown sequence.
+ * Shutdown: `enableGracefulShutdown()` (platform-runtime) flushes telemetry itself, after `app.close()`, so there is
+ * nothing to call from main.ts and nothing re-exported from here.
  */
-import { shutdownOtel, startOtel } from '@quynhonsemiconductor/observability/otel';
-
-export { shutdownOtel };
+import { startOtel } from '@quynhonsemiconductor/observability/otel';
 
 /**
  * Inbound-HTTP latency histogram boundaries, in milliseconds.

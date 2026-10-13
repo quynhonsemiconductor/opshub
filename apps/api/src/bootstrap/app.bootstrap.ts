@@ -1,4 +1,3 @@
-import { RequestMethod } from '@nestjs/common';
 import fastifyCompress from '@fastify/compress';
 import fastifyCookie from '@fastify/cookie';
 import fastifyCsrf from '@fastify/csrf-protection';
@@ -7,6 +6,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Logger } from 'nestjs-pino';
 import { assertEdgeClientIpEnv } from '@quynhonsemiconductor/platform-http';
+import { enableHealth } from '@quynhonsemiconductor/platform-runtime';
 import {
   AppConfigService,
   SESSION_COOKIE,
@@ -118,23 +118,16 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
     ],
   });
 
-  // Health probes are served at /v1/healthz and /v1/readyz to match the ALB
-  // target-group health check, the Docker HEALTHCHECK, and the deploy smoke test.
-  // `/livez` IS EXCLUDED from the prefix, and it is the one route that must be.
-  // The Kubernetes chart hardcodes the liveness path (§9j — not a per-service
-  // value) and `gitops/platform/policy/admission.yaml` DENIES any other path, so
-  // `/v1/livez` would be a rejected manifest rather than a working probe. Without
-  // the route the probe 404s and the pod sits in CrashLoopBackOff.
-  //
-  // Readiness needs no exclusion: `readinessPath` IS a chart value, and
-  // `gitops/values/opshub/base.yaml` sets it to `/v1/readyz`.
-  //
-  // Same change as rova, same cause — both share app-platform's health
-  // controller. Found 2026-09-19 in the pre-apply audit.
-  app.setGlobalPrefix('v1', {
-    exclude: [{ path: 'livez', method: RequestMethod.GET }],
-  });
-  app.enableShutdownHooks();
+  app.setGlobalPrefix('v1');
+
+  // /livez, /readyz and the legacy /v1/healthz, /v1/readyz (the ALB target group, the Dockerfile HEALTHCHECK, the
+  // deploy smoke test and the chart's readiness path), from `@quynhonsemiconductor/platform-runtime`. Raw Fastify
+  // routes on purpose: a controller would inherit the `v1` prefix (`/v1/livez` is a rejected manifest, because
+  // gitops/platform/policy/admission.yaml denies any liveness path but `/livez`), the global session guard, the rate
+  // limiter and the OpenAPI document. `/readyz` answers 503 once shutdown has begun. Its `database` and `cache`
+  // checks are built in: the pool is found under platform-db's token (`DatabaseModule` provides it) and the cache by
+  // `CacheService`. The cause of a failed check is logged, never returned: the endpoint is unauthenticated.
+  enableHealth(app);
 
   // Expose OpenAPI only outside production — avoids leaking endpoint inventory
   if (!config.get('NODE_ENV').startsWith('prod')) {

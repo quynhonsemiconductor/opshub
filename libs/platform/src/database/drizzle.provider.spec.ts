@@ -170,3 +170,24 @@ describe('DrizzleProvider pool warm-up', () => {
     expect(pool.connect).not.toHaveBeenCalled();
   });
 });
+
+describe('DrizzleProvider shutdown and readiness', () => {
+  it('closes the pool in onApplicationShutdown, AFTER the phase in which relays and crons stop', async () => {
+    // Nest runs onModuleDestroy -> beforeApplicationShutdown -> (HTTP server) -> onApplicationShutdown. The
+    // work that uses the pool stops in the first; a pool closed there too is gone under a query in flight.
+    const provider = new DrizzleProvider(makeConfig());
+    const stub = stubPool(provider);
+    const pool = (provider as unknown as { pool: { end: ReturnType<typeof vi.fn> } }).pool;
+    expect(stub).toBeDefined();
+    expect('onModuleDestroy' in provider).toBe(false);
+
+    await provider.onApplicationShutdown();
+
+    expect(pool.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes the pool itself, for platform-runtime’s /readyz (provided under platform-db’s token)', () => {
+    const provider = new DrizzleProvider(makeConfig());
+    expect(provider.rawPool).toBe((provider as unknown as { pool: unknown }).pool);
+  });
+});

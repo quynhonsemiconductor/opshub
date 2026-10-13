@@ -6,9 +6,10 @@ import '@quynhonsemiconductor/platform-runtime/load-env';
 // The process role, before anything that loads @platform (which validates the environment on import).
 import './role';
 // OTel must be imported before any other module — registers auto-instrumentation
-import { shutdownOtel } from './otel';
+import './otel';
 import { NestFactory } from '@nestjs/core';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import { enableGracefulShutdown } from '@quynhonsemiconductor/platform-runtime';
 import { WorkerModule } from './worker.module';
 
 async function main(): Promise<void> {
@@ -20,29 +21,10 @@ async function main(): Promise<void> {
   const logger = app.get(PinoLogger);
   logger.log('OpsHub worker started (outbox relay + scheduled jobs)', 'Bootstrap');
 
-  app.enableShutdownHooks();
-
-  // ── Process signal handlers ────────────────────────────────────────────────
-  // ECS sends SIGTERM on task replacement; Docker Ctrl-C sends SIGINT.
-  const shutdown = async (signal: string): Promise<void> => {
-    logger.log(`Received ${signal} — shutting down worker`, 'Bootstrap');
-    try {
-      await shutdownOtel();
-      await app.close();
-      logger.log('Worker shutdown complete', 'Bootstrap');
-    } catch (err) {
-      logger.error({ msg: 'Error during worker shutdown', err }, 'Bootstrap');
-    } finally {
-      process.exit(0);
-    }
-  };
-
-  process.on('SIGTERM', () => {
-    void shutdown('SIGTERM');
-  });
-  process.on('SIGINT', () => {
-    void shutdown('SIGINT');
-  });
+  // SIGTERM / SIGINT: `app.close()` (relays and crons stop, then the pool and cache close), telemetry flush, exit,
+  // bounded by SHUTDOWN_TIMEOUT_MS. The worker serves no HTTP, so there is no readiness flip or drain. The ONE owner
+  // of shutdown: no `app.enableShutdownHooks()` and no handler of our own, which closed the application twice.
+  enableGracefulShutdown(app);
 
   process.on('unhandledRejection', (reason: unknown) => {
     logger.error({ msg: 'Unhandled promise rejection', reason }, 'Bootstrap');
