@@ -1,4 +1,7 @@
 name: Infrastructure · Apply
+# What the run list shows. Without this a dispatch with `allow_destructive` on is indistinguishable, in the
+# list, from one with it off, and it is the one that may delete DNS records. A push or tag shows its ref.
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Infrastructure · Apply · dispatch{0}', inputs.allow_destructive && ' · ALLOW DESTRUCTIVE' || '') || format('Infrastructure · Apply · {0}', github.ref_name) }}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Infra apply, gated the same way as the app deploys (backend-deploy.yml):
