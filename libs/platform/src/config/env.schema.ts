@@ -300,24 +300,51 @@ const forbidden = (name: string, role: 'API' | 'worker', why: string) =>
 const GRAPH_WHY =
   'Microsoft Graph is worker-only; the API asks for Graph work through graph_task_outbox';
 
+/** A signing key: at least 32 characters once trimmed (the length `platform-http` itself enforces). */
+const edgeSecret = z
+  .string()
+  .refine((v) => v.trim().length >= 32, 'must be at least 32 characters: it is a signing key');
+
 /**
  * What only the API's sign-in needs, checked where sign-in is real. Placed in its own refinement, not in
  * {@link refineEnv}, because the worker has none of these variables and must not be asked for them.
  */
 const refineApiAuth = (
-  env: Common & { ENTRA_CLIENT_SECRET?: string; IDENTITY_TEST_LOGIN?: 'enabled' },
+  env: Common & {
+    ENTRA_CLIENT_SECRET?: string;
+    IDENTITY_TEST_LOGIN?: 'enabled';
+    EDGE_CLIENT_IP_SECRET?: string;
+    EDGE_CLIENT_IP_SECRET_PREVIOUS?: string;
+  },
   ctx: z.RefinementCtx,
 ): void => {
+  // A previous key with no current one is a rotation half done: `clientIp()` refuses to start on it, so say so here.
+  if (env.EDGE_CLIENT_IP_SECRET_PREVIOUS && !env.EDGE_CLIENT_IP_SECRET) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['EDGE_CLIENT_IP_SECRET_PREVIOUS'],
+      message: 'EDGE_CLIENT_IP_SECRET_PREVIOUS is set but EDGE_CLIENT_IP_SECRET is not.',
+    });
+  }
+
   // SIGN-IN MUST BE CONFIGURED WHERE IT IS REAL. In production a missing Entra setting is a refused boot, not a
   // login page that sends everyone to an error; in development and CI the Entra fields may stay unset
   // (test-login signs in).
   if (env.NODE_ENV !== 'production') return;
-  for (const key of ['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET'] as const) {
+  for (const key of [
+    'ENTRA_TENANT_ID',
+    'ENTRA_CLIENT_ID',
+    'ENTRA_CLIENT_SECRET',
+    'EDGE_CLIENT_IP_SECRET',
+  ] as const) {
     if (!env[key]) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [key],
-        message: `${key} is required when NODE_ENV=production: staff sign in with Microsoft Entra.`,
+        message:
+          key === 'EDGE_CLIENT_IP_SECRET'
+            ? "EDGE_CLIENT_IP_SECRET is required when NODE_ENV=production: every browser request reaches the API through the Pages Function, which signs the visitor address with it. Without it the API sees one shared Cloudflare address and the AUTH_LOGIN bucket is the whole company's."
+            : `${key} is required when NODE_ENV=production: staff sign in with Microsoft Entra.`,
       });
     }
   }
@@ -367,6 +394,18 @@ export const ApiEnvSchema = z
      * boot without one; required in production by `refineApiAuth`.
      */
     ENTRA_CLIENT_SECRET: emptyToUndefined(z.string().min(1).optional()),
+    /**
+     * The key the Cloudflare Pages Function signs the visitor's address with (`@quynhonsemiconductor/platform-http/edge`),
+     * and `clientIp()` verifies. Behind a Pages Function the API's `cf-connecting-ip` is a Cloudflare address shared
+     * by every visitor, so without a verifiable address one `AUTH_LOGIN` bucket (5 attempts per 15 minutes) would be
+     * the whole company's. The SAME value as the Pages project's secret of that name; at least 32 characters.
+     * Optional so development and CI (no Pages Function in front) boot, where `clientIp()` treats an absent secret as
+     * "no signed address, use cf-connecting-ip"; REQUIRED in production (`refineApiAuth`), where an empty value stops
+     * the boot: the only way a browser reaches the API is through the Function, and that means a shared address.
+     */
+    EDGE_CLIENT_IP_SECRET: emptyToUndefined(edgeSecret.optional()),
+    /** The previous key, accepted for verification only while the Pages secret is being rotated. */
+    EDGE_CLIENT_IP_SECRET_PREVIOUS: emptyToUndefined(edgeSecret.optional()),
     GRAPH_CLIENT_ID: forbidden('GRAPH_CLIENT_ID', 'API', GRAPH_WHY),
     GRAPH_CLIENT_CERTIFICATE: forbidden('GRAPH_CLIENT_CERTIFICATE', 'API', GRAPH_WHY),
     GRAPH_FEDERATED_TOKEN_FILE: forbidden('GRAPH_FEDERATED_TOKEN_FILE', 'API', GRAPH_WHY),
@@ -431,6 +470,16 @@ export const WorkerEnvSchema = z
       'worker',
       'the passwordless test sign-in exists on the API only',
     ),
+    EDGE_CLIENT_IP_SECRET: forbidden(
+      'EDGE_CLIENT_IP_SECRET',
+      'worker',
+      'only the API verifies the signed client address; the worker serves no visitor',
+    ),
+    EDGE_CLIENT_IP_SECRET_PREVIOUS: forbidden(
+      'EDGE_CLIENT_IP_SECRET_PREVIOUS',
+      'worker',
+      'only the API verifies the signed client address; the worker serves no visitor',
+    ),
   })
   .superRefine(refineEnv)
   .transform(deriveEnv);
@@ -438,7 +487,12 @@ export const WorkerEnvSchema = z
 /** Role-specific variables are typed on {@link ApiEnv} / {@link WorkerEnv}. */
 type GraphKey = 'GRAPH_CLIENT_ID' | 'GRAPH_CLIENT_CERTIFICATE' | 'GRAPH_FEDERATED_TOKEN_FILE';
 /** The variables only the API has (sign-in). The worker's schema refuses to start with any of them set. */
-type ApiOnlyKey = 'ENTRA_CLIENT_SECRET' | 'BETTER_AUTH_SECRET' | 'IDENTITY_TEST_LOGIN';
+type ApiOnlyKey =
+  | 'ENTRA_CLIENT_SECRET'
+  | 'BETTER_AUTH_SECRET'
+  | 'IDENTITY_TEST_LOGIN'
+  | 'EDGE_CLIENT_IP_SECRET'
+  | 'EDGE_CLIENT_IP_SECRET_PREVIOUS';
 
 /**
  * What each role's config service can READ. The forbidden variables are in the schemas (so a set one

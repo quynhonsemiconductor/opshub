@@ -198,6 +198,38 @@ describe('RateLimitGuard identity', () => {
     expect(cache.consumeRateLimit.mock.calls[0][0]).toBe('DEFAULT:198.51.100.7');
   });
 
+  describe('the address comes from clientIp(), never from a header the caller can choose', () => {
+    const keyFor = async (headers: Record<string, string>, ip = '10.0.0.1') => {
+      const cache = admittingCache();
+      const guard = new RateLimitGuard(reflector as never, cache as never);
+      await guard.canActivate(contextFor(headers, { ip }));
+      return cache.consumeRateLimit.mock.calls[0][0] as string;
+    };
+
+    it('cf-connecting-ip wins over a forged x-forwarded-for and x-real-ip', async () => {
+      expect(
+        await keyFor({
+          'cf-connecting-ip': '203.0.113.7',
+          'x-forwarded-for': '198.51.100.99',
+          'x-real-ip': '192.0.2.1',
+        }),
+      ).toBe('DEFAULT:203.0.113.7');
+    });
+
+    it('x-real-ip is not read at all: a caller cannot pick its own bucket with it', async () => {
+      const a = await keyFor({ 'x-real-ip': '192.0.2.1' }, '10.0.0.1');
+      const b = await keyFor({ 'x-real-ip': '192.0.2.2' }, '10.0.0.1');
+      expect(a).toBe('DEFAULT:10.0.0.1');
+      expect(b).toBe(a);
+    });
+
+    it('a header value that is not an IP address is skipped, not used as a key', async () => {
+      expect(await keyFor({ 'cf-connecting-ip': 'not-an-ip\r\nx' }, '10.0.0.1')).toBe(
+        'DEFAULT:10.0.0.1',
+      );
+    });
+  });
+
   it('reads a forwarded IP for that fallback, so it is the client and not the proxy', async () => {
     // Unchanged behaviour, asserted because the fallback now matters less often and so gets exercised
     // less: behind the ALB every request would otherwise share the load balancer's address.

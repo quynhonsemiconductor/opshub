@@ -451,20 +451,19 @@ describe('the access model', () => {
       },
     );
 
-    it('a SUBDOMAIN of qnsc.vn: identity’s own domain match lets it through, so the sign-in hook is what refuses it', async () => {
-      // Found by writing this suite: `staff.domains` matches subdomains, so identity accepts
-      // jane@sub.qnsc.vn and creates a user for it. The hook's exact-domain check stops it before any
-      // employee, role or session exists.
+    it('a SUBDOMAIN of qnsc.vn is refused by identity itself: staff.domains matches exactly since 8.2.0', async () => {
+      // identity <= 8.1 matched sub-domains (jane@sub.qnsc.vn), which the sign-in hook had to refuse as its second
+      // line. 8.2.0 matches exactly (a sub-domain needs an explicit "*.qnsc.vn" entry, which opshub does not have),
+      // so identity refuses it before the hook, the same way as any other foreign address, and creates nothing.
       const email = `${RUN}.jane@sub.qnsc.vn`;
       const who = person(['admin'], { email });
 
       const refused = await microsoftSignIn(who);
 
       expect(refused.cookie, 'a subdomain address was given a session').toBeUndefined();
-      expect(refused.error).toBe('STAFF_SIGN_IN_REFUSED');
-      expect((await provisioned(email)).employee, 'a subdomain address was provisioned').toBe(
-        false,
-      );
+      expect(refused.status).toBe(302);
+      expect(refused.error).toBe('unable_to_get_user_info');
+      expect(await provisioned(email)).toEqual({ employee: false, user: false });
     });
 
     it('another tenant is refused before provisioning too', async () => {

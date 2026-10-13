@@ -1,5 +1,5 @@
 import { Injectable, PipeTransform } from '@nestjs/common';
-import { sanitizeObject, sanitizeString } from '../utils/sanitize.util';
+import { sanitizeObject, sanitizeString } from '@quynhonsemiconductor/platform-http';
 
 /**
  * Strips XSS-dangerous markup from all string inputs before they reach handlers

@@ -167,8 +167,9 @@ locals {
     { name = "CSRF_SECRET", secret_arn = module.secrets.secret_arns["csrf-secret"] },
   ])
 
-  # The API's ALONE: what only a sign-in needs. The worker never completes one, and its env schema REFUSES TO
-  # START with either of these set, so they must not be in `app_secrets`.
+  # The API's ALONE: what only a sign-in or a visitor's request needs. The worker never completes a sign-in or
+  # serves a visitor, and its env schema REFUSES TO START with any of these set, so they must not be in
+  # `app_secrets`.
   #
   #  - BETTER_AUTH_SECRET: identity 8 (Better Auth) signs its cookies and encrypts what it stores with it.
   #    Required by the API's env schema (>= 32 characters), so it is injected unconditionally: a random value
@@ -178,16 +179,33 @@ locals {
   #    schema refuses to boot NODE_ENV=production without it (a deployed environment with no way to sign in is
   #    a failed deploy, not a degraded one). The value must already be in Secrets Manager before the tasks
   #    start: ECS cannot inject an empty secret.
+  #  - EDGE_CLIENT_IP_SECRET: the key the Cloudflare Pages Function signs the visitor's address with
+  #    (`@quynhonsemiconductor/platform-http/edge`) and `clientIp()` verifies. Behind a Pages Function the API's
+  #    `cf-connecting-ip` is a Cloudflare address shared by every visitor, so without it the `AUTH_LOGIN` bucket (5
+  #    attempts per 15 minutes) would be the whole company's. A random value generated on this side
+  #    (`openssl rand -base64 48`), and the SAME value as the Pages project's secret of that name, which Terraform
+  #    does not manage (`production_env_vars` below carries plain variables only): it is set with
+  #    `wrangler pages secret put EDGE_CLIENT_IP_SECRET` or in the dashboard. Unconditional here for the same reason
+  #    as the two above; the API itself treats an absent key as "no signed address", and the Function answers 500
+  #    without its copy, so the two ends are set together (owner steps in the PR that introduced it).
   #
   # WHERE THE VALUES LIVE. Develop runs with `secrets_use_bundle = true`, so these are KEYS in the `app`
   # bundle's JSON (`opshub/develop/app`), not secrets of their own: no container is created for them and
   # Terraform cannot put the value there. `better-auth-secret` must be added to the bundle by hand BEFORE the
   # new task definition starts, or ECS cannot resolve the key and the task does not start. (Without the
   # bundle, a standalone container is created by the apply and then needs its value.)
-  api_secrets = [
-    { name = "BETTER_AUTH_SECRET", secret_arn = module.secrets.secret_arns["better-auth-secret"] },
-    { name = "ENTRA_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["entra-client-secret"] },
-  ]
+  api_secrets = concat(
+    [
+      { name = "BETTER_AUTH_SECRET", secret_arn = module.secrets.secret_arns["better-auth-secret"] },
+      { name = "ENTRA_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["entra-client-secret"] },
+      { name = "EDGE_CLIENT_IP_SECRET", secret_arn = module.secrets.secret_arns["edge-client-ip-secret"] },
+    ],
+    # Only DURING a rotation: the key being retired, still accepted for verification. Gated because ECS cannot
+    # resolve a bundle key that is not there, so injecting it unconditionally would make an optional key mandatory.
+    var.edge_client_ip_secret_previous_set ? [
+      { name = "EDGE_CLIENT_IP_SECRET_PREVIOUS", secret_arn = module.secrets.secret_arns["edge-client-ip-secret-previous"] },
+    ] : [],
+  )
 
   # Microsoft Graph is the WORKER's alone. The API task is given no GRAPH_* variable and no Graph
   # secret: an API request that needs Graph writes a graph_task_outbox row and the worker performs it
@@ -275,9 +293,10 @@ module "secrets" {
   secret_names = merge(var.observability.otlp_endpoint == "" ? {} : {
     "observability-token" = "Authorization header for the OTLP backend (e.g. 'Basic <base64>')"
     }, {
-    "better-auth-secret" = "identity 8 (Better Auth) signing/encryption secret (min 32 chars; openssl rand -base64 48). Rotating it signs everyone out."
-    "cookie-secret"      = "Fastify cookie signing secret (min 32 chars)"
-    "csrf-secret"        = "HMAC key binding a CSRF token to its session (min 32 chars). Distinct from cookie-secret so the two rotate independently."
+    "edge-client-ip-secret" = "Key the Cloudflare Pages Function signs the visitor's address with, verified by the API (min 32 chars; openssl rand -base64 48). Same value as the Pages secret EDGE_CLIENT_IP_SECRET."
+    "better-auth-secret"    = "identity 8 (Better Auth) signing/encryption secret (min 32 chars; openssl rand -base64 48). Rotating it signs everyone out."
+    "cookie-secret"         = "Fastify cookie signing secret (min 32 chars)"
+    "csrf-secret"           = "HMAC key binding a CSRF token to its session (min 32 chars). Distinct from cookie-secret so the two rotate independently."
     # NOTE: no "tunnel-token" key here any more. It belonged to the OLD manual-tunnel
     # design (cloudflared tunnel create by hand, id pasted into a variable) — Terraform
     # now owns the tunnel's whole lifecycle (module.tunnel) and creates its OWN separate
@@ -290,7 +309,11 @@ module "secrets" {
     # `db_role_passwords_set` and `db_least_privilege`. Empty until step 2 of the runbook.
     "db-app-password"    = "Password for the opshub_app Postgres role (api). [A-Za-z0-9_-], 24+ chars."
     "db-worker-password" = "Password for the opshub_worker Postgres role (worker). [A-Za-z0-9_-], 24+ chars."
-  })
+    }, var.edge_client_ip_secret_previous_set ? {
+    # Present only DURING a rotation (see `edge_client_ip_secret_previous_set`): the retired key, still accepted for
+    # verification. Absent otherwise, so no empty container is created and no bundle key is required.
+    "edge-client-ip-secret-previous" = "The retired edge-client-ip-secret, accepted by the API for verification while the Pages secret is rotated."
+  } : {})
 
   tags = local.tags
 }
@@ -836,6 +859,10 @@ module "web" {
   # The SPA is built with VITE_API_URL unset, so it calls relative /v1 paths and has
   # no knowledge of this hostname; setting VITE_API_URL would send the browser
   # straight to the API origin and break the cookie.
+  #
+  # The Functions also need the Pages SECRET `EDGE_CLIENT_IP_SECRET` (the same value as the API's key of that
+  # name), which is not set here: this module carries plain variables only. Without it a Function answers 500
+  # rather than forward unsigned (see apps/web/functions/_lib/proxy.ts).
   production_env_vars = {
     API_ORIGIN = "https://${var.api_domain}"
   }
@@ -1797,12 +1824,9 @@ resource "aws_iam_role_policy" "worker_sqs_bounce_feedback" {
 # in rally's own prod: a zero-failure series is ABSENT, not present-at-zero, and
 # dividing by an absent vector renders as "No data" instead of the honest 0%).
 #
-# `db-pool-contention` and its dashboard panel are included for structural parity
-# with rally, but stay DARK until `DbPoolMetrics` is wired into opshub's own
-# `DatabaseModule` — not done as part of this change (application code, not infra).
-# `db_pool_in_use`/`db_pool_waiting` are simply absent metrics until then, so the
-# panel shows "No data" and the alert's `no_data_state` (see the module's own
-# default) keeps it from paging on that absence.
+# `db-pool-contention` and its dashboard panel read `db_pool_in_use` / `db_pool_waiting`, which
+# `DrizzleProvider` now emits (observability's `DbPoolMetrics`) from BOTH the api and the worker pool. Before that
+# they were absent series and the alert could not fire.
 #
 # NO LONGER a byte-for-byte mirror of rally as of this change: the four
 # statistically-unsound rules gained a minimum-sample gate and `http-slow-request-count`
@@ -1937,6 +1961,20 @@ locals {
     }
   }
   alert_thresholds = lookup(local.alert_thresholds_by_env, var.env, local.alert_thresholds_by_env.develop)
+
+  # `http.server.duration` has ONE emitter here: observability's `HttpMetrics`, meter scope `qnsc`. With
+  # `@opentelemetry/instrumentation-http` 0.221.0 its own duration instrument is not exported under this name, so the
+  # selector pins that scope (`otel_scope_name="qnsc"`): the series exists, and a second emitter (an instrumentation-http
+  # upgrade that records under the same name) cannot double the counts unnoticed. NEVER `!=` the scope: an earlier
+  # version excluded `qnsc`, which excluded the only series and left every latency alarm and panel selecting nothing.
+  # Consequence: the latency series covers only requests that reach the access-log interceptor (see below). After a
+  # deploy, `count by (otel_scope_name) (http_server_duration_milliseconds_bucket)` must return one row, `qnsc`.
+  #
+  # WHAT IS OUTSIDE `http_server_requests_total` / `_errors_total` (the `HttpMetrics` counters): a request a guard
+  # rejects (401, 403, 429 never reach an interceptor), a request that matches no route (404), and everything
+  # identity serves under `/api/auth/*` (a Fastify plugin, not a Nest controller). So the 5xx ratio and the
+  # volume gates describe API handler traffic; a sign-in outage shows in `auth-login-failure-rate`, not here.
+  http_duration_scope = "otel_scope_name=\"qnsc\""
 
   # The explicit bucket boundaries of `http_server_duration_milliseconds`, in the
   # instrument's own unit (milliseconds — `http.server.duration` is declared `unit: 'ms'`,
@@ -2091,7 +2129,7 @@ module "alerts" {
     },
     {
       name        = "http-5xx-rate"
-      promql      = "(sum(rate(http_server_errors_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
+      promql      = "(sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\", status_class=\"5xx\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
       for         = "5m"
       op          = "gt"
       threshold   = local.alert_thresholds.http_error_rate
@@ -2101,7 +2139,7 @@ module "alerts" {
     },
     {
       name        = "http-p99-latency"
-      promql      = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le)) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
+      promql      = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, deployment_environment_name=\"${var.env}\"}[5m])) by (le)) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
       for         = "5m"
       op          = "gt"
       threshold   = local.alert_thresholds.http_p99_latency_ms
@@ -2139,13 +2177,29 @@ module "alerts" {
     # compares different spans of traffic.
     {
       name        = "http-slow-request-count"
-      promql      = "sum(increase(http_server_duration_milliseconds_bucket{le=\"+Inf\", deployment_environment_name=\"${var.env}\"}[30m])) - sum(increase(http_server_duration_milliseconds_bucket{le=\"${local.alert_thresholds.slow_request_bucket_ms}\", deployment_environment_name=\"${var.env}\"}[30m]))"
+      promql      = "sum(increase(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, le=\"+Inf\", deployment_environment_name=\"${var.env}\"}[30m])) - sum(increase(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, le=\"${local.alert_thresholds.slow_request_bucket_ms}\", deployment_environment_name=\"${var.env}\"}[30m]))"
       for         = "5m"
       op          = "gt"
       threshold   = local.alert_thresholds.slow_request_count_30m
       severity    = "warning"
       summary     = "More than ${local.alert_thresholds.slow_request_count_30m} requests took longer than ${local.alert_thresholds.slow_request_bucket_ms}ms in ${var.env} over 30m — a count, not a percentile, so this is meaningful at any traffic level and is not volume-gated."
       runbook_url = "${local.runbook_base_url}/http-slow-request-count.md"
+    },
+    # A signed visitor address the API REFUSED (`edge_client_ip.rejected{reason}`, from platform-http's `clientIp()`).
+    # Nothing legitimate is refused once both ends hold the same key: a rejection is a forged or replayed header, a
+    # Function and an API on different secrets (a rotation half done), a clock skew over 60 s, or a caller reaching
+    # the API origin directly with edge headers. In every case the request still succeeds, but with the shared
+    # Cloudflare address, so the rate limiter and the log silently stop knowing who the visitor is. A count, not a
+    # ratio, so no sample floor: one rejection that persists for 10 minutes is the signal.
+    {
+      name        = "edge-client-ip-rejected"
+      promql      = "sum(increase(edge_client_ip_rejected_total{deployment_environment_name=\"${var.env}\"}[10m]))"
+      for         = "10m"
+      op          = "gt"
+      threshold   = 0
+      severity    = "warning"
+      summary     = "The API refused signed client addresses from the Pages Function in ${var.env} for 10m — the two ends hold different EDGE_CLIENT_IP_SECRET values, or a header is being forged. Visitors are being keyed on a shared Cloudflare address."
+      runbook_url = "${local.runbook_base_url}/edge-client-ip-rejected.md"
     },
     {
       name        = "worker-job-failure-rate"
@@ -2338,7 +2392,7 @@ resource "grafana_dashboard" "overview" {
           }
         }
         targets = [{
-          expr         = "(sum(rate(http_server_errors_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+          expr         = "(sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\", status_class=\"5xx\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m]))"
           legendFormat = "error rate"
           refId        = "A"
         }]
@@ -2375,17 +2429,17 @@ resource "grafana_dashboard" "overview" {
         }
         targets = [
           {
-            expr         = "histogram_quantile(0.50, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            expr         = "histogram_quantile(0.50, sum(rate(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
             legendFormat = "p50"
             refId        = "A"
           },
           {
-            expr         = "histogram_quantile(0.95, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            expr         = "histogram_quantile(0.95, sum(rate(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
             legendFormat = "p95"
             refId        = "B"
           },
           {
-            expr         = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            expr         = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
             legendFormat = "p99"
             refId        = "C"
           },

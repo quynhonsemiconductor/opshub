@@ -27,6 +27,10 @@ sum(increase(http_server_duration_milliseconds_bucket{le="+Inf",   ...}[30m]))
   - sum(increase(http_server_duration_milliseconds_bucket{le="1000", ...}[30m]))
 ```
 
+Both selectors also carry `otel_scope_name="qnsc"`: `HttpMetrics` is the only emitter of the duration (with
+instrumentation-http 0.221.0). Check with `count by (otel_scope_name) (http_server_duration_milliseconds_bucket)`: one
+row, `qnsc`. Guard rejections, unmatched 404s and `/api/auth/*` are not in this series.
+
 The `le` value is matched as a **string label**, so it must be one of the boundaries the
 service actually exports. A plausible-looking number that is not a real boundary — 2000,
 1500, 3000 — matches no series at all, the subtraction returns an empty result, and the

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeObject, sanitizeString } from './sanitize.util';
+import { sanitizeObject, sanitizeString } from '@quynhonsemiconductor/platform-http';
 
 /**
+ * The sanitiser is `@quynhonsemiconductor/platform-http`'s (the local copy is gone: divergence in an XSS control
+ * is a security defect, and two copies had already drifted). These cases stay here as the CONTRACT OPSHUB RELIES
+ * ON: if a platform-http bump ever changes what reaches a handler, this fails in the product, not in review.
+ *
  * The three cases marked CONVERGENCE are the ones the two copies of this file
  * disagreed on. Each was correct in exactly one repo, so each is a case the
  * other silently got wrong. They are the reason this file exists.

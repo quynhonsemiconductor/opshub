@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { LoggerModule } from 'nestjs-pino';
+import { createLoggerOptions } from '@quynhonsemiconductor/observability';
 import { PlatformModule, AppConfigService } from '@platform';
 import { AuditModule } from '@modules/audit';
 import { NotificationsModule } from '@modules/notifications';
@@ -23,14 +24,14 @@ import { BounceFeedbackService } from './email/bounce-feedback.service';
   imports: [
     LoggerModule.forRootAsync({
       inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => ({
-        pinoHttp: {
+      useFactory: (config: AppConfigService) =>
+        createLoggerOptions({
+          serviceName: config.get('OTEL_WORKER_SERVICE_NAME'),
+          nodeEnv: config.get('NODE_ENV'),
+          serviceVersion: config.get('SERVICE_VERSION'),
           level: config.get('LOG_LEVEL'),
-          transport: config.get('LOG_PRETTY')
-            ? { target: 'pino-pretty', options: { singleLine: true } }
-            : undefined,
-        },
-      }),
+          pretty: config.get('LOG_PRETTY'),
+        }),
     }),
     ScheduleModule.forRoot(),
     PlatformModule,

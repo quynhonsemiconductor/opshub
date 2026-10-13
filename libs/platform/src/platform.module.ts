@@ -1,5 +1,4 @@
 import { Global, Module } from '@nestjs/common';
-import { TerminusModule } from '@nestjs/terminus';
 import { CacheModule } from '@quynhonsemiconductor/platform-cache';
 import { RequestContextService } from '@quynhonsemiconductor/observability';
 import { AppConfigModule } from './config/config.module';
@@ -12,7 +11,6 @@ import { AuthzService } from './auth/authz.service';
 import { PolicyGuard } from './auth/policy.guard';
 import { RequestRegistry } from './requests/request-registry';
 import { RequestEngine } from './requests/request-engine.service';
-import { HealthController } from './observability/health.controller';
 import { HttpLoggingInterceptor } from './http/http-logging.interceptor';
 import { ResilienceService } from './resilience/resilience.service';
 import { EMAIL_PROVIDER } from './email/email.provider';
@@ -58,9 +56,7 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
         mode: 'optional' as const,
       }),
     }),
-    TerminusModule,
   ],
-  controllers: [HealthController],
   providers: [
     // Refuses to finish bootstrapping if any route declares no authorization. A provider so
     // it runs for every app that imports this module, with no call site to forget.

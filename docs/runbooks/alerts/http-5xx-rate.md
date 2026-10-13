@@ -1,11 +1,18 @@
 # Alert: http-5xx-rate
 
-Ratio of `http_server_errors_total` to `http_server_requests_total` over 5 minutes has
+Ratio of 5xx requests (`http_server_requests_total{status_class="5xx"}`) to all
+`http_server_requests_total` over 5 minutes has
 crossed the environment's threshold (2% prod / 5% develop) for 5 minutes straight.
 
 ## What this means
 
 The API is returning 5xx to a meaningful share of real traffic — not a single blip.
+
+**The numerator is the `status_class="5xx"` slice of the requests counter, not
+`http_server_errors_total`**: the errors counter counts every status >= 400, so a burst of 404s
+or 422s would read as a server outage. What the counters do not see: a request a guard rejects
+(401/403/429), a request that matched no route (404) and everything under `/api/auth/*`
+(identity's Fastify mount). A sign-in outage shows in `auth-login-failure-rate`, not here.
 
 ## First checks
 

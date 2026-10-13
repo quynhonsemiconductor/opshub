@@ -10,16 +10,11 @@
  * Cloudflare's fast path. Shares `proxyToApi` with it: same header hygiene, same `X-Forwarded-*` from the
  * trusted edge, same cookie passthrough.
  *
- * Requires the Pages project to expose an `API_ORIGIN` environment variable,
- * e.g. `https://opshub-api-dev.qnsc.vn`.
+ * Requires the Pages project to expose `API_ORIGIN` (e.g. `https://opshub-api-dev.qnsc.vn`) and the secret
+ * `EDGE_CLIENT_IP_SECRET`; see `../../_lib/proxy.ts`.
  */
-import { proxyToApi } from '../../_lib/proxy';
+import { proxyToApi, type ProxyEnv } from '../../_lib/proxy';
 
-interface Env {
-  API_ORIGIN?: string;
-}
+type PagesFunction = (context: { request: Request; env: ProxyEnv }) => Promise<Response>;
 
-type PagesFunction = (context: { request: Request; env: Env }) => Promise<Response>;
-
-export const onRequest: PagesFunction = (context) =>
-  proxyToApi(context.request, context.env.API_ORIGIN);
+export const onRequest: PagesFunction = (context) => proxyToApi(context.request, context.env);

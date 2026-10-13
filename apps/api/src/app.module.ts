@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
-import { trace, isSpanContextValid } from '@opentelemetry/api';
+import { createLoggerOptions } from '@quynhonsemiconductor/observability';
 import { LoggerModule } from 'nestjs-pino';
 import { ZodValidationPipe } from 'nestjs-zod';
 import {
@@ -39,35 +39,19 @@ import { SecurityPostureModule } from '@modules/security-posture';
 
 @Module({
   imports: [
+    // The shared logger options (`@quynhonsemiconductor/observability`): trace correlation, the request context's
+    // `userId` / `correlationId` on every line, the shared redaction list, and the `service` / `env` / `version`
+    // fields. `autoLogging` is off: HttpLoggingInterceptor writes the one summary line per request.
     LoggerModule.forRootAsync({
-      inject: [AppConfigService, RequestContextService],
-      useFactory: (config: AppConfigService, ctx: RequestContextService) => ({
-        pinoHttp: {
+      inject: [AppConfigService],
+      useFactory: (config: AppConfigService) =>
+        createLoggerOptions({
+          serviceName: config.get('OTEL_SERVICE_NAME'),
+          nodeEnv: config.get('NODE_ENV'),
+          serviceVersion: config.get('SERVICE_VERSION'),
           level: config.get('LOG_LEVEL'),
-          autoLogging: false,
-          transport: config.get('LOG_PRETTY')
-            ? { target: 'pino-pretty', options: { singleLine: true } }
-            : undefined,
-          mixin: () => {
-            const result: Record<string, unknown> = {};
-            // Trace-log correlation: link every log line to the active OTel span
-            const span = trace.getActiveSpan();
-            if (span) {
-              const spanCtx = span.spanContext();
-              if (isSpanContextValid(spanCtx)) {
-                result['trace.id'] = spanCtx.traceId;
-                result['span.id'] = spanCtx.spanId;
-              }
-            }
-            const correlationId = ctx.getCorrelationId();
-            const userId = ctx.getUserId();
-            if (correlationId) result['correlationId'] = correlationId;
-            if (userId) result['userId'] = userId;
-            return result;
-          },
-          redact: ['req.headers.authorization', 'req.headers.cookie'],
-        },
-      }),
+          pretty: config.get('LOG_PRETTY'),
+        }),
     }),
     PlatformModule,
     AuditModule,

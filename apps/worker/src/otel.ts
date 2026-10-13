@@ -14,9 +14,7 @@
  * is the local-development default — but a default that is wrong only when configuration is
  * missing is the kind that goes unnoticed.
  */
-import { shutdownOtel, startOtel } from '@quynhonsemiconductor/observability/otel';
-
-export { shutdownOtel };
+import { startOtel } from '@quynhonsemiconductor/observability/otel';
 
 /*
  * `serviceNameEnvVar` IS WHY `OTEL_WORKER_SERVICE_NAME` EXISTS, and it was never passed.

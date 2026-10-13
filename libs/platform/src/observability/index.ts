@@ -1,5 +1,3 @@
-export * from './health.controller';
-
 /**
  * `Span` comes from the shared package rather than a local copy.
  *

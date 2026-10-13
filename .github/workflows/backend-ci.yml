@@ -80,6 +80,12 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # `.pnpmfile.cjs` keeps Better Auth's optional peers (drizzle-kit, vitest, react ...) out of the runtime
+      # image; it is identity's shipped file, copied. A difference after an identity bump means a new peer or a
+      # changed rule: copy the file again and re-run `pnpm install` (the lockfile records its checksum).
+      - name: .pnpmfile.cjs is identity's shipped copy
+        run: cmp .pnpmfile.cjs node_modules/@quynhonsemiconductor/identity/pnpmfile.cjs
+
       - name: Typecheck (shipped sources)
         run: npx tsc -p tsconfig.build.json --noEmit
 

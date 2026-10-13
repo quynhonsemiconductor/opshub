@@ -51,6 +51,11 @@ const READ_BY_SHARED_PACKAGES = new Set([
   // The bootstrap's own default for the service name, read when no `serviceNameEnvVar` overrides it —
   // which is the api's case.
   'OTEL_SERVICE_NAME',
+  // `clientIp()` in `@quynhonsemiconductor/platform-http` reads these from `process.env` (the rate limiter, the access log,
+  // idempotency and identity's mount all go through it), and `assertEdgeClientIpEnv()` refuses a bad one at boot.
+  // Declared here so the schema validates them and the worker's schema can refuse them.
+  'EDGE_CLIENT_IP_SECRET',
+  'EDGE_CLIENT_IP_SECRET_PREVIOUS',
 ]);
 
 /**

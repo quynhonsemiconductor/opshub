@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SseStreams } from './application/sse-streams.service';
 import { NotificationsService } from './application/notifications.service';
 import { NotificationRelayService } from './application/notification-relay.service';
 import { EmailRelayService } from './application/email-relay.service';
@@ -19,6 +20,7 @@ import { NOTIFICATION_PREFERENCE_REPOSITORY } from './domain/ports/notification-
   ],
   providers: [
     NotificationsService,
+    SseStreams,
     NotificationRelayService,
     EmailRelayService,
     NotificationPreferencesService,

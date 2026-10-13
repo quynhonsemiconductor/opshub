@@ -4,6 +4,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Observable, from } from 'rxjs';
 import { switchMap, tap } from 'rxjs/operators';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
+import { clientIp } from '@quynhonsemiconductor/platform-http';
 import { ConflictException, ValidationException } from '../errors/exceptions';
 import { ErrorCodes } from '../errors/error-codes';
 import type { JwtPayload } from '../auth/principal';
@@ -83,7 +84,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     if (!key || !this.cache.isAvailable) return next.handle();
 
     // Identity first so keys are per-caller. `req.user` is populated: guards run before interceptors.
-    const identity = req.user?.sub ?? req.ip ?? 'anon';
+    const identity = req.user?.sub ?? `ip:${clientIp(req)}`;
     const cacheKey = `idem:${identity}:${key}`;
     const lockKey = `${cacheKey}:lock`;
     const fingerprint = this.fingerprint(req);
