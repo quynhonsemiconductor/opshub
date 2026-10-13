@@ -1,12 +1,12 @@
 variable "image_tag" {
   type        = string
-  default     = "latest"
+  default     = "set-by-the-deploy-never-a-real-tag"
   description = <<-EOT
     Container image tag for api/worker/migrator. infra-apply.yml overrides this with
     the v*.*.* tag that triggered the apply, so production runs exactly the release it
     belongs to.
 
-    The default exists so `tofu plan` works without it — the plan job deliberately does
+    The default is a PLACEHOLDER, not `latest` (immutable repositories never hold `latest`; the module rejects it). It exists so `tofu plan` works without it — the plan job deliberately does
     not pass a tag (it is only known at release time), and a required variable with no
     default would make every prod plan fail instead of merely showing a task-definition
     revision bump.

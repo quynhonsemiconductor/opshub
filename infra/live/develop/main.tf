@@ -92,8 +92,13 @@ module "stack" {
   shared_state_key  = "opshub/shared/terraform.tfstate"
   runtime_state_key = "platform/runtime-dev/terraform.tfstate"
 
-  // Develop tracks the newest image; production pins the release tag.
-  image_tag = "latest"
+  // A PLACEHOLDER, on purpose. `latest` never exists: the ECR repositories are IMMUTABLE and the deploy pushes
+  // `sha-<commit>` tags only. Terraform registers the BASELINE task definition; the deploy derives each rollout from the
+  // family's latest revision and replaces the tag in the product container (api / worker / migrator). The services have
+  // `ignore_changes = [task_definition]`, so an apply never moves a running service onto this baseline. The value only has to
+  // be one that can never be mistaken for a real tag; the module rejects `latest` and empty (2026-10: qnsc-kb's worker went
+  // down on a baseline tag that was never pushed).
+  image_tag = "set-by-the-deploy-never-a-real-tag"
 
   entra_tenant_id = var.entra_tenant_id
   entra_client_id = var.entra_client_id
