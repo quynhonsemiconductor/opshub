@@ -133,3 +133,17 @@ overrides:
   # GHSA-68fv-2mgg-jv7q — source-map-js, fixed 1.2.2. Transitive via postcss, tailwind,
   # css-tree (jsdom) and magicast (coverage); all request 1.x.
   "source-map-js": ">=1.2.2 <2.0.0"
+
+# pnpm's `minimumReleaseAge` (24 h by default) is a cooldown against a hijacked THIRD-PARTY release: a malicious
+# version is usually caught and yanked within hours, so not installing anything younger than a day removes most of
+# that exposure. Our own `@quynhonsemiconductor/*` packages are published by this organisation, from app-platform, by
+# a pipeline we control, so the cooldown protects nothing there and costs a day on every release: platform-http 4.3.0
+# blocked rova's CI for ~22 hours on `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. Exempt, as a scope pattern
+# (verified: a <24 h `@quynhonsemiconductor/*` version resolves with it and is refused without it).
+#
+# This does NOT exempt a third-party package that a first-party one depends on, and it does not touch Renovate: the
+# org preset (`quynhonsemiconductor/.github:renovate-config`) sets no `minimumReleaseAge`, so Renovate proposes our
+# packages as soon as they are published. If the org ever adds one, give the `^@quynhonsemiconductor/` rule in that
+# preset `"minimumReleaseAge": null`.
+minimumReleaseAgeExclude:
+  - '@quynhonsemiconductor/*'
