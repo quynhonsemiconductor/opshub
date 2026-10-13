@@ -1962,19 +1962,19 @@ locals {
   }
   alert_thresholds = lookup(local.alert_thresholds_by_env, var.env, local.alert_thresholds_by_env.develop)
 
-  # `http.server.duration` is recorded TWICE: by `@opentelemetry/instrumentation-http` (every request the server
-  # accepts, including ones a guard rejects, unmatched 404s and `/api/auth/*`) and by observability's `HttpMetrics`
-  # (scope `qnsc`; only requests that reach the access-log interceptor). Summed, a request is counted twice and
-  # the overflow count in `http-slow-request-count` doubles. Until observability stops the duplicate, every duration
-  # selector excludes the `qnsc` scope and so reads instrumentation-http's alone, the series these alarms were
-  # calibrated on. `!=` rather than `=` on the other scope's name on purpose: if the exposition ever lacks the
-  # label, `!=` still selects the series, where `=` would select nothing and leave the alarm blind.
+  # `http.server.duration` has ONE emitter here: observability's `HttpMetrics`, meter scope `qnsc`. With
+  # `@opentelemetry/instrumentation-http` 0.221.0 its own duration instrument is not exported under this name, so the
+  # selector pins that scope (`otel_scope_name="qnsc"`): the series exists, and a second emitter (an instrumentation-http
+  # upgrade that records under the same name) cannot double the counts unnoticed. NEVER `!=` the scope: an earlier
+  # version excluded `qnsc`, which excluded the only series and left every latency alarm and panel selecting nothing.
+  # Consequence: the latency series covers only requests that reach the access-log interceptor (see below). After a
+  # deploy, `count by (otel_scope_name) (http_server_duration_milliseconds_bucket)` must return one row, `qnsc`.
   #
   # WHAT IS OUTSIDE `http_server_requests_total` / `_errors_total` (the `HttpMetrics` counters): a request a guard
   # rejects (401, 403, 429 never reach an interceptor), a request that matches no route (404), and everything
   # identity serves under `/api/auth/*` (a Fastify plugin, not a Nest controller). So the 5xx ratio and the
   # volume gates describe API handler traffic; a sign-in outage shows in `auth-login-failure-rate`, not here.
-  http_duration_scope = "otel_scope_name!=\"qnsc\""
+  http_duration_scope = "otel_scope_name=\"qnsc\""
 
   # The explicit bucket boundaries of `http_server_duration_milliseconds`, in the
   # instrument's own unit (milliseconds — `http.server.duration` is declared `unit: 'ms'`,
