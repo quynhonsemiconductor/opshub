@@ -817,7 +817,7 @@ module "firelens_agent_worker" {
 # Cloudflare account is wired.
 module "web" {
   count  = var.cloudflare_account_id != "" ? 1 : 0
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/pages-web?ref=pages-web-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/pages-web?ref=pages-web-v1.0.2"
 
   account_id  = var.cloudflare_account_id
   name        = "${local.name}-web"
