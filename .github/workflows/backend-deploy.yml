@@ -129,6 +129,11 @@ jobs:
         with:
           workflow: infra-apply.yml
           label: Infrastructure · Apply
+          # The run on THIS ref: a release commit is pushed twice (main, and the vX.Y.Z tag) and both start an
+          # Infrastructure · Apply on the same sha. Without a branch the gate takes the newest of the two, which on
+          # a tag run can be the develop apply instead of the tag's prod apply it exists to wait for. `ref_name` is
+          # `main` for a push to main and the tag name for a tag push (a run's head branch is the tag name).
+          branch: ${{ github.ref_name }}
           # Warn: infra changed but no apply run exists. See the block comment above.
           if-missing: warn
           missing-message: >-
