@@ -135,10 +135,12 @@ module "stack" {
   secrets_use_bundle  = true
 
   // The standalone secrets are RETAINED for now (develop's step 3, not its step 5): references point at the bundle,
-  // and nothing is destroyed until the bundle is proven by a healthy production deploy. The owner then deletes the
-  // standalone containers by hand (docs/runbooks/secrets-bundle-migration.md, step 3) and a follow-up removes this
-  // line. Without it `create_standalone` defaults to `!use_bundle` = false and THIS apply would schedule all of them
-  // for deletion before anything has read the bundle.
+  // and nothing is destroyed until the bundle is proven (D.2, D.3 and a one-off task that reaches RUNNING, in
+  // docs/runbooks/secrets-bundle-migration.md; production serves nothing, so there is no "healthy deploy" to wait
+  // for). A follow-up then removes this line (section E) and the NEXT tag's apply schedules the eight standalone
+  // containers for deletion with the 30-day window. Nothing is deleted by hand. Without the line `create_standalone`
+  // defaults to `!use_bundle` = false and THIS apply would schedule all of them for deletion before anything has
+  // read the bundle.
   secrets_create_standalone = true
 
   // OFF, including here. Nothing in this product reads the ECS/ContainerInsights
