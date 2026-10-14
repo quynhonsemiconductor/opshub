@@ -4,9 +4,18 @@ Secrets Manager bills **$0.40 per secret per month regardless of size**. Develop
 (both environments) already read one JSON object, one key per value; production now does too
 (`secrets_bundle_name = "app"`, `secrets_use_bundle = true` in `infra/live/prod/main.tf`).
 
-Production has **never run a task**: the standalone secrets `opshub/production/*` were never accessed, both services
-have `min_count = 0`, and nothing is cut over live. What this runbook protects against is the first deploy failing on
-a bundle that is missing a key.
+> **DO NOT RELEASE the opshub release PR #323 (0.4.0), and do not push any `v*` tag, until #373 and #374 are merged**
+> (and this PR). Both fix problems the production plan has today, and either one makes the tag's infrastructure apply
+> fail or start an api task against an empty bundle:
+>
+> - **#373**: `module.api` created the service with a literal `desired_count = 1`, ignoring `min_count = 0`, so an api
+>   task started right after the apply, against the empty bundle.
+> - **#374**: production had `tunnel_enabled = false`, so the plan created `aws_lb_listener_rule` with no `listener_arn`
+>   (the shared ALB is gone) and the apply fails; and production had no ingress at all.
+
+Production has **never run a task**: the standalone secrets `opshub/production/*` were never accessed, and both
+services have `min_count = 0` (with #373 the api service is created at `desired_count = 0`, like the worker). What this
+runbook protects against is the first deploy failing on a bundle that is missing a key.
 
 **Every command below is metadata-only.** A value travels through a pipe or a `0600` file in a private temp directory
 and is never put in a shell variable, a command argument, or terminal output. Verification prints key names, lengths
@@ -44,14 +53,18 @@ Production infrastructure applies **only on a `v*.*.*` tag** (`infra-apply.yml`)
 production. The bundle container is created by that apply, so it **cannot be populated before the tag's apply**. The
 backend deploy of the same tag waits for the infra run, then deploys.
 
-1. Merge this PR. Nothing happens in production.
+1. Merge #373, #374, then this PR. Nothing happens in production.
 2. Push the release tag. Approve the `production` environment for **Infrastructure · Apply**. It creates
-   `opshub/production/app` **empty** and registers task definitions that reference its keys. No task starts
-   (`min_count = 0`).
-3. **Immediately populate and verify the bundle** (steps A to D below). The deploy that follows the apply reads the
-   bundle: if it runs before you finish, its preflight (or the first task) fails safely, the previous state is
-   untouched, and the fix is to finish A to D and **re-run the failed jobs** of the tag's Backend · Deploy.
-4. After a healthy production deploy, delete the standalone containers (step E).
+   `opshub/production/app` **empty**, the tunnel, and the services at zero tasks, and registers task definitions that
+   reference the bundle's keys. The apply itself starts no task (with #373).
+3. **Immediately populate and verify the bundle** (steps A to D below). The deploy that follows the apply rolls the
+   services onto the new task definitions: if it gets ahead of you, its preflight (or its migrator) fails safely, the
+   previous state is untouched, and the fix is to finish A to D and **re-run the failed jobs** of the tag's
+   Backend · Deploy.
+4. **Prove the bundle** (the gate below). Production has no ingress to probe and no running task at rest (floors are 0), so
+   "a healthy deploy" cannot be the signal: the gate is D.2 + D.3 and a one-off task that reaches RUNNING.
+5. Merge the follow-up PR that removes `secrets_create_standalone` (section E). The **next** tag's apply schedules the
+   standalone secrets for deletion, with the 30-day recovery window. Nobody deletes anything by hand.
 
 ## A. Check the standalone sources (lengths only)
 
@@ -153,45 +166,52 @@ Step 3 closes the gap the deploy preflight leaves (qnsc-infra#191): the prefligh
 non-empty, not that each key is in it. Run it after the apply has registered the new task definitions and before the
 deploy is approved to proceed.
 
-## E. After a healthy production deploy: delete the standalone secrets (owner)
+## The gate: prove the bundle before the standalone secrets go
 
-"Healthy" means the api and worker reached steady state on the bundle (ECS pulls every secret before a container
-starts, so RUNNING proves every key resolved), `/readyz` is 200, and a sign-in works. (The migrator reads only the
-RDS master secret until `db_role_passwords_set` is on, so its success proves nothing about the bundle.) Nothing here is
-deleted by Terraform or by this PR.
+Production serves nothing and keeps zero tasks at rest, so there is no healthy steady state to wait for. Two checks
+stand in for it; both must pass.
 
-After the apply, the standalone containers are these eight (six old ones, plus two empty ones the apply creates
-because `secrets_create_standalone = true` keeps the standalone set equal to the declared names):
+1. **D.2 and D.3 above**: every copied key equals its source, and every `<bundle arn>:<key>::` reference in the api,
+   worker and migrator task definitions resolves to a present, non-empty key.
+2. **A one-off task reaches RUNNING.** ECS pulls every secret before the container starts, so a task that reaches
+   RUNNING proves every key the api task definition references resolved and the execution role can read the bundle.
+   (rova's production was proven this way.) The command is overridden so the application does not start; the
+   cloudflared sidecar connects to the tunnel but nothing is routed to it.
 
 ```bash
 export AWS_PROFILE=qnsc-admin AWS_REGION=ap-southeast-1
-for k in cookie-secret csrf-secret entra-client-secret observability-token db-app-password db-worker-password \
-         better-auth-secret edge-client-ip-secret; do
-  aws secretsmanager delete-secret --secret-id "opshub/production/$k" --recovery-window-in-days 7 \
-    --query '{Name:Name,DeletionDate:DeletionDate}' --output text
-done
+NET=$(aws ecs describe-services --cluster opshub-prod --services api --query 'services[0].networkConfiguration' --output json)
+TASK=$(aws ecs run-task --cluster opshub-prod --task-definition opshub-prod-api --launch-type FARGATE \
+  --network-configuration "$NET" \
+  --overrides '{"containerOverrides":[{"name":"api","command":["node","-e","setTimeout(()=>{},300000)"]}]}' \
+  --query 'tasks[0].taskArn' --output text)
+for i in $(seq 1 30); do
+  aws ecs describe-tasks --cluster opshub-prod --tasks "$TASK" --query 'tasks[0].[lastStatus,stoppedReason]' --output text
+  sleep 10
+done | sort | uniq -c
+aws ecs stop-task --cluster opshub-prod --task "$TASK" --reason "bundle proof" --query 'task.lastStatus' --output text
 ```
 
-Recover one within 7 days with `aws secretsmanager restore-secret --secret-id opshub/production/<key>`.
+`RUNNING` is the pass. `STOPPED` with `ResourceInitializationError … can't find the specified secret value for staging
+label` (or `…:key::`) names the missing key: fix the bundle (steps C and D) and run it again. The architecture is
+ARM64 (`cpu_architecture`), so an image that is not built for arm64 fails here with an unrelated message.
 
-`jwt-private` and `graph-client-secret` are **not** in this list: the apply removes them (they left the declared set
-when identity 8 and the Graph certificate replaced them), scheduled for deletion with the 30-day window of
-`secrets_recovery_window_days`. `aws secretsmanager restore-secret --secret-id opshub/production/jwt-private` undoes it.
+## E. Removing the standalone secrets (nothing is deleted by hand)
 
-### Keeping Terraform consistent with the manual delete
+After the gate, the standalone containers are these eight: six old ones (`cookie-secret`, `csrf-secret`,
+`entra-client-secret`, `observability-token`, `db-app-password`, `db-worker-password`) and two empty ones the apply
+creates because `secrets_create_standalone = true` keeps the standalone set equal to the declared names
+(`better-auth-secret`, `edge-client-ip-secret`).
 
-`secrets_create_standalone = true` keeps the standalone containers in state. Once they are deleted by hand the
-provider treats a secret with a `DeletedDate` as gone and drops it from state on refresh, but with the flag still set
-the next plan would try to **create** them again. So:
+1. A **follow-up PR** removes `secrets_create_standalone = true` from `infra/live/prod/main.tf` (the default
+   `!use_bundle` is then false) and updates its comment. Merging it changes nothing in production.
+2. The **next tag's** apply destroys the eight standalone containers, scheduled for deletion with the 30-day window
+   (`secrets_recovery_window_days = 30`), the pattern develop and rova followed. Restore any of them inside the window
+   with `aws secretsmanager restore-secret --secret-id opshub/production/<key>`.
 
-1. A follow-up PR removes `secrets_create_standalone = true` from `infra/live/prod/main.tf` (the default
-   `!use_bundle` is then false) and updates its comment. **Merge it before the next tag** (merging changes nothing in
-   production).
-2. Delete the secrets as above.
-3. The next tag's plan then shows no standalone secrets at all. If a tag is applied after step 1 but before the
-   delete, Terraform itself schedules the deletion with the 30-day window instead of your 7: the same result, slower.
-
-Do not tag between deleting by hand and merging the follow-up.
+There is no hand-delete, so there is no moment at which Terraform's state and AWS disagree and a tag must be avoided.
+`jwt-private` and `graph-client-secret` are not in this set: the first apply removes them (they left the declared set
+when identity 8 and the Graph certificate replaced them), with the same 30-day window.
 
 ## What the apply does (so the plan is not a surprise)
 
@@ -199,16 +219,18 @@ Do not tag between deleting by hand and merging the follow-up.
   in step E);
 - updates `entra-client-secret`'s description;
 - **destroys `jwt-private` and `graph-client-secret`** (30-day recovery);
-- re-registers the api, worker and migrator task definitions with `<bundle arn>:<key>::` references, and narrows each
-  execution role's `secretsmanager:GetSecretValue` to the bundle (plus the RDS master secret);
-- the rest of the production plan (ECS services, listener rule, DNS, dashboard, alerts) is infrastructure production
-  never had; it is not part of this change.
+- re-registers the api, worker and migrator task definitions with `<bundle arn>:<key>::` references, and rewrites each
+  execution role's `secretsmanager:GetSecretValue` grant to cover the bundle, the retained standalone secrets and the RDS
+  master secret while both sets exist; it narrows to the bundle plus the RDS master secret only after the follow-up
+  (section E) has been applied;
+- the rest of the production plan (ECS services at zero tasks, the Cloudflare tunnel and its connector token, DNS,
+  dashboard, alerts) is infrastructure production never had; it comes from #373 and #374 and main, not from this change.
 
 ## Rolling back
 
-Before step E: set `secrets_use_bundle = false` in `infra/live/prod/main.tf`, apply on a tag, redeploy. The standalone
+Before the follow-up's apply: set `secrets_use_bundle = false` in `infra/live/prod/main.tf`, apply on a tag, redeploy. The standalone
 secrets still hold their values (`better-auth-secret` and `edge-client-ip-secret` must then be populated by hand: they
-are new). After step E: restore within 7 days, or recreate and re-paste by hand. **The bundle is then the only copy of
+are new). After the follow-up's apply (section E): restore within the 30-day window, or recreate and re-paste by hand. **The bundle is then the only copy of
 `better-auth-secret` and `edge-client-ip-secret`**; do not delete it casually, and keep the Pages secret in step with it.
 
 ## What bundling gives up
