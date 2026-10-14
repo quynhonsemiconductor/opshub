@@ -2640,13 +2640,16 @@ resource "grafana_dashboard" "runtime" {
       },
       {
         id         = 3
-        title      = "Outbound HTTP client calls: rate + p99 latency"
+        title      = "Outbound HTTP client calls: rate by server"
         type       = "timeseries"
         gridPos    = { h = 8, w = 12, x = 0, y = 8 }
         datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
         targets = [{
-          expr         = "sum(rate(http_client_duration_milliseconds_count{deployment_environment_name=\"${var.env}\"}[5m])) by (net_peer_name)"
-          legendFormat = "{{net_peer_name}}"
+          # http_client_request_duration_seconds_count: the ONLY outbound-HTTP series @opentelemetry/instrumentation-http 0.221 emits (stable
+          # semconv, seconds, labelled server_address). This panel read the legacy http_client_duration_milliseconds_count / net_peer_name,
+          # which 0.221 no longer creates, so it had been EMPTY since the upgrade.
+          expr         = "sum(rate(http_client_request_duration_seconds_count{deployment_environment_name=\"${var.env}\"}[5m])) by (server_address)"
+          legendFormat = "{{server_address}}"
           refId        = "A"
         }]
       },
