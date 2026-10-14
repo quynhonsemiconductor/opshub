@@ -114,6 +114,33 @@ module "stack" {
   log_retention_days           = 90
   secrets_recovery_window_days = 30
 
+  // Production on the same secrets bundle as develop (opshub/develop/app) and rova's two environments: Secrets
+  // Manager bills per SECRET, and one JSON object read per key by ECS holds all of them for one container's fee.
+  // See infra/modules/stack/variables.tf's `secrets_bundle_name` for the staging and
+  // docs/runbooks/secrets-bundle-migration.md for the owner's commands.
+  //
+  // Production has NEVER run a task (the 8 standalone secrets opshub/production/* were never accessed), so unlike
+  // develop there is no running service to cut over and nothing to roll back to but the standalone containers.
+  // The bundle `opshub/production/app` is created by this apply and must be POPULATED BEFORE the first deploy of a
+  // tag whose task definitions reference it: ECS resolves every `<arn>:<key>::` before a container starts, and a
+  // missing or empty key stops the task (the deploy preflight proves the container is non-empty, not that every key
+  // is in it - qnsc-infra issue #191).
+  //
+  // Keys the task definitions READ today: cookie-secret, csrf-secret, better-auth-secret, entra-client-secret,
+  // edge-client-ip-secret and observability-token (the collector sidecar). The bundle also declares db-app-password
+  // and db-worker-password: production has db_least_privilege off, so nothing reads them until that cutover, but
+  // they belong in the bundle now (RDS opshub-prod already uses those roles' passwords) rather than in a second
+  // migration. edge-client-ip-secret-previous exists only DURING a rotation (edge_client_ip_secret_previous_set).
+  secrets_bundle_name = "app"
+  secrets_use_bundle  = true
+
+  // The standalone secrets are RETAINED for now (develop's step 3, not its step 5): references point at the bundle,
+  // and nothing is destroyed until the bundle is proven by a healthy production deploy. The owner then deletes the
+  // standalone containers by hand (docs/runbooks/secrets-bundle-migration.md, step 3) and a follow-up removes this
+  // line. Without it `create_standalone` defaults to `!use_bundle` = false and THIS apply would schedule all of them
+  // for deletion before anything has read the bundle.
+  secrets_create_standalone = true
+
   // OFF, including here. Nothing in this product reads the ECS/ContainerInsights
   // namespace: the autoscaling targets read AWS/ECS, which is free and published
   // whether Container Insights is on or off, and application telemetry goes to OTLP.
