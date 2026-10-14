@@ -138,11 +138,18 @@ module "stack" {
   // snapshot restore cannot land smaller, so coming back down needs the instance
   // replaced.
   // ── Ingress: no ALB exists any more ─────────────────────────────────────────
-  // Same as develop — see ../develop/main.tf. Left OFF here deliberately: develop's
-  // apply (the same module.tunnel code path) needs to be verified working before
-  // production adopts it. Flip to true once develop's tunnel is confirmed serving
-  // real traffic.
-  tunnel_enabled = false
+  // The shared ALBs in qnsc-infra/live/runtime-{dev,prod} were DELETED once both products moved to Cloudflare
+  // Tunnels, so `https_listener_arn` is null and there is nothing to attach to: with this OFF the plan creates
+  // `module.api.aws_lb_listener_rule.this[0]` with no `listener_arn` and the apply FAILS, and production would have
+  // no ingress at all. Same as develop (see ../develop/main.tf), where it is enabled: module.tunnel (the shared
+  // cf-tunnel module) creates the tunnel, its connector token and its
+  // routing rule, the api task gets the cloudflared sidecar, and the api hostname is a proxied CNAME to the tunnel.
+  // No ALB listener rule, no target group.
+  //
+  // What it gives up, and what covers it: ALB access logs and per-target-group alarms. `monitor_target_health` stays
+  // false below, and the Route 53 ingress probe (`monitor_ingress`) arms itself once the floors are above 0, so an
+  // ingress outage becomes visible at go-live in the same change that raises them.
+  tunnel_enabled = true
 
   // ── Graviton ────────────────────────────────────────────────────────────────
   // ARM64 bills ~20% less per vCPU-hour and GB-hour than X86_64 for identical sizing,
