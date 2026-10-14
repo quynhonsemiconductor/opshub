@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, lt, lte } from 'drizzle-orm';
+import { and, asc, eq, isNull, lt, lte, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { Cron } from '@nestjs/schedule';
 import { createHmac } from 'crypto';
 import { AbstractOutboxRelay, InjectDrizzle, Span, describeUnsafeResolvedTarget } from '@platform';
@@ -56,35 +57,47 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
   };
 
   protected async selectDue(tx: DrizzleTx, limit: number, now: Date): Promise<DeliveryRow[]> {
+    /*
+     * `FOR UPDATE OF <table>`, because the join to `webhook_subscriptions` must NOT lock subscriptions: an API call
+     * editing or deleting a subscription would otherwise wait behind a relay pass, and two relays could never
+     * claim different deliveries of the same subscription.
+     *
+     * The table is ALIASED, and `of` names the alias. Postgres requires the `OF` operand to be an UNQUALIFIED
+     * relation name (a table, or its alias), and Drizzle renders `of: webhookDeliveries` as the qualified
+     * `"messaging"."webhook_deliveries"` for a table in a `pgSchema`, which Postgres rejects with `FOR UPDATE must
+     * specify unqualified relation names`: this relay failed every pass, and no delivery was ever made. Aliased, the
+     * query renders `... from "messaging"."webhook_deliveries" "d" ... for update of "d" skip locked`.
+     * (test/e2e/webhook-relay-claim.e2e.spec.ts runs this query against PostgreSQL.)
+     */
+    const d = alias(webhookDeliveries, 'd');
     return tx
       .select({
-        id: webhookDeliveries.id,
-        subscriptionId: webhookDeliveries.subscriptionId,
-        eventType: webhookDeliveries.eventType,
-        payload: webhookDeliveries.payload,
-        attempts: webhookDeliveries.attempts,
+        id: d.id,
+        subscriptionId: d.subscriptionId,
+        eventType: d.eventType,
+        payload: d.payload,
+        attempts: d.attempts,
         url: webhookSubscriptions.url,
         secret: webhookSubscriptions.secret,
       })
-      .from(webhookDeliveries)
+      .from(d)
       .innerJoin(
         webhookSubscriptions,
-        and(
-          eq(webhookDeliveries.subscriptionId, webhookSubscriptions.id),
-          eq(webhookSubscriptions.active, true),
-        ),
+        and(eq(d.subscriptionId, webhookSubscriptions.id), eq(webhookSubscriptions.active, true)),
       )
       .where(
         and(
-          eq(webhookDeliveries.status, 'pending'),
-          lt(webhookDeliveries.attempts, this.maxAttempts),
-          lte(webhookDeliveries.nextAttemptAt, now),
-          this.notLeased(now),
+          eq(d.status, 'pending'),
+          lt(d.attempts, this.maxAttempts),
+          lte(d.nextAttemptAt, now),
+          // `this.notLeased(now)` says the same about the UNALIASED column, which no longer exists in this query:
+          // the table is `d` here. Same predicate, written against the alias.
+          or(isNull(d.lockedUntil), lte(d.lockedUntil, now)),
         ),
       )
-      .orderBy(asc(webhookDeliveries.seq), asc(webhookDeliveries.id))
+      .orderBy(asc(d.seq), asc(d.id))
       .limit(limit)
-      .for('update', { skipLocked: true, of: webhookDeliveries });
+      .for('update', { skipLocked: true, of: d });
   }
 
   /** The HTTP POST, with NO transaction open: a slow receiver holds a connection, not row locks. */
