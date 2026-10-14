@@ -127,6 +127,15 @@ const baseShape = {
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default('claude-opus-4-8'),
 
+  // ── Webhooks ───────────────────────────────────────────────────────────────
+  /**
+   * How long a webhook delivery may wait, `pending`, before the relay stops trying to send it: past this age it is
+   * marked `failed` ("expired: pending longer than N h") and never sent. A delivery's body carries the time of SENDING,
+   * so a receiver cannot tell a stale event from a fresh one, and a relay that was down for a day would otherwise
+   * replay that day to every subscriber the moment it came back. The row is kept (no delete). Whole hours.
+   */
+  WEBHOOK_DELIVERY_MAX_AGE_HOURS: z.coerce.number().int().positive().default(24),
+
   // ── Email ──────────────────────────────────────────────────────────────────
   /**
    * Which transport actually sends.

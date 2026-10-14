@@ -288,6 +288,26 @@ describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
   });
 });
 
+describe('EnvSchema — WEBHOOK_DELIVERY_MAX_AGE_HOURS', () => {
+  it('defaults to 24 hours', () => {
+    const result = EnvSchema.safeParse(env());
+    expect(result.success && result.data.WEBHOOK_DELIVERY_MAX_AGE_HOURS).toBe(24);
+  });
+
+  it('takes a whole number of hours from the environment', () => {
+    const result = EnvSchema.safeParse(env({ WEBHOOK_DELIVERY_MAX_AGE_HOURS: '72' }));
+    expect(result.success && result.data.WEBHOOK_DELIVERY_MAX_AGE_HOURS).toBe(72);
+  });
+
+  it.each(['0', '-1', '1.5', 'soon'])(
+    'refuses %s: an age of zero would expire every delivery before it is sent',
+    (value) => {
+      const result = EnvSchema.safeParse(env({ WEBHOOK_DELIVERY_MAX_AGE_HOURS: value }));
+      expect(result.success).toBe(false);
+    },
+  );
+});
+
 describe('EnvSchema — email sender', () => {
   /*
    * `MAIL_FROM_EMAIL` used to default to `no-reply@opshub.app`, so a deployment configured with a real

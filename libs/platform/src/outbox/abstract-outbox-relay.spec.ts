@@ -114,6 +114,11 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
   /** More batches for the same pass: each claim takes the next one. */
   queuedBatches: TestRow[][] = [];
 
+  /** Exposes the protected recorder. */
+  expose(count: number): void {
+    this.recordExpired(count);
+  }
+
   /** The claim query itself fails (a SQL error, a dropped connection). */
   selectThrows: Error | null = null;
 
@@ -688,6 +693,15 @@ describe('outbox_relay_pass_failed_total', () => {
 
     expect(passFailedAdd).toHaveBeenCalledTimes(1);
     expect(passFailedAdd).toHaveBeenCalledWith(1, { relay: 'TestRelay' });
+  });
+
+  it('counts expired rows (outbox_relay_expired_total) with the relay label, and nothing for zero', () => {
+    // Both counters share the mocked `add`; what matters here is the value and the label.
+    const relay = setup();
+    relay.expose(0);
+    expect(passFailedAdd).not.toHaveBeenCalled();
+    relay.expose(3);
+    expect(passFailedAdd).toHaveBeenCalledWith(3, { relay: 'TestRelay' });
   });
 
   it('does not count a clean pass, nor a row that fails to deliver (that is queue.failures)', async () => {

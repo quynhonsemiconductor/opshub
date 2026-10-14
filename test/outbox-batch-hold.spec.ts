@@ -25,7 +25,7 @@ interface Relay {
 const none = {} as never;
 const relays: Array<[string, Relay, string | undefined]> = [
   ['EmailRelayService', new EmailRelayService(none, none, none) as unknown as Relay, undefined],
-  ['WebhookRelayService', new WebhookRelayService(none) as unknown as Relay, undefined],
+  ['WebhookRelayService', new WebhookRelayService(none, none) as unknown as Relay, undefined],
   [
     'NotificationRelayService',
     new NotificationRelayService(none, none, none, none, none, none) as unknown as Relay,

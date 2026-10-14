@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { Cron } from '@nestjs/schedule';
 import { createHmac } from 'crypto';
-import { AbstractOutboxRelay, InjectDrizzle, Span, describeUnsafeResolvedTarget } from '@platform';
+import {
+  AbstractOutboxRelay,
+  AppConfigService,
+  InjectDrizzle,
+  Span,
+  describeUnsafeResolvedTarget,
+} from '@platform';
 import type { Claimed, DrizzleDB, DrizzleTx, OutboxLeaseTable } from '@platform';
 import { webhookDeliveries, webhookSubscriptions } from '../../../../../db/schema';
 import { MS_PER_SEC } from '@shared-kernel';
@@ -11,6 +17,9 @@ import { MS_PER_SEC } from '@shared-kernel';
 const WEBHOOK_TIMEOUT_MS = 10_000; // 10s per delivery attempt
 const RETRY_DELAYS_SECONDS = [60, 300, 900, 3600]; // 1m → 5m → 15m → 1h
 const MAX_DELIVERY_ERROR_LENGTH = 2_000; // chars stored in lastError column
+const MS_PER_HOUR = 3_600_000;
+/** Rows expired per claim. The claim repeats (up to 50 per pass), so a large backlog clears over a few passes. */
+const EXPIRE_PER_CLAIM = 500;
 
 type DeliveryRow = {
   id: string;
@@ -32,8 +41,74 @@ type DeliveryRow = {
  */
 @Injectable()
 export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
-  constructor(@InjectDrizzle() db: DrizzleDB) {
+  constructor(
+    @InjectDrizzle() db: DrizzleDB,
+    private readonly config: AppConfigService,
+  ) {
     super(db);
+  }
+
+  /** Whole hours a delivery may stay `pending` before it is expired instead of sent (WEBHOOK_DELIVERY_MAX_AGE_HOURS). */
+  private get maxAgeHours(): number {
+    return this.config.get('WEBHOOK_DELIVERY_MAX_AGE_HOURS');
+  }
+
+  /**
+   * EXPIRY, inside the claim transaction, before the due rows are selected.
+   *
+   * A delivery still `pending` after WEBHOOK_DELIVERY_MAX_AGE_HOURS is not sent: it is marked `failed`
+   * ("expired: pending longer than N h") and kept. The body a receiver gets carries the time of SENDING, so a
+   * stale event is indistinguishable from a fresh one, and a relay that was down for a day would otherwise replay
+   * that day to every subscriber the moment it recovered.
+   *
+   * RACE-FREE, by the same rules as a claim: the candidate rows are locked `FOR UPDATE SKIP LOCKED` in THIS
+   * transaction (a row another transaction holds is skipped, not waited for), and a row whose lease is live is not
+   * a candidate at all (a relay is delivering it; its finish is fenced by `lease_token`). The update clears
+   * `lease_token`, so a relay whose lease had lapsed and that is still running cannot write `delivered` over
+   * `failed`: its fence (`lease_token = ...`) no longer matches. No other relay can claim an expired row either,
+   * because it is no longer `pending`.
+   */
+  protected override async beforeSelect(tx: DrizzleTx): Promise<void> {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - this.maxAgeHours * MS_PER_HOUR);
+    const stale = await tx
+      .select({ id: webhookDeliveries.id })
+      .from(webhookDeliveries)
+      .where(
+        and(
+          eq(webhookDeliveries.status, 'pending'),
+          lt(webhookDeliveries.createdAt, cutoff),
+          or(isNull(webhookDeliveries.lockedUntil), lte(webhookDeliveries.lockedUntil, now)),
+        ),
+      )
+      .orderBy(asc(webhookDeliveries.seq), asc(webhookDeliveries.id))
+      .limit(EXPIRE_PER_CLAIM)
+      .for('update', { skipLocked: true });
+    if (stale.length === 0) return;
+
+    const expired = await tx
+      .update(webhookDeliveries)
+      .set({
+        status: 'failed',
+        lastError: `expired: pending longer than ${this.maxAgeHours} h`,
+        leaseToken: null,
+        lockedUntil: null,
+      })
+      .where(
+        and(
+          inArray(
+            webhookDeliveries.id,
+            stale.map((r) => r.id),
+          ),
+          eq(webhookDeliveries.status, 'pending'),
+        ),
+      )
+      .returning({ id: webhookDeliveries.id });
+    this.recordExpired(expired.length);
+    this.logger.warn(
+      { expired: expired.length, maxAgeHours: this.maxAgeHours },
+      `Expired ${expired.length} webhook deliver(ies) pending longer than ${this.maxAgeHours} h; not sent`,
+    );
   }
 
   @Cron('*/10 * * * * *', { name: 'webhook-relay' })

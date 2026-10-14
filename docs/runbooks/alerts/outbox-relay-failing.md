@@ -29,41 +29,69 @@ was ever delivered, and nothing alerted.
    One: that relay's own claim query, usually after a deploy or a migration.
 4. Did it start with a deploy? The Deploys annotation on the overview dashboard.
 
-## After a long outage: the backlog
+## After a long outage: the backlog clears itself
 
-When the cause is fixed the relay claims everything that waited, at once: up to 50 batches of 5 per pass, one delivery
-at a time, each request with a 10-second timeout. Before the first pass after a long outage, look at what is waiting:
+Nothing is replayed that is too old, and nothing is done by hand. The webhook relay **expires** a delivery that has been
+`pending` longer than `WEBHOOK_DELIVERY_MAX_AGE_HOURS` (default **24**, whole hours, worker and API config):
+
+- It happens in the relay's own claim transaction, before it selects what is due. The candidate rows are locked
+  `FOR UPDATE SKIP LOCKED` (a row another transaction holds is skipped, not waited for), and a row with a **live lease**
+  is not a candidate (a relay is delivering it). The update clears `lease_token`, so a relay whose lease had lapsed and
+  that is still running cannot write `delivered` over `failed`: its fence no longer matches. An expired row is no longer
+  `pending`, so no relay can claim it.
+- The row is marked `failed` with `last_error = 'expired: pending longer than <N> h'`, spends no attempt, and is
+  **kept** (never deleted). It is never fetched. Age is measured from `created_at`.
+- It is counted: `outbox_relay_expired_total{relay}`, and logged at `warn` ("Expired N webhook deliver(ies) pending
+  longer than N h; not sent"). It does not trip the `outboxDeadLetter` alarm: expiry is the policy, not lost work.
+- A delivery younger than the maximum age is sent as usual, so after an outage shorter than a day the backlog is
+  delivered; after a longer one only the last day is.
+
+So when the cause is fixed and the relay recovers, rows older than the limit are expired on its first pass, and the rest
+are delivered: up to 50 batches of 5 per pass, one request at a time (10 s timeout each), per subscriber URL.
+
+### Find expired rows
 
 ```sql
--- how much is waiting, and how old
-SELECT status, count(*) AS rows, min(created_at) AS oldest, max(created_at) AS newest,
-       max(attempts) AS max_attempts
-FROM messaging.webhook_deliveries
-GROUP BY status ORDER BY status;
-
--- who would be flooded
-SELECT s.url, count(*) AS pending, min(d.created_at) AS oldest
+-- how many, per subscriber, and how old
+SELECT s.url, count(*) AS expired, min(d.created_at) AS oldest, max(d.created_at) AS newest
 FROM messaging.webhook_deliveries d
 JOIN messaging.webhook_subscriptions s ON s.id = d.subscription_id
-WHERE d.status = 'pending'
-GROUP BY s.url ORDER BY pending DESC;
+WHERE d.status = 'failed' AND d.last_error LIKE 'expired:%'
+GROUP BY s.url ORDER BY expired DESC;
+
+-- one subscriber's, newest first
+SELECT id, event_type, created_at, last_error
+FROM messaging.webhook_deliveries
+WHERE status = 'failed' AND last_error LIKE 'expired:%' AND subscription_id = '<subscription id>'
+ORDER BY created_at DESC LIMIT 50;
 ```
 
-Replace `webhook_deliveries` with `email_outbox` / `notification_outbox` for the other relays (the columns differ; start
-from `status`, `created_at`, `attempts`).
+The same view of the whole queue: `SELECT status, count(*), min(created_at), max(created_at) FROM
+messaging.webhook_deliveries GROUP BY status`. (`email_outbox` / `notification_outbox` are not expired: only webhooks
+carry a body whose age a receiver cannot see.)
 
-A delivery carries its own `id` and `eventType`, but the body's `timestamp` is the moment of SENDING. A receiver cannot
-tell a three-week-old event from a fresh one. If the oldest rows are stale enough that delivering them is worse than
-dropping them, mark them failed BEFORE the relay can claim them (stop the worker, or do it in the same minute the fix
-deploys):
+### Re-queue one deliberately
+
+Only if a specific event must still go out. Re-queue **by id**, and reset `created_at`: the age limit is measured from
+it, so a row put back as `pending` with its old `created_at` is expired again on the next claim.
 
 ```sql
+BEGIN;
 UPDATE messaging.webhook_deliveries
-SET status = 'failed', last_error = 'expired undelivered: the relay was failing; not sent'
-WHERE status = 'pending' AND created_at < now() - interval '24 hours';
+SET status = 'pending', attempts = 0, last_error = NULL,
+    next_attempt_at = now(), created_at = now()
+WHERE id = '<delivery id>'
+  AND status = 'failed' AND last_error LIKE 'expired:%' AND lease_token IS NULL;
+-- must say UPDATE 1 (a different count means the id was wrong or the row is not an expired one): ROLLBACK if not.
+COMMIT;
 ```
 
-The cut-off is a decision for whoever owns the subscribers, not a default.
+No worker stop is needed: a `failed` row with no lease is not claimed by any relay, and nothing else writes it.
+The receiver will get the event with the **time of sending** in `timestamp` (the original `id` and `eventType` are
+kept), which is the reason these rows were not sent in the first place.
+
+To change the limit: set `WEBHOOK_DELIVERY_MAX_AGE_HOURS` on the worker (and the API, which validates the same schema)
+and redeploy. It applies to rows already `pending`.
 
 ## Escalate if
 

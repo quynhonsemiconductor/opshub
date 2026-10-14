@@ -126,6 +126,11 @@ const passFailed = metrics.getMeter('opshub-worker').createCounter('outbox.relay
   description: 'Outbox relay passes that threw before finishing (claim or loop failure)',
 });
 
+/** Rows a relay deliberately did NOT send because they were too old (see `WebhookRelayService`). `outbox_relay_expired_total{relay}`. */
+const expiredRows = metrics.getMeter('opshub-worker').createCounter('outbox.relay.expired', {
+  description: 'Outbox rows a relay expired instead of sending (older than its maximum age)',
+});
+
 /** The table a relay works on and the columns the base class needs to lease, fence and dead-letter it. */
 export interface OutboxLeaseTable {
   table: PgTable;
@@ -293,6 +298,11 @@ export abstract class AbstractOutboxRelay<
    */
   protected beforeSelect(_tx: DrizzleTx): Promise<void> {
     return Promise.resolve();
+  }
+
+  /** Count rows this relay expired instead of sending. Call from the claim transaction, after the UPDATE. */
+  protected recordExpired(count: number): void {
+    if (count > 0) expiredRows.add(count, { relay: this.queueName });
   }
 
   /** `lease is absent or has lapsed` — put this in every `selectDue` WHERE clause. */
