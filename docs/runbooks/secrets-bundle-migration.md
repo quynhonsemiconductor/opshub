@@ -51,19 +51,28 @@ migration.
 
 Production infrastructure applies **only on a `v*.*.*` tag** (`infra-apply.yml`); merging this PR changes nothing in
 production. The bundle container is created by that apply, so it **cannot be populated before the tag's apply**. The
-backend deploy of the same tag waits for the infra run, then deploys.
+backend deploy of the same tag waits for the infra run, then deploys, and it **will not pass the first time**: the
+`production` GitHub environment has no variables yet (step 3) and the bundle is empty (step 4). Plan on re-running it.
 
 1. Merge #373, #374, then this PR. Nothing happens in production.
 2. Push the release tag. Approve the `production` environment for **Infrastructure · Apply**. It creates
    `opshub/production/app` **empty**, the tunnel, and the services at zero tasks, and registers task definitions that
    reference the bundle's keys. The apply itself starts no task (with #373).
-3. **Immediately populate and verify the bundle** (steps A to D below). The deploy that follows the apply rolls the
-   services onto the new task definitions: if it gets ahead of you, its preflight (or its migrator) fails safely, the
-   previous state is untouched, and the fix is to finish A to D and **re-run the failed jobs** of the tag's
-   Backend · Deploy.
-4. **Prove the bundle** (the gate below). Production has no ingress to probe and no running task at rest (floors are 0), so
+3. **Set the `production` environment variables** (section F). The apply tries to publish them and cannot: `production`
+   is a protected environment and the App token cannot write to it, so the step only prints `::warning::` lines. The
+   deploy reads `ECS_CLUSTER`, `ECS_API_SERVICE`, `ECS_WORKER_SERVICE`, `ECS_MIGRATOR_TASK_DEF`, `ECS_MIGRATOR_SUBNET` and
+   `ECS_MIGRATOR_SG` (and the web deploy `PAGES_PROJECT`); the environment holds none, so the tag's deploy fails at its
+   preflight and **re-running it never passes until they are set**.
+4. **Populate and verify the bundle** (steps A to D below). A deploy that runs against the still-empty bundle fails its
+   preflight, which does catch an EMPTY bundle. It does **not** catch a bundle that is non-empty but **missing a key**: the
+   migrator reads only the RDS master secret, and the services deploy at zero tasks, so a bundle with a key missing
+   deploys green. Only the gate (step 6) catches that.
+5. **Make sure the database is running before you approve or re-run the deploy** (section G). Production's RDS is
+   stopped every Sunday by `idle_schedule`, and a production deploy never wakes it (the wake job is develop-only), so
+   the migrator fails against a stopped instance.
+6. **Prove the bundle** (the gate below). Production has no ingress to probe and no running task at rest (floors are 0), so
    "a healthy deploy" cannot be the signal: the gate is D.2 + D.3 and a one-off task that reaches RUNNING.
-5. Merge the follow-up PR that removes `secrets_create_standalone` (section E). The **next** tag's apply schedules the
+7. Merge the follow-up PR that removes `secrets_create_standalone` (section E). The **next** tag's apply schedules the
    standalone secrets for deletion, with the 30-day recovery window. Nobody deletes anything by hand.
 
 ## A. Check the standalone sources (lengths only)
@@ -176,7 +185,9 @@ stand in for it; both must pass.
 2. **A one-off task reaches RUNNING.** ECS pulls every secret before the container starts, so a task that reaches
    RUNNING proves every key the api task definition references resolved and the execution role can read the bundle.
    (rova's production was proven this way.) The command is overridden so the application does not start; the
-   cloudflared sidecar connects to the tunnel but nothing is routed to it.
+   cloudflared sidecar connects to the tunnel, and the api hostname's CNAME is live, so a request to
+   `opshub-api.qnsc.vn` gets a 502 from the connector while the one-off task is up (nothing answers on port 3000), as it
+   does until the api runs at all. Stop the task as shown below.
 
 ```bash
 export AWS_PROFILE=qnsc-admin AWS_REGION=ap-southeast-1
@@ -212,6 +223,41 @@ creates because `secrets_create_standalone = true` keeps the standalone set equa
 There is no hand-delete, so there is no moment at which Terraform's state and AWS disagree and a tag must be avoided.
 `jwt-private` and `graph-client-secret` are not in this set: the first apply removes them (they left the declared set
 when identity 8 and the Graph certificate replaced them), with the same 30-day window.
+
+## F. The `production` environment variables (right after the apply)
+
+`production` is a protected environment (required reviewers). The apply's publish step cannot write to it and prints one
+`::warning title=infra-id publish::` line per variable, each carrying the ready command. Take them from the apply run
+(the run of **Infrastructure · Apply** for the tag), read them, then run them:
+
+```bash
+TAG=v0.4.0   # the tag you pushed
+RUN=$(gh run list --workflow infra-apply.yml --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run view "$RUN" --log | grep -o 'gh variable set [A-Z_]* --env production --repo [^ ]* --body .*' | tr -d '\r' | sort -u
+# Review the list (values are infrastructure IDs, not secrets), then run it:
+gh run view "$RUN" --log | grep -o 'gh variable set [A-Z_]* --env production --repo [^ ]* --body .*' | tr -d '\r' | sort -u | bash
+```
+
+Expected: `ECS_CLUSTER=opshub-prod`, `ECS_API_SERVICE=api`, `ECS_WORKER_SERVICE=worker`,
+`ECS_MIGRATOR_TASK_DEF` (the migrator task-definition family, `opshub-prod-migrator`), `ECS_MIGRATOR_SUBNET` (comma-separated subnet ids), `ECS_MIGRATOR_SG` and
+`PAGES_PROJECT=opshub-prod-web`. Check afterwards: `gh variable list --env production --repo quynhonsemiconductor/opshub`.
+
+**Leave `APP_URL` unset** while the floors are 0. The deploy's post-deploy readiness check runs only when `APP_URL` is
+set, and with no task running at rest it would fail every deploy. Set it in the change that raises the floors at go-live.
+`RDS_INSTANCE_ID` is read only by the develop-only wake job; production does not need it.
+
+## G. Start the database before the deploy
+
+```bash
+export AWS_PROFILE=qnsc-admin AWS_REGION=ap-southeast-1
+aws rds describe-db-instances --db-instance-identifier opshub-prod --query 'DBInstances[0].DBInstanceStatus' --output text
+# `stopped`: start it and wait. `available`: nothing to do.
+aws rds start-db-instance --db-instance-identifier opshub-prod --query 'DBInstance.DBInstanceStatus' --output text
+aws rds wait db-instance-available --db-instance-identifier opshub-prod
+```
+
+`idle_schedule` (`cron(0 1 ? * SUN *)`) stops it again every Sunday, so a deploy on or after a Sunday needs this each
+time until go-live removes the schedule. Starting an RDS instance is billed; the weekly stop is what ends it.
 
 ## What the apply does (so the plan is not a surprise)
 
