@@ -216,7 +216,13 @@ module "stack" {
   // Twice daily, matching rally. Develop is exercised by CI deploys and the occasional
   // manual poke, so the useful default is "down unless something just deployed": the
   // deploy pipeline wakes RDS and restores the desired count, and this puts it back.
-  idle_schedule = "cron(0 21,3 * * ? *)"
+  // OFF since 2026-10-14, at the owner's request: develop stays up around the clock for the rest of
+  // October 2026 (the owner decides then whether to turn idling back on). To restore idling, put back
+  // exactly:
+  //   idle_schedule = "cron(0 21,3 * * ? *)"
+  //   wake_schedule = null // OFF since 2026-10-14; see idle_schedule above
+  // (both together; idling without the wake leaves develop down until the next deploy).
+  idle_schedule = null
 
   // 08:00 local, MON-FRI. The weekday restriction is the entire cost control here: a 7-day
   // wake would pay for two days a week nobody works, which is a large share of what idling
@@ -234,7 +240,7 @@ module "stack" {
   // Net effect: develop moves from "up on merge days only" to roughly 13h/day on weekdays
   // and 0h at weekends. So this BUYS availability rather than saving money; the saving comes
   // from the weekends and the 21:00-08:00 window, which the idle schedule already owned.
-  wake_schedule = "cron(0 8 ? * MON-FRI *)"
+  wake_schedule = null // OFF since 2026-10-14; see idle_schedule above
 
   rds = {
     instance_class           = "db.t4g.micro"
