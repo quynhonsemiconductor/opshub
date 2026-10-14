@@ -14,17 +14,17 @@ and `match` / `MISMATCH`. Do not "check" a value by printing it.
 
 ## What is in the bundle
 
-| key | read by | source |
-|---|---|---|
-| `cookie-secret` | api, worker | **copy** from `opshub/production/cookie-secret` |
-| `csrf-secret` | api, worker | **copy** from `opshub/production/csrf-secret` |
-| `entra-client-secret` | api | **copy** from `opshub/production/entra-client-secret` |
-| `observability-token` | collector sidecars | **copy** from `opshub/production/observability-token` |
-| `db-app-password` | api, once `db_least_privilege` is on | **copy** from `opshub/production/db-app-password` (RDS `opshub-prod` already uses it) |
-| `db-worker-password` | worker, once `db_least_privilege` is on | **copy** from `opshub/production/db-worker-password` (same) |
-| `better-auth-secret` | api | **NEW**: `openssl rand -base64 48` (identity 8; the standalone set has no counterpart) |
-| `edge-client-ip-secret` | api | **NEW**: `openssl rand -base64 48`, and the SAME value as the Pages secret `EDGE_CLIENT_IP_SECRET` |
-| `edge-client-ip-secret-previous` | api | only DURING a rotation (`edge_client_ip_secret_previous_set`); not part of this migration |
+| key                              | read by                                 | source                                                                                             |
+| -------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `cookie-secret`                  | api, worker                             | **copy** from `opshub/production/cookie-secret`                                                    |
+| `csrf-secret`                    | api, worker                             | **copy** from `opshub/production/csrf-secret`                                                      |
+| `entra-client-secret`            | api                                     | **copy** from `opshub/production/entra-client-secret`                                              |
+| `observability-token`            | collector sidecars                      | **copy** from `opshub/production/observability-token`                                              |
+| `db-app-password`                | api, once `db_least_privilege` is on    | **copy** from `opshub/production/db-app-password` (RDS `opshub-prod` already uses it)              |
+| `db-worker-password`             | worker, once `db_least_privilege` is on | **copy** from `opshub/production/db-worker-password` (same)                                        |
+| `better-auth-secret`             | api                                     | **NEW**: `openssl rand -base64 48` (identity 8; the standalone set has no counterpart)             |
+| `edge-client-ip-secret`          | api                                     | **NEW**: `openssl rand -base64 48`, and the SAME value as the Pages secret `EDGE_CLIENT_IP_SECRET` |
+| `edge-client-ip-secret-previous` | api                                     | only DURING a rotation (`edge_client_ip_secret_previous_set`); not part of this migration          |
 
 Why these are copied and not rotated: production has never served a request, so no copy has been exposed to traffic, and
 the two database passwords **must** equal what the RDS roles hold (a new value would lock the roles out). The two
@@ -73,7 +73,8 @@ equal the roles' current passwords).
 ## B. The Pages secret and the new bundle values (one value, two homes)
 
 `edge-client-ip-secret` is set on the Cloudflare Pages project `opshub-prod-web` and in the bundle, from the SAME
-bytes. The value goes through a `0600` file that is deleted at the end.
+bytes. The value goes through a `0600` file that is deleted at the end. Run B and C in ONE fresh shell (`bash --noprofile`;
+`exit` afterwards), because `set -e` would otherwise close your terminal and `$W` must survive between them.
 
 ```bash
 set -euo pipefail
@@ -155,8 +156,9 @@ deploy is approved to proceed.
 ## E. After a healthy production deploy: delete the standalone secrets (owner)
 
 "Healthy" means the api and worker reached steady state on the bundle (ECS pulls every secret before a container
-starts, so RUNNING proves every key resolved), `/readyz` is 200, and a sign-in works. **The migrator ran on the bundle
-too.** Nothing here is deleted by Terraform or by this PR.
+starts, so RUNNING proves every key resolved), `/readyz` is 200, and a sign-in works. (The migrator reads only the
+RDS master secret until `db_role_passwords_set` is on, so its success proves nothing about the bundle.) Nothing here is
+deleted by Terraform or by this PR.
 
 After the apply, the standalone containers are these eight (six old ones, plus two empty ones the apply creates
 because `secrets_create_standalone = true` keeps the standalone set equal to the declared names):
