@@ -227,20 +227,46 @@ when identity 8 and the Graph certificate replaced them), with the same 30-day w
 ## F. The `production` environment variables (right after the apply)
 
 `production` is a protected environment (required reviewers). The apply's publish step cannot write to it and prints one
-`::warning title=infra-id publish::` line per variable, each carrying the ready command. Take them from the apply run
-(the run of **Infrastructure · Apply** for the tag), read them, then run them:
+`::warning title=infra-id publish::` line per variable, each carrying the command it could not run. **Print them, read
+them, and paste them yourself; nothing is piped into a shell.**
 
 ```bash
 TAG=v0.4.0   # the tag you pushed
 RUN=$(gh run list --workflow infra-apply.yml --branch "$TAG" --limit 1 --json databaseId --jq '.[0].databaseId')
 gh run view "$RUN" --log | grep -o 'gh variable set [A-Z_]* --env production --repo [^ ]* --body .*' | tr -d '\r' | sort -u
-# Review the list (values are infrastructure IDs, not secrets), then run it:
-gh run view "$RUN" --log | grep -o 'gh variable set [A-Z_]* --env production --repo [^ ]* --body .*' | tr -d '\r' | sort -u | bash
 ```
 
-Expected: `ECS_CLUSTER=opshub-prod`, `ECS_API_SERVICE=api`, `ECS_WORKER_SERVICE=worker`,
-`ECS_MIGRATOR_TASK_DEF` (the migrator task-definition family, `opshub-prod-migrator`), `ECS_MIGRATOR_SUBNET` (comma-separated subnet ids), `ECS_MIGRATOR_SG` and
-`PAGES_PROJECT=opshub-prod-web`. Check afterwards: `gh variable list --env production --repo quynhonsemiconductor/opshub`.
+Compare each printed line with the table below before you run it (the values are infrastructure IDs, not secrets). The
+names and values come from the module's naming and the Terraform outputs; the subnet and security-group IDs are the
+only ones you cannot know in advance, so take those two from the warning lines (and cross-check with
+`tofu output private_subnet_ids` / `sg_app_id` in `infra/live/prod`).
+
+| variable                | expected value                                                    |
+| ----------------------- | ----------------------------------------------------------------- |
+| `ECS_CLUSTER`           | `opshub-prod`                                                     |
+| `ECS_API_SERVICE`       | `api`                                                             |
+| `ECS_WORKER_SERVICE`    | `worker`                                                          |
+| `ECS_MIGRATOR_TASK_DEF` | the migrator task-definition family, `opshub-prod-migrator`       |
+| `ECS_MIGRATOR_SUBNET`   | the private subnet ids, comma-separated (from the warning line)   |
+| `ECS_MIGRATOR_SG`       | the application security group id, `sg-…` (from the warning line) |
+| `PAGES_PROJECT`         | `opshub-prod-web`                                                 |
+
+Then set each one explicitly, one command per variable:
+
+```bash
+R=quynhonsemiconductor/opshub
+gh variable set ECS_CLUSTER           --env production --repo $R --body 'opshub-prod'
+gh variable set ECS_API_SERVICE       --env production --repo $R --body 'api'
+gh variable set ECS_WORKER_SERVICE    --env production --repo $R --body 'worker'
+gh variable set ECS_MIGRATOR_TASK_DEF --env production --repo $R --body 'opshub-prod-migrator'
+gh variable set ECS_MIGRATOR_SUBNET   --env production --repo $R --body '<subnet-a>,<subnet-b>'   # from the warning
+gh variable set ECS_MIGRATOR_SG       --env production --repo $R --body '<sg-...>'                # from the warning
+gh variable set PAGES_PROJECT         --env production --repo $R --body 'opshub-prod-web'
+gh variable list --env production --repo $R
+```
+
+If a printed value differs from the table for any of the first five or `PAGES_PROJECT`, stop and find out why before
+setting it: the deploy composes `<ECS_CLUSTER>-<ECS_API_SERVICE>` into the task-definition family it checks.
 
 **Leave `APP_URL` unset** while the floors are 0. The deploy's post-deploy readiness check runs only when `APP_URL` is
 set, and with no task running at rest it would fail every deploy. Set it in the change that raises the floors at go-live.
