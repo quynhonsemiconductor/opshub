@@ -463,11 +463,14 @@ module "api" {
   subnet_ids        = data.terraform_remote_state.runtime.outputs.private_subnet_ids
   security_group_id = data.terraform_remote_state.runtime.outputs.sg_app_id
 
-  # One task at rest in both environments; autoscaling adds more on load. Production
-  # buys redundancy through `max_count` and the ALB health check rather than by
-  # standing a second task up permanently.
-  desired_count = 1
-  min_count     = 1
+  # The INITIAL count is the floor, like the worker's. It was a literal 1, which made a freshly created service
+  # in an environment provisioned idle (`min_count = 0`: production before go-live) start an api task the moment
+  # it was created, against secrets and a database that were not ready. `desired_count` is under `ignore_changes`
+  # in the ecs-service module, so this changes only what a NEW service starts with: an existing service is not
+  # touched (its count is set by the deploy pipeline, the wake schedule and autoscaling). With autoscaling on, the
+  # floor is the scalable target's minimum, which is what `min_count` means everywhere else.
+  desired_count = var.api.min_count
+  min_count     = var.api.min_count
   max_count     = var.api.max_count
   use_spot      = var.api.use_spot
   # Off for an environment driven by a schedule rather than by load: autoscaling would
