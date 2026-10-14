@@ -46,6 +46,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
+import { metrics } from '@opentelemetry/api';
 import { QueueMetrics, withJobContext } from '@quynhonsemiconductor/observability';
 import { and, inArray, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import type { AnyPgColumn, PgTable } from 'drizzle-orm/pg-core';
@@ -111,6 +112,24 @@ export class DeferError extends Error {
  * ordering, one huge hint would also hold back every later task for that key.
  */
 export const MAX_RETRY_AFTER_MS = 60 * 60_000;
+
+/**
+ * A relay PASS that threw: its claim failed (a SQL error, a lost connection) before any row was reached.
+ *
+ * `queue.failures` counts ROWS that failed to deliver and is recorded only after the loop, so a pass that dies in its
+ * claim emits nothing: the webhook relay's claim threw on every pass (10 s) and no metric, log field or alarm moved.
+ * Prometheus name `outbox_relay_pass_failed_total{relay}`; the `outbox-relay-failing` alert watches it. Deliberately a
+ * counter of its own and not `job.runs` (JobMetrics): relays run every 5-10 s, and thousands of extra successful
+ * `job.runs` would dilute `worker-job-failure-rate`'s ratio until a failing cron no longer crossed its threshold.
+ */
+const passFailed = metrics.getMeter('opshub-worker').createCounter('outbox.relay.pass_failed', {
+  description: 'Outbox relay passes that threw before finishing (claim or loop failure)',
+});
+
+/** Rows a relay deliberately did NOT send because they were too old (see `WebhookRelayService`). `outbox_relay_expired_total{relay}`. */
+const expiredRows = metrics.getMeter('opshub-worker').createCounter('outbox.relay.expired', {
+  description: 'Outbox rows a relay expired instead of sending (older than its maximum age)',
+});
 
 /** The table a relay works on and the columns the base class needs to lease, fence and dead-letter it. */
 export interface OutboxLeaseTable {
@@ -281,6 +300,11 @@ export abstract class AbstractOutboxRelay<
     return Promise.resolve();
   }
 
+  /** Count rows this relay expired instead of sending. Call from the claim transaction, after the UPDATE. */
+  protected recordExpired(count: number): void {
+    if (count > 0) expiredRows.add(count, { relay: this.queueName });
+  }
+
   /** `lease is absent or has lapsed` — put this in every `selectDue` WHERE clause. */
   protected notLeased(now: Date) {
     return or(isNull(this.outbox.lockedUntil), lte(this.outbox.lockedUntil, now));
@@ -406,7 +430,15 @@ export abstract class AbstractOutboxRelay<
    * carries a `correlationId`.
    */
   private runOnce(): Promise<void> {
-    return withJobContext(this.constructor.name, () => this.runOncePass()) as Promise<void>;
+    return withJobContext(this.constructor.name, async () => {
+      try {
+        await this.runOncePass();
+      } catch (err) {
+        // Counted, then rethrown: the scheduler still logs it, and a caller still sees it.
+        passFailed.add(1, { relay: this.queueName });
+        throw err;
+      }
+    }) as Promise<void>;
   }
 
   private async claim(): Promise<Array<Claimed<TRow>>> {

@@ -121,7 +121,7 @@ describe('WebhookRelayService — HMAC signature', () => {
 
   beforeEach(() => {
     const db = makeMockDb();
-    service = new TestableRelayService(db as never);
+    service = new TestableRelayService(db as never, { get: () => 24 } as never);
 
     mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', mockFetch);
@@ -229,7 +229,10 @@ describe('WebhookRelayService — markFailed() backoff delays', () => {
     updateChain.update.mockReturnValue(updateChain);
     updateChain.set.mockReturnValue(updateChain);
 
-    service = new TestableRelayService({ update: updateChain.update } as never);
+    service = new TestableRelayService(
+      { update: updateChain.update } as never,
+      { get: () => 24 } as never,
+    );
     vi.stubGlobal('fetch', vi.fn());
   });
 
@@ -290,7 +293,10 @@ describe('WebhookRelayService — markSent()', () => {
     chain.update.mockReturnValue(chain);
     chain.set.mockReturnValue(chain);
 
-    const service = new TestableRelayService({ update: chain.update } as never);
+    const service = new TestableRelayService(
+      { update: chain.update } as never,
+      { get: () => 24 } as never,
+    );
 
     const before = Date.now();
     await service.exposedMarkSent(chain as never, 'del-1');
@@ -317,7 +323,7 @@ describe('the target is checked again at delivery time', () => {
   it('refuses an unsafe target and never issues the request', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
-    const relay = new TestableRelayService({} as never);
+    const relay = new TestableRelayService({} as never, { get: () => 24 } as never);
 
     await expect(
       relay.exposedProcessRow(makeRow({ url: 'https://169.254.169.254/latest/meta-data/' })),
@@ -334,7 +340,7 @@ describe('the target is checked again at delivery time', () => {
      * subscription that looks healthy and delivers nothing.
      */
     vi.stubGlobal('fetch', vi.fn());
-    const relay = new TestableRelayService({} as never);
+    const relay = new TestableRelayService({} as never, { get: () => 24 } as never);
 
     await expect(
       relay.exposedProcessRow(makeRow({ url: 'https://10.0.4.17:5432/' })),
@@ -345,7 +351,7 @@ describe('the target is checked again at delivery time', () => {
     // The converse. A relay that refused everything would satisfy both cases above.
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' });
     vi.stubGlobal('fetch', fetchSpy);
-    const relay = new TestableRelayService({} as never);
+    const relay = new TestableRelayService({} as never, { get: () => 24 } as never);
 
     await relay.exposedProcessRow(makeRow({ url: 'https://hooks.example.com/opshub' }));
 

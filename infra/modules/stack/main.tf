@@ -2221,6 +2221,26 @@ module "alerts" {
       summary     = "The API refused signed client addresses from the Pages Function in ${var.env} for 10m — the two ends hold different EDGE_CLIENT_IP_SECRET values, or a header is being forged. Visitors are being keyed on a shared Cloudflare address."
       runbook_url = "${local.runbook_base_url}/edge-client-ip-rejected.md"
     },
+    # An outbox relay whose PASS throws, continuously. `WebhookRelayService`'s claim query failed on every pass (every
+    # 10 s) for weeks - `FOR UPDATE must specify unqualified relation names` - and nothing alerted: the relays are not
+    # timed by JobMetrics (so `worker-job-failure-rate` never saw them; its runbook said it did), `queue_failures_total`
+    # counts ROWS that failed to deliver and is recorded only after the claim, and `outboxDeadLetter` needs a row to
+    # have been claimed. `outbox_relay_pass_failed_total{relay}` is counted by AbstractOutboxRelay when a pass throws.
+    # A relay passes every 5-10 s, so a failure that persists shows an increase in every 3-minute window; for 10m makes
+    # it "failing continuously", and one transient blip (a connection reset) clears long before. `sum by (relay)`, so
+    # each failing relay is its own alert instance and names itself (`{{ $labels.relay }}`); healthy, the series
+    # does not exist and the rule's no-data state is OK. No sample floor: it is not a ratio. Not gated on idle: the
+    # counter is emitted only by a running worker.
+    {
+      name        = "outbox-relay-failing"
+      promql      = "sum by (relay) (increase(outbox_relay_pass_failed_total{deployment_environment_name=\"${var.env}\"}[3m]))"
+      for         = "10m"
+      op          = "gt"
+      threshold   = 0
+      severity    = "warning"
+      summary     = "Outbox relay {{ $labels.relay }} has failed its pass continuously for 10m in ${var.env} - a claim query or the database connection is failing before any row is reached, so nothing is delivered. The error is in the worker log (`level=error`, the relay's class name)."
+      runbook_url = "${local.runbook_base_url}/outbox-relay-failing.md"
+    },
     {
       name        = "worker-job-failure-rate"
       promql      = "(sum(rate(job_failures_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(job_runs_total{deployment_environment_name=\"${var.env}\"}[5m])) and on() (sum(rate(job_runs_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
