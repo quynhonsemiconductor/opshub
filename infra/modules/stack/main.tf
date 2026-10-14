@@ -441,7 +441,7 @@ module "ecs_cluster" {
 
 # ── ECS service — API ─────────────────────────────────────────────────────────
 module "api" {
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.5.0"
 
   use_firelens = module.firelens_agent_api.enabled
   # Moves with the caller's build_runner/image_platforms in ONE change — see the
@@ -506,6 +506,12 @@ module "api" {
     module.firelens_agent_api.container_definitions,
   )
 
+  # ECS stops containers in the REVERSE of their dependencies, so the app stops BEFORE the collector and its shutdown "flush telemetry" step (5 s) reaches a
+  # live agent; without this both get SIGTERM at once and the flush times out. Built from the agent module's own output, so it is EMPTY when the agent is
+  # disabled and the name always matches the container that is really in the task (a dependsOn naming an absent container fails task registration).
+  # START, not HEALTHY: the ADOT image has no health check.
+  container_depends_on = [for c in module.otel_agent_api.container_definitions : { container_name = c.name, condition = "START" }]
+
   # Includes the AWS-managed RDS secret: the execution role needs GetSecretValue on it
   # to inject DATABASE_USER/PASSWORD. Omit it and the task cannot start at all ("unable
   # to pull secrets") — a boot failure, not a runtime error. The migrator reuses the
@@ -562,7 +568,7 @@ module "api" {
 
 # ── ECS service — worker ──────────────────────────────────────────────────────
 module "worker" {
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.5.0"
 
   use_firelens = module.firelens_agent_worker.enabled
   # Moves with the caller's build_runner/image_platforms in ONE change — see the
@@ -600,6 +606,12 @@ module "worker" {
     module.otel_agent_worker.container_definitions,
     module.firelens_agent_worker.container_definitions,
   )
+
+  # ECS stops containers in the REVERSE of their dependencies, so the app stops BEFORE the collector and its shutdown "flush telemetry" step (5 s) reaches a
+  # live agent; without this both get SIGTERM at once and the flush times out. Built from the agent module's own output, so it is EMPTY when the agent is
+  # disabled and the name always matches the container that is really in the task (a dependsOn naming an absent container fails task registration).
+  # START, not HEALTHY: the ADOT image has no health check.
+  container_depends_on = [for c in module.otel_agent_worker.container_definitions : { container_name = c.name, condition = "START" }]
 
   # Includes the AWS-managed RDS secret: the execution role needs GetSecretValue on it
   # to inject DATABASE_USER/PASSWORD. Omit it and the task cannot start at all ("unable
