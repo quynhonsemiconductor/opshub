@@ -7,8 +7,9 @@ environment's threshold (5% prod / 10% develop) for 5 minutes straight.
 
 A meaningful share of background jobs (cron jobs — security-posture sync, compliance
 sync, audit cleanup, delegation expiry, review-due, storage cleanup, request expiry,
-contract expiry, SLA breach — plus the webhook and notification/email relays) are
-failing. This is the worker process (`apps/worker`), not the API.
+contract expiry, SLA breach) are failing. The outbox relay PASSES (webhook, notification,
+email, Graph) are NOT in this ratio: they are not timed by `JobMetrics`, and a relay whose pass throws is watched by
+`outbox-relay-failing`. This is the worker process (`apps/worker`), not the API.
 
 ## First checks
 
@@ -19,9 +20,9 @@ failing. This is the worker process (`apps/worker`), not the API.
 3. Check the Deploys annotation — did this start right after a deploy to the worker?
 4. Check which JOB TYPE is failing (log `context` field). Different jobs have different
    likely causes:
-   - Email relay: check `MAIL_FROM_EMAIL`/SES verification and the SES bounce/complaint
+   - Email relay (its rows failing, not its pass): check `MAIL_FROM_EMAIL`/SES verification and the SES bounce/complaint
      queue depth (CloudWatch).
-   - Webhook relay / notification relay: check the outbox table for `status = 'failed'`
+   - Webhook relay / notification relay (rows): check the outbox table for `status = 'failed'`
      rows and any outbox dead-letter CloudWatch alarm.
    - Compliance/security-posture sync crons: check the upstream source's own health and
      rate limits.
