@@ -2227,17 +2227,18 @@ module "alerts" {
     # counts ROWS that failed to deliver and is recorded only after the claim, and `outboxDeadLetter` needs a row to
     # have been claimed. `outbox_relay_pass_failed_total{relay}` is counted by AbstractOutboxRelay when a pass throws.
     # A relay passes every 5-10 s, so a failure that persists shows an increase in every 3-minute window; for 10m makes
-    # it "failing continuously", and one transient blip (a connection reset) clears long before. count() of relays, so
-    # one series; `or vector(0)` for the healthy state, when the series does not exist at all. No sample floor: it
-    # is not a ratio. Not gated on idle: the counter is emitted only by a running worker.
+    # it "failing continuously", and one transient blip (a connection reset) clears long before. `sum by (relay)`, so
+    # each failing relay is its own alert instance and names itself (`{{ $labels.relay }}`); healthy, the series
+    # does not exist and the rule's no-data state is OK. No sample floor: it is not a ratio. Not gated on idle: the
+    # counter is emitted only by a running worker.
     {
       name        = "outbox-relay-failing"
-      promql      = "count(sum by (relay) (increase(outbox_relay_pass_failed_total{deployment_environment_name=\"${var.env}\"}[3m])) > 0) or vector(0)"
+      promql      = "sum by (relay) (increase(outbox_relay_pass_failed_total{deployment_environment_name=\"${var.env}\"}[3m]))"
       for         = "10m"
       op          = "gt"
       threshold   = 0
       severity    = "warning"
-      summary     = "An outbox relay (webhook, email, notification or Graph) has failed its pass continuously for 10m in ${var.env} - a claim query or the database connection is failing before any row is reached, so nothing is delivered. The error is in the worker log (`level=error`, the relay's class name); the series says which relay: `outbox_relay_pass_failed_total` by `relay`."
+      summary     = "Outbox relay {{ $labels.relay }} has failed its pass continuously for 10m in ${var.env} - a claim query or the database connection is failing before any row is reached, so nothing is delivered. The error is in the worker log (`level=error`, the relay's class name)."
       runbook_url = "${local.runbook_base_url}/outbox-relay-failing.md"
     },
     {
