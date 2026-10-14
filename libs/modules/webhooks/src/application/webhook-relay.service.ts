@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lt, lte, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { Cron } from '@nestjs/schedule';
 import { createHmac } from 'crypto';
@@ -18,8 +18,12 @@ const WEBHOOK_TIMEOUT_MS = 10_000; // 10s per delivery attempt
 const RETRY_DELAYS_SECONDS = [60, 300, 900, 3600]; // 1m → 5m → 15m → 1h
 const MAX_DELIVERY_ERROR_LENGTH = 2_000; // chars stored in lastError column
 const MS_PER_HOUR = 3_600_000;
-/** Rows expired per claim. The claim repeats (up to 50 per pass), so a large backlog clears over a few passes. */
-const EXPIRE_PER_CLAIM = 500;
+/**
+ * Most rows ONE claim expires: a cap on the work (and the locks) a single transaction takes on. It is not a cap on what is
+ * safe: `selectDue` carries the same age predicate, so an over-age row beyond this cap is simply not claimed, never sent,
+ * and the next claim or pass expires it. A backlog of any size drains over several claims.
+ */
+const DEFAULT_EXPIRE_PER_CLAIM = 500;
 
 type DeliveryRow = {
   id: string;
@@ -48,6 +52,12 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     super(db);
   }
 
+  /** Rows one claim may expire. A seam: a test lowers it to prove the claim itself refuses over-age rows. */
+  protected readonly expirePerClaim: number = DEFAULT_EXPIRE_PER_CLAIM;
+
+  /** The age cutoff of the claim in progress: set by `beforeSelect`, used (and cleared) by the `selectDue` that follows. */
+  private claimCutoff: Date | null = null;
+
   /** Whole hours a delivery may stay `pending` before it is expired instead of sent (WEBHOOK_DELIVERY_MAX_AGE_HOURS). */
   private get maxAgeHours(): number {
     return this.config.get('WEBHOOK_DELIVERY_MAX_AGE_HOURS');
@@ -70,7 +80,10 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
    */
   protected override async beforeSelect(tx: DrizzleTx): Promise<void> {
     const now = new Date();
+    // Computed ONCE per claim: `selectDue` uses this same instant, so a row is either expired here or too old to claim
+    // there, never sent in between.
     const cutoff = new Date(now.getTime() - this.maxAgeHours * MS_PER_HOUR);
+    this.claimCutoff = cutoff;
     const stale = await tx
       .select({ id: webhookDeliveries.id })
       .from(webhookDeliveries)
@@ -82,7 +95,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
         ),
       )
       .orderBy(asc(webhookDeliveries.seq), asc(webhookDeliveries.id))
-      .limit(EXPIRE_PER_CLAIM)
+      .limit(this.expirePerClaim)
       .for('update', { skipLocked: true });
     if (stale.length === 0) return;
 
@@ -145,6 +158,11 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
      * (test/e2e/webhook-relay-claim.e2e.spec.ts runs this query against PostgreSQL.)
      */
     const d = alias(webhookDeliveries, 'd');
+    // THE AGE LIMIT AGAIN, on the claim itself. `beforeSelect` expires at most `expirePerClaim` rows, so with a bigger
+    // backlog the rest are still over-age here; without this predicate they would be claimed and SENT in this very pass.
+    // The cutoff is the one `beforeSelect` used for this claim (or, for a caller that skipped it, derived from `now`).
+    const cutoff = this.claimCutoff ?? new Date(now.getTime() - this.maxAgeHours * MS_PER_HOUR);
+    this.claimCutoff = null;
     return tx
       .select({
         id: d.id,
@@ -163,6 +181,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
       .where(
         and(
           eq(d.status, 'pending'),
+          gte(d.createdAt, cutoff),
           lt(d.attempts, this.maxAttempts),
           lte(d.nextAttemptAt, now),
           // `this.notLeased(now)` says the same about the UNALIASED column, which no longer exists in this query:

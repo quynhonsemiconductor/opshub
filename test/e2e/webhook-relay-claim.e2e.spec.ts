@@ -47,6 +47,10 @@ let parked: Array<{ id: string; nextAttemptAt: Date }> = [];
 
 const config = { get: () => MAX_AGE_HOURS } as unknown as AppConfigService;
 const makeRelay = () => new ProbeRelay(db, config);
+/** A relay that expires only 2 rows per claim, so a backlog of 5 is bigger than one claim's cap. */
+class CappedRelay extends WebhookRelayService {
+  protected override readonly expirePerClaim = 2;
+}
 
 /** Exposes the protected claim query: the thing that was broken. */
 class ProbeRelay extends WebhookRelayService {
@@ -286,6 +290,44 @@ describe('WebhookRelayService expiry, against PostgreSQL', () => {
 
     await makeRelay().relay();
     expect((await load(held)).status).toBe('failed');
+  });
+
+  it('NEVER sends an over-age row, even when the backlog is bigger than one claim expires', async () => {
+    // beforeSelect expires at most `expirePerClaim` rows. The claim's own age predicate is what keeps the REST of
+    // the over-age rows from being claimed and sent in the same pass.
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('ok', { status: 200 }));
+    const subscriptionId = await subscribe(PUBLIC_TARGET);
+    const overAge: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      overAge.push(await queue(subscriptionId, { createdAt: hoursAgo(MAX_AGE_HOURS + 1 + i) }));
+    }
+    const freshId = await queue(subscriptionId);
+    await parkOthers([...overAge, freshId]);
+    const relay = new CappedRelay(db, config);
+
+    await relay.relay();
+
+    const sentAfterFirstPass = fetchSpy.mock.calls.map(
+      ([, init]) => (init?.headers as Record<string, string>)['X-OpsHub-Delivery'],
+    );
+    expect(sentAfterFirstPass).toEqual([freshId]);
+    for (const id of overAge) {
+      expect((await load(id)).status, 'an over-age row was delivered').not.toBe('delivered');
+    }
+
+    // The cap only slows the draining: a few more passes expire all five, and still nothing old is sent.
+    for (let pass = 0; pass < 6; pass += 1) await relay.relay();
+    for (const id of overAge) {
+      const row = await load(id);
+      expect(row.status).toBe('failed');
+      expect(row.lastError).toBe(`expired: pending longer than ${MAX_AGE_HOURS} h`);
+    }
+    const sentIds = fetchSpy.mock.calls.map(
+      ([, init]) => (init?.headers as Record<string, string>)['X-OpsHub-Delivery'],
+    );
+    expect(sentIds.filter((id) => overAge.includes(id))).toEqual([]);
   });
 
   it('does not touch rows that are not pending', async () => {
