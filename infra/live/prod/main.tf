@@ -141,8 +141,8 @@ module "stack" {
   // The shared ALBs in qnsc-infra/live/runtime-{dev,prod} were DELETED once both products moved to Cloudflare
   // Tunnels, so `https_listener_arn` is null and there is nothing to attach to: with this OFF the plan creates
   // `module.api.aws_lb_listener_rule.this[0]` with no `listener_arn` and the apply FAILS, and production would have
-  // no ingress at all. Same as develop (see ../develop/main.tf), where this has been serving since the tunnel was
-  // verified there: module.tunnel (the shared cf-tunnel module) creates the tunnel, its connector token and its
+  // no ingress at all. Same as develop (see ../develop/main.tf), where it is enabled: module.tunnel (the shared
+  // cf-tunnel module) creates the tunnel, its connector token and its
   // routing rule, the api task gets the cloudflared sidecar, and the api hostname is a proxied CNAME to the tunnel.
   // No ALB listener rule, no target group.
   //
