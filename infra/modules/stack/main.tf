@@ -235,6 +235,11 @@ locals {
     # environment should never run the relaxed one. Environment identity travels in
     # tags and log groups instead.
     { name = "NODE_ENV", value = "production" },
+    # The DEPLOYMENT environment (develop | production), distinct from NODE_ENV above, which is "production" everywhere on purpose. The shared
+    # observability package reads DEPLOYMENT_ENV for the OTel `deployment.environment.name` and the log `env` field and FALLS BACK to NODE_ENV, so
+    # without this opshub's develop logs said "env":"production" and its resource said production before the collector sidecar overwrote it.
+    # rova sets it; opshub never did.
+    { name = "DEPLOYMENT_ENV", value = var.env },
     { name = "VALKEY_URL", value = local.valkey_url },
     { name = "AWS_REGION", value = var.region },
     # Head sampling, read by `resolveSampler` in libs/platform/src/observability/otel.ts and
