@@ -302,9 +302,6 @@ module "stack" {
     // libs/platform/src/observability/otel.ts, and asserted by otel.spec.ts.
     sampling_probability = 1.0
 
-    // DIAGNOSTIC, DEVELOP ONLY, TEMPORARY: the collector sidecars also log every metric datapoint to
-    // their CloudWatch stream (the duplicate-timestamp hunt). Revert = delete this line (or false).
-    debug_metrics = true
   }
 
   // No dashboard in develop. CloudWatch bills dashboards per ACCOUNT — three free, then
