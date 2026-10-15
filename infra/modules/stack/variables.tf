@@ -644,10 +644,17 @@ variable "observability" {
     and otel.spec.ts asserts a configured probability changes the decisions. It was inert
     before that — declared here and in the env schema, and ignored by opshub's own OTel
     bootstrap, which had drifted behind the `@quynhonsemiconductor/observability` package rally uses.
+
+    `debug_metrics` is a TEMPORARY DIAGNOSTIC for DEVELOP ONLY (the tf-modules observability-agent
+    `debug_metrics`): the collector sidecars also log every metric datapoint, with its timestamp, to
+    their CloudWatch stream, to find which writer emits duplicate-timestamp samples. It costs
+    CloudWatch ingestion (~5 GB/day) and logs application data. Default false; never set it in
+    production; turn it off by deleting the line in live/develop (runbook: quynhonsemiconductor/ci docs/runbooks/otel-duplicate-timestamps.md).
   EOT
   type = object({
     otlp_endpoint        = optional(string, "")
     sampling_probability = optional(number, 1.0)
+    debug_metrics        = optional(bool, false)
   })
   default = {}
 

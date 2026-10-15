@@ -800,7 +800,7 @@ module "tunnel_api" {
 # turning telemetry on a one-line change per environment rather than a migration, and it is
 # why adopting this costs nothing while it is off.
 module "otel_agent_api" {
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.1.0"
 
   product       = var.product
   env           = var.env
@@ -810,10 +810,11 @@ module "otel_agent_api" {
   token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
   log_group        = local.api_log_group
   region           = var.region
+  debug_metrics    = var.observability.debug_metrics
 }
 
 module "otel_agent_worker" {
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.1.0"
 
   product          = var.product
   env              = var.env
@@ -821,6 +822,7 @@ module "otel_agent_worker" {
   token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
   log_group        = local.worker_log_group
   region           = var.region
+  debug_metrics    = var.observability.debug_metrics
 }
 
 # Ships each service's router (task-level, non-app) logs to Loki, same shared stack the
