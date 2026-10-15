@@ -28,6 +28,8 @@ import { BounceFeedbackService } from './email/bounce-feedback.service';
         createLoggerOptions({
           serviceName: config.get('OTEL_WORKER_SERVICE_NAME'),
           nodeEnv: config.get('NODE_ENV'),
+          // the DEPLOYMENT environment for the `env` field; NODE_ENV is production everywhere on purpose
+          deploymentEnv: config.get('DEPLOYMENT_ENV'),
           serviceVersion: config.get('SERVICE_VERSION'),
           level: config.get('LOG_LEVEL'),
           pretty: config.get('LOG_PRETTY'),

@@ -103,6 +103,9 @@ const baseShape = {
 
   // ── Observability ──────────────────────────────────────────────────────────
   SERVICE_VERSION: z.string().default('dev'),
+  // The DEPLOYMENT environment (develop | production), distinct from NODE_ENV, which is production in every deployed environment on purpose.
+  // Read by the shared observability package for the OTel resource and the log `env` field; the stack sets it (var.env).
+  DEPLOYMENT_ENV: z.string().optional(),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   LOG_PRETTY: booleanish(false),
   LOG_SQL: booleanish(false),
