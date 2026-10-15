@@ -1870,7 +1870,7 @@ locals {
   #     boundary. It meant only "at least one request took longer than 10s" — the true
   #     value could have been 11s or 200s. The same change that added this gate widened
   #     the view out to 60000 (`local.http_duration_buckets_ms` below, mirroring
-  #     apps/api/src/otel.ts), so a repeat of that page lands in a bucket that separates
+  #     apps/api/src/http-duration-boundaries.ts), so a repeat of that page lands in a bucket that separates
   #     12s from a spent retry budget. The clamp itself is a property of the TOP bucket,
   #     not of the number 10000, and it still applies there.
   #   * `48.5` being the resolve value is the tell. A service does not travel from 10s to
@@ -2007,7 +2007,7 @@ locals {
   # from not knowing this list, and because `slow_request_bucket_ms` is only meaningful as
   # a member of it.
   #
-  # MIRRORS apps/api/src/otel.ts, and is NOT the SDK defaults any more. The same change
+  # MIRRORS apps/api/src/http-duration-boundaries.ts, and is NOT the SDK defaults any more. The same change
   # that added the volume gate passed `httpDurationBoundaries` to `startOtel`, because a
   # top finite bucket of 10000 is exactly where a slow request goes to hide. The first
   # fifteen entries are the OTel JS defaults verbatim, so the low end a healthy p99 sits

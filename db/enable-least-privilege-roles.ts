@@ -38,6 +38,7 @@ try {
 import { Client } from 'pg';
 import { pgOptions } from './pg-ssl';
 import { resolveMigrationUrl } from './database-url';
+import { log } from './script-log';
 
 interface Target {
   role: string;
@@ -275,7 +276,7 @@ async function assertPrivilegesAreExactlyAsDeclared(admin: Client, role: string)
   if (problems.length > 0) throw new Error(problems.join('\n\n'));
 
   const tables = seen.size;
-  console.log(
+  log.info(
     `    ${role}: all four DML privileges on ${tables} tables, ` +
       `minus the declared restrictions on ${RESTRICTED_TABLES.length} of them.`,
   );
@@ -405,7 +406,7 @@ async function enableRole(
     await client.end();
   }
 
-  console.log(
+  log.info(
     `✅  ${role}: can log in, can read its tables, holds no privileged attributes, cannot run DDL.`,
   );
 }
@@ -418,7 +419,7 @@ async function run(): Promise<void> {
   try {
     adminUrl = resolveMigrationUrl();
   } catch (err) {
-    console.error(`❌  ${(err as Error).message}`);
+    log.error({ err }, (err as Error).message);
     process.exit(1);
   }
 
@@ -428,8 +429,8 @@ async function run(): Promise<void> {
   })).filter((r): r is { target: Target; password: string } => Boolean(r.password));
 
   if (requested.length === 0) {
-    console.error(
-      `❌  No role passwords supplied. Set at least one of: ${TARGETS.map((t) => t.envVar).join(', ')}.`,
+    log.error(
+      `No role passwords supplied. Set at least one of: ${TARGETS.map((t) => t.envVar).join(', ')}.`,
     );
     process.exit(1);
   }
@@ -445,7 +446,8 @@ async function run(): Promise<void> {
       await enableRole(adminUrl, admin, target, password);
     }
   } catch (err) {
-    console.error(`❌  ${redact((err as Error).message, secrets)}`);
+    // The message only, redacted: an `err` object would carry the unredacted text in its message and stack.
+    log.error(redact((err as Error).message, secrets));
     process.exitCode = 1;
   } finally {
     await admin.end();

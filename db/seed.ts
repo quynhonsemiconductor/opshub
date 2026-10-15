@@ -29,6 +29,7 @@ import { inArray, eq, sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { pgOptions } from './pg-ssl';
 import { resolveDatabaseUrl } from './database-url';
+import { log } from './script-log';
 import { permissions, roles, rolePermissions, userRoleAssignments } from './schema/authz';
 import { employees } from './schema/identity';
 import { user as identityUser } from './schema/identity-auth';
@@ -251,9 +252,7 @@ async function seedRbacCatalogInto(db: SeedDb): Promise<void> {
     }
   });
 
-  console.log(
-    `✅ RBAC catalogue seeded: ${PERMISSIONS.length} permissions | ${ROLES.length} roles`,
-  );
+  log.info(`✅ RBAC catalogue seeded: ${PERMISSIONS.length} permissions | ${ROLES.length} roles`);
 }
 
 /**
@@ -388,7 +387,7 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
       .onConflictDoNothing();
   }
 
-  console.log(`✅ Demo employees seeded: ${DEMO_EMPLOYEES.length} (one per role)`);
+  log.info(`✅ Demo employees seeded: ${DEMO_EMPLOYEES.length} (one per role)`);
 }
 
 /**
@@ -420,7 +419,7 @@ export async function seed(connectionUrl?: string): Promise<void> {
 // Run directly: pnpm db:seed
 if (process.argv[1]?.endsWith('seed.ts') || process.argv[1]?.endsWith('seed.js')) {
   seed().catch((err) => {
-    console.error('❌ Seed failed:', err);
+    log.error({ err }, 'Seed failed');
     process.exit(1);
   });
 }

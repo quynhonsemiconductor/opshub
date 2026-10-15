@@ -1,42 +1,17 @@
-// `.env` FIRST, above the OTel bootstrap: that bootstrap reads process.env directly,
-// and @nestjs/config does not load the file until ConfigModule initialises — far too
-// late. See @quynhonsemiconductor/platform-runtime's own header: this MUST stay
-// above the OTel bootstrap, and MUST come from the subpath, not the package root.
-import '@quynhonsemiconductor/platform-runtime/load-env';
-// The process role, before anything that loads @platform (which validates the environment on import).
-import './role';
-// OTel must be imported before any other module — registers auto-instrumentation
-import './otel';
-import { NestFactory } from '@nestjs/core';
-import { Logger as PinoLogger } from 'nestjs-pino';
-import { enableGracefulShutdown } from '@quynhonsemiconductor/platform-runtime';
-import { WorkerModule } from './worker.module';
+import { createWorkerApp } from '@quynhonsemiconductor/platform-runtime/bootstrap';
 
-async function main(): Promise<void> {
-  const app = await NestFactory.createApplicationContext(WorkerModule, {
-    bufferLogs: true,
-  });
-  app.useLogger(app.get(PinoLogger));
-
-  const logger = app.get(PinoLogger);
-  logger.log('OpsHub worker started (outbox relay + scheduled jobs)', 'Bootstrap');
-
-  // SIGTERM / SIGINT: `app.close()` (relays and crons stop, then the pool and cache close), telemetry flush, exit,
-  // bounded by SHUTDOWN_TIMEOUT_MS. The worker serves no HTTP, so there is no readiness flip or drain. The ONE owner
-  // of shutdown: no `app.enableShutdownHooks()` and no handler of our own, which closed the application twice.
-  enableGracefulShutdown(app);
-
-  process.on('unhandledRejection', (reason: unknown) => {
-    logger.error({ msg: 'Unhandled promise rejection', reason }, 'Bootstrap');
-  });
-
-  process.on('uncaughtException', (error: Error) => {
-    logger.error({ msg: 'Uncaught exception', error }, 'Bootstrap');
-    process.exit(1);
-  });
-}
-
-main().catch((err) => {
-  console.error('Fatal worker bootstrap error', err);
-  process.exit(1);
+// The whole bootstrap lives in the shared library (see apps/api/src/main.ts). The worker has no HTTP server, so it records no
+// `http.server.duration` and passes no histogram boundaries.
+void createWorkerApp({
+  // Declares this process as the worker BEFORE `@platform` loads (the worker holds the Graph credential and refuses ENTRA_CLIENT_SECRET).
+  before: async () => {
+    await import('./role');
+  },
+  module: () => import('./worker.module').then((m) => m.WorkerModule),
+  otel: {
+    // The api and the worker share one `.env`; the worker is named by its own variable, which is what OTEL_WORKER_SERVICE_NAME is for.
+    // OpenTelemetry and the logger both read it, so a log line and a span agree on the service.
+    serviceNameEnvVar: 'OTEL_WORKER_SERVICE_NAME',
+    defaultServiceName: 'opshub-worker',
+  },
 });

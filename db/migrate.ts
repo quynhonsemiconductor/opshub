@@ -16,6 +16,7 @@ import path from 'path';
 import { seed, seedRbacCatalog } from './seed';
 import { pgOptions } from './pg-ssl';
 import { resolveDatabaseUrl, resolveMigrationUrl } from './database-url';
+import { log } from './script-log';
 
 // Resolves DATABASE_MIGRATION_URL, else DATABASE_URL, else composes from the
 // DATABASE_* parts (the deployed path — credentials come straight from the RDS-managed
@@ -25,7 +26,7 @@ let url: string;
 try {
   url = resolveMigrationUrl();
 } catch (err) {
-  console.error(`❌  ${(err as Error).message}`);
+  log.error({ err }, (err as Error).message);
   process.exit(1);
 }
 
@@ -34,9 +35,9 @@ const db = drizzle(pool);
 
 async function run() {
   try {
-    console.log('Running migrations...');
+    log.info('Running migrations...');
     await migrate(db, { migrationsFolder: path.join(__dirname, 'migrations') });
-    console.log('✅  Migrations applied');
+    log.info('✅  Migrations applied');
 
     // Seed uses the app connection, not the migration URL (admin role), so a grant the
     // app role is missing fails here rather than succeeding as the owner and hiding it.
@@ -54,7 +55,7 @@ async function run() {
     // reference data the app depends on to authorize anything — ensure it in
     // EVERY environment, independent of SEED_ON_DEPLOY.
     await seedRbacCatalog(seedUrl);
-    console.log('✅  RBAC catalogue ensured');
+    log.info('✅  RBAC catalogue ensured');
 
     /**
      * Demo fixtures: login-able employees, sample assets, requests.
@@ -76,18 +77,18 @@ async function run() {
      */
     if (process.env['SEED_ON_DEPLOY'] === 'true') {
       if (process.env['NODE_ENV'] === 'production') {
-        console.warn(
+        log.warn(
           '⚠️  SEED_ON_DEPLOY=true but NODE_ENV=production — demo seed REFUSED. ' +
             'Deployed environments get the RBAC catalogue only; fixtures are for local ' +
             'development (pnpm db:seed) and CI.',
         );
       } else {
-        console.log('SEED_ON_DEPLOY=true — seeding demo fixtures...');
+        log.info('SEED_ON_DEPLOY=true — seeding demo fixtures...');
         await seed(seedUrl);
       }
     }
   } catch (err) {
-    console.error('❌  Migration failed', err);
+    log.error({ err }, 'Migration failed');
     process.exit(1);
   } finally {
     await pool.end();

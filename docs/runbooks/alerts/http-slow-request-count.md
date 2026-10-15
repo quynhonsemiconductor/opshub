@@ -40,7 +40,7 @@ fails the plan rather than letting that pass review, and it enforces a second ru
 well: the bucket may not sit BELOW the same environment's own p99 threshold, or this rule
 would count requests the latency rule considers acceptable and the two would contradict
 each other. `local.http_duration_buckets_ms` in the same file is the list of legal
-values. That list mirrors `apps/api/src/otel.ts`; if one moves, both move.
+values. That list mirrors `apps/api/src/http-duration-boundaries.ts`; if one moves, both move.
 
 ## First checks
 
