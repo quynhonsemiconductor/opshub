@@ -290,6 +290,14 @@ jobs:
           OTEL_ENABLED: 'false'
           OTEL_SERVICE_NAME: opshub-api-test
 
+      # The worker's logging conformance has its OWN environment (test/logging/worker-env.fixture.ts): the worker's schema refuses the API-only
+      # variables the step above sets. Only the two services it connects to are passed through.
+      - name: Worker logging conformance
+        run: pnpm test:logging-worker
+        env:
+          DATABASE_URL: postgresql://opshub_app:ci-opshub-app-least-privilege@localhost:5432/opshub_test?sslmode=disable
+          VALKEY_URL: redis://localhost:6379
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

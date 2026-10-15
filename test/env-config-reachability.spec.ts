@@ -56,6 +56,13 @@ const READ_BY_SHARED_PACKAGES = new Set([
   // Declared here so the schema validates them and the worker's schema can refuse them.
   'EDGE_CLIENT_IP_SECRET',
   'EDGE_CLIENT_IP_SECRET_PREVIOUS',
+  // `createHttpApp` / `createWorkerApp` (platform-runtime/bootstrap) read these from the environment BY CONVENTION, before Nest exists: the
+  // listen address, and the logger's `env`, level and pretty-printing. Declared here so the schema validates them.
+  'PORT',
+  'HOST',
+  'DEPLOYMENT_ENV',
+  'LOG_LEVEL',
+  'LOG_PRETTY',
 ]);
 
 /**

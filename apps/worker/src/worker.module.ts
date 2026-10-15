@@ -1,8 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
-import { LoggerModule } from 'nestjs-pino';
-import { createLoggerOptions } from '@quynhonsemiconductor/observability';
-import { PlatformModule, AppConfigService } from '@platform';
+import { PlatformModule } from '@platform';
 import { AuditModule } from '@modules/audit';
 import { NotificationsModule } from '@modules/notifications';
 import { WebhooksModule } from '@modules/webhooks';
@@ -22,19 +20,7 @@ import { BounceFeedbackService } from './email/bounce-feedback.service';
 
 @Module({
   imports: [
-    LoggerModule.forRootAsync({
-      inject: [AppConfigService],
-      useFactory: (config: AppConfigService) =>
-        createLoggerOptions({
-          serviceName: config.get('OTEL_WORKER_SERVICE_NAME'),
-          nodeEnv: config.get('NODE_ENV'),
-          // the DEPLOYMENT environment for the `env` field; NODE_ENV is production everywhere on purpose
-          deploymentEnv: config.get('DEPLOYMENT_ENV'),
-          serviceVersion: config.get('SERVICE_VERSION'),
-          level: config.get('LOG_LEVEL'),
-          pretty: config.get('LOG_PRETTY'),
-        }),
-    }),
+    // Logging is NOT wired here: `createWorkerApp` (main.ts) registers the shared pino logger around this module.
     ScheduleModule.forRoot(),
     PlatformModule,
     AuditModule,

@@ -1,11 +1,8 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
-import { createLoggerOptions } from '@quynhonsemiconductor/observability';
-import { LoggerModule } from 'nestjs-pino';
 import { ZodValidationPipe } from 'nestjs-zod';
 import {
   PlatformModule,
-  AppConfigService,
   GlobalExceptionFilter,
   REQUEST_CONTEXT,
   HttpLoggingInterceptor,
@@ -39,22 +36,7 @@ import { SecurityPostureModule } from '@modules/security-posture';
 
 @Module({
   imports: [
-    // The shared logger options (`@quynhonsemiconductor/observability`): trace correlation, the request context's
-    // `userId` / `correlationId` on every line, the shared redaction list, and the `service` / `env` / `version`
-    // fields. `autoLogging` is off: HttpLoggingInterceptor writes the one summary line per request.
-    LoggerModule.forRootAsync({
-      inject: [AppConfigService],
-      useFactory: (config: AppConfigService) =>
-        createLoggerOptions({
-          serviceName: config.get('OTEL_SERVICE_NAME'),
-          nodeEnv: config.get('NODE_ENV'),
-          // the DEPLOYMENT environment for the `env` field; NODE_ENV is production everywhere on purpose
-          deploymentEnv: config.get('DEPLOYMENT_ENV'),
-          serviceVersion: config.get('SERVICE_VERSION'),
-          level: config.get('LOG_LEVEL'),
-          pretty: config.get('LOG_PRETTY'),
-        }),
-    }),
+    // Logging is NOT wired here: `createHttpApp` (main.ts) registers the shared pino logger around this module.
     PlatformModule,
     AuditModule,
     NotificationsModule,

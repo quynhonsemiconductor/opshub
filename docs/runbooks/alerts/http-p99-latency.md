@@ -20,7 +20,7 @@ already sent someone down the wrong path on the sibling product:
   clamps there. When the boundaries ended at 10000, a page reading `A=10000` meant only
   "at least one request took longer than 10 seconds, and the histogram cannot say how
   much longer" — the real value could have been 11 seconds or 4 minutes. The view is now
-  widened to 60000 (`apps/api/src/otel.ts`, mirrored by
+  widened to 60000 (`apps/api/src/http-duration-boundaries.ts`, mirrored by
   `local.http_duration_buckets_ms`), so the resolution is better, but the clamp is a
   property of the TOP bucket rather than of any particular number and still applies
   there. To find an actual duration, go to the traces or the request log for the window,

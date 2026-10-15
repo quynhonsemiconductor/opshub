@@ -1,25 +1,8 @@
 /**
- * OpenTelemetry bootstrap for the API — must be the very first import in main.ts, so
- * auto-instrumentation patches HTTP, pg, ioredis and the AWS SDK before any module loads
- * them.
- *
- * The implementation is shared, in `@quynhonsemiconductor/observability`. Imported from its `/otel`
- * subpath rather than the package root on purpose: the root barrel reaches Nest and pino,
- * which would then be required BEFORE instrumentation is installed — defeating the reason
- * this import sits at the top of main.ts.
- *
- * This replaced a local copy in libs/platform. That copy had drifted behind the package in
- * ways nobody could see from reading it: no sampler (so `OTEL_SAMPLING_PROBABILITY` was
- * configured and ignored until #110 added one here), no `service.namespace` or
- * `service.instance.id`, no deployment-environment attribute, and no batch tuning. Sharing
- * one implementation is what stops that happening again — and it is why the sampler spec
- * that lived beside the local copy is gone: the behaviour it pinned is the package's now,
- * and duplicating the assertion here would only pin our copy of someone else's decision.
- *
- * Shutdown: `enableGracefulShutdown()` (platform-runtime) flushes telemetry itself, after `app.close()`, so there is
- * nothing to call from main.ts and nothing re-exported from here.
+ * The API's OpenTelemetry options. The bootstrap itself (OpenTelemetry first, then the module, the pino logger, shutdown) is
+ * `createHttpApp` in `@quynhonsemiconductor/platform-runtime/bootstrap`; this file holds only what is opshub's own. It imports nothing,
+ * so loading it from main.ts cannot pull pg/http/ioredis in ahead of the instrumentation.
  */
-import { startOtel } from '@quynhonsemiconductor/observability/otel';
 
 /**
  * Inbound-HTTP latency histogram boundaries, in milliseconds.
@@ -76,16 +59,9 @@ import { startOtel } from '@quynhonsemiconductor/observability/otel';
  * COST. 19 boundaries against the default 15 means four extra `_bucket` series per label
  * combination on one instrument. Negligible next to being able to read the p99 at all.
  */
-const HTTP_DURATION_BOUNDARIES_MS = [
+export const HTTP_DURATION_BOUNDARIES_MS = [
   // OTel JS defaults, preserved verbatim.
   0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000,
   // Extensions covering opshub's real request-path timeout budgets.
   15000, 30000, 45000, 60000,
 ];
-
-// `OTEL_SERVICE_NAME` overrides this, and the stack sets it per service
-// (`<product>-api`), so the default is the local-development value.
-startOtel({
-  defaultServiceName: 'opshub-api',
-  httpDurationBoundaries: HTTP_DURATION_BOUNDARIES_MS,
-});

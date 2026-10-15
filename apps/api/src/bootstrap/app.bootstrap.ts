@@ -4,7 +4,6 @@ import fastifyCsrf from '@fastify/csrf-protection';
 import fastifyHelmet from '@fastify/helmet';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { Logger } from 'nestjs-pino';
 import { assertEdgeClientIpEnv } from '@quynhonsemiconductor/platform-http';
 import { enableHealth } from '@quynhonsemiconductor/platform-runtime';
 import {
@@ -29,9 +28,6 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
   // instead of surfacing as a 500 on whichever request arrives first. (platform-http's own guard does the same
   // in its bootstrap hook; opshub's guards are local, so the check is made explicitly.)
   assertEdgeClientIpEnv();
-
-  app.useLogger(app.get(Logger));
-  app.flushLogs();
 
   await app.register(fastifyHelmet, {
     contentSecurityPolicy: {
