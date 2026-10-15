@@ -649,7 +649,7 @@ variable "observability" {
     `debug_metrics`): the collector sidecars also log every metric datapoint, with its timestamp, to
     their CloudWatch stream, to find which writer emits duplicate-timestamp samples. It costs
     CloudWatch ingestion (~5 GB/day) and logs application data. Default false; never set it in
-    production; turn it off by deleting the line in live/develop (runbook: ci/docs).
+    production; turn it off by deleting the line in live/develop (runbook: quynhonsemiconductor/ci docs/runbooks/otel-duplicate-timestamps.md).
   EOT
   type = object({
     otlp_endpoint        = optional(string, "")
