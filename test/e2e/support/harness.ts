@@ -21,8 +21,8 @@
  * Prereqs: `docker compose -f docker-compose.dev.yml up -d` and `pnpm db:seed`.
  */
 import 'reflect-metadata';
-import { NestFactory } from '@nestjs/core';
-import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { prepareHttpApp } from '@quynhonsemiconductor/platform-runtime/bootstrap';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { CSRF_SECRET_COOKIE, RATE_LIMIT_TIERS, SESSION_COOKIE } from '@platform';
 import { AppModule } from '../../../apps/api/src/app.module';
@@ -87,12 +87,13 @@ export const FIXTURE = {
 } as const;
 
 export async function createTestApp(): Promise<NestFastifyApplication> {
-  const app = await NestFactory.create<NestFastifyApplication>(
-    AppModule,
-    new FastifyAdapter({ logger: false, trustProxy: true }),
-    { bufferLogs: true, logger: false },
-  );
-  await bootstrapApp(app);
+  // The SAME path production takes (`createHttpApp` minus listening): the shared bootstrap registers the one pino logger around `AppModule`.
+  // `AppModule` no longer registers logging itself, so a bare `NestFactory.create(AppModule)` here would have no `PinoLogger` for the modules
+  // that inject it, and would not test the app that ships. `LOG_LEVEL` comes from the environment (the suite sets `fatal`).
+  const app = await prepareHttpApp({
+    module: () => Promise.resolve(AppModule),
+    configure: bootstrapApp,
+  });
   await app.init();
   // Fastify only builds its routing table and runs plugin `onReady` hooks here. Without
   // it `inject()` on a freshly created app can 404 a route that is in fact registered.
