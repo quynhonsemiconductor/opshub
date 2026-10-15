@@ -68,13 +68,25 @@ async function subscribe(url = 'http://127.0.0.1:9/hook'): Promise<string> {
   return row.id;
 }
 
+/**
+ * `nextAttemptAt` is set EXPLICITLY, a minute in the past. The column defaults to the DATABASE's `now()` and the claim
+ * compares it with the HOST's clock; the Postgres container's runs a couple of milliseconds ahead (measured: median
+ * +1.7 ms, never behind), so a row claimed right after it is inserted is "in the future" and not due. That made these
+ * tests fail about one full run in three. Production never claims a row milliseconds after inserting it.
+ */
 async function queue(
   subscriptionId: string,
   extra: Partial<typeof webhookDeliveries.$inferInsert> = {},
 ): Promise<string> {
   const [row] = await db
     .insert(webhookDeliveries)
-    .values({ subscriptionId, eventType: 'request.approved', payload: { n: 1 }, ...extra })
+    .values({
+      subscriptionId,
+      eventType: 'request.approved',
+      payload: { n: 1 },
+      nextAttemptAt: new Date(Date.now() - 60_000),
+      ...extra,
+    })
     .returning({ id: webhookDeliveries.id });
   return row.id;
 }
