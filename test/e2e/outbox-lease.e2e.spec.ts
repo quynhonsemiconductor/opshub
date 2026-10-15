@@ -74,6 +74,16 @@ const makeRelay = (options: RelayOptions = {}) => {
   return { relay, reconcile };
 };
 
+/*
+ * `nextAttemptAt` is set EXPLICITLY, a minute in the past. The column defaults to the DATABASE's `now()`, and the claim
+ * compares it with the HOST's clock; the Postgres container's clock runs a couple of milliseconds AHEAD of the host's
+ * (measured: median +1.7 ms, never behind, up to +22 ms). A task claimed within that gap of being inserted, which is
+ * every test here, is "in the future" and not due, so the relay finds nothing: the spec failed about one full run in
+ * four with `reconcile` called 0 times, or an ordering assertion off by one task. Production never claims a row
+ * milliseconds after inserting it.
+ */
+const DUE = () => new Date(Date.now() - 60_000);
+
 async function insertTask(
   employeeId: string,
   extra: Partial<typeof graphTaskOutbox.$inferInsert> = {},
@@ -84,6 +94,7 @@ async function insertTask(
       kind: GRAPH_TASK.ACCOUNT_RECONCILE,
       payload: { employeeId },
       orderingKey: employeeId,
+      nextAttemptAt: DUE(),
       ...extra,
     })
     .returning();
@@ -290,6 +301,7 @@ describe('long tasks never hold up account tasks, against PostgreSQL', () => {
         kind: GRAPH_TASK.SHADOW_IT_SCAN,
         payload: {},
         dedupeKey: GRAPH_TASK.SHADOW_IT_SCAN,
+        nextAttemptAt: DUE(),
       })
       .returning()
       .then((r) => r[0]);
@@ -328,6 +340,7 @@ describe('long tasks never hold up account tasks, against PostgreSQL', () => {
         kind: GRAPH_TASK.SHADOW_IT_SCAN,
         payload: {},
         dedupeKey: GRAPH_TASK.SHADOW_IT_SCAN,
+        nextAttemptAt: DUE(),
       })
       .returning()
       .then((r) => r[0]);
@@ -473,6 +486,7 @@ describe('the abandoned-row reaper is scoped to its own relay, against PostgreSQ
         kind: GRAPH_TASK.SHADOW_IT_SCAN,
         payload: {},
         dedupeKey: GRAPH_TASK.SHADOW_IT_SCAN,
+        nextAttemptAt: DUE(),
         ...lapsed,
       })
       .returning()
@@ -496,6 +510,7 @@ describe('deferring on a held lock is bounded, against PostgreSQL', () => {
         kind: GRAPH_TASK.SHADOW_IT_SCAN,
         payload: {},
         dedupeKey: GRAPH_TASK.SHADOW_IT_SCAN,
+        nextAttemptAt: DUE(),
         ...extra,
       })
       .returning()
