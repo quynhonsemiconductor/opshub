@@ -410,7 +410,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4
 
       # THE CACHE IS WRITTEN FROM main ONLY. Every PR push used to write a mode=max cache for each of the images, into a repository-wide
       # 10 GB cap shared with everything else, and a PR's entry is readable by that PR alone. Writing it evicted the entries main's
