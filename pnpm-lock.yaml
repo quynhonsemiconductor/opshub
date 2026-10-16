@@ -116,7 +116,7 @@ importers:
         specifier: ^1.43.0
         version: 1.43.0
       '@quynhonsemiconductor/identity':
-        specifier: 8.2.0
+        specifier: ^8.2.0
         version: 8.2.0(e8ad1db3e675537b3ca625de75563bfe)
       '@quynhonsemiconductor/observability':
         specifier: ^0.6.0
@@ -125,10 +125,10 @@ importers:
         specifier: ^3.2.0
         version: 3.2.0(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(ioredis@5.11.1)
       '@quynhonsemiconductor/platform-db':
-        specifier: 0.1.1
+        specifier: ^0.1.1
         version: 0.1.1(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@quynhonsemiconductor/observability@0.6.0(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.1)(@opentelemetry/auto-instrumentations-node@0.79.0(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1)))(@opentelemetry/exporter-metrics-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-node@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.10.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(nestjs-pino@4.6.1(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2))(pino@10.3.1))(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.22.0))(pg@8.22.0)
       '@quynhonsemiconductor/platform-http':
-        specifier: 4.3.0
+        specifier: ^4.3.0
         version: 4.3.0(ca3dbbcf3d50cf04b0aba96e446c4e8e)
       '@quynhonsemiconductor/platform-runtime':
         specifier: ^0.3.0
@@ -282,7 +282,7 @@ importers:
         specifier: ^5.2.8
         version: 5.2.8
       '@quynhonsemiconductor/platform-http':
-        specifier: 4.3.0
+        specifier: ^4.3.0
         version: 4.3.0(ca3dbbcf3d50cf04b0aba96e446c4e8e)
       '@tanstack/react-query':
         specifier: ^5.101.0
