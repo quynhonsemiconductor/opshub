@@ -8,9 +8,11 @@
  *
  * Scope: the peers OF our own packages. Third-party unmet peers (which every large tree has) are not this check's business.
  *
- * Zero dependencies: reads node_modules the way the package itself would resolve its peers (from its real path, walking up).
- * Supported peer ranges: `>=`, `>`, `<=`, `<`, `^`, `~`, an exact version, `*`, whitespace-separated AND (`>=0.45 <1`) and `||`. Anything else FAILS the check, loudly,
- * so a new range form is added here rather than silently passing.
+ * Reads node_modules the way the package itself would resolve its peers (from its real path, walking up), for EVERY installed copy of every
+ * package in the scope (`node_modules/.pnpm/@quynhonsemiconductor+*`), not only the one linked at the root: a workspace app (apps/web) or a
+ * transitive install can hold a different version with different peers.
+ * Ranges are checked with `semver` (includePrerelease), so a canary `0.5.0-pr.245.abc` does NOT satisfy `>=0.5.0`; a range semver cannot
+ * parse FAILS the check, loudly, rather than passing.
  */
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
