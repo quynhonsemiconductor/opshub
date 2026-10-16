@@ -599,6 +599,12 @@ module "worker" {
   # No listener rule: the worker serves no HTTP traffic.
   attach_alb = false
 
+  # The worker has no HTTP listener, so check the node process is alive instead; the same command rova's worker passes
+  # (stack-conformance reported this as the one argument opshub was missing). `pgrep` is busybox in the node:alpine image
+  # (checked: `pgrep -x node` exits 0 while node runs and 1 once it is gone), and the Dockerfile runs node under tini, so a
+  # dead node already ends the container; this makes ECS see the task as unhealthy rather than only as stopped.
+  health_check_command = "pgrep -x node || exit 1"
+
   # No tunnel sidecar here — the worker is a relay with no HTTP surface. The collector is
   # still wanted: the outbox and webhook relays are exactly the code whose latency and
   # failures are invisible from a request trace.
