@@ -25,8 +25,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { prepareHttpApp } from '@quynhonsemiconductor/platform-runtime/bootstrap';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { CSRF_SECRET_COOKIE, RATE_LIMIT_TIERS, SESSION_COOKIE } from '@platform';
-import { AppModule } from '../../../apps/api/src/app.module';
-import { bootstrapApp } from '../../../apps/api/src/bootstrap/app.bootstrap';
+import { apiAppOptions } from '../../../apps/api/src/app-options';
 
 /**
  * Seeded demo employees (`db/seed.ts`), addressed by the tier they represent rather than
@@ -87,13 +86,10 @@ export const FIXTURE = {
 } as const;
 
 export async function createTestApp(): Promise<NestFastifyApplication> {
-  // The SAME path production takes (`createHttpApp` minus listening): the shared bootstrap registers the one pino logger around `AppModule`.
-  // `AppModule` no longer registers logging itself, so a bare `NestFactory.create(AppModule)` here would have no `PinoLogger` for the modules
-  // that inject it, and would not test the app that ships. `LOG_LEVEL` comes from the environment (the suite sets `fatal`).
-  const app = await prepareHttpApp({
-    module: () => Promise.resolve(AppModule),
-    configure: bootstrapApp,
-  });
+  // EXACTLY what production starts (`createHttpApp(apiAppOptions)` minus listening): the role hook, the lazy `AppModule`, the OTel options, the 10 MB
+  // body limit, and `configure` (correlation id, then `bootstrapApp`), around the one shared pino logger. The environment is the suite's
+  // (`LOG_LEVEL=fatal`). A harness that rebuilt these by hand would test an app that does not ship.
+  const app = await prepareHttpApp(apiAppOptions);
   await app.init();
   // Fastify only builds its routing table and runs plugin `onReady` hooks here. Without
   // it `inject()` on a freshly created app can 404 a route that is in fact registered.
