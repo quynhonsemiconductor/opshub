@@ -2,7 +2,7 @@
 # Web · CI — browser end-to-end flows against a live API and a seeded database
 #
 # The SPA had NO workflow of its own. Its typecheck/lint run inside the backend
-# build and `codegen:check` lives in Backend · CI, but nothing ever opened a
+# build and `codegen:check` used to live in Backend · CI (it now runs below), but nothing ever opened a
 # browser: every screen was unverified above the API boundary, so a broken auth
 # bootstrap, a form that posts the wrong shape, or a list that never re-fetches
 # shipped green.
@@ -66,6 +66,8 @@ jobs:
   # (its `paths-ignore`) cannot affect what this workflow builds, so the heavy jobs are skipped and one cheap gate reports instead.
   # A push to main ALWAYS runs everything (deploys wait for that run), and every doubt (API error, empty file list, any file not on
   # the list) runs everything too: see actions/changed-paths in the ci repo.
+  # WEB CI IGNORES ONLY DOCS. Its E2E job builds and runs the REAL API and migrations, the only full-stack end-to-end in the repo, so
+  # a change to apps/api, libs or db must still run it. (Backend CI can skip web-only changes; the reverse is not true.)
   changes:
     name: Which parts changed
     runs-on: ubuntu-latest
@@ -83,18 +85,11 @@ jobs:
             **/*.md
             docs/**
             .claude/**
-            apps/api/**
-            apps/worker/**
-            libs/**
-            db/**
-            Dockerfile
-            nest-cli.json
-            tsconfig.migrator.json
-          # A release-please PR only edits versions and the changelog (the push to main it becomes runs everything), and a
-          # Renovate PR that touches nothing but workflow files is an action bump. Their own security/lint workflows still run.
+          # A release-please PR: only when the author is the release bot (a branch name is chosen by whoever opens the PR, so the
+          # prefix alone proves nothing) AND the diff is the changelog, the manifest and `version` lines. The push to main it becomes
+          # runs everything. Renovate PRs are NOT skipped: an action bump must be exercised on its PR.
           skip-heads: |
-            release-please--=**
-            renovate/=.github/workflows/**,.github/actions/**
+            release-please--@qnsc-automation[bot]=CHANGELOG.md,.release-please-manifest.json,version-only:**/package.json
 
   # ─────────────────────────────────────────────────────────────────────────
   # 1. Lint + typecheck (fast gate — no deps needed)
@@ -380,6 +375,18 @@ jobs:
             sleep 1
           done
           echo "API failed to start"; cat /tmp/api.log; exit 1
+
+      # The SPA's API client is generated from the API's OpenAPI spec and COMMITTED, so it can silently fall behind a DTO change, or be
+      # hand-edited, with nothing to notice: `tsc` can pass against stale build info and a route the client has never heard of only fails
+      # at runtime. Regenerating from the running API and diffing is the cheapest proof the two agree. This used to run in Backend CI,
+      # which skips web-only changes; it lives here, next to the running API, so it runs for every change to either side.
+      # Fix a failure with `pnpm --filter opshub-web codegen` against a local API, then commit.
+      - name: Generated web client matches the spec
+        run: |
+          curl -sf http://localhost:3001/api/docs-json -o "$RUNNER_TEMP/openapi.json"
+          pnpm --filter opshub-web codegen:check
+        env:
+          OPENAPI_SPEC: ${{ runner.temp }}/openapi.json
 
       # ── Playwright browser ────────────────────────────────────────────────────
       #

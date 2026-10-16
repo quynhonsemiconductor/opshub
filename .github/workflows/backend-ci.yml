@@ -96,11 +96,11 @@ jobs:
             docs/**
             .claude/**
             apps/web/**
-          # A release-please PR only edits versions and the changelog (the push to main it becomes runs everything), and a
-          # Renovate PR that touches nothing but workflow files is an action bump. Their own security/lint workflows still run.
+          # A release-please PR: only when the author is the release bot (a branch name is chosen by whoever opens the PR, so the
+          # prefix alone proves nothing) AND the diff is the changelog, the manifest and `version` lines. The push to main it becomes
+          # runs everything. Renovate PRs are NOT skipped: an action bump must be exercised on its PR.
           skip-heads: |
-            release-please--=**
-            renovate/=.github/workflows/**,.github/actions/**
+            release-please--@qnsc-automation[bot]=CHANGELOG.md,.release-please-manifest.json,version-only:**/package.json
 
   # ─────────────────────────────────────────────────────────────────────────
   # 1. Lint + typecheck (fast gate — no DB needed)
@@ -551,20 +551,9 @@ jobs:
           OTEL_ENABLED: 'false'
           OTEL_SERVICE_NAME: opshub-api
 
-      # The SPA's API client is generated from this very spec and COMMITTED, so it can
-      # silently fall behind a DTO change with nothing to notice. `tsc` does not: on an
-      # incremental build it can pass against stale build info, and a route the client has
-      # never heard of only fails at runtime as `Cannot POST /v1/...`. Regenerating here and
-      # diffing is the cheapest proof that the two agree.
-      #
-      # Reads the spec file just captured, not a live server, so it is deterministic. Fix a
-      # failure with `pnpm --filter opshub-web codegen` against a local API, then commit.
-      #
-      # Ported from rally, where the same gap cost real debugging time twice in one day.
-      - name: Generated web client matches the spec
-        run: pnpm --filter opshub-web codegen:check
-        env:
-          OPENAPI_SPEC: ${{ github.workspace }}/openapi.json
+      # `codegen:check` (the generated web client matches this spec) moved to Web CI's e2e job: the files it guards live in
+      # apps/web, which this workflow skips for web-only changes, and a web-only edit to the generated client is exactly the case
+      # that must still be checked. Web CI builds and runs the same API, so it has the same spec.
 
       - name: Upload OpenAPI spec artifact
         uses: quynhonsemiconductor/ci/actions/publish-openapi-spec@v1
