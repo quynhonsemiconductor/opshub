@@ -239,6 +239,9 @@ importers:
       prettier:
         specifier: ^3.9.4
         version: 3.9.4
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
       supertest:
         specifier: ^7.0.0
         version: 7.2.2
