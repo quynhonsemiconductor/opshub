@@ -1,6 +1,6 @@
 # Alert: scheduled-job-failed
 
-A scheduled job (anything that runs through `ExclusiveJob`: the crons and, in opshub, the Graph syncs) threw. `job_failures_total{job}` increased in
+A scheduled job (anything that runs through `ExclusiveJob`: the crons and, in opshub, the Graph syncs) threw. `job_failures_total{job_name}` increased in
 the last hour, per job, with **no volume floor**.
 
 ## What this means
@@ -11,7 +11,7 @@ last failure, so a daily job that failed once is visible all morning.
 
 ## First checks
 
-1. The alert names the job (`job` label). Find its failure in the worker log: Logs Explorer, `service_name="<product>-worker"`, `level="error"`,
+1. The alert names the job (`job_name` label; observability >= 0.6.0. Before that every job of the worker shared one series and the alert cannot name it: read the worker log). Find its failure in the worker log: Logs Explorer, `service_name="<product>-worker"`, `level="error"`,
    `context` or `msg` naming the job. A failure raised **before** the job's own code (the lock) logs as `[Scheduler] ...` rather than under the job.
 2. Did it start at a deploy? Compare with the Deploys annotation. A dependency upgrade that changes a shared primitive fails *every* job at once:
    on 2026-10-15 platform-runtime 0.2.0 called `CacheService.tryLock`, which does not exist before platform-cache 3.2.0, and every `ExclusiveJob` failed with

@@ -2247,19 +2247,31 @@ module "alerts" {
     # gated on `min_samples_5m` job runs - but only ExclusiveJob users are timed by JobMetrics (the outbox relays are not), and they run once an
     # hour, once a day, or every few minutes, so a 5-minute window never holds the floor's worth of runs and that rule cannot fire. It did
     # not when `this.cache.tryLock is not a function` failed EVERY scheduled job for 14 hours on develop (2026-10-15): no alert.
-    # This one has no floor: any failure of a scheduled job in the last hour, per job (`{{ $labels.job }}` names it), held for 5m so a single
-    # transient blip on a 5-minute job still pages only if it persisted; a daily job that fails once stays firing for the hour after.
-    # Healthy, the series does not exist and the rule's no-data state is OK. The first failure of a job that has never failed since the worker
-    # started creates the series at 1, which `increase` cannot see: it is the SECOND failure that fires (observability >=0.5.1 adds the series
-    # at 0 before each run, which removes that blind spot).
+    # This one has no floor: any failure of a scheduled job in the last hour, per job (`{{ $labels.job_name }}` names it).
+    #
+    # `job_name`, not `job`: through OTLP -> Prometheus `job` is overwritten with service.namespace/service.name, so a metric attribute called
+    # `job` collapsed every cron of a worker into one series (observability < 0.6.0). From 0.6.0 the attribute is `job_name`; until a product runs
+    # that release the series is still one per worker: this rule still fires, but with no job name (read the worker log).
+    #
+    # THE BLIND SPOT, and why the expression is shaped this way. A counter first added to by its first failure appears at 1, and `increase()` sees
+    # no change in a series' first sample. observability >= 0.5.1 creates the series at 0 before each run, which covers a failure after an earlier
+    # run; but the exporter sends every 30 s, so a job whose VERY FIRST run after a pod start fails exports 0 and 1 in the same batch and still
+    # starts at 1. So the value is `increase()` PLUS, for a series that did not exist an hour ago (`X unless X offset 1h`), its current value (the
+    # failures since it appeared). The obvious `increase(X) or (X unless X offset 1h)` does NOT work: a new series with two or more samples has an
+    # `increase` result (0), so `or` never reaches the right side. Both shapes were run through promtool (prom/prometheus v3.5.0) against a new
+    # series appearing at 1, a series at 0 then failing, an old constant series (no alert), a new series at 0 (no alert) and another environment.
+    #
+    # `for = "5m"` only delays the page by five minutes; it does NOT filter one-off failures. The one-hour `increase` window means a job that
+    # failed once stays above zero for an hour, so a single failure of an hourly or daily job pages. That is intended: a scheduled job that
+    # threw has not done its work. Healthy, the series does not exist and the no-data state is OK.
     {
       name        = "scheduled-job-failed"
-      promql      = "sum by (job) (increase(job_failures_total{deployment_environment_name=\"${var.env}\"}[1h]))"
+      promql      = "sum by (job_name) (increase(job_failures_total{deployment_environment_name=\"${var.env}\"}[1h])) + (sum by (job_name) (job_failures_total{deployment_environment_name=\"${var.env}\"} unless job_failures_total{deployment_environment_name=\"${var.env}\"} offset 1h) or sum by (job_name) (increase(job_failures_total{deployment_environment_name=\"${var.env}\"}[1h])) * 0)"
       for         = "5m"
       op          = "gt"
       threshold   = 0
       severity    = "warning"
-      summary     = "Scheduled job {{ $labels.job }} failed in the last hour in ${var.env} - it throws before or while doing its work, so what it does (a sweep, a sync, a purge) is not being done. The exception is in the worker log (`level=error`, `context` = the job)."
+      summary     = "Scheduled job {{ $labels.job_name }} failed in the last hour in ${var.env} - it throws before or while doing its work, so what it does (a sweep, a sync, a purge) is not being done. The exception is in the worker log (`level=error`, `context` = the job)."
       runbook_url = "${local.runbook_base_url}/scheduled-job-failed.md"
     },
     {
