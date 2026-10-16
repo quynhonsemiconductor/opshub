@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['test/logging/**/*.conformance.spec.ts'],
+    include: ['test/logging/**/*.conformance.spec.ts', 'test/worker/**/*.worker.spec.ts'],
     passWithNoTests: false,
     pool: 'forks',
     setupFiles: ['./test/logging/worker-env.fixture.ts'],
