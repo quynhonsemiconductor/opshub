@@ -3,6 +3,10 @@
 Ratio of `job_failures_total` to `job_runs_total` over 5 minutes has crossed the
 environment's threshold (5% prod / 10% develop) for 5 minutes straight.
 
+> **Limit.** This is a ratio over five minutes and is gated on a minimum number of job runs in that window (`min_samples_5m`). Only scheduled
+> jobs that run through `ExclusiveJob` are counted here (outbox relays are not), and they run every few minutes to once a day, so the gate is
+> rarely open. A single failing scheduled job is caught by `scheduled-job-failed`, which has no floor.
+
 ## What this means
 
 A meaningful share of background jobs (cron jobs — security-posture sync, compliance

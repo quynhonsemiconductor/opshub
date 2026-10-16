@@ -2243,6 +2243,25 @@ module "alerts" {
       summary     = "Outbox relay {{ $labels.relay }} has failed its pass continuously for 10m in ${var.env} - a claim query or the database connection is failing before any row is reached, so nothing is delivered. The error is in the worker log (`level=error`, the relay's class name)."
       runbook_url = "${local.runbook_base_url}/outbox-relay-failing.md"
     },
+    # A scheduled job (an `ExclusiveJob` user) that FAILED, whatever the volume. `worker-job-failure-rate` below is a RATIO over a 5-minute window
+    # gated on `min_samples_5m` job runs - but only ExclusiveJob users are timed by JobMetrics (the outbox relays are not), and they run once an
+    # hour, once a day, or every few minutes, so a 5-minute window never holds the floor's worth of runs and that rule cannot fire. It did
+    # not when `this.cache.tryLock is not a function` failed EVERY scheduled job for 14 hours on develop (2026-10-15): no alert.
+    # This one has no floor: any failure of a scheduled job in the last hour, per job (`{{ $labels.job }}` names it), held for 5m so a single
+    # transient blip on a 5-minute job still pages only if it persisted; a daily job that fails once stays firing for the hour after.
+    # Healthy, the series does not exist and the rule's no-data state is OK. The first failure of a job that has never failed since the worker
+    # started creates the series at 1, which `increase` cannot see: it is the SECOND failure that fires (observability >=0.5.1 adds the series
+    # at 0 before each run, which removes that blind spot).
+    {
+      name        = "scheduled-job-failed"
+      promql      = "sum by (job) (increase(job_failures_total{deployment_environment_name=\"${var.env}\"}[1h]))"
+      for         = "5m"
+      op          = "gt"
+      threshold   = 0
+      severity    = "warning"
+      summary     = "Scheduled job {{ $labels.job }} failed in the last hour in ${var.env} - it throws before or while doing its work, so what it does (a sweep, a sync, a purge) is not being done. The exception is in the worker log (`level=error`, `context` = the job)."
+      runbook_url = "${local.runbook_base_url}/scheduled-job-failed.md"
+    },
     {
       name        = "worker-job-failure-rate"
       promql      = "(sum(rate(job_failures_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(job_runs_total{deployment_environment_name=\"${var.env}\"}[5m])) and on() (sum(rate(job_runs_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
