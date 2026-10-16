@@ -12,6 +12,7 @@ import 'reflect-metadata';
 import { describe, it } from 'vitest';
 import { runLoggingConformance } from '@quynhonsemiconductor/observability/testing';
 import { prepareHttpApp } from '@quynhonsemiconductor/platform-runtime/bootstrap';
+import { apiAppOptions } from '../../apps/api/src/app-options';
 
 const ENV = {
   ...process.env,
@@ -28,21 +29,8 @@ describe('logging conformance: opshub-api (real module, shared bootstrap)', () =
     await runLoggingConformance({
       expected: { service: 'opshub-api', env: 'develop', version: 'sha-conformance' },
       boot: async (logStream) => {
-        const app = await prepareHttpApp({
-          before: async () => {
-            await import('../../apps/api/src/role');
-          },
-          module: () => import('../../apps/api/src/app.module').then((m) => m.AppModule),
-          env: ENV,
-          logStream,
-          http: { bodyLimit: 10 * 1024 * 1024 },
-          configure: async (a) => {
-            const { enableCorrelationId } = await import('@quynhonsemiconductor/platform-http');
-            const { bootstrapApp } = await import('../../apps/api/src/bootstrap/app.bootstrap');
-            enableCorrelationId(a);
-            await bootstrapApp(a);
-          },
-        });
+        // The SAME options object main.ts starts the process with; only the environment and the log sink are the test's.
+        const app = await prepareHttpApp({ ...apiAppOptions, env: ENV, logStream });
         await app.init();
         await app.getHttpAdapter().getInstance().ready();
         return {
