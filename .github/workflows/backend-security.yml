@@ -63,7 +63,11 @@ jobs:
     uses: quynhonsemiconductor/ci/.github/workflows/security.yml@v1
     with:
       product: opshub
-      image_target: api
+      # Gitleaks + osv-scanner + Semgrep as ONE job; the required check is now
+      # `security / Security scans (Gitleaks, osv-scanner, Semgrep)`.
+      combine: true
+      # Trivy runs in `Backend CI`'s Docker build job, on the image it already builds, instead of building it again here.
+      scan_container: false
       # Semgrep runs report-only for now: findings are in shared infra/config
       # (workflow action tags, dependabot/pnpm/npm supply-chain hardening, pg-ssl
       # TLS, editor sanitisation) and are being addressed org-wide separately.
@@ -79,3 +83,4 @@ jobs:
     uses: quynhonsemiconductor/ci/.github/workflows/actions-security.yml@v1
     with:
       blocking: true
+      combine: true # actionlint + zizmor as ONE job; the required check is now `actions-security / Workflow security (actionlint, zizmor)`
