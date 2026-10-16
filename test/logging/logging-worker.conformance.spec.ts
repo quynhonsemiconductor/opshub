@@ -10,6 +10,7 @@ import 'reflect-metadata';
 import { describe, it } from 'vitest';
 import { runLoggingConformance } from '@quynhonsemiconductor/observability/testing';
 import { prepareWorkerApp } from '@quynhonsemiconductor/platform-runtime/bootstrap';
+import { workerAppOptions } from '../../apps/worker/src/worker-options';
 
 // The environment is the fixture's (worker-env.fixture.ts); nothing is added here.
 const ENV = process.env;
@@ -19,18 +20,8 @@ describe('logging conformance: opshub-worker (real module, shared bootstrap)', (
     await runLoggingConformance({
       expected: { service: 'opshub-worker', env: 'develop', version: 'sha-conformance' },
       boot: async (logStream) => ({
-        app: await prepareWorkerApp({
-          before: async () => {
-            await import('../../apps/worker/src/role');
-          },
-          module: () => import('../../apps/worker/src/worker.module').then((m) => m.WorkerModule),
-          env: ENV,
-          otel: {
-            serviceNameEnvVar: 'OTEL_WORKER_SERVICE_NAME',
-            defaultServiceName: 'opshub-worker',
-          },
-          logStream,
-        }),
+        // The SAME options object main.ts starts the process with; only the environment and the log sink are the test's.
+        app: await prepareWorkerApp({ ...workerAppOptions, env: ENV, logStream }),
       }),
     });
   });
