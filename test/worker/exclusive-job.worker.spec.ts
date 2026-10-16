@@ -18,20 +18,17 @@ import { ExclusiveJob } from '@quynhonsemiconductor/platform-runtime';
 import { prepareWorkerApp } from '@quynhonsemiconductor/platform-runtime/bootstrap';
 import type { INestApplicationContext } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { workerAppOptions } from '../../apps/worker/src/worker-options';
 
 let app: INestApplicationContext;
 let exclusive: ExclusiveJob;
 let cache: CacheService;
 
 beforeAll(async () => {
+  // The SAME options object main.ts starts the process with; only the environment is this spec's (the fixture's, with a quiet log).
   app = await prepareWorkerApp({
-    before: async () => {
-      await import('../../apps/worker/src/role');
-    },
-    module: () => import('../../apps/worker/src/worker.module').then((m) => m.WorkerModule),
-    // The fixture's environment (a minimal worker one); only the log level is lowered for this spec.
+    ...workerAppOptions,
     env: { ...process.env, LOG_LEVEL: 'fatal' },
-    otel: { serviceNameEnvVar: 'OTEL_WORKER_SERVICE_NAME', defaultServiceName: 'opshub-worker' },
   });
   // Booting the worker module also starts its schedules (the relays tick every 5-10 s) against the shared e2e database and Valkey. This spec
   // drives ExclusiveJob by hand; stop every cron, interval and timeout the module registered so it does not process rows other specs own.
