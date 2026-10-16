@@ -31,6 +31,8 @@ function product(opts: {
   peers: Record<string, string>;
   optional?: string[];
   installed: Record<string, string>;
+  /** Install the package ONLY in the pnpm store (not linked at the root), as pnpm does for a transitive or workspace-app copy. */
+  storeOnly?: boolean;
 }): string {
   const root = mkdtempSync(join(tmpdir(), 'qnsc-peers-'));
   made.push(root);
@@ -38,7 +40,13 @@ function product(opts: {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'package.json'), JSON.stringify(json));
   };
-  write(join(root, 'node_modules/@quynhonsemiconductor/platform-runtime'), {
+  const runtimeDir = opts.storeOnly
+    ? join(
+        root,
+        'node_modules/.pnpm/@quynhonsemiconductor+platform-runtime@0.2.0/node_modules/@quynhonsemiconductor/platform-runtime',
+      )
+    : join(root, 'node_modules/@quynhonsemiconductor/platform-runtime');
+  write(runtimeDir, {
     name: '@quynhonsemiconductor/platform-runtime',
     version: '0.2.0',
     peerDependencies: opts.peers,
@@ -47,7 +55,11 @@ function product(opts: {
     ),
   });
   for (const [name, version] of Object.entries(opts.installed)) {
-    write(join(root, 'node_modules', name), { name, version });
+    // A store copy resolves its peers from its own `.pnpm/<dir>/node_modules`, like pnpm links them.
+    const base = opts.storeOnly
+      ? join(root, 'node_modules/.pnpm/@quynhonsemiconductor+platform-runtime@0.2.0/node_modules')
+      : join(root, 'node_modules');
+    write(join(base, name), { name, version });
   }
   return root;
 }
@@ -80,6 +92,18 @@ describe('check-qnsc-peers', () => {
     expect(findUnmetPeers(root)).toEqual([]);
   });
 
+  it('checks EVERY installed copy, including one that exists only in the pnpm store (a workspace app or a transitive install)', async () => {
+    const { findUnmetPeers } = await load();
+    const root = product({
+      storeOnly: true,
+      peers: { '@quynhonsemiconductor/platform-cache': '>=3.2.0' },
+      installed: { '@quynhonsemiconductor/platform-cache': '3.1.1' },
+    });
+    const problems = findUnmetPeers(root);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/but 3\.1\.1 is installed/);
+  });
+
   it('fails on a missing required peer and accepts a missing OPTIONAL one', async () => {
     const { findUnmetPeers } = await load();
     const required = product({ peers: { fastify: '>=5' }, installed: {} });
@@ -88,7 +112,7 @@ describe('check-qnsc-peers', () => {
     expect(findUnmetPeers(optional)).toEqual([]);
   });
 
-  it('fails loudly on a range form it does not understand, rather than passing it', async () => {
+  it('fails loudly on a range semver cannot read, rather than passing it', async () => {
     const { findUnmetPeers } = await load();
     const root = product({ peers: { zod: 'github:foo/bar' }, installed: { zod: '4.1.0' } });
     expect(findUnmetPeers(root)[0]).toMatch(/unsupported peer range/);
@@ -98,7 +122,9 @@ describe('check-qnsc-peers', () => {
     ['3.2.0', '>=3.2.0', true],
     ['3.1.1', '>=3.2.0', false],
     ['4.0.0', '>=3.2.0', true],
-    ['0.5.0-pr.245.abc', '>=0.5.0', true],
+    // A canary pin does NOT satisfy the release it precedes: 0.5.0-pr.245.abc < 0.5.0.
+    ['0.5.0-pr.245.abc', '>=0.5.0', false],
+    ['0.5.0-pr.245.abc', '>=0.5.0-0', true],
     ['0.45.2', '>=0.45.2 <1', true],
     ['1.0.0', '>=0.45.2 <1', false],
     ['0.44.9', '>=0.45 <1', false],
@@ -106,8 +132,14 @@ describe('check-qnsc-peers', () => {
     ['4.0.0', '^3.2.0', false],
     ['0.5.3', '^0.5.0', true],
     ['0.6.0', '^0.5.0', false],
+    ['0.0.3', '^0.0.3', true],
+    ['0.0.4', '^0.0.3', false],
     ['5.2.1', '~5.2.0', true],
     ['5.3.0', '~5.2.0', false],
+    ['5.9.9', '~5', true],
+    ['6.0.0', '~5', false],
+    ['1.0.0', '>= 1.0.0', true],
+    ['0.9.9', '>= 1.0.0', false],
     ['1.2.3', '1.2.3', true],
     ['1.2.4', '1.2.3', false],
     ['11.2.7', '>=11', true],

@@ -17,6 +17,7 @@ import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { ExclusiveJob } from '@quynhonsemiconductor/platform-runtime';
 import { prepareWorkerApp } from '@quynhonsemiconductor/platform-runtime/bootstrap';
 import type { INestApplicationContext } from '@nestjs/common';
+import { SchedulerRegistry } from '@nestjs/schedule';
 
 let app: INestApplicationContext;
 let exclusive: ExclusiveJob;
@@ -32,6 +33,12 @@ beforeAll(async () => {
     env: { ...process.env, LOG_LEVEL: 'fatal' },
     otel: { serviceNameEnvVar: 'OTEL_WORKER_SERVICE_NAME', defaultServiceName: 'opshub-worker' },
   });
+  // Booting the worker module also starts its schedules (the relays tick every 5-10 s) against the shared e2e database and Valkey. This spec
+  // drives ExclusiveJob by hand; stop every cron, interval and timeout the module registered so it does not process rows other specs own.
+  const registry = app.get(SchedulerRegistry, { strict: false });
+  for (const job of registry.getCronJobs().values()) void job.stop();
+  for (const name of registry.getIntervals()) registry.deleteInterval(name);
+  for (const name of registry.getTimeouts()) registry.deleteTimeout(name);
   exclusive = app.get(ExclusiveJob, { strict: false });
   cache = app.get(CacheService, { strict: false });
   // The cache connects in the background (onModuleInit does not wait for `ready`); a tick a few seconds after boot sees it connected.
@@ -72,16 +79,22 @@ describe('ExclusiveJob against the worker’s real cache', () => {
       started();
       await held;
     });
-    await running;
+    try {
+      await running;
 
-    let ranOnOtherPod = false;
-    await otherPod.run(job, 10_000, () => Promise.resolve(void (ranOnOtherPod = true)));
-    expect(ranOnOtherPod, 'two pods ran the same exclusive job at once').toBe(false);
+      let ranOnOtherPod = false;
+      await otherPod.run(job, 10_000, () => Promise.resolve(void (ranOnOtherPod = true)));
+      expect(ranOnOtherPod, 'two pods ran the same exclusive job at once').toBe(false);
 
-    release();
-    await first;
-    await otherPod.run(job, 10_000, () => Promise.resolve(void (ranOnOtherPod = true)));
-    expect(ranOnOtherPod, 'the lock was not released when the first run finished').toBe(true);
+      release();
+      await first;
+      await otherPod.run(job, 10_000, () => Promise.resolve(void (ranOnOtherPod = true)));
+      expect(ranOnOtherPod, 'the lock was not released when the first run finished').toBe(true);
+    } finally {
+      // An assertion that fails above must not leave the lock held (it would stay until its TTL) or the first run hanging.
+      release();
+      await first.catch(() => undefined);
+    }
   });
 
   it('propagates a failing job (so the failure metric counts it) and still releases the lock', async () => {

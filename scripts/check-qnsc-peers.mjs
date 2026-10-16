@@ -15,65 +15,18 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import semver from 'semver';
 
 const SCOPE = '@quynhonsemiconductor';
 
-/** @returns {[number, number, number] | null} */
-function parseVersion(v) {
-  const m = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(String(v).trim());
-  return m ? [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)] : null;
-}
-
-function cmp(a, b) {
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
-  return 0;
-}
-
 /**
- * Prereleases are compared by their numeric core: `0.5.0-pr.245.abc` counts as 0.5.0, which is the intent of a canary pin.
  * @returns {boolean} whether `version` satisfies `range`
- * @throws on a range form this checker does not understand
+ * @throws on a version or range semver cannot read
  */
 export function satisfies(version, range) {
-  const v = parseVersion(version);
-  if (!v) throw new Error(`unreadable installed version "${version}"`);
-  const comparator = (token) => {
-    if (token === '*' || token === 'x') return true;
-    const m = /^(>=|<=|>|<|=|\^|~)?v?(\d+(?:\.\d+){0,2})(?:-[\w.]+)?$/.exec(token);
-    if (!m)
-      throw new Error(`unsupported peer range "${range}" (add it to scripts/check-qnsc-peers.mjs)`);
-    const base = parseVersion(m[2]);
-    switch (m[1] ?? '') {
-      case '>=':
-        return cmp(v, base) >= 0;
-      case '>':
-        return cmp(v, base) > 0;
-      case '<=':
-        return cmp(v, base) <= 0;
-      case '<':
-        return cmp(v, base) < 0;
-      case '^': {
-        const upper =
-          base[0] > 0
-            ? [base[0] + 1, 0, 0]
-            : base[1] > 0
-              ? [0, base[1] + 1, 0]
-              : [0, 0, base[2] + 1];
-        return cmp(v, base) >= 0 && cmp(v, upper) < 0;
-      }
-      case '~':
-        return cmp(v, base) >= 0 && cmp(v, [base[0], base[1] + 1, 0]) < 0;
-      default:
-        return cmp(v, base) === 0;
-    }
-  };
-  // `a || b` is OR; whitespace inside a part is AND (`>=0.45 <1`).
-  return String(range)
-    .split('||')
-    .some((part) => {
-      const tokens = part.trim().split(/\s+/).filter(Boolean);
-      return tokens.length === 0 || tokens.every(comparator);
-    });
+  if (semver.valid(version) === null) throw new Error(`unreadable installed version "${version}"`);
+  if (semver.validRange(range) === null) throw new Error(`unsupported peer range "${range}"`);
+  return semver.satisfies(version, range, { includePrerelease: true });
 }
 
 /** The version of `name` as the package at `fromDir` would resolve it: nearest node_modules/<name> going up from its real path. */
@@ -88,51 +41,59 @@ function installedVersion(name, fromDir) {
   }
 }
 
+/** Every installed package directory of the scope: the root links AND every copy in the pnpm store, de-duplicated by real path. */
+function installedCopies(root) {
+  const dirs = new Set();
+  const add = (scopeDir) => {
+    if (!existsSync(scopeDir)) return;
+    for (const entry of readdirSync(scopeDir)) dirs.add(realpathSync(join(scopeDir, entry)));
+  };
+  add(join(root, 'node_modules', SCOPE));
+  const store = join(root, 'node_modules', '.pnpm');
+  if (existsSync(store)) {
+    for (const dir of readdirSync(store)) {
+      if (dir.startsWith(`${SCOPE.replace('/', '+')}+`)) add(join(store, dir, 'node_modules', SCOPE));
+    }
+  }
+  return [...dirs].sort();
+}
+
 /**
  * @param {string} root the product's root (the directory holding node_modules)
  * @returns {string[]} one message per unmet peer; empty when all are satisfied
  */
 export function findUnmetPeers(root) {
-  const scopeDir = join(root, 'node_modules', SCOPE);
-  if (!existsSync(scopeDir))
-    return [`no ${SCOPE}/* packages in ${root}/node_modules: run pnpm install first`];
-  const problems = [];
-  for (const entry of readdirSync(scopeDir)) {
-    const real = realpathSync(join(scopeDir, entry));
+  const copies = installedCopies(root);
+  if (copies.length === 0) return [`no ${SCOPE}/* packages in ${root}/node_modules: run pnpm install first`];
+  const problems = new Set();
+  for (const real of copies) {
     const pkgJson = join(real, 'package.json');
     if (!existsSync(pkgJson)) continue;
     const pkg = JSON.parse(readFileSync(pkgJson, 'utf8'));
     const optional = pkg.peerDependenciesMeta ?? {};
     for (const [peer, range] of Object.entries(pkg.peerDependencies ?? {})) {
       const found = installedVersion(peer, real);
-      const label = `${SCOPE}/${entry}@${pkg.version} needs ${peer} ${range}`;
+      const label = `${pkg.name}@${pkg.version} needs ${peer} ${range}`;
       if (found === undefined) {
-        if (!optional[peer]?.optional) problems.push(`${label}, but it is not installed`);
+        if (!optional[peer]?.optional) problems.add(`${label}, but it is not installed`);
         continue;
       }
       try {
-        if (!satisfies(found, range)) problems.push(`${label}, but ${found} is installed`);
+        if (!satisfies(found, range)) problems.add(`${label}, but ${found} is installed`);
       } catch (error) {
-        problems.push(`${label}: ${error.message}`);
+        problems.add(`${label}: ${error.message}`);
       }
     }
   }
-  return problems;
+  return [...problems];
 }
 
-if (
-  process.argv[1] &&
-  realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))
-) {
+if (process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const root = resolve(process.argv[2] ?? process.cwd());
   const problems = findUnmetPeers(root);
   if (problems.length > 0) {
-    console.error(
-      `Unmet peer dependencies of ${SCOPE}/* packages:\n${problems.map((p) => `  - ${p}`).join('\n')}`,
-    );
-    console.error(
-      '\nRaise the product dependency to a version that satisfies the peer, then run pnpm install.',
-    );
+    console.error(`Unmet peer dependencies of ${SCOPE}/* packages:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
+    console.error('\nRaise the product dependency to a version that satisfies the peer, then run pnpm install.');
     process.exit(1);
   }
   console.log(`${SCOPE}/*: every peer dependency is satisfied.`);
