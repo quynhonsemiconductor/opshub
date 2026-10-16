@@ -2254,7 +2254,7 @@ module "alerts" {
     # that release the series is still one per worker: this rule still fires, but with no job name (read the worker log).
     #
     # THE BLIND SPOT, and why the expression is shaped this way. A counter first added to by its first failure appears at 1, and `increase()` sees
-    # no change in a series' first sample. observability >= 0.5.1 creates the series at 0 before each run, which covers a failure after an earlier
+    # no change in a series' first sample. observability >= 0.6.0 creates the series at 0 before each run, which covers a failure after an earlier
     # run; but the exporter sends every 30 s, so a job whose VERY FIRST run after a pod start fails exports 0 and 1 in the same batch and still
     # starts at 1. So the value is `increase()` PLUS, for a series that did not exist an hour ago (`X unless X offset 1h`), its current value (the
     # failures since it appeared). The obvious `increase(X) or (X unless X offset 1h)` does NOT work: a new series with two or more samples has an
