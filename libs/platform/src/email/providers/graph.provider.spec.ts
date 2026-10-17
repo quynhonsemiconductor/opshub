@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Logger } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import {
   MailConfigError,
@@ -13,6 +14,7 @@ import { DeferError, NonRetryableError, RetryAfterError } from '../../outbox/abs
 import {
   GraphEmailProvider,
   SENDER_BLOCKED_BACKOFF_MS,
+  SENDER_BLOCKED_FIELD,
   type GraphMailConfig,
 } from './graph.provider';
 
@@ -47,6 +49,30 @@ function fakeSender(
 }
 
 describe('GraphEmailProvider', () => {
+  it('logs the field the email-sender-blocked alarm filters on, once, with no recipient', async () => {
+    expect(SENDER_BLOCKED_FIELD).toBe('senderBlocked');
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    try {
+      const { sender } = fakeSender(() =>
+        Promise.reject(
+          new MailSendError('forbidden', 'Graph answered 403', { status: 403, requestId: 'rid-1' }),
+        ),
+      );
+      await new GraphEmailProvider(CONFIG, () => sender).send(PAYLOAD).catch(() => undefined);
+      const blocked = error.mock.calls.filter(
+        ([fields]) => (fields as Record<string, unknown>)?.[SENDER_BLOCKED_FIELD],
+      );
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0][0]).toEqual({
+        senderBlocked: 'forbidden',
+        status: 403,
+        requestId: 'rid-1',
+      });
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('sends the message through the transport as the mailbox, ignoring the display-name `from` the service builds', async () => {
     const { sender, send } = fakeSender(() => Promise.resolve({ id: 'req-1', transport: 'graph' }));
     const provider = new GraphEmailProvider(CONFIG, () => sender);

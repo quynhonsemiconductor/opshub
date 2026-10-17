@@ -35,6 +35,9 @@ export interface GraphMailConfig {
  */
 export const SENDER_BLOCKED_BACKOFF_MS = 15 * 60_000;
 
+/** The log field the `email-sender-blocked` alarm filters on (infra: `$.senderBlocked`); a spec in the infra tree pins the same name. */
+export const SENDER_BLOCKED_FIELD = 'senderBlocked';
+
 /** Counted once per block; an alarm (`email-sender-blocked`) watches it. `reason` is `forbidden` or `mailbox_not_found`: a closed set. */
 const senderBlocked = metrics.getMeter('opshub-worker').createCounter('email.sender_blocked', {
   description:
@@ -166,7 +169,7 @@ export class GraphEmailProvider implements IEmailProvider {
       this.blockedReason = err.code;
       senderBlocked.add(1, { reason: err.code });
       this.logger.error(
-        { senderBlocked: err.code, status: err.status, requestId: err.requestId },
+        { [SENDER_BLOCKED_FIELD]: err.code, status: err.status, requestId: err.requestId },
         `Graph refused the sender mailbox (${err.code}): the Exchange role or the mailbox is wrong. Rows are deferred ${SENDER_BLOCKED_BACKOFF_MS / 60_000} minutes; see docs/runbooks/mail-graph.md`,
       );
       return new DeferError(err.message, SENDER_BLOCKED_BACKOFF_MS);
