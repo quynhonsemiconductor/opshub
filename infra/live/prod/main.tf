@@ -106,6 +106,12 @@ module "stack" {
   // a different image than the release it belongs to.
   image_tag = var.image_tag
 
+  // Mail through Microsoft 365 (Graph): STAGED, NOT SWITCHED ON. email_provider stays as it is until the owner has done
+  // docs/runbooks/mail-graph.md for this environment (it needs the Graph worker app below, which does not exist yet); the cut-over is then a
+  // PR setting email_provider = "graph", graph_client_id and graph_client_certificate_set = true.
+  // A non-prod environment never sends from the prod mailbox: develop has its own.
+  mail_graph_sender = "noreply-opshub@qnsc.vn"
+
   entra_tenant_id = var.entra_tenant_id
   entra_client_id = var.entra_client_id
 

@@ -258,10 +258,12 @@ locals {
     # Read by the OTel resource and by the served OpenAPI document, both of which
     # reported "dev" in every environment before this was injected.
     { name = "SERVICE_VERSION", value = var.image_tag },
-    # Mail. Both services send: the api sends inline where a caller waits for the result, the worker
-    # relays the outbox — so a value set on one and not the other is a half outage that reads as a
-    # flake. Shared for that reason rather than duplicated per service.
+    # Mail. The WORKER relays the outbox and is the only process that sends; the api writes outbox rows. The provider and sender are shared so the
+    # two never disagree about which transport is configured.
     { name = "EMAIL_PROVIDER", value = var.email_provider },
+    # The shared mailbox Graph sends as. Not a secret. The WORKER's Graph credential (GRAPH_CLIENT_ID, GRAPH_CLIENT_CERTIFICATE) is what lets it send; the
+    # api gets only this, because it never sends (it writes outbox rows).
+    { name = "MAIL_GRAPH_SENDER", value = var.mail_graph_sender },
     { name = "MAIL_FROM_NAME", value = var.mail_from_name },
     { name = "MAIL_FROM_EMAIL", value = var.mail_from_email },
     { name = "MAIL_REPLY_TO", value = var.mail_reply_to },
