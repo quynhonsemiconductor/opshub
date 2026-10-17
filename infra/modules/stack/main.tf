@@ -1657,6 +1657,43 @@ resource "aws_cloudwatch_metric_alarm" "outbox_dead_letter" {
   ok_actions    = [module.observability.alarm_topic_arn]
 }
 
+# ── The Graph mail sender is refused (403/404 on sendMail) ──────────────────────
+# Not a dead-letter: the email relay DEFERS every row for 15 minutes without spending its attempts, so `outbox-dead-letter` stays silent while no
+# email leaves. Causes: the Exchange role assignment is missing or still propagating (up to ~2 hours), or the mailbox is missing / not REST-enabled
+# (docs/runbooks/mail-graph.md). The field is SENDER_BLOCKED_FIELD in libs/platform/src/email/providers/graph.provider.ts. The provider logs it
+# once per block, i.e. every ~15 minutes while the cause stands, so the alarm looks back over four 5-minute periods and stays in ALARM until
+# the blocks stop.
+resource "aws_cloudwatch_log_metric_filter" "email_sender_blocked" {
+  name           = "${local.name}-email-sender-blocked"
+  log_group_name = module.worker.log_group_name
+  pattern        = "{ $.senderBlocked = \"*\" }"
+
+  metric_transformation {
+    name          = "EmailSenderBlocked"
+    namespace     = "${var.product}/${var.env}"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "email_sender_blocked" {
+  alarm_name        = "${local.name}-email-sender-blocked"
+  alarm_description = "Microsoft Graph refused the shared mailbox (403/404 on sendMail): no email is leaving, and nothing is dead-lettered. Exchange role missing or still propagating, or the mailbox is missing. docs/runbooks/mail-graph.md, \"When Graph refuses, or does not answer\"."
+
+  namespace           = "${var.product}/${var.env}"
+  metric_name         = "EmailSenderBlocked"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 4
+  datapoints_to_alarm = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [module.observability.alarm_topic_arn]
+  ok_actions    = [module.observability.alarm_topic_arn]
+}
+
 # The cache/floors invariant is enforced by a `validation` block on `var.cache` in
 # variables.tf, NOT by a `check` block here.
 #
@@ -1669,7 +1706,7 @@ resource "aws_cloudwatch_metric_alarm" "outbox_dead_letter" {
 
 # ── Outbound email: the permission half ───────────────────────────────────────
 #
-# WITHOUT `ses:SendEmail` ON THE TASK ROLE, EVERY SEND FAILS `AccessDenied` — before the sender is
+# WITHOUT `ses:SendEmail` ON THE WORKER'S TASK ROLE, EVERY SEND FAILS `AccessDenied` — before the sender is
 # even looked at. The relay's attempts exhaust, the rows dead-letter, and the service goes on
 # reporting healthy, so the first symptom is somebody asking why they never got an email. The sibling
 # repo ran BOTH of its environments that way for a while, with `EMAIL_PROVIDER=ses` and a correct
@@ -1710,14 +1747,12 @@ locals {
   })
 }
 
-resource "aws_iam_role_policy" "api_ses_send" {
-  count  = var.mail_from_email == "" ? 0 : 1
-  name   = "${local.name}-api-ses-send"
-  role   = split("/", module.api.task_role_arn)[1]
-  policy = local.ses_send_policy
-}
-
-# The worker relays the outbox, so it sends more mail than the api does. Both need the grant.
+# ONLY THE WORKER SENDS. The API writes `email_outbox` rows and never calls a provider: the email relay refuses to run outside the worker process
+# (`EmailRelayService.onModuleInit` and `relay()` check the process role), so the API's task role has no SES grant. There used to be one, from
+# when the API subscribed to its own wake signal and ran a relay too.
+#
+# APPLY ORDER: this removes the API role's grant. It must be applied only AFTER the image with the worker-only relay guard is deployed (the
+# feat/mail-graph code PR); an older API image still runs a relay, and without the grant it would claim rows and burn their attempts on AccessDenied.
 resource "aws_iam_role_policy" "worker_ses_send" {
   count  = var.mail_from_email == "" ? 0 : 1
   name   = "${local.name}-worker-ses-send"

@@ -845,6 +845,13 @@ variable "mail_graph_sender" {
     condition     = var.mail_graph_sender == "" || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.mail_graph_sender))
     error_message = "mail_graph_sender must be a single bare email address (no display name)."
   }
+
+  # A non-prod environment never sends from the prod mailbox, and production never from the dev one. Each is scoped to its own Graph worker app in
+  # Exchange; this stops the wrong address being typed into the wrong environment's live/main.tf.
+  validation {
+    condition     = var.mail_graph_sender == "" || lower(trimspace(var.mail_graph_sender)) == (var.env == "production" ? "noreply-${var.product}@qnsc.vn" : "noreply-${var.product}-dev@qnsc.vn")
+    error_message = "mail_graph_sender must be noreply-opshub@qnsc.vn in production and noreply-opshub-dev@qnsc.vn in every other environment (a non-prod environment never sends from the prod mailbox)."
+  }
 }
 
 variable "mail_from_email" {
