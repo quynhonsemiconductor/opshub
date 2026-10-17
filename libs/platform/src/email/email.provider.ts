@@ -37,6 +37,15 @@ export interface EmailPayload {
   idempotencyKey?: string;
 }
 
+/** What the caller can hand a send besides the message. */
+export interface EmailSendOptions {
+  /**
+   * Aborted when the caller's deadline (EMAIL_SEND_TIMEOUT_MS) passes. A provider that can cancel (Graph) cancels the request, its in-place
+   * retries and any wait; one that cannot (the Resend SDK) ignores it, and the caller's deadline still rejects its wait.
+   */
+  signal?: AbortSignal;
+}
+
 export interface IEmailProvider {
-  send(payload: EmailPayload): Promise<EmailSendResult>;
+  send(payload: EmailPayload, options?: EmailSendOptions): Promise<EmailSendResult>;
 }

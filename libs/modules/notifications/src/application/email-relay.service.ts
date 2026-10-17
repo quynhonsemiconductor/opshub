@@ -16,6 +16,7 @@ import { InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
 import { AbstractOutboxRelay } from '@platform';
 import type { Claimed, OutboxLeaseTable } from '@platform';
+import { getProcessRole } from '@platform/config/process-role';
 import { EmailService } from '@platform/email';
 import { EMAIL_SEND_TIMEOUT_MS } from '@platform/email';
 import type { EmailTemplateName, EmailTemplateVars } from '@platform/email';
@@ -50,6 +51,17 @@ export class EmailRelayService
   }
 
   async onModuleInit(): Promise<void> {
+    /*
+     * ONLY THE WORKER SENDS. The API writes outbox rows and publishes the wake signal; it holds no mail credential (its schema refuses the
+     * Graph variables, and its task has no SES grant), so a relay pass in the API would try to send with none. Without this the API
+     * subscribed to its own wake signal and ran the relay too. `relay()` below enforces the same rule for any other caller.
+     */
+    if (getProcessRole() !== 'worker') {
+      this.logger.log('Email relay idle: this is not the worker process');
+      return;
+    }
+    // Fail the deploy, not the first invitation, if the configured transport cannot work (a missing Graph variable).
+    this.emailService.assertReady();
     this.logger.log('Email relay started — polling email_outbox every 5s');
     this.unsubscribeRelayWake = await this.pubSub.subscribeEmailRelayWake(() => {
       this.relay().catch((err: unknown) =>
@@ -65,6 +77,8 @@ export class EmailRelayService
   @Cron('*/5 * * * * *', { name: 'email-relay' })
   @Span('email.relay')
   override async relay(): Promise<void> {
+    // Whoever calls it (the cron, the wake signal, a test): only the worker sends.
+    if (getProcessRole() !== 'worker') return;
     return super.relay();
   }
 

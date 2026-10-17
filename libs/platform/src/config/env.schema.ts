@@ -148,13 +148,19 @@ const baseShape = {
   /**
    * Which transport actually sends.
    *
-   * `ses` is the one to reach for: it is in the same AWS account as everything else and
-   * authenticates with the task role, so there is no third-party account and no API key in a secret.
-   * `resend` stays because it is a working transport and removing it would be a decision about
-   * vendors rather than about code. `dev` logs to the console and sends nothing, which is the default
-   * so that a fresh checkout needs no mail setup at all.
+   * `graph` sends through Microsoft 365 (Graph `sendMail`) from the product's shared mailbox
+   * (HYBRID-INFRA-PLAN §7.4): see `docs/runbooks/mail-graph.md`. `ses` and `resend` are the transports it
+   * replaces and stay only until the cut-over is done (the deployed task definitions still name `ses`).
+   * `dev` logs to the console and sends nothing, which is the default so that a fresh checkout needs no
+   * mail setup at all.
    */
-  EMAIL_PROVIDER: z.enum(['dev', 'resend', 'ses']).default('dev'),
+  EMAIL_PROVIDER: z.enum(['dev', 'graph', 'resend', 'ses']).default('dev'),
+  /**
+   * The shared mailbox mail goes out as (`noreply-opshub@qnsc.vn`). Required for `graph`. Not a secret.
+   * Graph sends as this mailbox and no other; the display name is the mailbox's own, so `MAIL_FROM_NAME`
+   * does not apply to it.
+   */
+  MAIL_GRAPH_SENDER: emptyToUndefined(z.string().email().optional()),
   MAIL_FROM_NAME: z.string().default('OpsHub'),
   /**
    * NO DEFAULT, deliberately — see the refusal in the `superRefine` below.
@@ -222,7 +228,16 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
      * from. Anything else reaches a real mail service, and reaching one without a verified sender is
      * the failure this refuses to boot into.
      */
-    if (env.EMAIL_PROVIDER !== 'dev' && !env.MAIL_FROM_EMAIL) {
+    if (env.EMAIL_PROVIDER === 'graph' && !env.MAIL_GRAPH_SENDER) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['MAIL_GRAPH_SENDER'],
+        message:
+          'MAIL_GRAPH_SENDER is required when EMAIL_PROVIDER is "graph": it is the shared mailbox Graph sends as ' +
+          '(noreply-opshub@qnsc.vn), and the Exchange role assignment names exactly that mailbox.',
+      });
+    }
+    if (env.EMAIL_PROVIDER !== 'dev' && env.EMAIL_PROVIDER !== 'graph' && !env.MAIL_FROM_EMAIL) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['MAIL_FROM_EMAIL'],
@@ -441,6 +456,43 @@ export const ApiEnvSchema = z
   .transform(deriveEnv);
 
 /**
+ * The worker is the only process that SENDS mail (the API writes outbox rows), so it is the only one asked for the Graph credential.
+ * With `EMAIL_PROVIDER=graph` it must have the Graph worker app and a credential for it; otherwise the first invitation would dead-letter on
+ * `config` instead of the deploy failing. The API is not asked: it is forbidden to hold any of these.
+ */
+const refineWorkerMail = (
+  env: Common & {
+    GRAPH_CLIENT_ID?: string;
+    GRAPH_CLIENT_CERTIFICATE?: string;
+    GRAPH_FEDERATED_TOKEN_FILE?: string;
+  },
+  ctx: z.RefinementCtx,
+): void => {
+  if (env.EMAIL_PROVIDER !== 'graph') return;
+  const need = (name: string, why: string): void =>
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [name],
+      message: `${name} is required: ${why}`,
+    });
+  if (!env.ENTRA_TENANT_ID) {
+    need('ENTRA_TENANT_ID', 'EMAIL_PROVIDER=graph signs in to this directory.');
+  }
+  if (!env.GRAPH_CLIENT_ID) {
+    need(
+      'GRAPH_CLIENT_ID',
+      'EMAIL_PROVIDER=graph sends as the Graph worker app, which holds the Exchange "Application Mail.Send" role for the mailbox.',
+    );
+  }
+  if (!env.GRAPH_CLIENT_CERTIFICATE && !env.GRAPH_FEDERATED_TOKEN_FILE) {
+    need(
+      'GRAPH_CLIENT_CERTIFICATE',
+      'EMAIL_PROVIDER=graph has no credential (set it on ECS, or GRAPH_FEDERATED_TOKEN_FILE on k3s).',
+    );
+  }
+};
+
+/**
  * The worker process. Holds the Graph variables and NO sign-in secret: the worker never runs a login
  * callback.
  */
@@ -508,6 +560,7 @@ export const WorkerEnvSchema = z
     ),
   })
   .superRefine(refineEnv)
+  .superRefine(refineWorkerMail)
   .transform(deriveEnv);
 
 /** Role-specific variables are typed on {@link ApiEnv} / {@link WorkerEnv}. */
