@@ -25,9 +25,13 @@ Workspace model, develop, build, and deploy conventions mirror [`rally`](https:/
 
 A clean clone runs with **`cp .env.example .env` and the commands below, nothing else**. CI proves it on every PR (the `local quickstart` job boots exactly this) and `test/env-example.spec.ts` checks `.env.example` against the env schemas and the dev tooling.
 
-**You need:** Docker with Compose v2, Node 24 (`.nvmrc`), pnpm 10 or later, and a GitHub token that can read the org's packages: the shared `@quynhonsemiconductor/*` packages install from GitHub Packages (`.npmrc` reads `NODE_AUTH_TOKEN`).
+**You need:** Docker with Compose v2, Node 24 (`.nvmrc`), pnpm 10 or later, and a GitHub token that can read the org's packages: the shared `@quynhonsemiconductor/*` packages install from GitHub Packages.
 
 ```bash
+# Once per machine. pnpm 11+ ignores a token written in a project .npmrc (that file is committed, so an environment
+# variable in it could leak to a registry the repo names), but expands one in your user-level file, on every version.
+grep -qs 'npm.pkg.github.com/:_authToken' ~/.npmrc || echo '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' >> ~/.npmrc
+
 export NODE_AUTH_TOKEN="$(gh auth token)"      # per shell; or a PAT with read:packages
 cp .env.example .env                           # every value is already wired, secrets are local placeholders
 docker compose -f docker-compose.dev.yml up -d --wait    # Postgres, Valkey, LocalStack (S3), OTel collector
