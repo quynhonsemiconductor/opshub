@@ -27,9 +27,13 @@ describe('@quynhonsemiconductor/* dependency ranges', () => {
     const manifest = JSON.parse(readFileSync(join(ROOT, file), 'utf8')) as Manifest;
     const offenders = SECTIONS.flatMap((section) =>
       Object.entries(manifest[section] ?? {})
+        // `file:` is app-platform's consumer CI, which links each shared package to a tarball packed from the pull request under test (it rewrites
+        // these ranges in the runner's copy, never committed). It is not a range this rule is about.
         .filter(
           ([name, range]) =>
-            name.startsWith('@quynhonsemiconductor/') && !/^\^\d+\.\d+\.\d+$/.test(range),
+            name.startsWith('@quynhonsemiconductor/') &&
+            !range.startsWith('file:') &&
+            !/^\^\d+\.\d+\.\d+$/.test(range),
         )
         .map(([name, range]) => `${section}: ${name}@${range}`),
     );
