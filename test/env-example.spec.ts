@@ -135,7 +135,7 @@ describe('.env.example agrees with the dev tooling', () => {
 
   it('points at the host ports docker-compose.dev.yml publishes', () => {
     expect(portOf(env['DATABASE_URL'])).toBe(hostPort('opshub-postgres', 5432));
-    expect(portOf(env['REDIS_URL'])).toBe(hostPort('opshub-valkey', 6379));
+    expect(portOf(env['VALKEY_URL'])).toBe(hostPort('opshub-valkey', 6379));
     expect(portOf(env['STORAGE_ENDPOINT'])).toBe(hostPort('opshub-localstack', 4566));
     expect(portOf(env['AWS_ENDPOINT_URL'])).toBe(hostPort('opshub-localstack', 4566));
     expect(portOf(env['OTEL_EXPORTER_OTLP_ENDPOINT'])).toBe(hostPort('opshub-otel', 4318));
@@ -232,5 +232,12 @@ describe('the README and the "local quickstart" CI job run the same commands', (
 
   it('the job gates the PR: it is a dependency of `Web CI required`', () => {
     expect(workflow).toMatch(/needs: \[changes, quality, test, build, e2e, quickstart\]/);
+  });
+});
+
+describe('.env.example uses the current cache name', () => {
+  it('sets VALKEY_URL and not the deprecated REDIS_URL', () => {
+    expect(env['VALKEY_URL']).toBeTruthy();
+    expect(Object.keys(env)).not.toContain('REDIS_URL');
   });
 });

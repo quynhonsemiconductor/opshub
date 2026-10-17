@@ -20,7 +20,7 @@
  *   cache and rate-limit. This service creates a second, subscriber-only ioredis
  *   connection that is never used for anything else.
  *
- * When REDIS_URL is not set: all publish/subscribe operations silently no-op.
+ * When VALKEY_URL is not set: all publish/subscribe operations silently no-op.
  * The schedulers still write to the DB outbox; delivery is via cron polling only.
  *
  * Channel naming:
@@ -65,9 +65,9 @@ export class NotificationPubSubService implements OnModuleInit, OnModuleDestroy 
   ) {}
 
   onModuleInit(): void {
-    const url = this.config.get('REDIS_URL');
+    const url = this.config.get('VALKEY_URL');
     if (!url) {
-      this.logger.warn('REDIS_URL not set — notification pub/sub disabled (cron-only delivery)');
+      this.logger.warn('VALKEY_URL not set — notification pub/sub disabled (cron-only delivery)');
       return;
     }
 
@@ -150,7 +150,7 @@ export class NotificationPubSubService implements OnModuleInit, OnModuleDestroy 
    * Redis SUBSCRIBE.  Returns an async unsubscribe function; call it on cleanup
    * (SSE disconnect, module destroy) to free resources and UNSUBSCRIBE from Redis.
    *
-   * No-ops silently if pub/sub is disabled (REDIS_URL not set).
+   * No-ops silently if pub/sub is disabled (VALKEY_URL not set).
    */
   async subscribe(
     channel: string,

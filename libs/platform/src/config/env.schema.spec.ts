@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { ApiConfigService, AppConfigService, WorkerConfigService } from './app-config.service';
 import {
   ApiEnvSchema,
@@ -156,29 +156,48 @@ describe('EnvSchema — database credentials', () => {
   });
 });
 
-describe('EnvSchema — cache URL alias', () => {
-  // Infra injects VALKEY_URL; every caller reads REDIS_URL. Kept here because the
-  // normalisation now shares a transform with the JWT derivation, so a change to one
-  // can silently drop the other.
-  it('resolves VALKEY_URL into REDIS_URL', () => {
+describe('EnvSchema — cache URL: VALKEY_URL, with REDIS_URL as a deprecated alias', () => {
+  // Every reader uses get('VALKEY_URL'). REDIS_URL survives one more release so an existing .env keeps booting; the
+  // normalisation shares a transform with other derivations, so a change to one can silently drop the other.
+  it('reads VALKEY_URL', () => {
     const result = EnvSchema.safeParse(env({ VALKEY_URL: 'rediss://cache:6379' }));
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.data.REDIS_URL).toBe('rediss://cache:6379');
-  });
-
-  it('leaves an explicit REDIS_URL alone when no alias is set', () => {
-    const result = EnvSchema.safeParse(env({ REDIS_URL: 'redis://localhost:6379' }));
     if (!result.success) throw new Error('expected parse to succeed');
-    expect(result.data.REDIS_URL).toBe('redis://localhost:6379');
+    expect(result.data.VALKEY_URL).toBe('rediss://cache:6379');
   });
 
-  it('prefers the infra alias over an explicit REDIS_URL', () => {
+  it('folds the deprecated REDIS_URL into VALKEY_URL when it is the only one set, and says it is deprecated (once)', () => {
+    const warn = vi.spyOn(process, 'emitWarning').mockImplementation(() => undefined);
+    const result = EnvSchema.safeParse(env({ REDIS_URL: 'redis://localhost:6379' }));
+    EnvSchema.safeParse(env({ REDIS_URL: 'redis://localhost:6379' }));
+    if (!result.success) throw new Error('expected parse to succeed');
+    expect(result.data.VALKEY_URL).toBe('redis://localhost:6379');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('REDIS_URL is deprecated'),
+      expect.objectContaining({ code: 'OPSHUB_REDIS_URL' }),
+    );
+    warn.mockRestore();
+  });
+
+  it('does not warn when VALKEY_URL is set, even alongside REDIS_URL', () => {
+    const warn = vi.spyOn(process, 'emitWarning').mockImplementation(() => undefined);
+    EnvSchema.safeParse(env({ VALKEY_URL: 'rediss://cache:6379', REDIS_URL: 'redis://x:6379' }));
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('prefers VALKEY_URL over REDIS_URL when both are set', () => {
     const result = EnvSchema.safeParse(
       env({ REDIS_URL: 'redis://localhost:6379', VALKEY_URL: 'rediss://cache:6379' }),
     );
     if (!result.success) throw new Error('expected parse to succeed');
-    expect(result.data.REDIS_URL).toBe('rediss://cache:6379');
+    expect(result.data.VALKEY_URL).toBe('rediss://cache:6379');
+  });
+
+  it('leaves the cache unset when neither is set', () => {
+    const result = EnvSchema.safeParse(env());
+    if (!result.success) throw new Error('expected parse to succeed');
+    expect(result.data.VALKEY_URL).toBeUndefined();
   });
 });
 

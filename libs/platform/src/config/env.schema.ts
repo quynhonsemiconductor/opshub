@@ -114,10 +114,15 @@ const baseShape = {
   OTEL_WORKER_SERVICE_NAME: z.string().default('opshub-worker'),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional(),
 
-  // ── Cache (Valkey / Redis — optional in dev) ───────────────────────────────
-  REDIS_URL: z.string().optional(),
-  /** Alias for REDIS_URL injected by infra as VALKEY_URL. Resolved into REDIS_URL at startup. */
+  // ── Cache (Valkey, Redis-compatible — optional in dev) ─────────────────────
+  /** The cache's URL. THE name: infra, CI and `.env.example` all set it. The `redis://` scheme stays (the wire protocol). */
   VALKEY_URL: z.string().optional(),
+  /**
+   * DEPRECATED alias of VALKEY_URL, read for ONE more release. Every reader uses `get('VALKEY_URL')`; this survives only
+   * so a developer's existing `.env` keeps booting, and setting it (without VALKEY_URL) logs a deprecation warning.
+   * Delete it, and the `deriveEnv` line below, in the release after.
+   */
+  REDIS_URL: z.string().optional(),
   REDIS_KEY_PREFIX: z.string().default('opshub:'),
 
   // ── Background jobs ────────────────────────────────────────────────────────
@@ -290,14 +295,23 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
   }
 };
 
-/** Derivations, shared by every role: the Redis alias. */
-const deriveEnv = <E extends Common>(env: E): E & { REDIS_URL: string | undefined } => ({
-  ...env,
-  // VALKEY_URL is the infra-injected alias for Redis-compatible caches (e.g. ElastiCache
-  // Valkey). Normalize at parse time so all callers use get('REDIS_URL') regardless of
-  // which var infra sets.
-  REDIS_URL: env.VALKEY_URL ?? env.REDIS_URL,
-});
+let warnedRedisUrl = false;
+
+/** Derivations, shared by every role: the deprecated cache alias folds into VALKEY_URL. */
+const deriveEnv = <E extends Common>(env: E): E & { VALKEY_URL: string | undefined } => {
+  if (env.REDIS_URL && !env.VALKEY_URL && !warnedRedisUrl) {
+    warnedRedisUrl = true;
+    process.emitWarning(
+      'REDIS_URL is deprecated: set VALKEY_URL to the same value. REDIS_URL is still read for one more release.',
+      { type: 'DeprecationWarning', code: 'OPSHUB_REDIS_URL' },
+    );
+  }
+  return {
+    ...env,
+    // Normalise at parse time so every reader uses get('VALKEY_URL'). VALKEY_URL wins when both are set (infra sets it).
+    VALKEY_URL: env.VALKEY_URL ?? env.REDIS_URL,
+  };
+};
 
 /**
  * A variable the process must NOT have. Present (non-empty) => the process refuses to start, naming it.
