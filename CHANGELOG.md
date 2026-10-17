@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.4.0](https://github.com/quynhonsemiconductor/opshub/compare/v0.3.1...v0.4.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **logging:** log lines carry level as a label and time as ISO-8601 UTC
+* **graph:** POST /v1/compliance/shadow-it/scan and POST /v1/security-posture/sync now answer 202 with { queued }; the shadow-it scan no longer returns { scanned, newFindings }. GRAPH_CLIENT_SECRET is removed; the develop stack's graph-client-secret container is destroyed by the next apply.
+
+### ✨ Features
+
+* **identity:** move opshub to identity 8 ([#355](https://github.com/quynhonsemiconductor/opshub/issues/355)) ([6b38c68](https://github.com/quynhonsemiconductor/opshub/commit/6b38c68afcb510fda6bee4f71c695040ba23da45))
+* **infra:** production on the secrets bundle ([#372](https://github.com/quynhonsemiconductor/opshub/issues/372)) ([1483c2c](https://github.com/quynhonsemiconductor/opshub/commit/1483c2ca77a2fb46c761d10f773e302248557c6d))
+* **logging:** adopt the shared bootstrap and one log shape ([#384](https://github.com/quynhonsemiconductor/opshub/issues/384)) ([24801ad](https://github.com/quynhonsemiconductor/opshub/commit/24801adb336bcf219a6964e2aa7dfbd5e4d93258))
+* serve /livez for Kubernetes, and immutable ECR tags ([#337](https://github.com/quynhonsemiconductor/opshub/issues/337)) ([14b7a40](https://github.com/quynhonsemiconductor/opshub/commit/14b7a40039ef6090fa69eb270504fa6cdb7a9483))
+
+
+### 🐛 Bug Fixes
+
+* **cache,alerts:** join the shared develop Valkey, and route alarms to devops@ ([#333](https://github.com/quynhonsemiconductor/opshub/issues/333)) ([0ce3a0b](https://github.com/quynhonsemiconductor/opshub/commit/0ce3a0bbc1d2a216fc7e1f6608db4cc83f5e62ad))
+* **ci:** restore infra-plan.yml, which a bad edit emptied ([#339](https://github.com/quynhonsemiconductor/opshub/issues/339)) ([68b2306](https://github.com/quynhonsemiconductor/opshub/commit/68b23064d3075ac40573b5e0d06bc08e647b049d))
+* **ci:** run CI on stacked pull requests, not only PRs aimed at main ([#330](https://github.com/quynhonsemiconductor/opshub/issues/330)) ([fee1264](https://github.com/quynhonsemiconductor/opshub/commit/fee1264dfcc908071aac07686e0598b34435dd64))
+* **deps:** clear the osv-scanner findings that block the required check ([#352](https://github.com/quynhonsemiconductor/opshub/issues/352)) ([495cf20](https://github.com/quynhonsemiconductor/opshub/commit/495cf20309ae60bda2413aec26903a6e6cea4ae6))
+* **deps:** observability 0.4.2 (credential leak in error logging) ([#386](https://github.com/quynhonsemiconductor/opshub/issues/386)) ([16c253b](https://github.com/quynhonsemiconductor/opshub/commit/16c253b4f0d87d33d70af447b7c5ea65e3905f48))
+* **deps:** platform-cache ^3.2.0, which platform-runtime 0.2.0 requires ([#387](https://github.com/quynhonsemiconductor/opshub/issues/387)) ([8865f54](https://github.com/quynhonsemiconductor/opshub/commit/8865f546bafcc3f389aa60019a50ab35e9c5d327))
+* **deps:** update @quynhonsemiconductor/identity and platform-cache ([#322](https://github.com/quynhonsemiconductor/opshub/issues/322)) ([60c938f](https://github.com/quynhonsemiconductor/opshub/commit/60c938f2aec11e1e4c6ab94ed11eb7781bf69468))
+* **deps:** update dependency fastify to v5.12.4 [security] ([#332](https://github.com/quynhonsemiconductor/opshub/issues/332)) ([74b2a0d](https://github.com/quynhonsemiconductor/opshub/commit/74b2a0dc3619b10a91d90857254299aa07fd2212))
+* **infra:** alert on a failing scheduled job, whatever the volume ([#389](https://github.com/quynhonsemiconductor/opshub/issues/389)) ([331ef68](https://github.com/quynhonsemiconductor/opshub/commit/331ef685e2c6bb8d160b65c76ddba79c7c5b4cd8))
+* **infra:** fail closed when the Cloudflare zone id is missing ([#359](https://github.com/quynhonsemiconductor/opshub/issues/359)) ([e937864](https://github.com/quynhonsemiconductor/opshub/commit/e937864468f4e01e7dade84236960c90c045cb72))
+* **infra:** no 'latest' baseline image tag; reject it in the stack module ([#368](https://github.com/quynhonsemiconductor/opshub/issues/368)) ([1269072](https://github.com/quynhonsemiconductor/opshub/commit/12690728b5ee1979c8a2ad4ab3f383806b1f948b))
+* **infra:** point the outbound-HTTP panel at the series instrumentation-http 0.221 emits ([#371](https://github.com/quynhonsemiconductor/opshub/issues/371)) ([b2bbd81](https://github.com/quynhonsemiconductor/opshub/commit/b2bbd8111ec9cdb8284db5d4724af34c1c14bb7b))
+* **infra:** production ingress through the Cloudflare tunnel, like develop ([#374](https://github.com/quynhonsemiconductor/opshub/issues/374)) ([cb1ae92](https://github.com/quynhonsemiconductor/opshub/commit/cb1ae92bf1355497473f47f7411de286fe6c2570))
+* **infra:** set DEPLOYMENT_ENV so the logs and the OTel resource name the deployment environment ([#370](https://github.com/quynhonsemiconductor/opshub/issues/370)) ([a47a09e](https://github.com/quynhonsemiconductor/opshub/commit/a47a09e7e3923c62d9ea2c62b02107e2f474c0cb))
+* **infra:** start the api service at min_count, not at a literal 1 ([#373](https://github.com/quynhonsemiconductor/opshub/issues/373)) ([fdbd241](https://github.com/quynhonsemiconductor/opshub/commit/fdbd24125ffe86c0276a04eb428357113387320b))
+* **logging:** pass deploymentEnv to the logger in the api and the worker ([#379](https://github.com/quynhonsemiconductor/opshub/issues/379)) ([e447b2d](https://github.com/quynhonsemiconductor/opshub/commit/e447b2d4472af7b07813f3a53735ddd04bb8c632))
+* **platform:** converge sanitize.util with rova ([#324](https://github.com/quynhonsemiconductor/opshub/issues/324)) ([453c175](https://github.com/quynhonsemiconductor/opshub/commit/453c17584022cc67cb2446f2932278c5d178789d))
+* **secrets:** grant IAM on secret containers, not valueFrom references ([#335](https://github.com/quynhonsemiconductor/opshub/issues/335)) ([4cb187b](https://github.com/quynhonsemiconductor/opshub/commit/4cb187bd9ce8e9964b6659bf25d0a9828f710217))
+* **test:** make the second-PERMISSION-map ratchet run on macOS ([#328](https://github.com/quynhonsemiconductor/opshub/issues/328)) ([c5f56b0](https://github.com/quynhonsemiconductor/opshub/commit/c5f56b00bc079e64f1f87710c6d8e3990900fe5b))
+* **webhooks:** lock only the deliveries in the relay's claim; alert when a relay pass fails ([#378](https://github.com/quynhonsemiconductor/opshub/issues/378)) ([323fa8e](https://github.com/quynhonsemiconductor/opshub/commit/323fa8e5c9fb8a25557b187ce0c9a0fec7f66cf8))
+
+
+### ♻️ Refactors
+
+* **graph:** run Graph only in the worker, with its own app id, and delete the unused PIM client ([#354](https://github.com/quynhonsemiconductor/opshub/issues/354)) ([0118ef3](https://github.com/quynhonsemiconductor/opshub/commit/0118ef3bb99db7775a067ecee9bd9c20c187b1e3))
+* **logging:** main and the conformance specs share one bootstrap options object ([#390](https://github.com/quynhonsemiconductor/opshub/issues/390)) ([e5965a2](https://github.com/quynhonsemiconductor/opshub/commit/e5965a243b3cecdcef4aa145d63a7ab3fdbe53b2))
+* **platform:** adopt platform-http 4.3.0 and identity 8.2.0 where it loses nothing ([#364](https://github.com/quynhonsemiconductor/opshub/issues/364)) ([ce8637f](https://github.com/quynhonsemiconductor/opshub/commit/ce8637f007c0310d31317866e7322df0d9747f3f))
+* **platform:** name the cache url VALKEY_URL, keeping REDIS_URL as a deprecated alias ([#400](https://github.com/quynhonsemiconductor/opshub/issues/400)) ([ef16233](https://github.com/quynhonsemiconductor/opshub/commit/ef162333487f43b06b65d54cf0ec06934d57bf03))
+
+
+### 🔒 Security
+
+* **ci:** arm gitleaks — the config was replacing the default ruleset ([#329](https://github.com/quynhonsemiconductor/opshub/issues/329)) ([63b175b](https://github.com/quynhonsemiconductor/opshub/commit/63b175b4950d48a411253d17e7a64c0b7307547e))
+* **deps:** raise js-yaml to 4.3.2 and vitest to 4.1.11 for two 2026-09-08 advisories ([#327](https://github.com/quynhonsemiconductor/opshub/issues/327)) ([fd9f50d](https://github.com/quynhonsemiconductor/opshub/commit/fd9f50d9a1a43cf16ffe5fb0c8c5119d01a66c21))
+
 ## [0.3.1](https://github.com/quynhonsemiconductor/opshub/compare/v0.3.0...v0.3.1) (2026-09-08)
 
 
