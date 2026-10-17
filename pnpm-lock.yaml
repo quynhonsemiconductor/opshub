@@ -131,8 +131,8 @@ importers:
         specifier: ^4.3.0
         version: 4.3.0(ca3dbbcf3d50cf04b0aba96e446c4e8e)
       '@quynhonsemiconductor/platform-runtime':
-        specifier: ^0.3.0
-        version: 0.3.0(ea15f7debc8ff15e479063838f2dc1ce)
+        specifier: ^0.3.1
+        version: 0.3.1(ea15f7debc8ff15e479063838f2dc1ce)
       cockatiel:
         specifier: ^4.0.0
         version: 4.0.0
@@ -2569,8 +2569,8 @@ packages:
       nestjs-zod: '>=5'
       zod: '>=4'
 
-  '@quynhonsemiconductor/platform-runtime@0.3.0':
-    resolution: {integrity: sha512-yAYDoHC6624vXNQVmYK9BvoZeUSfQB4a7s9aB2BHO5GpSjyEXy7AsI60KsPFdspwA71OEgKmkwTuW1Z9KY+MQg==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-runtime/0.3.0/53307b21ef1518d9caa32f456ccd01ece4ab29ec}
+  '@quynhonsemiconductor/platform-runtime@0.3.1':
+    resolution: {integrity: sha512-y29DBBUUt+8sz/2CQLcYjqqe76vPX5Ht6W/ndV4vef8cmIPlAm3/bkBEJxn3iVDAQFM3bEUQZVP7CgrPZQrmVA==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-runtime/0.3.1/a1cb54e040353624e3c458a551fd7fce2eda02e8}
     peerDependencies:
       '@nestjs/common': '>=11'
       '@nestjs/config': '>=4'
@@ -9262,7 +9262,7 @@ snapshots:
       nestjs-zod: 5.4.0(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/swagger@11.4.5(@fastify/static@10.1.2)(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.4.3)
       zod: 4.4.3
 
-  '@quynhonsemiconductor/platform-runtime@0.3.0(ea15f7debc8ff15e479063838f2dc1ce)':
+  '@quynhonsemiconductor/platform-runtime@0.3.1(ea15f7debc8ff15e479063838f2dc1ce)':
     dependencies:
       '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/config': 4.0.4(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(rxjs@7.8.2)
