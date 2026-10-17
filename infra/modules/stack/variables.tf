@@ -802,36 +802,67 @@ variable "grafana_alerting" {
 
 variable "email_provider" {
   description = <<-EOT
-    Which transport sends mail: "dev" logs and sends nothing, "ses" uses this account's SES.
+    Which transport sends mail: "dev" logs and sends nothing, "graph" sends through Microsoft 365 (Graph
+    `sendMail`) from the product's shared mailbox, "ses" uses this account's SES (being replaced by graph), "resend"
+    is the old third-party transport.
 
-    Defaults to "dev" so applying this module changes nothing about mail until somebody chooses to
-    turn it on. Choosing "ses" needs `mail_from_email` set AND the sender's domain verified in SES —
-    the IAM grant below is created either way, and grants nothing when there is no sender.
+    Defaults to "dev" so applying this module changes nothing about mail until somebody chooses to turn it on.
+
+    "graph" needs `mail_graph_sender`, the Graph worker app (`graph_client_id`) and its certificate in the worker task
+    (`graph_client_certificate_set`): the WORKER is the only process that sends. The mailbox is granted to that app by
+    Exchange RBAC for Applications, NOT by a Graph permission in Entra: docs/runbooks/mail-graph.md has the owner steps.
   EOT
   type        = string
   default     = "dev"
 
   validation {
-    condition     = contains(["dev", "ses", "resend"], var.email_provider)
-    error_message = "email_provider must be dev, ses or resend."
+    condition     = contains(["dev", "graph", "ses", "resend"], var.email_provider)
+    error_message = "email_provider must be dev, graph, ses or resend."
+  }
+
+  validation {
+    condition = var.email_provider != "graph" || (
+      var.mail_graph_sender != "" && var.graph_client_id != "" && var.graph_client_certificate_set
+    )
+    error_message = "email_provider = \"graph\" needs mail_graph_sender, graph_client_id and graph_client_certificate_set = true (the worker's credential for the mailbox). Finish docs/runbooks/mail-graph.md first: ECS cannot inject a secret that holds no value."
   }
 }
 
-variable "mail_from_email" {
+variable "mail_graph_sender" {
   description = <<-EOT
-    The verified sender address, e.g. no-reply@opshub.example.com.
+    The shared mailbox Graph sends as, e.g. `noreply-opshub@qnsc.vn`. Required for email_provider = "graph". A public
+    address, held in git. Graph sends as exactly this mailbox: the Exchange role assignment is scoped to its
+    PrimarySmtpAddress, so any other sender is a 403.
 
-    NO DEFAULT, deliberately. The app used to default this to a domain a deployment may not own, and
-    the result was not a failure: mail went out failing SPF and DKIM, which is silent non-delivery or
-    delivery to spam. Empty is the honest value when mail is off, and the app refuses to boot with a
-    non-dev provider and no sender.
+    A NON-PROD ENVIRONMENT NEVER SENDS FROM THE PROD MAILBOX (decision 2026-10-18, HYBRID-INFRA-PLAN §7.4): develop sends as
+    `noreply-opshub-dev@qnsc.vn`, scoped to the develop Graph worker app; production sends as `noreply-opshub@qnsc.vn`, scoped to the
+    production one. docs/runbooks/mail-graph.md has the steps.
   EOT
   type        = string
   default     = ""
 
   validation {
-    condition     = var.email_provider == "dev" || var.mail_from_email != ""
-    error_message = "mail_from_email is required when email_provider is not \"dev\"."
+    condition     = var.mail_graph_sender == "" || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.mail_graph_sender))
+    error_message = "mail_graph_sender must be a single bare email address (no display name)."
+  }
+}
+
+variable "mail_from_email" {
+  description = <<-EOT
+    The verified SES sender address, e.g. no-reply@opshub.example.com. Used by the ses and resend providers ONLY: with
+    "graph" or "dev" leave it empty (Graph sends as `mail_graph_sender`), which also removes the SES send grants.
+
+    NO DEFAULT, deliberately. The app used to default this to a domain a deployment may not own, and
+    the result was not a failure: mail went out failing SPF and DKIM, which is silent non-delivery or
+    delivery to spam. Empty is the honest value when mail is off, and the app refuses to boot with a
+    ses or resend provider and no sender.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = contains(["dev", "graph"], var.email_provider) || var.mail_from_email != ""
+    error_message = "mail_from_email is required when email_provider is ses or resend."
   }
 }
 

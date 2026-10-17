@@ -36,6 +36,13 @@ import the module that has one — `test/graph-client-single-source.spec.ts` fai
 Verify after consent: decode an access token for the app and check the `roles` claim lists exactly these
 five values, nothing else.
 
+### Mail
+
+This app also **sends the product's email**, with no Graph permission at all: its only mail authority is the Exchange Online RBAC role
+"Application Mail.Send", scoped to one shared mailbox per environment (`noreply-opshub-dev@qnsc.vn` for develop, `noreply-opshub@qnsc.vn` for production).
+Entra grants and Exchange grants are additive, so a `Mail.*` permission here would make that scope meaningless. Setup and proof:
+[`docs/runbooks/mail-graph.md`](runbooks/mail-graph.md). Same credential, same worker; `EMAIL_PROVIDER=graph`.
+
 ### Never grant
 
 - **`RoleManagement.ReadWrite.Directory`** and the rest of the directory role-management write family
