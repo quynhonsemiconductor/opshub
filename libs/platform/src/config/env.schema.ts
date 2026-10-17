@@ -120,7 +120,7 @@ const baseShape = {
   /**
    * DEPRECATED alias of VALKEY_URL, read for ONE more release. Every reader uses `get('VALKEY_URL')`; this survives only
    * so a developer's existing `.env` keeps booting, and setting it (without VALKEY_URL) logs a deprecation warning.
-   * Delete it, and the `deriveEnv` line below, in the release after.
+   * Delete it, and the `deriveEnv` line below, in the release after the one that ships this (tracking: #401).
    */
   REDIS_URL: z.string().optional(),
   REDIS_KEY_PREFIX: z.string().default('opshub:'),
