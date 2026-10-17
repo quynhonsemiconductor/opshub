@@ -116,8 +116,8 @@ export default defineConfig({
       // Raised again 2026-10-13 after the health controller (untested boilerplate) went to platform-runtime and the
       // shutdown / readiness / pool specs landed: lines 46.34 / statements 46.24 / branches 37.06 / functions 31.75.
       thresholds: {
-        lines: 44,
-        functions: 29,
+        lines: 46,
+        functions: 32,
         branches: 35,
         statements: 44,
       },
