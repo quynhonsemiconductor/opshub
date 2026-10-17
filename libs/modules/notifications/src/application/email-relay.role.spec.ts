@@ -50,4 +50,23 @@ describe('EmailRelayService per process role', () => {
     expect(assertReady).not.toHaveBeenCalled();
     await expect(service.onModuleDestroy()).resolves.toBeUndefined();
   });
+
+  it('relay() does nothing in the API even if something calls it (it must not claim a row it cannot send)', async () => {
+    setProcessRole('api');
+    // A db that fails loudly if the relay touches it.
+    const db = new Proxy(
+      {},
+      {
+        get: () => () => {
+          throw new Error('the API claimed an email row');
+        },
+      },
+    );
+    const service = new EmailRelayService(
+      db as never,
+      { assertReady: vi.fn() } as never,
+      {} as never,
+    );
+    await expect(service.relay()).resolves.toBeUndefined();
+  });
 });

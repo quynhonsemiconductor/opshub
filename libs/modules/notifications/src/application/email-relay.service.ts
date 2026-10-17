@@ -52,9 +52,9 @@ export class EmailRelayService
 
   async onModuleInit(): Promise<void> {
     /*
-     * ONLY THE WORKER SENDS. The API writes outbox rows and publishes the wake signal; it holds no mail credential (the Graph variables are
-     * refused by its schema, and an SES role is no longer the arrangement), so a relay pass in the API would try to send with none. Without
-     * this the API subscribed to its own wake signal and ran the relay too.
+     * ONLY THE WORKER SENDS. The API writes outbox rows and publishes the wake signal; it holds no mail credential (its schema refuses the
+     * Graph variables, and its task has no SES grant), so a relay pass in the API would try to send with none. Without this the API
+     * subscribed to its own wake signal and ran the relay too. `relay()` below enforces the same rule for any other caller.
      */
     if (getProcessRole() !== 'worker') {
       this.logger.log('Email relay idle: this is not the worker process');
@@ -77,6 +77,8 @@ export class EmailRelayService
   @Cron('*/5 * * * * *', { name: 'email-relay' })
   @Span('email.relay')
   override async relay(): Promise<void> {
+    // Whoever calls it (the cron, the wake signal, a test): only the worker sends.
+    if (getProcessRole() !== 'worker') return;
     return super.relay();
   }
 

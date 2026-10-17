@@ -9,8 +9,12 @@ import {
   type EmailMessage,
   type EmailSender,
 } from '@quynhonsemiconductor/platform-mail/sender';
-import { NonRetryableError, RetryAfterError } from '../../outbox/abstract-outbox-relay';
-import { GraphEmailProvider, type GraphMailConfig } from './graph.provider';
+import { DeferError, NonRetryableError, RetryAfterError } from '../../outbox/abstract-outbox-relay';
+import {
+  GraphEmailProvider,
+  SENDER_BLOCKED_BACKOFF_MS,
+  type GraphMailConfig,
+} from './graph.provider';
 
 const CONFIG: GraphMailConfig = {
   sender: 'noreply-opshub@qnsc.vn',
@@ -31,7 +35,12 @@ const PAYLOAD = {
   idempotencyKey: 'email-outbox:row-1',
 };
 
-function fakeSender(send: (m: EmailMessage) => Promise<{ id: string; transport: 'graph' }>) {
+function fakeSender(
+  send: (
+    m: EmailMessage,
+    o?: { signal?: AbortSignal },
+  ) => Promise<{ id: string; transport: 'graph' }>,
+) {
   const spy = vi.fn(send);
   const sender = { mailbox: 'noreply-opshub@qnsc.vn', send: spy } as unknown as EmailSender;
   return { sender, send: spy };
@@ -72,18 +81,86 @@ describe('GraphEmailProvider', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('dead-letters at once on an error retrying cannot fix (403: the app may not send as this mailbox)', async () => {
-    const { sender } = fakeSender(() =>
-      Promise.reject(
-        new MailSendError('forbidden', 'Graph answered 403', { status: 403, requestId: 'abc' }),
-      ),
+  describe('what is a message problem and what is a sender problem', () => {
+    it.each([
+      ['invalid_message', 400],
+      ['too_large', 413],
+    ] as const)(
+      '%s (HTTP %i) is about THIS message: dead-lettered at once',
+      async (code, status) => {
+        const { sender } = fakeSender(() =>
+          Promise.reject(
+            new MailSendError(code, `Graph answered ${status}`, { status, requestId: 'abc' }),
+          ),
+        );
+        const error = await new GraphEmailProvider(CONFIG, () => sender)
+          .send(PAYLOAD)
+          .catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(NonRetryableError);
+        expect((error as Error).message).toContain(String(status));
+        expect((error as Error).message).not.toContain('someone@qnsc.vn');
+      },
     );
-    const error = await new GraphEmailProvider(CONFIG, () => sender)
-      .send(PAYLOAD)
-      .catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(NonRetryableError);
-    expect((error as Error).message).toContain('403');
-    expect((error as Error).message).not.toContain('someone@qnsc.vn');
+
+    it.each([
+      ['forbidden', 403],
+      ['mailbox_not_found', 404],
+    ] as const)(
+      '%s (HTTP %i) on sendMail is about the SENDER (role not assigned or still propagating, mailbox missing): defer 15 minutes, never dead-letter',
+      async (code, status) => {
+        const { sender } = fakeSender(() =>
+          Promise.reject(new MailSendError(code, `Graph answered ${status}`, { status })),
+        );
+        const error = await new GraphEmailProvider(CONFIG, () => sender)
+          .send(PAYLOAD)
+          .catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(DeferError);
+        expect(error).not.toBeInstanceOf(NonRetryableError);
+        expect((error as DeferError).delayMs).toBe(SENDER_BLOCKED_BACKOFF_MS);
+      },
+    );
+
+    it('STOPS THE BATCH: after a sender refusal the next rows are deferred without calling Graph, until the backoff passes', async () => {
+      let clock = 1_000_000;
+      let refuse = true;
+      const { sender, send } = fakeSender(() =>
+        refuse
+          ? Promise.reject(new MailSendError('forbidden', 'Graph answered 403', { status: 403 }))
+          : Promise.resolve({ id: 'req-9', transport: 'graph' }),
+      );
+      const provider = new GraphEmailProvider(
+        CONFIG,
+        () => sender,
+        () => clock,
+      );
+
+      await expect(provider.send(PAYLOAD)).rejects.toBeInstanceOf(DeferError);
+      expect(send).toHaveBeenCalledTimes(1);
+
+      // The rest of the batch, and rows that arrive meanwhile: deferred for what is LEFT of the window, no request made.
+      clock += 60_000;
+      const second = await provider
+        .send({ ...PAYLOAD, idempotencyKey: 'k2' })
+        .catch((e: unknown) => e);
+      expect(second).toBeInstanceOf(DeferError);
+      expect((second as DeferError).delayMs).toBe(SENDER_BLOCKED_BACKOFF_MS - 60_000);
+      expect(send).toHaveBeenCalledTimes(1);
+
+      // After the window the role has propagated: Graph is asked again, and the send goes through.
+      clock += SENDER_BLOCKED_BACKOFF_MS;
+      refuse = false;
+      await expect(provider.send({ ...PAYLOAD, idempotencyKey: 'k3' })).resolves.toEqual({
+        messageId: 'req-9',
+      });
+      expect(send).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('hands the caller’s deadline signal to the transport, so the request, its retries and any Retry-After wait stop when it fires', async () => {
+    const { sender, send } = fakeSender(() => Promise.resolve({ id: 'r', transport: 'graph' }));
+    const controller = new AbortController();
+    await new GraphEmailProvider(CONFIG, () => sender).send(PAYLOAD, { signal: controller.signal });
+    expect(send.mock.calls[0][1]).toEqual({ signal: controller.signal });
   });
 
   it('honours the server’s own wait on throttling', async () => {

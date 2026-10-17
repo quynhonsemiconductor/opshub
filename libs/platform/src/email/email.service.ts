@@ -71,16 +71,20 @@ export class EmailService {
       // Returned so the relay can persist the provider's message id at acceptance —
       // that id is the feedback loop's only exact match key for a later verdict.
       return await withDeadline(
-        this.provider.send({
-          to,
-          from: this.from,
-          replyTo: opts?.replyTo ?? this.replyTo,
-          subject: rendered.subject,
-          html: rendered.html,
-          text: rendered.text,
-          category: 'transactional',
-          idempotencyKey: opts?.idempotencyKey,
-        }),
+        (signal) =>
+          this.provider.send(
+            {
+              to,
+              from: this.from,
+              replyTo: opts?.replyTo ?? this.replyTo,
+              subject: rendered.subject,
+              html: rendered.html,
+              text: rendered.text,
+              category: 'transactional',
+              idempotencyKey: opts?.idempotencyKey,
+            },
+            { signal },
+          ),
         EMAIL_SEND_TIMEOUT_MS,
       );
     } catch (err) {
@@ -91,14 +95,19 @@ export class EmailService {
   }
 }
 
-/** Rejects if `work` has not settled within `ms`. Does not cancel `work`; see EMAIL_SEND_TIMEOUT_MS. */
-function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+/**
+ * Runs `work` with a hard deadline: at `ms` the SIGNAL passed to it is aborted (so a provider that can cancel stops the request, its in-place
+ * retries and any wait: nothing is accepted after the caller has given up and the relay has retried), and the returned promise rejects even if
+ * the provider ignores the signal.
+ */
+function withDeadline<T>(work: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`Email provider did not answer within ${Math.round(ms / 1000)} s`)),
-      ms,
-    );
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`Email provider did not answer within ${Math.round(ms / 1000)} s`));
+    }, ms);
   });
-  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+  return Promise.race([work(controller.signal), deadline]).finally(() => clearTimeout(timer));
 }
