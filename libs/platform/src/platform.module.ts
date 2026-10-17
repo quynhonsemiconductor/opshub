@@ -46,12 +46,12 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     // Single shared Valkey/Redis client (@quynhonsemiconductor/platform-cache), registered
     // globally so every consumer (rate-limit, idempotency, health, pub/sub) and
     // the identity 8 session store and rate limits share one connection.
-    // Optional mode: when REDIS_URL is unset the cache is disabled and all
+    // Optional mode: when VALKEY_URL is unset the cache is disabled and all
     // consumers fail open (opshub runs without a hard Redis dependency).
     CacheModule.forRootAsync({
       inject: [AppConfigService],
       useFactory: (config: AppConfigService) => ({
-        url: config.get('REDIS_URL'),
+        url: config.get('VALKEY_URL'),
         keyPrefix: config.get('REDIS_KEY_PREFIX'),
         mode: 'optional' as const,
       }),

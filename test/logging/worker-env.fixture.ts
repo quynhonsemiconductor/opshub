@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /** What a worker legitimately needs, taken from the caller's environment when present (CI supplies the services). */
-const INHERIT = ['PATH', 'HOME', 'TMPDIR', 'DATABASE_URL', 'REDIS_URL', 'VALKEY_URL'] as const;
+const INHERIT = ['PATH', 'HOME', 'TMPDIR', 'DATABASE_URL', 'VALKEY_URL', 'REDIS_URL'] as const;
 
 const inherited = Object.fromEntries(
   INHERIT.flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]])),
@@ -27,9 +27,9 @@ for (const key of Object.keys(process.env)) delete process.env[key];
 Object.assign(process.env, {
   // Local defaults, overridden by what the caller (CI) provides.
   DATABASE_URL: 'postgres://opshub:opshub@localhost:5433/opshub',
-  ...(inherited['REDIS_URL'] || inherited['VALKEY_URL']
+  ...(inherited['VALKEY_URL'] || inherited['REDIS_URL']
     ? {}
-    : { REDIS_URL: 'redis://localhost:6380' }),
+    : { VALKEY_URL: 'redis://localhost:6380' }),
   ...inherited,
   NODE_ENV: 'production', // pinned to production in every deployed environment, on purpose
   DEPLOYMENT_ENV: 'develop',

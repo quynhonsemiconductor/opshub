@@ -68,10 +68,10 @@ const READ_BY_SHARED_PACKAGES = new Set([
 /**
  * Variables consumed inside the schema itself.
  *
- * `VALKEY_URL` is the infra-injected alias for `REDIS_URL` and is normalised into it at parse time, so it
+ * `REDIS_URL` is the DEPRECATED alias of `VALKEY_URL` and is folded into it at parse time, so it
  * is read exactly once — in the file that declares it, which the scan excludes.
  */
-const RESOLVED_IN_SCHEMA = new Set(['VALKEY_URL']);
+const RESOLVED_IN_SCHEMA = new Set(['REDIS_URL']);
 
 function declaredKeys(): string[] {
   const schema = readFileSync(join(ROOT, SCHEMA), 'utf8');
