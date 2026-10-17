@@ -1381,7 +1381,7 @@ resource "aws_scheduler_schedule" "ecs_scale_up" {
 # ── Guard: an environment without a cache must run no tasks ───────────────────
 # `cache.enabled = false` deletes the node, and ElastiCache has no stopped state, so it
 # is the only way to stop an idled environment paying for one. But a task that cannot
-# reach its cache does NOT fail loudly here: REDIS_URL is optional in the app's env
+# reach its cache does NOT fail loudly here: VALKEY_URL is optional in the app's env
 # schema, and the token denylist and the rate limiter both FAIL OPEN when Valkey is
 # unreachable. So the dangerous state is not "no cache" — it is "no cache, tasks
 # running", which degrades two security controls silently.

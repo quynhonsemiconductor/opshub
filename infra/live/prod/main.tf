@@ -249,7 +249,7 @@ module "stack" {
   // ElastiCache cannot be stopped, only deleted, so the node is the one component of an
   // idled environment that keeps billing (~$12/mo). The `check` block in the stack module
   // enforces that this requires min_count = 0 on both services: a task without a
-  // reachable cache does NOT fail loudly — REDIS_URL is optional and both the token
+  // reachable cache does NOT fail loudly — VALKEY_URL is optional and both the token
   // denylist and the rate limiter fail open — so "no cache, tasks running" would degrade
   // two security controls silently. RE-ENABLE AT GO-LIVE.
   cache = {
