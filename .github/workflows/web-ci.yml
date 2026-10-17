@@ -503,7 +503,7 @@ jobs:
       # /readyz is the API's own probe (database and cache both up).
       - name: The API answers /readyz
         run: |
-          for i in $(seq 1 90); do
+          for _ in $(seq 1 90); do
             if body=$(curl -sf http://localhost:3001/readyz); then
               echo "$body"
               echo "$body" | jq -e '.status == "ok" and .checks.database == "up" and .checks.cache == "up"'
@@ -518,7 +518,7 @@ jobs:
       # signal: it must say it started and must not contain an error (a refusal names the variable).
       - name: The worker started from the same .env
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             grep -q "Worker process started" "$LOGS/worker.log" && break
             sleep 2
           done
@@ -533,7 +533,7 @@ jobs:
       # breaks when the example's PORT and the proxy target disagree.
       - name: Sign in with the test login and make an authenticated /v1 call, through the SPA's proxy
         run: |
-          for i in $(seq 1 30); do curl -sf http://localhost:5173/v1/healthz >/dev/null && break; sleep 2; done
+          for _ in $(seq 1 30); do curl -sf http://localhost:5173/v1/healthz >/dev/null && break; sleep 2; done
           curl -sf http://localhost:5173/v1/healthz || { echo "::error::/v1 through the Vite proxy failed: .env.example PORT must equal the proxy target in apps/web/vite.config.ts"; exit 1; }
           curl -sf -c "$LOGS/jar.txt" -H 'content-type: application/json' \
             -d '{"email":"admin@opshub.local"}' http://localhost:5173/api/auth/test-login
