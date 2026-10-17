@@ -555,3 +555,69 @@ describe('role-specific schemas — the API and the worker hold different creden
     expect(typeof never).toBe('function');
   });
 });
+
+describe('EnvSchema: EMAIL_PROVIDER=graph (Microsoft 365 mail)', () => {
+  const TENANT = '11111111-1111-4111-8111-111111111111';
+  const APP = '22222222-2222-4222-8222-222222222222';
+  const PEM = '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----';
+  const graph = { EMAIL_PROVIDER: 'graph', MAIL_GRAPH_SENDER: 'noreply-opshub@qnsc.vn' };
+
+  it('needs the mailbox it sends as, in both roles, and no MAIL_FROM_EMAIL (Graph sends as the mailbox)', () => {
+    for (const parse of [
+      (e: Record<string, string | undefined>) => ApiEnvSchema.safeParse(env(e)),
+      (e: Record<string, string | undefined>) => WorkerEnvSchema.safeParse(workerEnv(e)),
+    ]) {
+      const missing = parse({ EMAIL_PROVIDER: 'graph' });
+      expect(missing.success).toBe(false);
+      expect(
+        !missing.success && missing.error.issues.some((i) => i.path[0] === 'MAIL_GRAPH_SENDER'),
+      ).toBe(true);
+    }
+    expect(ApiEnvSchema.safeParse(env(graph)).success).toBe(true);
+  });
+
+  it('refuses a sender that is not an address', () => {
+    expect(
+      ApiEnvSchema.safeParse(env({ ...graph, MAIL_GRAPH_SENDER: 'not-an-address' })).success,
+    ).toBe(false);
+  });
+
+  it('the API sends nothing, so it needs no Graph credential and is forbidden to hold one', () => {
+    expect(ApiEnvSchema.safeParse(env(graph)).success).toBe(true);
+    const withCredential = ApiEnvSchema.safeParse(env({ ...graph, GRAPH_CLIENT_ID: APP }));
+    expect(withCredential.success).toBe(false);
+  });
+
+  it('the worker needs the tenant, the Graph worker app and a credential for it', () => {
+    const complete = workerEnv({
+      ...graph,
+      ENTRA_TENANT_ID: TENANT,
+      GRAPH_CLIENT_ID: APP,
+      GRAPH_CLIENT_CERTIFICATE: PEM,
+    });
+    expect(WorkerEnvSchema.safeParse(complete).success).toBe(true);
+    for (const name of [
+      'ENTRA_TENANT_ID',
+      'GRAPH_CLIENT_ID',
+      'GRAPH_CLIENT_CERTIFICATE',
+    ] as const) {
+      const result = WorkerEnvSchema.safeParse({ ...complete, [name]: undefined });
+      expect(result.success, `${name} missing should fail`).toBe(false);
+      expect(!result.success && result.error.issues.some((i) => i.path[0] === name)).toBe(true);
+    }
+  });
+
+  it('a federated token file is a credential too, so the k3s move is adding it', () => {
+    const federated = workerEnv({
+      ...graph,
+      ENTRA_TENANT_ID: TENANT,
+      GRAPH_CLIENT_ID: APP,
+      GRAPH_FEDERATED_TOKEN_FILE: '/var/run/token',
+    });
+    expect(WorkerEnvSchema.safeParse(federated).success).toBe(true);
+  });
+
+  it('the worker without graph mail is unchanged: no credential asked for', () => {
+    expect(WorkerEnvSchema.safeParse(workerEnv()).success).toBe(true);
+  });
+});

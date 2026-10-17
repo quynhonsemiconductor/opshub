@@ -2,7 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { CacheModule } from '@quynhonsemiconductor/platform-cache';
 import { RequestContextService } from '@quynhonsemiconductor/observability';
 import { AppConfigModule } from './config/config.module';
-import { AppConfigService } from './config/app-config.service';
+import { AppConfigService, WorkerConfigService } from './config/app-config.service';
 import { DatabaseModule } from './database/database.module';
 import { SessionAuthGuard } from './auth/session-principal.guard';
 import { ScopeEvaluator } from './auth/scope-evaluator';
@@ -21,6 +21,7 @@ import { RouteAuthzAudit } from './auth/route-authz-audit';
 import { DevEmailProvider } from './email/providers/dev.provider';
 import { ResendEmailProvider } from './email/providers/resend.provider';
 import { SesEmailProvider } from './email/providers/ses.provider';
+import { GraphEmailProvider } from './email/providers/graph.provider';
 import { EmailService } from './email/email.service';
 import { EmailSchedulerService } from './email/email-scheduler.service';
 import { EmailDeliveryService } from './email/email-delivery.service';
@@ -74,9 +75,24 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     ResilienceService,
     {
       provide: EMAIL_PROVIDER,
-      inject: [AppConfigService],
-      useFactory: (config: AppConfigService) => {
+      inject: [AppConfigService, WorkerConfigService],
+      useFactory: (config: AppConfigService, worker: WorkerConfigService) => {
         const provider = config.get('EMAIL_PROVIDER');
+        if (provider === 'graph') {
+          /*
+           * The WORKER's credential, read through the worker-typed config: the API's schema refuses every GRAPH_* variable, so there it
+           * reads `undefined` and the provider (which builds its transport on the first send, and the API never sends) stays inert. The
+           * worker's schema requires them for this provider, and `EmailRelayService` calls `assertReady()` when it starts.
+           */
+          return new GraphEmailProvider({
+            sender: config.get('MAIL_GRAPH_SENDER') ?? '',
+            tenantId: worker.get('ENTRA_TENANT_ID'),
+            clientId: worker.get('GRAPH_CLIENT_ID'),
+            certificate: worker.get('GRAPH_CLIENT_CERTIFICATE'),
+            federatedTokenFile: worker.get('GRAPH_FEDERATED_TOKEN_FILE'),
+            nodeEnv: config.get('NODE_ENV'),
+          });
+        }
         if (provider === 'ses') {
           /*
            * NO KEY TO CHECK, which is the point of choosing SES: the credential is the task role, so
