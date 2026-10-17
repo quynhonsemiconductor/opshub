@@ -35,6 +35,9 @@ export interface GraphMailConfig {
  */
 export const SENDER_BLOCKED_BACKOFF_MS = 15 * 60_000;
 
+/** Why the sender is blocked: a closed set, also the metric's `reason`. */
+export type BlockReason = 'forbidden' | 'mailbox_not_found' | 'unauthenticated';
+
 /** The log field the `email-sender-blocked` alarm filters on (infra: `$.senderBlocked`); a spec in the infra tree pins the same name. */
 export const SENDER_BLOCKED_FIELD = 'senderBlocked';
 
@@ -43,6 +46,15 @@ const senderBlocked = metrics.getMeter('opshub-worker').createCounter('email.sen
   description:
     'Graph refused the sender mailbox (403/404 on sendMail): the Exchange role or the mailbox is wrong',
 });
+
+const BLOCK_EXPLANATION: Record<BlockReason, string> = {
+  forbidden:
+    'Graph refused the sender mailbox (403): the Exchange role is not assigned yet, still propagating, or scoped to another mailbox.',
+  mailbox_not_found:
+    'Graph does not find the sender mailbox (404): it is missing or not REST-enabled.',
+  unauthenticated:
+    'Graph or Entra refused the app credential (401 / token failure): the certificate is expired, revoked or not the one uploaded, or the client id is wrong.',
+};
 
 /**
  * Sends through Microsoft Graph `sendMail` from the product's shared mailbox, using `@quynhonsemiconductor/platform-mail`'s transport.
@@ -54,8 +66,8 @@ const senderBlocked = metrics.getMeter('opshub-worker').createCounter('email.sen
  * cannot arrive after the relay has already retried the row.
  *
  * WHAT IS A MESSAGE PROBLEM AND WHAT IS NOT. 400 (invalid) and 413 (too large) are about THIS message: the row is dead-lettered at once. A 403 or
- * 404 on `sendMail` is about the SENDER (the Exchange role is not assigned yet or is still propagating, the mailbox is missing or not REST-enabled):
- * it would dead-letter every queued row at rollout for a cause unrelated to any of them. So it BLOCKS the sender: this row and every row that
+ * 404 on `sendMail`, or a 401 / token failure, is about the SENDER or its credential (the Exchange role is not assigned yet or is still propagating, the mailbox is missing or not REST-enabled, the certificate is expired, revoked or mismatched, the client id is wrong):
+ * it would burn every queued row's attempts, and dead-letter them, for a cause unrelated to any of them. So it BLOCKS the sender: this row and every row that
  * follows are deferred (attempt refunded) for {@link SENDER_BLOCKED_BACKOFF_MS} without calling Graph, one error is logged with
  * `senderBlocked`, and `email.sender_blocked` is counted for the alarm.
  *
@@ -73,7 +85,7 @@ export class GraphEmailProvider implements IEmailProvider {
   private readonly logger = new Logger(GraphEmailProvider.name);
   private sender: EmailSender | undefined;
   private blockedUntil = 0;
-  private blockedReason: 'forbidden' | 'mailbox_not_found' | undefined;
+  private blockedReason: BlockReason | undefined;
 
   constructor(
     private readonly config: GraphMailConfig,
@@ -153,10 +165,10 @@ export class GraphEmailProvider implements IEmailProvider {
    * The relay's decision, from the transport's closed error codes. The error text holds the code, the status and Microsoft's request id, never a
    * recipient or a body.
    *
-   *  - `forbidden` / `mailbox_not_found` (403 / 404 on sendMail): the SENDER is wrong. Block it, defer, alarm; never dead-letter a message for it.
+   *  - `forbidden` / `mailbox_not_found` (403 / 404 on sendMail) and `unauthenticated` (401, token failure): the SENDER or its credential is wrong. Block it, defer, alarm; never dead-letter a message for it.
    *  - `invalid_message` / `too_large` (400 / 413) and `config`: about this message or this process; they fail the same way every time:
    *    dead-letter now (the `outbox-dead-letter` alarm fires).
-   *  - 429 carries the server's own wait; everything else (401, 5xx, timeout, network) is retried by the relay with backoff.
+   *  - 429 carries the server's own wait; everything else (5xx, timeout, network) is retried by the relay with backoff.
    */
   private classify(err: unknown): unknown {
     if (!(err instanceof MailSendError)) return err;
@@ -164,13 +176,17 @@ export class GraphEmailProvider implements IEmailProvider {
       { code: err.code, status: err.status, requestId: err.requestId },
       'Graph sendMail failed',
     );
-    if (err.code === 'forbidden' || err.code === 'mailbox_not_found') {
+    if (
+      err.code === 'forbidden' ||
+      err.code === 'mailbox_not_found' ||
+      err.code === 'unauthenticated'
+    ) {
       this.blockedUntil = this.now() + SENDER_BLOCKED_BACKOFF_MS;
       this.blockedReason = err.code;
       senderBlocked.add(1, { reason: err.code });
       this.logger.error(
         { [SENDER_BLOCKED_FIELD]: err.code, status: err.status, requestId: err.requestId },
-        `Graph refused the sender mailbox (${err.code}): the Exchange role or the mailbox is wrong. Rows are deferred ${SENDER_BLOCKED_BACKOFF_MS / 60_000} minutes; see docs/runbooks/mail-graph.md`,
+        `${BLOCK_EXPLANATION[err.code]} Rows are deferred ${SENDER_BLOCKED_BACKOFF_MS / 60_000} minutes; see docs/runbooks/mail-graph.md`,
       );
       return new DeferError(err.message, SENDER_BLOCKED_BACKOFF_MS);
     }

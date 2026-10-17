@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { DeferError } from '../outbox/abstract-outbox-relay';
 import { AppConfigService } from '../config/app-config.service';
 import {
   EMAIL_PROVIDER,
@@ -88,8 +89,10 @@ export class EmailService {
         EMAIL_SEND_TIMEOUT_MS,
       );
     } catch (err) {
-      // Log and re-throw — the relay will catch this and update the outbox row.
-      this.logger.error({ err, to, template }, 'Failed to send email');
+      // Re-throw: the relay catches it and updates the outbox row. A DeferError is not a failure (the provider already logged the one block, and
+      // every deferred row of a batch would repeat it); anything else is logged WITHOUT the recipient.
+      if (!(err instanceof DeferError))
+        this.logger.error({ err, template }, 'Failed to send email');
       throw err;
     }
   }

@@ -131,8 +131,9 @@ describe('GraphEmailProvider', () => {
     it.each([
       ['forbidden', 403],
       ['mailbox_not_found', 404],
+      ['unauthenticated', 401],
     ] as const)(
-      '%s (HTTP %i) on sendMail is about the SENDER (role not assigned or still propagating, mailbox missing): defer 15 minutes, never dead-letter',
+      '%s (HTTP %i) on sendMail is about the SENDER or its credential (role not assigned or still propagating, mailbox missing, certificate expired or wrong): defer 15 minutes, never burn attempts',
       async (code, status) => {
         const { sender } = fakeSender(() =>
           Promise.reject(new MailSendError(code, `Graph answered ${status}`, { status })),
@@ -180,6 +181,25 @@ describe('GraphEmailProvider', () => {
       });
       expect(send).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('gives an expired or mismatched credential its own reason in the senderBlocked log', async () => {
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    try {
+      const { sender } = fakeSender(() =>
+        Promise.reject(new MailSendError('unauthenticated', 'AADSTS700027', { status: 401 })),
+      );
+      await new GraphEmailProvider(CONFIG, () => sender).send(PAYLOAD).catch(() => undefined);
+      const blocked = error.mock.calls.filter(
+        ([fields]) => (fields as Record<string, unknown>)?.[SENDER_BLOCKED_FIELD],
+      );
+      expect(blocked).toHaveLength(1);
+      expect((blocked[0][0] as Record<string, unknown>)[SENDER_BLOCKED_FIELD]).toBe(
+        'unauthenticated',
+      );
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it('hands the caller’s deadline signal to the transport, so the request, its retries and any Retry-After wait stop when it fires', async () => {
