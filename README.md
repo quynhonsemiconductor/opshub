@@ -96,7 +96,7 @@ Every host port is offset from rova's defaults so both stacks run at once. The t
 | LocalStack (S3) | **4567** | 4566 |
 | OTel collector (OTLP / Prometheus) | **4319** / **8890** | 4318 / 8889 |
 
-The Vite server uses `strictPort`: a second SPA fails with "Port 5173 is already in use" instead of quietly moving to 5174, where CORS and the sign-in redirect would not match. To run both SPAs, start one of them elsewhere and tell **its** API the new origin on the command line (a variable in the environment beats `.env`):
+The Vite server uses `strictPort`: a second SPA fails with "Port 5173 is already in use" instead of quietly moving to 5174, where the Microsoft sign-in redirect (`APP_URL`) and the upload bucket's CORS would no longer match. To run both SPAs, start one of them elsewhere and tell **its** API the new origin on the command line (a variable in the environment beats `.env`; `APP_URL` is the redirect and link origin, `CORS_ORIGINS` the allow-list):
 
 ```bash
 APP_URL=http://localhost:5174 CORS_ORIGINS=http://localhost:5174 pnpm start:dev
