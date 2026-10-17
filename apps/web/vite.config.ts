@@ -21,6 +21,11 @@ export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss(), securityHeadersPlugin],
   server: {
     host: '0.0.0.0',
+    // 5173 is the origin the rest of the stack is wired to (.env.example CORS_ORIGINS and APP_URL, the Microsoft redirect
+    // URI, LocalStack's bucket CORS, Playwright's baseURL). strictPort: if another dev server holds it, FAIL instead of
+    // silently moving to 5174, where CORS and the sign-in redirect would not match and the symptom is a broken login.
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/v1': { target: 'http://localhost:3001', changeOrigin: true, secure: false },
       // identity 8 (Better Auth): sign-in, the Microsoft callback and sign-out, same-origin with the SPA.

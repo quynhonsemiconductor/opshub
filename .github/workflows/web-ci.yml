@@ -440,6 +440,121 @@ jobs:
         if: failure()
         run: cat /tmp/api.log || true
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5. Local quickstart — the README's "Local stack", executed.
+  #
+  # A clean clone must run with `cp .env.example .env` and the README's commands, nothing else. This job IS that
+  # clone: it copies the example, starts the compose stack, migrates (and seeds the demo users), boots the API and the
+  # worker from that `.env` with the README's own start scripts, boots the Vite server, and signs in with the test
+  # login THROUGH the Vite proxy. Every other job passes its configuration as `env:` and would stay green while
+  # `.env.example` rotted; this one reads nothing else.
+  #
+  # What it caught on the day it was written: PORT=3000 against a Vite proxy to :3001 (every SPA request 502), no
+  # SEED_ON_DEPLOY (no demo users, every test login refused). It lives in WEB CI rather than Backend CI because the
+  # drift runs both ways: a proxy-port edit in apps/web touches no backend file, and Backend CI skips web-only changes.
+  #
+  # The commands below mirror the README (test/env-example.spec.ts fails when the two stop agreeing).
+  # ─────────────────────────────────────────────────────────────────────────
+  quickstart:
+    name: local quickstart
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      LOGS: ${{ github.workspace }}/quickstart-logs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: cp .env.example .env
+        run: |
+          cp .env.example .env
+          mkdir -p "$LOGS"
+
+      # `--wait` returns when every healthcheck passes; LocalStack's means the init hook has created the bucket.
+      - name: docker compose -f docker-compose.dev.yml up -d --wait
+        run: docker compose -f docker-compose.dev.yml up -d --wait --wait-timeout 240
+
+      - name: pnpm db:migrate
+        run: pnpm db:migrate
+
+      # `SEED_ON_DEPLOY=true` in the example is what makes the migrate step load the demo users. Without them the test
+      # login is refused, so ask the database directly and fail by name rather than at a 401 later.
+      - name: The demo users exist
+        run: |
+          n=$(docker exec opshub-postgres psql -U opshub -d opshub -Atc "select count(*) from identity.\"user\" where email = 'admin@opshub.local'")
+          echo "admin@opshub.local rows: $n"
+          test "$n" = 1
+
+      - name: Start the API, the worker and the web dev server
+        run: |
+          nohup pnpm start:dev        > "$LOGS/api.log"    2>&1 &
+          nohup pnpm start:dev:worker > "$LOGS/worker.log" 2>&1 &
+          nohup pnpm dev:web          > "$LOGS/web.log"    2>&1 &
+
+      # /readyz is the API's own probe (database and cache both up).
+      - name: The API answers /readyz
+        run: |
+          for i in $(seq 1 90); do
+            if body=$(curl -sf http://localhost:3001/readyz); then
+              echo "$body"
+              echo "$body" | jq -e '.status == "ok" and .checks.database == "up" and .checks.cache == "up"'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the API did not answer /readyz on :3001 within 3 minutes. Is PORT in .env.example the port the Vite proxy forwards to?"
+          exit 1
+
+      # The worker serves no HTTP, and `nest start --watch` keeps running after a config refusal, so the log is the
+      # signal: it must say it started and must not contain an error (a refusal names the variable).
+      - name: The worker started from the same .env
+        run: |
+          for i in $(seq 1 60); do
+            grep -q "Worker process started" "$LOGS/worker.log" && break
+            sleep 2
+          done
+          grep -q "Worker process started" "$LOGS/worker.log" || { echo "::error::the worker did not start"; exit 1; }
+          sleep 10
+          if grep -aE "ERROR|FATAL" "$LOGS/worker.log" "$LOGS/api.log"; then
+            echo "::error::an error in the API or worker log after boot"
+            exit 1
+          fi
+
+      # THROUGH THE VITE PROXY (:5173), not the API directly: this is the call a browser makes, and it is the one that
+      # breaks when the example's PORT and the proxy target disagree.
+      - name: Sign in with the test login and make an authenticated /v1 call, through the SPA's proxy
+        run: |
+          for i in $(seq 1 30); do curl -sf http://localhost:5173/v1/healthz >/dev/null && break; sleep 2; done
+          curl -sf http://localhost:5173/v1/healthz || { echo "::error::/v1 through the Vite proxy failed: .env.example PORT must equal the proxy target in apps/web/vite.config.ts"; exit 1; }
+          curl -sf -c "$LOGS/jar.txt" -H 'content-type: application/json' \
+            -d '{"email":"admin@opshub.local"}' http://localhost:5173/api/auth/test-login
+          me=$(curl -sf -b "$LOGS/jar.txt" http://localhost:5173/v1/auth/me)
+          echo "$me" | jq '{email, roles}'
+          echo "$me" | jq -e '.email == "admin@opshub.local" and (.roles | index("admin"))'
+          curl -sf -b "$LOGS/jar.txt" -o /dev/null -w 'GET /v1/assets -> %{http_code}\n' http://localhost:5173/v1/assets
+
+      - name: Logs
+        if: always()
+        run: |
+          for f in api worker web; do echo "::group::$f.log"; tail -n 120 "$LOGS/$f.log" || true; echo "::endgroup::"; done
+          docker compose -f docker-compose.dev.yml ps || true
+
+      - name: Tear down
+        if: always()
+        run: |
+          pkill -f "nest start" || true
+          pkill -f vite || true
+          docker compose -f docker-compose.dev.yml down -v || true
+
   # ── The aggregate gate ──────────────────────────────────────────────────────
   # `Web CI required` is THE required check for this workflow. It exists because GitHub counts a
   # SKIPPED or CANCELLED required check as PASSING, so naming each job in the ruleset
@@ -459,7 +574,7 @@ jobs:
   ci-required:
     name: Web CI required
     if: always()
-    needs: [changes, quality, test, build, e2e]
+    needs: [changes, quality, test, build, e2e, quickstart]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
