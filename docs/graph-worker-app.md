@@ -23,6 +23,16 @@ role-management write (the app could have made itself Global Admin) and `User.Re
 task had the Graph secret injected. Now the API process has no Graph variable, no Graph client and cannot
 import the module that has one — `test/graph-client-single-source.spec.ts` fails the build if it does.
 
+## Accepted risk: mail shares this app
+
+Outbound email is sent by this same app (certificate, worker only; the Exchange RBAC role `Application Mail.Send` scoped to one mailbox, and **no** `Mail.*` in Entra,
+see `docs/runbooks/mail-graph.md`). That is the organisation's standard, one Service app per product and environment, and it was a conscious choice, but the
+consequence should be stated: **one certificate now covers both the five permissions below (Intune reads, account disable and session revocation) and sending as
+the shared mailbox.** Whoever holds that certificate, or the worker's execution role that injects it, can do both. The mitigations are the ones that already
+bound the app: the certificate lives in one Secrets Manager secret readable only by the worker's execution role (not by the API and not by any task role), there
+is no client secret, the Exchange scope limits mail to one `PrimarySmtpAddress`, and develop and production are separate apps with separate certificates. If
+mail ever needs a different blast radius from the directory actions, the split is a second Service app and a second certificate; nothing in the code assumes one.
+
 ## Application permissions — exactly these five, admin-consented
 
 | Permission                                | Used by                                                   | Call                                                                              | Why this and not a broader one                                                                                                                                                                                                   |
