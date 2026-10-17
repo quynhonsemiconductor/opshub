@@ -41,18 +41,23 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
     ports:
-      # 4567 avoids conflict with other local LocalStack instances (rally on 4566),
-      # matching how postgres and valkey are offset above. AWS_ENDPOINT_URL and
-      # SQS_OUTBOX_URL in .env must carry this port, not 4566.
+      # 4567 avoids conflict with other local LocalStack instances (rova/rally on 4566),
+      # matching how postgres and valkey are offset above. STORAGE_ENDPOINT and
+      # AWS_ENDPOINT_URL in .env must carry this port, not 4566.
       - '4567:4566'
     volumes:
       - opshub_localstack:/var/lib/localstack
-      # Init hook: runs every time LocalStack becomes ready, creating the SQS
-      # queue, its DLQ and the files bucket. Mirrors how db/init bootstraps
-      # Postgres above.
+      # Init hook: runs every time LocalStack becomes ready, creating the files
+      # bucket and its CORS rules (the SQS queue and DLQ it used to create went with
+      # the domain-event outbox). Mirrors how db/init bootstraps Postgres above.
       - ./scripts/localstack:/etc/localstack/init/ready.d:ro
     healthcheck:
-      test: ['CMD', 'awslocal', 'sqs', 'list-queues']
+      # Healthy means the init hook has RUN, not merely that LocalStack answers: the bucket
+      # exists. `docker compose up --wait` therefore returns only when uploads can work, and
+      # the API never races a bucket that is still being created. Keep the name in step with
+      # S3_FILES_BUCKET in .env.example and BUCKET in scripts/localstack/01-bootstrap.sh
+      # (test/env-example.spec.ts checks all three).
+      test: ['CMD', 'awslocal', 's3api', 'head-bucket', '--bucket', 'opshub-files-dev']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -65,7 +70,7 @@ services:
     volumes:
       - ./scripts/otel/collector.yaml:/etc/otel/collector.yaml:ro
     ports:
-      # 4319 avoids conflict with other local collectors (rally would take 4318), matching
+      # 4319 avoids conflict with other local collectors (rova/rally take 4318), matching
       # how postgres (5433), valkey (6380) and localstack (4567) are offset. `.env` must
       # point OTEL_EXPORTER_OTLP_ENDPOINT at this port, not 4318.
       - '4319:4318'
