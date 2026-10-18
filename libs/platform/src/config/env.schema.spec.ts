@@ -305,6 +305,22 @@ describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
     if (!result.success) return;
     expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(50);
   });
+
+  it('REFUSES to raise the pre-auth address ceiling in production, and says why', () => {
+    const result = EnvSchema.safeParse(
+      env({ NODE_ENV: 'production', RATE_LIMIT_IP_LIMIT: '100000' }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.message).toMatch(/RATE_LIMIT_IP_LIMIT cannot exceed 1000/);
+  });
+
+  it('lets a test environment raise the pre-auth ceiling', () => {
+    const result = EnvSchema.safeParse(env({ NODE_ENV: 'test', RATE_LIMIT_IP_LIMIT: '100000' }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.RATE_LIMIT_IP_LIMIT).toBe(100000);
+  });
 });
 
 describe('EnvSchema — WEBHOOK_DELIVERY_MAX_AGE_HOURS', () => {

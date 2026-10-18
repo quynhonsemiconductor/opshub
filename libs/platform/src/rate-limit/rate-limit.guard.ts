@@ -121,6 +121,8 @@ export class RateLimitGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly cache: CacheService,
+    // Optional, as on UserRateLimitGuard: a unit test or a host without the config module keeps the shipped ceiling.
+    private readonly config?: AppConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -138,7 +140,7 @@ export class RateLimitGuard implements CanActivate {
       res,
       `IP:${ip}`,
       PRE_AUTH_IP_BUCKET,
-      PRE_AUTH_IP_BUCKET.limit,
+      this.config?.get('RATE_LIMIT_IP_LIMIT') ?? PRE_AUTH_IP_BUCKET.limit,
     );
   }
 }

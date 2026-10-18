@@ -182,6 +182,17 @@ describe('RateLimitGuard (pre-auth, per verified address)', () => {
     expect(GlobalExceptionFilter).toBeTypeOf('function');
   });
 
+  it('applies RATE_LIMIT_IP_LIMIT when configured, and the shipped ceiling otherwise', async () => {
+    const cache = countingCache();
+    const config = { get: vi.fn(() => 2) };
+    const guard = new RateLimitGuard(reflectorFor() as never, cache as never, config as never);
+
+    await guard.canActivate(contextFor().context);
+    await guard.canActivate(contextFor().context);
+    await expect(guard.canActivate(contextFor().context)).rejects.toMatchObject({ status: 429 });
+    expect(cache.consumeRateLimit.mock.calls[0][1]).toBe(2);
+  });
+
   it('fails open when the cache is down', async () => {
     const cache = { consumeRateLimit: vi.fn().mockRejectedValue(new Error('valkey down')) };
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);

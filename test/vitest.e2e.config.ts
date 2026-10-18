@@ -29,6 +29,11 @@ export default defineConfig({
      */
     env: {
       IDENTITY_TEST_LOGIN: 'enabled',
+      // Every e2e request comes from one loopback address, and the suite runs as a handful of seeded users, so the
+      // pre-auth ceiling and the DEFAULT tier are raised for the run. CI web e2e does the same (web-ci.yml). Production
+      // refuses both values above their defaults (env.schema.ts).
+      RATE_LIMIT_IP_LIMIT: '100000',
+      RATE_LIMIT_DEFAULT_LIMIT: '5000',
       BETTER_AUTH_SECRET:
         process.env['BETTER_AUTH_SECRET'] ?? 'e2e-better-auth-secret-minimum-32-chars!!',
     },
