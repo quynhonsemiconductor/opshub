@@ -803,8 +803,7 @@ variable "grafana_alerting" {
 variable "email_provider" {
   description = <<-EOT
     Which transport sends mail: "dev" logs and sends nothing, "graph" sends through Microsoft 365 (Graph
-    `sendMail`) from the product's shared mailbox, "ses" uses this account's SES (being replaced by graph), "resend"
-    is the old third-party transport.
+    `sendMail`) from the product's shared mailbox. SES and Resend were removed (opshub#405).
 
     Defaults to "dev" so applying this module changes nothing about mail until somebody chooses to turn it on.
 
@@ -816,8 +815,8 @@ variable "email_provider" {
   default     = "dev"
 
   validation {
-    condition     = contains(["dev", "graph", "ses", "resend"], var.email_provider)
-    error_message = "email_provider must be dev, graph, ses or resend."
+    condition     = contains(["dev", "graph"], var.email_provider)
+    error_message = "email_provider must be dev or graph."
   }
 
   validation {
@@ -852,31 +851,6 @@ variable "mail_graph_sender" {
     condition     = var.mail_graph_sender == "" || lower(trimspace(var.mail_graph_sender)) == (var.env == "production" ? "noreply-${var.product}@qnsc.vn" : "noreply-${var.product}-dev@qnsc.vn")
     error_message = "mail_graph_sender must be noreply-opshub@qnsc.vn in production and noreply-opshub-dev@qnsc.vn in every other environment (a non-prod environment never sends from the prod mailbox)."
   }
-}
-
-variable "mail_from_email" {
-  description = <<-EOT
-    The verified SES sender address, e.g. no-reply@opshub.example.com. Used by the ses and resend providers ONLY: with
-    "graph" or "dev" leave it empty (Graph sends as `mail_graph_sender`), which also removes the SES send grants.
-
-    NO DEFAULT, deliberately. The app used to default this to a domain a deployment may not own, and
-    the result was not a failure: mail went out failing SPF and DKIM, which is silent non-delivery or
-    delivery to spam. Empty is the honest value when mail is off, and the app refuses to boot with a
-    ses or resend provider and no sender.
-  EOT
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = contains(["dev", "graph"], var.email_provider) || var.mail_from_email != ""
-    error_message = "mail_from_email is required when email_provider is ses or resend."
-  }
-}
-
-variable "mail_from_name" {
-  description = "Display name on outgoing mail."
-  type        = string
-  default     = "OpsHub"
 }
 
 variable "mail_reply_to" {
