@@ -9,15 +9,15 @@ Plan: HYBRID-INFRA-PLAN §7.4 (all email through Graph, one mailbox and one app 
 
 ## The design, and why
 
-| Choice                                                                                                                                                                                                                          | Why                                                                                                                                                                                                                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Two Entra apps per environment.** The **sign-in app** (`ENTRA_CLIENT_ID`: delegated, client secret, API only) and the **"OpsHub <Env> Service" app** (`GRAPH_CLIENT_ID`: **certificate only, no client secret, worker only**) | A compromised API process must not hold a credential that can send mail or call Graph. The Service app is the only one that holds application permissions, and the only one with the Exchange role                                                                                                                                                        |
-| **The Exchange role is on the Service app**, never on the sign-in app                                                                                                                                                           | Separation of duties; revoking mail does not touch sign-in                                                                                                                                                                                                                                                                                                |
-| **No Graph permission for mail in Entra. Not `Mail.Send`, not `Mail.ReadWrite`, no admin consent for mail**                                                                                                                     | Entra grants and Exchange RBAC grants are **additive** ([Microsoft: the grants are independent of Entra's](https://learn.microsoft.com/exchange/permissions-exo/application-rbac)). An Entra `Mail.Send` consent lets the app send as **any** mailbox and makes the Exchange scope meaningless. The app's only mail authority is the scoped Exchange role |
-| **One management scope per mailbox**, filtered on `PrimarySmtpAddress`                                                                                                                                                          | A stolen key can send as that one mailbox and as nobody else                                                                                                                                                                                                                                                                                              |
-| **A non-prod environment never sends from the prod mailbox** (decision 2026-10-18)                                                                                                                                              | Develop has its own mailbox `noreply-opshub-dev@qnsc.vn` scoped to the **develop** Service app; production uses `noreply-opshub@qnsc.vn` scoped to the **production** Service app. Each has its own quota and sending reputation, and a develop mistake cannot send as production. Local stays on the console provider                                    |
-| **A certificate, no client secret**                                                                                                                                                                                             | A secret is a string anything that can read the environment can replay; the key lives only in Secrets Manager and the app proves possession by signing a short-lived assertion                                                                                                                                                                            |
-| **Shared mailboxes**                                                                                                                                                                                                            | No licence, no sign-in; the sender address needs to exist, not to be a person                                                                                                                                                                                                                                                                             |
+| Choice                                                                                                                                 | Why                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Two Entra apps per environment.** The **sign-in app** (`ENTRA_CLIENT_ID`: delegated, client secret, API only) and the **"OpsHub <Dev | Prod> Service" app** (`GRAPH_CLIENT_ID`: **certificate only, no client secret, worker only**)                                                                                                                                                                                                                                                             | A compromised API process must not hold a credential that can send mail or call Graph. The Service app is the only one that holds application permissions, and the only one with the Exchange role |
+| **The Exchange role is on the Service app**, never on the sign-in app                                                                  | Separation of duties; revoking mail does not touch sign-in                                                                                                                                                                                                                                                                                                |
+| **No Graph permission for mail in Entra. Not `Mail.Send`, not `Mail.ReadWrite`, no admin consent for mail**                            | Entra grants and Exchange RBAC grants are **additive** ([Microsoft: the grants are independent of Entra's](https://learn.microsoft.com/exchange/permissions-exo/application-rbac)). An Entra `Mail.Send` consent lets the app send as **any** mailbox and makes the Exchange scope meaningless. The app's only mail authority is the scoped Exchange role |
+| **One management scope per mailbox**, filtered on `PrimarySmtpAddress`                                                                 | A stolen key can send as that one mailbox and as nobody else                                                                                                                                                                                                                                                                                              |
+| **A non-prod environment never sends from the prod mailbox** (decision 2026-10-18)                                                     | Develop has its own mailbox `noreply-opshub-dev@qnsc.vn` scoped to the **develop** Service app; production uses `noreply-opshub@qnsc.vn` scoped to the **production** Service app. Each has its own quota and sending reputation, and a develop mistake cannot send as production. Local stays on the console provider                                    |
+| **A certificate, no client secret**                                                                                                    | A secret is a string anything that can read the environment can replay; the key lives only in Secrets Manager and the app proves possession by signing a short-lived assertion                                                                                                                                                                            |
+| **Shared mailboxes**                                                                                                                   | No licence, no sign-in; the sender address needs to exist, not to be a person                                                                                                                                                                                                                                                                             |
 
 Who can do what: **Exchange**: Organization Management (mailbox, scope, role assignment). **Entra**: Application Administrator or Cloud
 Application Administrator (register the app, upload the certificate). **AWS**: write access to the secret (the secret `opshub/<env>/graph-client-certificate`). **No Global
@@ -25,18 +25,18 @@ Administrator consent is needed**, which is the point.
 
 ## Where things stand (what is missing)
 
-|                                                                            | develop                                                                       | production                                                             |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Mailbox                                                                    | `noreply-opshub-dev@qnsc.vn` **missing: create it (step 1)**                  | `noreply-opshub@qnsc.vn` exists (2026-10-11)                           |
-| Management scope                                                           | missing (step 2)                                                              | missing (step 2)                                                       |
-| "OpsHub <Env> Service" Entra app (the Graph worker app, `GRAPH_CLIENT_ID`) | **does not exist** (`docs/graph-worker-app.md`: "specified, not yet created") | **does not exist** (and there is no production sign-in app yet either) |
-| Certificate and secret `opshub/<env>/graph-client-certificate`             | secret container exists, **empty**                                            | empty or absent: production is not deployed yet                        |
-| Exchange role assignment                                                   | missing (step 6)                                                              | missing (step 6)                                                       |
-| Switch-on PR                                                               | not opened: needs the Service app's client id                                 | not opened                                                             |
+|                                                                | develop                                                            | production                                                                    |
+| -------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| Mailbox                                                        | `noreply-opshub-dev@qnsc.vn` **missing: create it (step 1)**       | `noreply-opshub@qnsc.vn` exists (2026-10-11)                                  |
+| Management scope                                               | missing (step 2)                                                   | missing (step 2)                                                              |
+| "OpsHub <Dev                                                   | Prod> Service" Entra app (the Graph worker app, `GRAPH_CLIENT_ID`) | **does not exist** (`docs/graph-worker-app.md`: "specified, not yet created") | **does not exist** (and there is no production sign-in app yet either) |
+| Certificate and secret `opshub/<env>/graph-client-certificate` | secret container exists, **empty**                                 | empty or absent: production is not deployed yet                               |
+| Exchange role assignment                                       | missing (step 6)                                                   | missing (step 6)                                                              |
+| Switch-on PR                                                   | not opened: needs the Service app's client id                      | not opened                                                                    |
 
 The sign-in app for develop is `5a83d82b-34ed-4701-b426-635fd303d875`. The author could not verify any row against the tenant (no access): they are what the plan and
 the repository show, so **confirm each** as you go. **Setting `graph_client_id` also switches on every other Graph feature** (Intune sync, shadow-IT scan,
-Secure Score, Entra account tasks): do step 3 with the five permissions of `docs/graph-worker-app.md` consented, or those features fail.
+Secure Score, Entra account tasks): do step 3 with the permissions of `docs/graph-worker-app.md` consented for that environment (**three in develop, five in production**), or those features fail.
 
 Repeat steps 3-9 for each environment. Steps 1-2 are per mailbox. **Do the develop environment first** and prove it before production.
 
@@ -70,12 +70,12 @@ New-ManagementScope -Name "OpsHub mail production" `
   -RecipientRestrictionFilter "PrimarySmtpAddress -eq 'noreply-opshub@qnsc.vn'"
 ```
 
-## 3. The Entra "OpsHub <Env> Service" app registration (per environment)
+## 3. The Entra "OpsHub <Dev|Prod> Service" app registration (per environment)
 
-Entra admin center > App registrations > New registration: name `OpsHub Develop Service` / `OpsHub Prod Service`,
+Entra admin center > App registrations > New registration: name `OpsHub Dev Service` / `OpsHub Prod Service`,
 **single tenant**, no redirect URI. `docs/graph-worker-app.md` specifies this app (there called "OpsHub Graph Worker"); name it per the convention above, one per environment, and see that document for its credential layout. Then:
 
-- **API permissions:** the **five application permissions** of `docs/graph-worker-app.md`, admin-consented, and **no `Mail.*`**. Mail needs no Graph permission at all: it comes from the Exchange role in step 6. Remove the default `User.Read` delegated entry (unused).
+- **API permissions, admin-consented, and no `Mail.*`.** **`OpsHub Dev Service` gets ONLY the three READ permissions** (`SecurityEvents.Read.All`, `DeviceManagementManagedDevices.Read.All`, `User.Read.All`): develop shares the real tenant, so it must not be able to disable or sign out a real account (the account tasks fail closed there, with a clear log). **`OpsHub Prod Service` gets all five** (adding `User.EnableDisableAccount.All` and `User.RevokeSessions.All`). Mail needs no Graph permission at all: it comes from the Exchange role in step 6. Remove the default `User.Read` delegated entry (unused).
 - Record three IDs: **Application (client) ID** and **Directory (tenant) ID** from the app's Overview, and the **Object ID of the enterprise
   application** (Enterprise applications > the app > Object ID). Do **not** use the Object ID on the _App registrations_ page; it is a different
   object and Exchange rejects it. If the enterprise application does not exist: `az ad sp create --id <client-id>`.
@@ -116,11 +116,11 @@ the expiry date.
 
 ```powershell
 Connect-ExchangeOnline
-New-ServicePrincipal -AppId <client-id> -ObjectId <enterprise-app-object-id> -DisplayName "OpsHub <Env> Service"
+New-ServicePrincipal -AppId <client-id> -ObjectId <enterprise-app-object-id> -DisplayName "OpsHub <Dev|Prod> Service"
 New-ManagementRoleAssignment -App <client-id> -Role "Application Mail.Send" `
   -CustomResourceScope "OpsHub mail develop"      # production: the production scope
 
-Get-ManagementRoleAssignment -RoleAssignee "OpsHub <Env> Service" | Format-List Role, CustomResourceScope
+Get-ManagementRoleAssignment -RoleAssignee "OpsHub <Dev|Prod> Service" | Format-List Role, CustomResourceScope
 # In scope for its own mailbox, NOT for the other environment's, NOT for another product's:
 Test-ServicePrincipalAuthorization -Identity <client-id> -Resource noreply-opshub-dev@qnsc.vn   # InScope : True   (develop app)
 Test-ServicePrincipalAuthorization -Identity <client-id> -Resource noreply-opshub@qnsc.vn       # InScope : False  (develop app)
@@ -136,7 +136,7 @@ debugging.
 
 ## 7. Make sure there is NO mail grant in Entra
 
-Entra admin center > Enterprise applications > the Service app > Permissions: lists exactly the five permissions of `docs/graph-worker-app.md` and **no `Mail.*`**.
+Entra admin center > Enterprise applications > the Service app > Permissions: lists exactly the permissions of `docs/graph-worker-app.md` for that environment (**three in develop, five in production**) and **no `Mail.*`**.
 
 ```powershell
 Connect-MgGraph -Scopes "Application.Read.All"
@@ -145,7 +145,7 @@ Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $sp.Id | Select-Obje
 ```
 
 `AppRoleId` is a GUID, not a name. The one to look for is **`Mail.Send` = `b633e1c5-b582-4048-a93e-9f11b44c7e96`** (Microsoft Graph); any other `Mail.*`
-role is as bad. The expected output is five rows and none of them is that id.
+role is as bad. The expected output is three rows in develop and five in production, and none of them is that id.
 
 If a Microsoft Graph `Mail.*` role is listed (especially `Mail.Send`), **remove it**. This is the step people skip, and it is what makes the 403
 negative test fail in step 8.
@@ -161,14 +161,16 @@ pnpm exec platform-mail-check \
   --tenant <tenant-id> --client-id <develop-service-app-client-id> --cert mail.crt --key mail.key \
   --sender noreply-opshub-dev@qnsc.vn --to <your address> \
   --denied-mailbox noreply-opshub@qnsc.vn --denied-mailbox noreply-rova@qnsc.vn \
-  --allowed-role SecurityEvents.Read.All --allowed-role DeviceManagementManagedDevices.Read.All \
-  --allowed-role User.EnableDisableAccount.All --allowed-role User.Read.All --allowed-role User.RevokeSessions.All
+  --allowed-role SecurityEvents.Read.All --allowed-role DeviceManagementManagedDevices.Read.All --allowed-role User.Read.All
+# PRODUCTION app: the same, plus --allowed-role User.EnableDisableAccount.All --allowed-role User.RevokeSessions.All
 ```
+
+Develop is passed exactly the **three** read roles, so the check fails if someone later consents a write permission there.
 
 Expected, in order:
 
 ```
-PASS  TOKEN   issued for appid=<client-id>; roles in the token: SecurityEvents.Read.All, DeviceManagementManagedDevices.Read.All, User.EnableDisableAccount.All, User.Read.All, User.RevokeSessions.All
+PASS  TOKEN   issued for appid=<client-id>; roles in the token: SecurityEvents.Read.All, DeviceManagementManagedDevices.Read.All, User.Read.All   (production: all five)
 PASS  SEND    sent as noreply-opshub-dev@qnsc.vn to <you> (HTTP 202)
 PASS  DENIED  as noreply-opshub@qnsc.vn: forbidden HTTP 403 (request-id ...)
 PASS  DENIED  as noreply-rova@qnsc.vn: forbidden HTTP 403 (request-id ...)
@@ -177,8 +179,8 @@ PASS  DENIED  as noreply-rova@qnsc.vn: forbidden HTTP 403 (request-id ...)
 - `DENIED` is the **negative test** and the proof that the scope works. **For develop it must be the PRODUCTION mailbox that is refused.** Only
   a refusal with **403** passes. If it says the send was _accepted_, the app can send as anyone: go back to step 7.
 - For production, the same with the production Service app, `--sender noreply-opshub@qnsc.vn`, `--denied-mailbox noreply-opshub-dev@qnsc.vn` (**the other environment's mailbox**) and `--denied-mailbox noreply-rova@qnsc.vn`.
-- `--denied-mailbox` is required and repeatable. This app legitimately holds the five Graph roles, so they are passed with `--allowed-role`; `SCOPE` fails on any role not in that list and on any `Mail.*` even if listed. Exit code 3 means nothing failed but the scope could not be proven.
-- If the token carries `Mail.Send` (or any role outside the five), step 7 was not done: the check prints a `FAIL SCOPE` line after `TOKEN` and exits 1 (a passing scope prints nothing extra; the roles are on the `TOKEN` line, and you read that they are the five).
+- `--denied-mailbox` is required and repeatable. This app legitimately holds its Graph roles (three in develop, five in production), so they are passed with `--allowed-role`; `SCOPE` fails on any role not in that list and on any `Mail.*` even if listed. Exit code 3 means nothing failed but the scope could not be proven.
+- If the token carries `Mail.Send` (or any role outside the environment's list), step 7 was not done: the check prints a `FAIL SCOPE` line after `TOKEN` and exits 1 (on 0.1.5 and later a passing scope also prints `PASS  SCOPE`; before that the roles are on the `TOKEN` line, and you read that they are the expected ones).
 - `TOKEN` failing with `AADSTS700027` (invalid assertion signature) or `AADSTS700024`: the certificate uploaded to Entra is not the one whose key
   you hold. Nothing was sent.
 
