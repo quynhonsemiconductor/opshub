@@ -92,14 +92,14 @@ describe('SessionAuthGuard', () => {
     expect(log).toHaveBeenCalledTimes(1);
   });
 
-  it('serves a verified request whose id the context refuses, writing it unchecked and logging only the class', () => {
+  it('serves a verified request whose id the context refuses, and writes nothing unchecked for a non-uuid id', () => {
     const { guard, context, ctx, log } = setup({
       session: { session: { id: 'session-1' }, user: { id: 'bad\u0001id', email: 'a', name: 'a' } },
     });
 
     expect(seeded(() => guard.canActivate(context))).toBe(true);
 
-    expect(ctx.setAuthContext).toHaveBeenCalledWith(undefined, 'bad\u0001id', 'session-1');
+    expect(ctx.setAuthContext).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('TypeError'));
   });
 

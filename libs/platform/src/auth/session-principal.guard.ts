@@ -22,6 +22,9 @@ interface RequestWithSession {
 /** Set once per process: the request context is missing, so every later request would log the same line. */
 let loggedNoRequestContext = false;
 
+/** identity ids are uuid (`identity.user.id`, `identity.session.id`); anything else is not written unchecked. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Authentication for opshub's routes, on top of identity 8.
  *
@@ -77,8 +80,8 @@ export class SessionAuthGuard implements CanActivate {
    * `setRequestPrincipal` returns false when nothing seeded a request context (`CORRELATION_ID_MODE=disabled`).
    * Then the rate limit keys this caller by session and the access log has no `userId`, and nothing else says
    * so, so it is logged once per process. It throws for a value that is not a plain id (control characters,
-   * too long). The request is already verified, so it is served anyway: the value is written unchecked, as it
-   * was before platform-http 5, and only the error class is logged.
+   * too long). The request is already verified, so it is served anyway. The value is written unchecked only when
+   * both ids are uuids, as identity issues them; otherwise nothing is written and only the error class is logged.
    */
   private recordPrincipal(userId: string, sessionId: string): void {
     try {
@@ -90,9 +93,10 @@ export class SessionAuthGuard implements CanActivate {
       }
     } catch (err) {
       this.logger.warn(
-        `SessionAuthGuard: platform-http refused the principal (${err instanceof Error ? err.name : 'unknown'}); written unchecked`,
+        `SessionAuthGuard: platform-http refused the principal (${err instanceof Error ? err.name : 'unknown'})`,
       );
-      this.ctx.setAuthContext(undefined, userId, sessionId);
+      if (UUID.test(userId) && UUID.test(sessionId))
+        this.ctx.setAuthContext(undefined, userId, sessionId);
     }
   }
 }

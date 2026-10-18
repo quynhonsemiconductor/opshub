@@ -2,7 +2,13 @@ import { Global, Module } from '@nestjs/common';
 import { IdentityModule } from '@quynhonsemiconductor/identity/nest';
 import { PinoLogger } from 'nestjs-pino';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { ApiConfigService, DRIZZLE, SESSION_REVOKER, type DrizzleDB } from '@platform';
+import {
+  ApiConfigService,
+  DRIZZLE,
+  SESSION_REVOKER,
+  UserRateLimitModule,
+  type DrizzleDB,
+} from '@platform';
 import { AuditModule } from '@modules/audit';
 import { AuthzModule } from '@modules/authz';
 import { EmployeesModule } from './employees.module';
@@ -56,6 +62,9 @@ class IdentityBindingsModule {}
         logger: PinoLogger,
       ) => createOpshubIdentity({ config, db, cache, staffSignIn, auditSink, logger }),
     }),
+    // HERE, in the same module as IdentityModule and after it: Nest orders global guards by module depth, so a
+    // per-user bucket in AppModule (one level up) ran BEFORE identity's SessionGuard and never saw the principal.
+    UserRateLimitModule,
   ],
   controllers: [AuthController],
   providers: [{ provide: SESSION_REVOKER, useClass: IdentitySessionRevoker }],

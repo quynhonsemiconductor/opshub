@@ -8,43 +8,31 @@ export interface RateLimitTier {
   windowMs: number;
   /** Max allowed requests within the window */
   limit: number;
-  /**
-   * How to derive the rate-limit key.
-   * - 'ip'           — client IP; for pre-auth endpoints, where there is no credential yet
-   * - 'userId'       — the caller's SESSION: the session cookie, hashed (default)
-   *
-   * `userId` IS A HISTORICAL NAME. It used to read the decoded JWT `sub`, which is always undefined
-   * here: this guard is global and `SessionAuthGuard` is a route guard, so authentication has not run when
-   * the limiter executes. Every tier using it silently keyed on the IP instead — see the guard's own
-   * docblock for what that cost. The name is kept because the tier table is append-only and renaming a
-   * key changes every declaration; what it means is "per caller, not per network".
-   */
-  keyBy?: 'ip' | 'userId';
 }
 
 /**
- * Named tiers for intent-based rate limiting.
- * Append-only — never change the semantics of an existing tier name. (`AUTH_REFRESH` was removed with the
- * refresh-token endpoint it limited: identity 8 has no such route, and no code names the tier.)
+ * Named tiers for intent-based rate limiting. Each is applied PER AUTHENTICATED USER (`uid:<userId>`), after
+ * identity has verified the session. Append-only: never change the semantics of an existing tier name.
  */
 export const RATE_LIMIT_TIERS = {
-  /**
-   * Default: most read/write endpoints — 200 req/min per session.
-   *
-   * PER SESSION AND NOT PER NETWORK, which is the whole point and was broken until the guard stopped
-   * asking for a principal that does not exist yet. Shared across a NAT this bound is meaningless: a
-   * page load costs roughly a dozen calls, so one office reached it at about fifteen simultaneous page
-   * loads and everybody there started getting 429s at once.
-   */
+  /** Default: most read/write endpoints — 200 req/min per user. Configurable downwards in production. */
   DEFAULT: { name: 'DEFAULT', windowMs: 60_000, limit: 200 },
-  /** Strict: expensive search/list endpoints — 60 req/min per session */
+  /** Strict: expensive search/list endpoints — 60 req/min per user */
   STRICT: { name: 'STRICT', windowMs: 60_000, limit: 60 },
-  /** Auth login: brute-force protection — 5 attempts / 15 min per IP */
-  AUTH_LOGIN: { name: 'AUTH_LOGIN', windowMs: 15 * 60_000, limit: 5, keyBy: 'ip' },
-  /** AI chat — LLM calls are expensive; 10 req/min per session to cap inference cost. */
-  AI: { name: 'AI', windowMs: 60_000, limit: 10, keyBy: 'userId' },
-  /** File upload presign/confirm — S3 PUT costs; 30 req/min per session. */
-  UPLOAD: { name: 'UPLOAD', windowMs: 60_000, limit: 30, keyBy: 'userId' },
+  /** AI chat — LLM calls are expensive; 10 req/min per user to cap inference cost. */
+  AI: { name: 'AI', windowMs: 60_000, limit: 10 },
+  /** File upload presign/confirm — S3 PUT costs; 30 req/min per user. */
+  UPLOAD: { name: 'UPLOAD', windowMs: 60_000, limit: 30 },
 } as const satisfies Record<string, RateLimitTier>;
 
 export type RateLimitTierName = keyof typeof RATE_LIMIT_TIERS;
+
+/**
+ * The PRE-AUTH bucket: every request, authenticated or not, is counted against its client address before any
+ * credential is looked at. It is NAT-sized on purpose: an office behind one address shares it, so it is set
+ * high enough that a normal day of page loads never reaches it. Its job is to stop one network from flooding
+ * the authentication path and from minting unlimited unverified credentials; it does not bound a signed-in
+ * user (the tiers above do). Keyed by the verified address from `clientIp()`, never by a cookie: a cookie is
+ * unverified until identity reads it, so a per-cookie bucket could be made fresh with every request.
+ */
+export const PRE_AUTH_IP_BUCKET: RateLimitTier = { name: 'IP', windowMs: 60_000, limit: 1000 };

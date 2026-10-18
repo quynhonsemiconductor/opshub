@@ -14,7 +14,7 @@
  *    `x-qnsc-edge-*`), so what the API sees as the client is not a header a visitor chose;
  *  - it SIGNS the visitor's address (`cf-connecting-ip`) with `EDGE_CLIENT_IP_SECRET`, covering the address, a
  *    timestamp, the method and the path. Behind a Pages Function the API's own `cf-connecting-ip` is a Cloudflare
- *    address shared by every visitor: without the signature one `AUTH_LOGIN` bucket (5 attempts per 15 minutes)
+ *    address shared by every visitor: without the signature one per-address pre-auth bucket
  *    would be shared by the whole company. The API verifies it in `clientIp()`.
  *
  * Requires the Pages project to expose two variables: `API_ORIGIN` (e.g. `https://opshub-api-dev.qnsc.vn`) and
