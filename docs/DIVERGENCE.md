@@ -87,7 +87,7 @@ Both products authenticate with `@quynhonsemiconductor/identity`; what each conf
 | --- | --- | --- |
 | presets | `staff` only: Microsoft Entra, single tenant, 12 h sessions, no password endpoints | `public` and `staff` |
 | B2B guests of the tenant | refused (`allowGuests: false`) | allowed, for vendors |
-| who may sign in | any member of the QNSC tenant with an address on `qnsc.vn`; no App Role means the `employee` role | by product policy |
+| who may sign in | Entra "Assignment required" ON: the dynamic group `opshub-users` (every enabled member of the QNSC tenant) is assigned to the app with the App Role `employee` (decided 2026-10-18); then an address on `qnsc.vn`; no App Role means the `employee` role | by product policy |
 | person identity | `identity.employees.id` **is** `identity.user.id`: every foreign key in the product points at `employees`, so the identity user is created with the employee's id (`UserDirectory`) and a first sign-in finds that user by email | the identity user is the person |
 | roles | Entra **App Roles** are reconciled into `user_role_assignments` on every sign-in (`hooks.onStaffSignIn`, `StaffSignInHandler`); authorization is resolved from the database per request, never read from the session | product-assigned |
 | offboarding | `SessionRevoker` (`setUserBanned` + session deletion) after the status change commits; the workflow also bans and deletes in its own transaction | not applicable |

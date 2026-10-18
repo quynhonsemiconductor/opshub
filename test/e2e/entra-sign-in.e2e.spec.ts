@@ -281,9 +281,10 @@ describe('Microsoft sign-in with the staff preset', () => {
 });
 
 /*
- * THE ACCESS MODEL (owner decision). "Assignment required" is OFF on the Entra app because the whole company
- * uses OpsHub, so just-in-time provisioning IS the access path:
- *   - any member of the tenant with a qnsc.vn address signs in and is provisioned as `employee`;
+ * THE ACCESS MODEL (owner decision, 2026-10-18). "Assignment required" is ON on the Entra app: Entra admits only
+ * the members of `opshub-users`, assigned with the App Role `employee`. Just-in-time provisioning is still the path
+ * for those members:
+ *   - an assigned member with a qnsc.vn address signs in and is provisioned as `employee`;
  *   - elevated roles come ONLY from Entra App Role assignments, reconciled on every sign-in;
  *   - opshub itself refuses guests, other tenants, other domains and offboarded employees.
  */
