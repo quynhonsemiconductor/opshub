@@ -174,19 +174,53 @@ export class EntraAccountService {
   }
 
   async setEnabled(entraOid: string, enabled: boolean): Promise<void> {
-    await this.graph
-      .client()
-      .api(`/users/${encodeURIComponent(entraOid)}`)
-      .patch({ accountEnabled: enabled });
+    await this.writeOrRefuse(
+      'User.EnableDisableAccount.All',
+      enabled ? 'enable' : 'disable',
+      entraOid,
+      () =>
+        this.graph
+          .client()
+          .api(`/users/${encodeURIComponent(entraOid)}`)
+          .patch({ accountEnabled: enabled }),
+    );
     this.logger.log(`${enabled ? 'Enabled' : 'Disabled'} Entra account OID=${entraOid}`);
   }
 
   /** Invalidates the user's refresh tokens and session cookies. Not applicable to external (guest) users. */
   async revokeSessions(entraOid: string): Promise<void> {
-    await this.graph
-      .client()
-      .api(`/users/${encodeURIComponent(entraOid)}/revokeSignInSessions`)
-      .post({});
+    await this.writeOrRefuse('User.RevokeSessions.All', 'revoke sessions of', entraOid, () =>
+      this.graph
+        .client()
+        .api(`/users/${encodeURIComponent(entraOid)}/revokeSignInSessions`)
+        .post({}),
+    );
     this.logger.log(`Revoked sign-in sessions for Entra OID=${entraOid}`);
+  }
+
+  /*
+   * FAIL CLOSED. The two WRITE permissions are not granted everywhere: develop shares the real tenant, so its app holds only the three READ
+   * permissions and must not be able to disable or sign out a real account (docs/graph-worker-app.md). Graph answers such a call with 403.
+   * That is turned into one clear, non-retried failure: nothing was changed, the log says which permission and why that may be intended, and the
+   * task dead-letters (alarm) instead of retrying a call that cannot succeed. Any other error is left to the relay's own classification.
+   */
+  private async writeOrRefuse(
+    permission: 'User.EnableDisableAccount.All' | 'User.RevokeSessions.All',
+    action: string,
+    entraOid: string,
+    call: () => Promise<unknown>,
+  ): Promise<void> {
+    try {
+      await call();
+    } catch (err) {
+      if ((err as { statusCode?: number } | undefined)?.statusCode !== 403) throw err;
+      this.logger.error(
+        { permission, entraOid },
+        `Refused to ${action} Entra account ${entraOid}: Graph answered 403. This app is not allowed to (it lacks ${permission}, which develop deliberately does not hold, or the user holds a privileged directory role). Nothing was changed.`,
+      );
+      throw new NonRetryableError(
+        `Graph 403: not permitted to ${action} the account (${permission} missing, or a privileged user). Nothing was changed.`,
+      );
+    }
   }
 }

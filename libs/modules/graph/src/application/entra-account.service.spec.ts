@@ -263,3 +263,37 @@ describe('EntraAccountService.reconcile — will not START a change it may not f
     expect(patch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('EntraAccountService — FAILS CLOSED where the write permissions are not granted (develop holds only the three read ones)', () => {
+  const forbidden = () => Object.assign(new Error('Insufficient privileges'), { statusCode: 403 });
+
+  it.each([
+    ['disable', 'User.EnableDisableAccount.All', 'patch'],
+    ['revoke sessions of', 'User.RevokeSessions.All', 'post'],
+  ] as const)(
+    'a 403 on %s dead-letters at once with one clear log naming %s, and nothing is retried or changed further',
+    async (action, permission, call) => {
+      const { service, patch, post } = make([employee({ status: 'offboarded' })]);
+      (call === 'patch' ? patch : post).mockRejectedValue(forbidden());
+      const logged = vi.spyOn(service['logger'], 'error').mockImplementation(() => undefined);
+
+      const error = await service.reconcile('emp-1', LEASE_OK()).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(NonRetryableError);
+      expect((error as Error).message).toContain(permission);
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls[0][0]).toEqual({ permission, entraOid: OID });
+      expect(String(logged.mock.calls[0][1])).toContain(`Refused to ${action}`);
+      expect(String(logged.mock.calls[0][1])).toContain('Nothing was changed');
+      // A disable that is refused must not go on to revoke.
+      if (call === 'patch') expect(post).not.toHaveBeenCalled();
+    },
+  );
+
+  it('leaves any other Graph error to the relay (a 503 is not turned into a permission failure)', async () => {
+    const { service, patch } = make([employee({ status: 'offboarded' })]);
+    const unavailable = Object.assign(new Error('down'), { statusCode: 503 });
+    patch.mockRejectedValue(unavailable);
+    await expect(service.reconcile('emp-1', LEASE_OK())).rejects.toBe(unavailable);
+  });
+});
