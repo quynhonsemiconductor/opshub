@@ -135,6 +135,7 @@ export class RequestEngine {
         requiredPermission: firstStepPermission,
         excludeUserId: actor.sub,
         actorId: actor.sub,
+        requestType: type,
         idempotencyPrefix: `request_submitted:${row.id}`,
         vars: { requestType: type, requestId: row.id, requesterEmail: actor.email },
       });
@@ -263,6 +264,7 @@ export class RequestEngine {
           assigneeId: nextAssigneeId,
           requiredPermission: nextStepDef?.requiredPermission ?? def.requiredApprovalPermission,
           excludeUserId: request.requesterId,
+          requestType: request.type,
           idempotencyPrefix: `step_ready:${requestId}:${nextStep}`,
           vars: {
             requestType: request.type,
@@ -686,25 +688,36 @@ export class RequestEngine {
       assigneeId: string | null;
       requiredPermission: string;
       excludeUserId: string;
+      requestType: string;
       idempotencyPrefix: string;
       actorId?: string;
     },
   ): Promise<void> {
-    const recipients = opts.assigneeId
+    const holders = opts.assigneeId
       ? [opts.assigneeId]
-      : (await this.authz.globalHoldersOf(opts.requiredPermission, tx as DrizzleDB)).filter(
-          (userId) => userId !== opts.excludeUserId,
-        );
+      : await this.authz.globalHoldersOf(opts.requiredPermission, tx as DrizzleDB);
+    const recipients = opts.assigneeId
+      ? holders
+      : holders.filter((userId) => userId !== opts.excludeUserId);
 
     if (recipients.length === 0) {
+      /*
+       * TWO DIFFERENT FACTS, one silence. Nobody holds the permission at all, or the only holder is the
+       * requester, whom separation of duties will not let decide it. The log names which, and the
+       * administrators are told, so a single-admin tenant does not wait on a request nobody was asked
+       * to decide. Ids only: no addresses are logged here.
+       */
+      const reason = holders.length === 0 ? 'no_holder' : 'only_holder_is_requester';
       this.logger.warn(
         {
           requestId: opts.requestId,
           requiredPermission: opts.requiredPermission,
           notificationType: opts.notificationType,
+          reason,
         },
-        'No unconstrained holder of this permission — request submitted with nobody to notify',
+        'No approver was notified for this request',
       );
+      await this.notifyAdministratorsOfUnassignedRequest(tx, opts);
       return;
     }
 
@@ -732,6 +745,36 @@ export class RequestEngine {
         actorId: opts.actorId,
         resourceId: opts.requestId,
         idempotencyKey: `${opts.idempotencyPrefix}:${recipientId}`,
+      });
+    }
+  }
+
+  /**
+   * Tell administrators that a request is waiting and no approver was notified. Administrators are the
+   * holders of `rbac.manage`, and the requester is NOT excluded: a single administrator who filed the
+   * request must still see that nothing else was told. Idempotent per event and recipient.
+   */
+  private async notifyAdministratorsOfUnassignedRequest(
+    tx: DbExecutor,
+    opts: {
+      requestId: string;
+      requestType: string;
+      requiredPermission: string;
+      idempotencyPrefix: string;
+    },
+  ): Promise<void> {
+    const administrators = await this.authz.globalHoldersOf('rbac.manage', tx as DrizzleDB);
+    for (const recipientId of administrators) {
+      await this.notifScheduler.schedule(tx, {
+        type: 'request.no_approver',
+        vars: {
+          requestType: opts.requestType,
+          requestId: opts.requestId,
+          requiredPermission: opts.requiredPermission,
+        },
+        recipientId,
+        resourceId: opts.requestId,
+        idempotencyKey: `request_no_approver:${opts.idempotencyPrefix}:${recipientId}`,
       });
     }
   }
