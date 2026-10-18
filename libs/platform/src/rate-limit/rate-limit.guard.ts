@@ -10,7 +10,7 @@ import { Reflector } from '@nestjs/core';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { AppConfigService } from '../config/app-config.service';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { clientIp, currentUserId } from '@quynhonsemiconductor/platform-http';
+import { KEYED_BY_ADDRESS, clientIp, currentUserId } from '@quynhonsemiconductor/platform-http';
 import {
   PRE_AUTH_IP_BUCKET,
   RATE_LIMIT_TIER,
@@ -75,7 +75,13 @@ async function consume(
   void res.header('RateLimit-Remaining', Math.max(0, remaining));
   void res.header('RateLimit-Reset', resetAt);
 
-  if (!allowed) {
+  if (!allowed) refuse(res, resetAt);
+  return true;
+}
+
+/** Writes Retry-After and throws the 429. Shared by both buckets, so the refusal reads the same from either. */
+function refuse(res: FastifyReply, resetAt: number): never {
+  {
     const retryAfterSecs = Math.max(resetAt - Math.floor(Date.now() / 1000), 1);
     void res.header('Retry-After', retryAfterSecs);
     /**
@@ -91,7 +97,6 @@ async function consume(
       HttpStatus.TOO_MANY_REQUESTS,
     );
   }
-  return true;
 }
 
 /** Shared by both guards: the tier name a route declared, or DEFAULT. */
@@ -125,6 +130,14 @@ export class RateLimitGuard implements CanActivate {
     private readonly config?: AppConfigService,
   ) {}
 
+  /**
+   * Only FAILED authentications count against the address. The window is read before the request runs, and the
+   * count is taken after the response, and only when it is a 401. A signed-in caller is limited per user by bucket 2,
+   * so an office behind one address is not spent by its normal traffic.
+   *
+   * The count after the response is what makes this a count of failures: the guard cannot know yet whether identity
+   * will refuse the request. It is fire-and-forget, after the reply, so it never delays the caller.
+   */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     if (skipped(this.reflector, context)) return true;
 
@@ -133,15 +146,61 @@ export class RateLimitGuard implements CanActivate {
     // `clientIp()`, never a header read here: behind Cloudflare `x-real-ip` and the first `x-forwarded-for` entry
     // are whatever the caller chose to send, so a forged one would pick its own bucket.
     const ip = clientIp(req);
+    const key = `IP:${ip}`;
+    const limit = this.config?.get('RATE_LIMIT_IP_LIMIT') ?? PRE_AUTH_IP_BUCKET.limit;
 
-    return consume(
-      this.cache,
-      this.logger,
-      res,
-      `IP:${ip}`,
-      PRE_AUTH_IP_BUCKET,
-      this.config?.get('RATE_LIMIT_IP_LIMIT') ?? PRE_AUTH_IP_BUCKET.limit,
+    const window = await readWindow(this.cache, this.logger, key, limit, PRE_AUTH_IP_BUCKET);
+    if (window?.full) refuse(res, window.resetAt);
+
+    res.raw.once('finish', () => {
+      if (res.statusCode !== 401) return;
+      this.cache
+        .consumeRateLimit(key, limit, Math.ceil(PRE_AUTH_IP_BUCKET.windowMs / 1000))
+        .catch((err: unknown) =>
+          this.logger.error(
+            failOpenLog('rate_limit', { err, key }),
+            'RateLimitGuard: failed-auth count not recorded',
+          ),
+        );
+    });
+    return true;
+  }
+}
+
+/**
+ * The window's state without spending a slot: `full` when the counted requests have reached `limit`, with `resetAt`
+ * the Unix-seconds time the oldest one leaves the window. `undefined` when the cache is absent or down, so the caller
+ * fails open. Reads the sorted set the shared limiter writes (`rl:<key>`, score = request time in ms).
+ */
+async function readWindow(
+  cache: CacheService,
+  logger: Logger,
+  key: string,
+  limit: number,
+  tier: RateLimitTier,
+): Promise<{ full: boolean; resetAt: number } | undefined> {
+  const redis = cache.redis;
+  if (!redis) return undefined;
+  try {
+    const from = Date.now() - tier.windowMs;
+    const count = await redis.zcount(`rl:${key}`, from, '+inf');
+    if (count < limit) return { full: false, resetAt: 0 };
+    const [, oldest] = await redis.zrangebyscore(
+      `rl:${key}`,
+      from,
+      '+inf',
+      'WITHSCORES',
+      'LIMIT',
+      0,
+      1,
     );
+    return { full: true, resetAt: Math.ceil((Number(oldest) + tier.windowMs) / 1000) };
+  } catch (err) {
+    logger.error(
+      failOpenLog('rate_limit', { err, key }),
+      'RateLimitGuard: backend unavailable — allowing request',
+    );
+    return undefined;
   }
 }
 
@@ -176,8 +235,14 @@ export class UserRateLimitGuard implements CanActivate {
     if (skipped(this.reflector, context)) return true;
 
     const userId = currentUserId();
-    // No principal: a public route, or a request identity refused. Bucket 1 has already counted it.
-    if (!userId) return true;
+    if (!userId) {
+      // No principal. On a public route that is expected. On a route that needs one it means this guard ran BEFORE identity's
+      // SessionGuard, so the per-user bucket could not key the caller. The marker lets identity say so (its "too-late"
+      // warning), and only when a principal is written after it: a public route never reaches that line.
+      const req = context.switchToHttp().getRequest<Record<symbol, unknown>>();
+      req[KEYED_BY_ADDRESS] = true;
+      return true;
+    }
 
     const tierName = tierOf(this.reflector, context);
     const tier = RATE_LIMIT_TIERS[tierName] as RateLimitTier;

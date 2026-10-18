@@ -62,8 +62,9 @@ class IdentityBindingsModule {}
         logger: PinoLogger,
       ) => createOpshubIdentity({ config, db, cache, staffSignIn, auditSink, logger }),
     }),
-    // HERE, in the same module as IdentityModule and after it: Nest orders global guards by module depth, so a
-    // per-user bucket in AppModule (one level up) ran BEFORE identity's SessionGuard and never saw the principal.
+    // HERE, in the same module as IdentityModule and after it. Nest runs global guards in depth-first import order: a
+    // per-user bucket in AppModule, imported before AuthModule, ran BEFORE identity's SessionGuard and never saw the
+    // principal. Keep it below IdentityModule.forRootAsync; test/e2e/rate-limit-buckets.e2e.spec.ts asserts the order.
     UserRateLimitModule,
   ],
   controllers: [AuthController],

@@ -1,13 +1,15 @@
+import { EventEmitter } from 'node:events';
 import { HttpException } from '@nestjs/common';
 import { requestContextStorage } from '@quynhonsemiconductor/observability';
-import { GlobalExceptionFilter } from '@quynhonsemiconductor/platform-http';
+import { GlobalExceptionFilter, KEYED_BY_ADDRESS } from '@quynhonsemiconductor/platform-http';
 import { describe, expect, it, vi } from 'vitest';
 import { PRE_AUTH_IP_BUCKET, RATE_LIMIT_TIER, SKIP_RATE_LIMIT } from './rate-limit.constants';
 import { RateLimitGuard, UserRateLimitGuard } from './rate-limit.guard';
 
 /**
- * Two buckets: the pre-auth one per verified client address (every request), and the per-user one for an
- * authenticated caller. Neither is keyed by a cookie. See the guard's docblock for why.
+ * Two buckets. The pre-auth one per verified address counts FAILED authentications only (a 401 after the response),
+ * and refuses before the request runs once the window is full. The per-user one counts an authenticated caller.
+ * Neither is keyed by a cookie. See the guard's docblock for why.
  */
 
 interface Overrides {
@@ -19,7 +21,6 @@ interface Overrides {
   skip?: boolean;
 }
 
-/** A reflector that answers the two metadata keys the guards read. */
 function reflectorFor(over: Overrides = {}) {
   return {
     getAllAndOverride: vi.fn((key: symbol) => {
@@ -30,6 +31,10 @@ function reflectorFor(over: Overrides = {}) {
   };
 }
 
+/**
+ * A request and its reply. `status` is the response code the guard sees when the reply finishes; `finish()` plays
+ * the reply going out, which is when a failed authentication is counted.
+ */
 function contextFor(over: Overrides = {}) {
   const request = {
     headers: over.headers ?? {},
@@ -37,7 +42,8 @@ function contextFor(over: Overrides = {}) {
     user: over.user,
     cookies: over.cookies ?? {},
   };
-  const response = { header: vi.fn() };
+  const raw = new EventEmitter();
+  const response = { header: vi.fn(), statusCode: 200, raw };
   return {
     context: {
       switchToHttp: () => ({ getRequest: () => request, getResponse: () => response }),
@@ -46,21 +52,42 @@ function contextFor(over: Overrides = {}) {
     } as never,
     request,
     response,
+    finish: (status: number) => {
+      response.statusCode = status;
+      raw.emit('finish');
+    },
   };
 }
 
-/** A cache with real counting: admits up to `limit` per key in the window, then refuses. */
-function countingCache() {
-  const counts = new Map<string, number>();
+/**
+ * A cache with the sliding window the shared limiter keeps: `consumeRateLimit` records a request under `rl:<key>`
+ * and `redis` reads that window without recording anything, as `readWindow` does against the real client.
+ */
+function windowCache() {
+  const sets = new Map<string, number[]>();
+  const members = (key: string, from: number) =>
+    (sets.get(`rl:${key}`) ?? []).filter((t) => t >= from);
   return {
-    counts,
-    consumeRateLimit: vi.fn((key: string, limit: number) => {
-      const used = (counts.get(key) ?? 0) + 1;
-      counts.set(key, used);
+    sets,
+    redis: {
+      zcount: vi.fn((key: string, from: number) =>
+        Promise.resolve(members(key.slice(3), from).length),
+      ),
+      zrangebyscore: vi.fn((key: string, from: number) => {
+        const [oldest] = members(key.slice(3), from);
+        return Promise.resolve(oldest === undefined ? [] : ['member', String(oldest)]);
+      }),
+    },
+    consumeRateLimit: vi.fn((key: string, limit: number, windowSeconds: number) => {
+      const now = Date.now();
+      const from = now - windowSeconds * 1000;
+      const kept = members(key, from);
+      const allowed = kept.length < limit;
+      if (allowed) sets.set(`rl:${key}`, [...kept, now]);
       return Promise.resolve({
-        allowed: used <= limit,
-        remaining: Math.max(0, limit - used),
-        resetAt: Math.floor(Date.now() / 1000) + 60,
+        allowed,
+        remaining: Math.max(0, limit - kept.length - 1),
+        resetAt: Math.ceil(now / 1000) + 60,
       });
     }),
   };
@@ -80,42 +107,70 @@ function asUser<T>(userId: string, fn: () => T): T {
   );
 }
 
-describe('RateLimitGuard (pre-auth, per verified address)', () => {
-  it('counts a request against its address, and never against a cookie', async () => {
-    const cache = countingCache();
+describe('RateLimitGuard (pre-auth, failed authentications per verified address)', () => {
+  it('counts nothing for a signed-in caller: a 200 is not a failed authentication', async () => {
+    const cache = windowCache();
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const { context, finish } = contextFor({ cookies: { session_token: 'valid' } });
 
-    await guard.canActivate(contextFor({ cookies: { session_token: 'anything' } }).context);
+    await guard.canActivate(context);
+    finish(200);
+
+    expect(cache.consumeRateLimit).not.toHaveBeenCalled();
+  });
+
+  it('counts a failed authentication (401) against the address, and never against a cookie', async () => {
+    const cache = windowCache();
+    const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const { context, finish } = contextFor({ cookies: { session_token: 'random' } });
+
+    await guard.canActivate(context);
+    finish(401);
 
     expect(cache.consumeRateLimit.mock.calls[0][0]).toBe('IP:203.0.113.9');
   });
 
-  it('refuses a caller who mints a fresh random cookie per request once the address bucket is spent', async () => {
-    const cache = countingCache();
+  it('refuses a caller who mints a fresh random cookie per request once the address has failed too often', async () => {
+    const cache = windowCache();
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
 
-    let refused: unknown;
-    for (let i = 0; i <= PRE_AUTH_IP_BUCKET.limit; i++) {
-      const { context } = contextFor({ cookies: { session_token: `random-${i}` } });
-      try {
-        await guard.canActivate(context);
-      } catch (err) {
-        refused ??= err;
-      }
+    for (let i = 0; i < PRE_AUTH_IP_BUCKET.limit; i++) {
+      const { context, finish } = contextFor({ cookies: { session_token: `random-${i}` } });
+      await guard.canActivate(context);
+      finish(401);
     }
 
-    // Before this change every random cookie opened a new bucket, so none of these was ever refused.
+    const next = contextFor({ cookies: { session_token: 'one-more' } });
+    const refused = await guard.canActivate(next.context).catch((err: unknown) => err);
     expect(refused).toBeInstanceOf(HttpException);
     expect((refused as HttpException).getStatus()).toBe(429);
-    expect(cache.counts.size).toBe(1);
+    // The refused request never reached identity, so nothing was counted for it.
+    expect(cache.sets.get('rl:IP:203.0.113.9')).toHaveLength(PRE_AUTH_IP_BUCKET.limit);
   });
 
-  it('gives two addresses two buckets', async () => {
-    const cache = countingCache();
+  it('does not refuse a whole office behind one address: signed-in traffic is limited per user, not here', async () => {
+    const cache = windowCache();
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
 
-    await guard.canActivate(contextFor({ ip: '198.51.100.1' }).context);
-    await guard.canActivate(contextFor({ ip: '198.51.100.2' }).context);
+    for (let i = 0; i < PRE_AUTH_IP_BUCKET.limit + 500; i++) {
+      const { context, finish } = contextFor({ cookies: { session_token: 'valid' } });
+      await guard.canActivate(context);
+      finish(200);
+    }
+
+    expect(cache.consumeRateLimit).not.toHaveBeenCalled();
+  });
+
+  it('gives two addresses two windows', async () => {
+    const cache = windowCache();
+    const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
+
+    const a = contextFor({ ip: '198.51.100.1' });
+    await guard.canActivate(a.context);
+    a.finish(401);
+    const b = contextFor({ ip: '198.51.100.2' });
+    await guard.canActivate(b.context);
+    b.finish(401);
 
     expect(cache.consumeRateLimit.mock.calls.map((call) => call[0])).toEqual([
       'IP:198.51.100.1',
@@ -123,21 +178,22 @@ describe('RateLimitGuard (pre-auth, per verified address)', () => {
     ]);
   });
 
-  it('never sets the KEYED_BY_ADDRESS marker: that is for a caller the per-user bucket cannot key', async () => {
-    const cache = countingCache();
-    const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
+  it('never sets the KEYED_BY_ADDRESS marker: that is for the per-user bucket, which could not key the caller', async () => {
+    const guard = new RateLimitGuard(reflectorFor() as never, windowCache() as never);
     const { context, request } = contextFor();
 
     await guard.canActivate(context);
 
-    expect(Object.getOwnPropertySymbols(request)).toEqual([]);
+    expect((request as unknown as Record<symbol, unknown>)[KEYED_BY_ADDRESS]).toBeUndefined();
   });
 
   describe('the address comes from clientIp(), never from a header the caller can choose', () => {
     const keyFor = async (headers: Record<string, string>, ip = '10.0.0.1') => {
-      const cache = countingCache();
+      const cache = windowCache();
       const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
-      await guard.canActivate(contextFor({ headers, ip }).context);
+      const { context, finish } = contextFor({ headers, ip });
+      await guard.canActivate(context);
+      finish(401);
       return cache.consumeRateLimit.mock.calls[0][0];
     };
 
@@ -161,13 +217,12 @@ describe('RateLimitGuard (pre-auth, per verified address)', () => {
     });
   });
 
-  it('throws a body the exception filter can read the message out of', async () => {
-    const cache = countingCache();
-    cache.consumeRateLimit.mockResolvedValue({
-      allowed: false,
-      remaining: 0,
-      resetAt: Math.floor(Date.now() / 1000) + 42,
-    });
+  it('throws a flat body the exception filter can read the message out of', async () => {
+    const cache = windowCache();
+    cache.sets.set(
+      'rl:IP:203.0.113.9',
+      Array.from({ length: PRE_AUTH_IP_BUCKET.limit }, () => Date.now()),
+    );
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
 
     const thrown = await guard.canActivate(contextFor().context).catch((err: unknown) => err);
@@ -178,38 +233,61 @@ describe('RateLimitGuard (pre-auth, per verified address)', () => {
     expect(body.error, 'the body must not nest another envelope inside itself').toBeUndefined();
     expect(body.message).toMatch(/Too many requests — retry after \d+s\./);
     expect(body.retryAfter).toBeGreaterThan(0);
-    expect(body['message'] as string).not.toBe('Error');
     expect(GlobalExceptionFilter).toBeTypeOf('function');
   });
 
   it('applies RATE_LIMIT_IP_LIMIT when configured, and the shipped ceiling otherwise', async () => {
-    const cache = countingCache();
+    const cache = windowCache();
     const config = { get: vi.fn(() => 2) };
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never, config as never);
 
-    await guard.canActivate(contextFor().context);
-    await guard.canActivate(contextFor().context);
+    for (let i = 0; i < 2; i++) {
+      const { context, finish } = contextFor();
+      await guard.canActivate(context);
+      finish(401);
+    }
     await expect(guard.canActivate(contextFor().context)).rejects.toMatchObject({ status: 429 });
-    expect(cache.consumeRateLimit.mock.calls[0][1]).toBe(2);
   });
 
   it('fails open when the cache is down', async () => {
-    const cache = { consumeRateLimit: vi.fn().mockRejectedValue(new Error('valkey down')) };
+    const cache = {
+      redis: { zcount: vi.fn().mockRejectedValue(new Error('valkey down')) },
+      consumeRateLimit: vi.fn(),
+    };
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
 
     await expect(guard.canActivate(contextFor().context)).resolves.toBe(true);
   });
 
   it('honours @SkipRateLimit()', async () => {
-    const cache = countingCache();
+    const cache = windowCache();
     const guard = new RateLimitGuard(reflectorFor({ skip: true }) as never, cache as never);
+    const { context, finish } = contextFor();
 
-    await expect(guard.canActivate(contextFor().context)).resolves.toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    finish(401);
     expect(cache.consumeRateLimit).not.toHaveBeenCalled();
   });
 });
 
 describe('UserRateLimitGuard (authenticated, per user)', () => {
+  // A counting cache for the per-user bucket: admits up to `limit` per key in the window.
+  function countingCache() {
+    const counts = new Map<string, number>();
+    return {
+      counts,
+      consumeRateLimit: vi.fn((key: string, limit: number) => {
+        const used = (counts.get(key) ?? 0) + 1;
+        counts.set(key, used);
+        return Promise.resolve({
+          allowed: used <= limit,
+          remaining: Math.max(0, limit - used),
+          resetAt: Math.floor(Date.now() / 1000) + 60,
+        });
+      }),
+    };
+  }
+
   it('counts an authenticated caller against uid:<userId>, with the route tier', async () => {
     const cache = countingCache();
     const guard = new UserRateLimitGuard(reflectorFor() as never, cache as never);
@@ -220,8 +298,6 @@ describe('UserRateLimitGuard (authenticated, per user)', () => {
   });
 
   it('gives every cookie variant of one signed-in session the same user bucket', async () => {
-    // Cookie encoding variants (padding, quoting) reach identity as the same session, so they must not each open
-    // a bucket. The bucket is keyed by the verified user, and the cookie is not in the key at all.
     const cache = countingCache();
     const guard = new UserRateLimitGuard(reflectorFor() as never, cache as never);
 
@@ -254,12 +330,25 @@ describe('UserRateLimitGuard (authenticated, per user)', () => {
     expect(cache.counts.get('AI:uid:emp-1')).toBe(11);
   });
 
-  it('does nothing without a principal: a public route or a refused request is the pre-auth bucket’s', async () => {
+  it('marks a request with no principal, so identity can warn when this guard ran before its SessionGuard', async () => {
     const cache = countingCache();
     const guard = new UserRateLimitGuard(reflectorFor() as never, cache as never);
+    const { context, request } = contextFor();
 
-    await expect(guard.canActivate(contextFor().context)).resolves.toBe(true);
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+
     expect(cache.consumeRateLimit).not.toHaveBeenCalled();
+    expect((request as unknown as Record<symbol, unknown>)[KEYED_BY_ADDRESS]).toBe(true);
+  });
+
+  it('does not mark an authenticated request: its principal is there, so there is nothing to warn about', async () => {
+    const cache = countingCache();
+    const guard = new UserRateLimitGuard(reflectorFor() as never, cache as never);
+    const { context, request } = contextFor();
+
+    await asUser('emp-1', () => guard.canActivate(context));
+
+    expect((request as unknown as Record<symbol, unknown>)[KEYED_BY_ADDRESS]).toBeUndefined();
   });
 
   it('does not treat req.user alone as a principal', async () => {

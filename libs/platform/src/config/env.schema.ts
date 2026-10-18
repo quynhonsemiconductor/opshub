@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getProcessRole, type ProcessRole } from './process-role';
+import { PRE_AUTH_IP_BUCKET } from '../rate-limit/rate-limit.constants';
 
 const booleanish = (defaultValue: boolean) =>
   z
@@ -37,7 +38,7 @@ const baseShape = {
    * shipped `PRE_AUTH_IP_BUCKET` limit. CI's e2e suites drive every request from one loopback address, so they
    * raise it; `NODE_ENV=production` refuses a value above the default, so it is not a dial in a deployed environment.
    */
-  RATE_LIMIT_IP_LIMIT: z.coerce.number().int().positive().default(1000),
+  RATE_LIMIT_IP_LIMIT: z.coerce.number().int().positive().default(PRE_AUTH_IP_BUCKET.limit),
   RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(200),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
@@ -214,12 +215,14 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
     // A RATE LIMIT TESTS CAN RAISE IS NOT A CONTROL. The knob exists for CI; production keeps the
     // shipped ceiling, and this refusal is what makes that a rule rather than a comment. Deliberately
     // placed above the early return below, for the reason that comment gives.
-    if (env.NODE_ENV === 'production' && env.RATE_LIMIT_IP_LIMIT > 1000) {
+    if (env.NODE_ENV === 'production' && env.RATE_LIMIT_IP_LIMIT > PRE_AUTH_IP_BUCKET.limit) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['RATE_LIMIT_IP_LIMIT'],
         message:
-          'RATE_LIMIT_IP_LIMIT cannot exceed 1000 when NODE_ENV=production: the per-address bucket is a protective ' +
+          'RATE_LIMIT_IP_LIMIT cannot exceed ' +
+          PRE_AUTH_IP_BUCKET.limit +
+          ' when NODE_ENV=production: the per-address bucket is a protective ' +
           'control, and an environment that raises it stops describing production. Lowering it is allowed.',
       });
     }

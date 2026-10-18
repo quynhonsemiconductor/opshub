@@ -111,24 +111,26 @@ export async function createTestApp(): Promise<NestFastifyApplication> {
  *     in, on whichever spec happens to be running. Clearing only the login tier left this half
  *     of the problem in place, and it cost a debugging round today.
  *
- * Tiers come from `RATE_LIMIT_TIERS` rather than a list written out here, so a tier added
- * later is covered without anyone remembering this file. Subjects are the IP plus every
- * fixture id, because a tier keyed by `userId` buckets per caller — and `app.inject()` has no
- * socket, so Fastify reports `127.0.0.1` for the ip-keyed ones.
+ * Per-user tiers come from `RATE_LIMIT_TIERS` rather than a list written out here, so a tier added later is covered
+ * without anyone remembering this file. Subjects are the IP (the pre-auth bucket) plus every fixture id, because the
+ * per-user buckets key on the user, and `app.inject()` has no socket, so Fastify reports `127.0.0.1` for the address.
  *
  * Goes through the app's own `CacheService.del`, not a raw client, so the namespace prefix
  * and the `rl:` key shape stay in ONE place: `consumeRateLimit` builds the same key, and a
  * hard-coded string here would silently stop matching if either changed.
  */
 async function clearRateLimits(app: NestFastifyApplication): Promise<void> {
-  const subjects = ['127.0.0.1', ...Object.values(FIXTURE).map((f) => f.id)];
+  const ids = Object.values(FIXTURE).map((f) => f.id);
   try {
     const cache = app.get(CacheService);
-    await Promise.all(
-      Object.keys(RATE_LIMIT_TIERS).flatMap((tier) =>
-        subjects.map((subject) => cache.del(`rl:${tier}:${subject}`)),
+    await Promise.all([
+      // The pre-auth bucket: one per verified client address (127.0.0.1 under app.inject()).
+      cache.del('rl:IP:127.0.0.1'),
+      // The per-user buckets: one per tier per fixture user.
+      ...Object.keys(RATE_LIMIT_TIERS).flatMap((tier) =>
+        ids.map((id) => cache.del(`rl:${tier}:uid:${id}`)),
       ),
-    );
+    ]);
   } catch {
     // Cache optional in some configurations; the limiter fails open there anyway.
   }
