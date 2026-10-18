@@ -100,10 +100,9 @@ module "stack" {
   // down on a baseline tag that was never pushed).
   image_tag = "set-by-the-deploy-never-a-real-tag"
 
-  // Mail through Microsoft 365 (Graph): STAGED, NOT SWITCHED ON. email_provider stays as it is until the owner has done
-  // docs/runbooks/mail-graph.md for this environment (it needs the Graph worker app below, which does not exist yet); the cut-over is then a
-  // PR setting email_provider = "graph", graph_client_id and graph_client_certificate_set = true.
-  // A non-prod environment never sends from the prod mailbox: develop has its own.
+  // Mail through Microsoft 365 (Graph): ON. The worker sends as noreply-opshub-dev@qnsc.vn with the "OpsHub Dev Service" app below (certificate only; Exchange
+  // "Application Mail.Send" scoped to that one mailbox, no Mail.* in Entra). A non-prod environment never sends from the prod mailbox.
+  // docs/runbooks/mail-graph.md.
   mail_graph_sender = "noreply-opshub-dev@qnsc.vn"
 
   entra_tenant_id = var.entra_tenant_id
@@ -113,20 +112,22 @@ module "stack" {
   // unconditionally: identity 8 cannot sign anyone in without it, and the API's env schema refuses to boot
   // production without it.
 
-  // Microsoft Graph is OFF: the "OpsHub Graph Worker" app does not exist yet (it is created at the
-  // on-prem move, with a federated credential), and the sign-in app holds no application
-  // permissions. With graph_client_id empty every Graph feature skips with one info log.
-  // docs/graph-worker-app.md has the app's exact permissions and credential setup.
-  graph_client_certificate_set = false
-  graph_client_id              = ""
+  // Microsoft Graph is ON, with the "OpsHub Dev Service" app: certificate only, no client secret, and ONLY the three READ permissions
+  // (SecurityEvents.Read.All, DeviceManagementManagedDevices.Read.All, User.Read.All). Develop shares the real tenant, so it deliberately cannot
+  // disable or sign out an account (the account tasks fail closed). The certificate is the standalone secret opshub/develop/graph-client-certificate.
+  // docs/graph-worker-app.md.
+  graph_client_certificate_set = true
+  graph_client_id              = "328bac47-4848-42b5-9464-bb4ba7b0cb56"
 
   // qnsc.vn is a verified SES domain identity in this account (rally already sends from
   // it). A distinct local-part from rally's own noreply@qnsc.vn keeps bounce/reply
   // routing distinguishable per product, though the domain-level identity would permit
   // either. SES_CONFIGURATION_SET is NOT set here — it's derived automatically from the
   // real aws_sesv2_configuration_set.email_feedback resource this module now creates.
-  email_provider  = "ses"
-  mail_from_email = "opshub-noreply@qnsc.vn"
+  // (SES stays defined, and its removal is tracked in opshub#405; develop now sends through Graph, which needs no SES sender, so mail_from_email is
+  // empty and the SES send grants are not created.)
+  email_provider  = "graph"
+  mail_from_email = ""
 
   // Cost-leaning: short retention, immediate secret deletion so a destroy+redeploy
   // cycle does not trip "secret scheduled for deletion".
