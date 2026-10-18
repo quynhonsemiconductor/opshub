@@ -14,7 +14,7 @@ and its prod twin) holds **no application permissions**.
 | ----------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
 | Used by                       | API (BFF login callback)                 | **Worker only**                                                                       |
 | Flow                          | Authorization code + PKCE (delegated)    | Client credentials (application)                                                      |
-| Permissions                   | `openid`, `profile`, `email` (delegated) | The five below (application)                                                          |
+| Permissions                   | `openid`, `profile`, `email` (delegated) | Three or five below (application), by environment                                     |
 | Credential                    | Client secret (`ENTRA_CLIENT_SECRET`)    | **Certificate now, federated token later. No secret.**                                |
 | If the process is compromised | A session-minting secret leaks           | The API has nothing to steal; the worker's credential is short-lived or a private key |
 
@@ -23,7 +23,19 @@ role-management write (the app could have made itself Global Admin) and `User.Re
 task had the Graph secret injected. Now the API process has no Graph variable, no Graph client and cannot
 import the module that has one — `test/graph-client-single-source.spec.ts` fails the build if it does.
 
-## Application permissions — exactly these five, admin-consented
+## Accepted risk: mail shares this app
+
+Outbound email is sent by this same app (certificate, worker only; the Exchange RBAC role `Application Mail.Send` scoped to one mailbox, and **no** `Mail.*` in Entra,
+see `docs/runbooks/mail-graph.md`). That is the organisation's standard, one Service app per product and environment, and it was a conscious choice, but the
+consequence should be stated: **one certificate now covers both the permissions below (Intune reads, account disable and session revocation) and sending as
+the shared mailbox.** Whoever holds that certificate, or the worker's execution role that injects it, can do both. The mitigations are the ones that already
+bound the app: the certificate lives in one Secrets Manager secret readable only by the worker's execution role (not by the API and not by any task role), there
+is no client secret, the Exchange scope limits mail to one `PrimarySmtpAddress`, and develop and production are separate apps with separate certificates. If
+mail ever needs a different blast radius from the directory actions, the split is a second Service app and a second certificate; nothing in the code assumes one.
+
+## Application permissions — admin-consented: three in develop, five in production
+
+**Production** holds all five rows below. **Develop holds ONLY the three read permissions** (`SecurityEvents.Read.All`, `DeviceManagementManagedDevices.Read.All`, `User.Read.All`), because develop shares the real tenant and must not be able to disable or sign out a real account. With `User.EnableDisableAccount.All` and `User.RevokeSessions.All` absent, `EntraAccountService` fails closed: Graph answers 403, nothing is changed, one clear error is logged naming the missing permission, and the task dead-letters (alarm) instead of retrying.
 
 | Permission                                | Used by                                                   | Call                                                                              | Why this and not a broader one                                                                                                                                                                                                   |
 | ----------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -33,8 +45,14 @@ import the module that has one — `test/graph-client-single-source.spec.ts` fai
 | `User.Read.All`                           | `EntraAccountService.assertBelongsTo`, `setEnabled`       | `GET /users/{id}?$select=id,userPrincipalName,mail,proxyAddresses`, and the above | The identity check before any change reads the object; also required alongside `User.EnableDisableAccount.All` for the `PATCH`.                                                                                                  |
 | `User.RevokeSessions.All`                 | `EntraAccountService.revokeSessions`                      | `POST /users/{id}/revokeSignInSessions`                                           | The only application permission that grants it. Disabling an account stops _new_ sign-ins; revoking ends the refresh tokens already issued. It does not apply to external (guest) users — their home tenant owns their sessions. |
 
-Verify after consent: decode an access token for the app and check the `roles` claim lists exactly these
-five values, nothing else.
+Verify after consent: decode an access token for the app and check the `roles` claim lists exactly the values for that environment (three in develop, five in production), nothing else. `platform-mail-check --allowed-role …` does this (`docs/runbooks/mail-graph.md`, step 8).
+
+### Mail
+
+This app also **sends the product's email**, with no Graph permission at all: its only mail authority is the Exchange Online RBAC role
+"Application Mail.Send", scoped to one shared mailbox per environment (`noreply-opshub-dev@qnsc.vn` for develop, `noreply-opshub@qnsc.vn` for production).
+Entra grants and Exchange grants are additive, so a `Mail.*` permission here would make that scope meaningless. Setup and proof:
+[`docs/runbooks/mail-graph.md`](runbooks/mail-graph.md). Same credential, same worker; `EMAIL_PROVIDER=graph`.
 
 ### Never grant
 
