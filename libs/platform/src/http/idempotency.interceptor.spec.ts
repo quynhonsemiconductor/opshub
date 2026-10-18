@@ -19,6 +19,13 @@ import { firstValueFrom, of, throwError } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
 
+// The principal the interceptor reads: the request context, set by the guard that authenticated. Not `req.user`.
+const principal: { userId: string | undefined } = { userId: undefined };
+vi.mock('@quynhonsemiconductor/platform-http', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@quynhonsemiconductor/platform-http')>()),
+  currentUserId: () => principal.userId,
+}));
+
 interface Stored {
   fingerprint: string;
   body: unknown;
@@ -41,10 +48,18 @@ function makeContext(
     body?: unknown;
     key?: string;
     user?: { sub: string } | null;
+    /** The principal in the request context. Default: the signed-in `emp-1`, or none when `user` is null. */
+    principal?: string | null;
     headers?: Record<string, string>;
   } = {},
 ) {
   const header = vi.fn();
+  principal.userId =
+    over.principal === undefined
+      ? over.user === null
+        ? undefined
+        : 'emp-1'
+      : (over.principal ?? undefined);
   const req = {
     method: over.method ?? 'POST',
     url: over.url ?? '/v1/assets',
@@ -254,5 +269,50 @@ describe('IdempotencyInterceptor', () => {
     await firstValueFrom(interceptor.intercept(ctx, handler()));
 
     expect(cache.getJson).toHaveBeenCalledWith('idem:ip:198.51.100.9:k-1');
+  });
+
+  it('an authenticated request with no principal in the context runs uncached, never keyed by address', async () => {
+    const cache = makeCache();
+    const next = handler();
+    const { ctx } = makeContext({ key: 'k-2', user: { sub: 'emp-1' }, principal: null });
+
+    await firstValueFrom(new IdempotencyInterceptor(cache as never).intercept(ctx, next));
+
+    expect(next.handle).toHaveBeenCalledTimes(1);
+    expect(cache.getJson).not.toHaveBeenCalled();
+    expect(cache.acquireLock).not.toHaveBeenCalled();
+    expect(cache.setJson).not.toHaveBeenCalled();
+  });
+
+  it('two users with the same Idempotency-Key each get their own response, and a retry gets its own back', async () => {
+    const stored = new Map<string, Stored>();
+    const cache = {
+      isAvailable: true,
+      getJson: vi.fn((k: string) => Promise.resolve(stored.get(k) ?? null)),
+      setJson: vi.fn((k: string, v: Stored) => {
+        stored.set(k, v);
+        return Promise.resolve();
+      }),
+      acquireLock: vi.fn().mockResolvedValue(true),
+      releaseLock: vi.fn().mockResolvedValue(undefined),
+    };
+    const interceptor = new IdempotencyInterceptor(cache as never);
+
+    const alice = handler({ id: 'alice-asset' });
+    const bob = handler({ id: 'bob-asset' });
+    const aliceFirst = await firstValueFrom(
+      interceptor.intercept(makeContext({ key: 'same', principal: 'alice' }).ctx, alice),
+    );
+    const bobFirst = await firstValueFrom(
+      interceptor.intercept(makeContext({ key: 'same', principal: 'bob' }).ctx, bob),
+    );
+    const aliceRetry = await firstValueFrom(
+      interceptor.intercept(makeContext({ key: 'same', principal: 'alice' }).ctx, handler()),
+    );
+
+    expect(aliceFirst).toEqual({ id: 'alice-asset' });
+    expect(bobFirst).toEqual({ id: 'bob-asset' });
+    expect(aliceRetry).toEqual({ id: 'alice-asset' });
+    expect(bob.handle).toHaveBeenCalledTimes(1);
   });
 });
