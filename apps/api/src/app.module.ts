@@ -4,10 +4,8 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import {
   PlatformModule,
   GlobalExceptionFilter,
-  REQUEST_CONTEXT,
   HttpLoggingInterceptor,
   IdempotencyInterceptor,
-  RequestContextService,
   RateLimitGuard,
   SanitizationPipe,
 } from '@platform';
@@ -63,9 +61,6 @@ import { SecurityPostureModule } from '@modules/security-posture';
     SecurityPostureModule,
   ],
   providers: [
-    // Bind the shared filter's request-context port to observability's request-context store: the one
-    // `enableCorrelationId` (platform-http) seeds for every request, and the worker's `withJobContext` for jobs.
-    { provide: REQUEST_CONTEXT, useExisting: RequestContextService },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_INTERCEPTOR, useClass: HttpLoggingInterceptor },

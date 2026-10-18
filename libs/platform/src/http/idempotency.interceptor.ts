@@ -4,7 +4,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Observable, from } from 'rxjs';
 import { switchMap, tap } from 'rxjs/operators';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { clientIp } from '@quynhonsemiconductor/platform-http';
+import { clientIp, currentUserId } from '@quynhonsemiconductor/platform-http';
 import { ConflictException, ValidationException } from '../errors/exceptions';
 import { ErrorCodes } from '../errors/error-codes';
 import type { JwtPayload } from '../auth/principal';
@@ -66,6 +66,22 @@ interface IdempotentRecord {
  * unavailable. The last is deliberate — degrading to "perform the request" keeps the API working when
  * Valkey is down, at the cost of the guarantee, and the alternative is refusing every mutation.
  */
+/** Set by SessionAuthGuard (`req.user`) or identity's SessionGuard (`req.session`): the request is authenticated. */
+function isAuthenticated(req: FastifyRequest & { user?: JwtPayload; session?: unknown }): boolean {
+  return Boolean(req.user ?? req.session);
+}
+
+/** Once per process: the same condition would repeat on every request that hits it. */
+let warnedNoPrincipal = false;
+
+function warnOnceNoPrincipal(logger: Logger): void {
+  if (warnedNoPrincipal) return;
+  warnedNoPrincipal = true;
+  logger.error(
+    'IdempotencyInterceptor: an authenticated request has no principal in the request context, so its Idempotency-Key is not honoured. Check that the guard that authenticates calls setRequestPrincipal and that CORRELATION_ID_MODE is not disabled.',
+  );
+}
+
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
   private readonly logger = new Logger(IdempotencyInterceptor.name);
@@ -83,8 +99,16 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const key = req.headers[IDEMPOTENCY_KEY_HEADER] as string | undefined;
     if (!key || !this.cache.isAvailable) return next.handle();
 
-    // Identity first so keys are per-caller. `req.user` is populated: guards run before interceptors.
-    const identity = req.user?.sub ?? `ip:${clientIp(req)}`;
+    // Identity first so keys are per-caller: the principal from the request context, written by the guard that
+    // authenticated. An authenticated request with no principal is NOT keyed by address: every caller behind one
+    // NAT would share the key space, so the second user could be answered with the first user's response. It
+    // runs uncached instead, and the warning says why (once per process).
+    const userId = currentUserId();
+    if (!userId && isAuthenticated(req)) {
+      warnOnceNoPrincipal(this.logger);
+      return next.handle();
+    }
+    const identity = userId ?? `ip:${clientIp(req)}`;
     const cacheKey = `idem:${identity}:${key}`;
     const lockKey = `${cacheKey}:lock`;
     const fingerprint = this.fingerprint(req);

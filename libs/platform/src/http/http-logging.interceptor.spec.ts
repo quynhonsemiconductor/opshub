@@ -1,7 +1,7 @@
 import { firstValueFrom, from, lastValueFrom, of, throwError } from 'rxjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@quynhonsemiconductor/platform-http';
-import { HttpMetrics } from '@quynhonsemiconductor/observability';
+import { HttpMetrics, requestContextStorage } from '@quynhonsemiconductor/observability';
 import { HttpLoggingInterceptor } from './http-logging.interceptor';
 
 /**
@@ -12,7 +12,7 @@ import { HttpLoggingInterceptor } from './http-logging.interceptor';
 
 function setup(over: { url?: string; routeUrl?: string; status?: number; ip?: string } = {}) {
   const record = vi.spyOn(HttpMetrics.prototype, 'record').mockImplementation(() => undefined);
-  const interceptor = new HttpLoggingInterceptor({ getUserId: () => 'emp-1' } as never);
+  const interceptor = new HttpLoggingInterceptor();
   // the access log goes to Nest's logger; keep the test output quiet
   const logger = (interceptor as unknown as { logger: Record<string, unknown> }).logger;
   const log = vi.fn();
@@ -31,12 +31,30 @@ function setup(over: { url?: string; routeUrl?: string; status?: number; ip?: st
     getType: () => 'http',
     switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
   } as never;
-  return { interceptor, context, record, log };
+  return { interceptor, context, record, log, req };
 }
 
 afterEach(() => vi.restoreAllMocks());
 
 describe('HttpLoggingInterceptor', () => {
+  it('logs the user from the request context, never from req.user', async () => {
+    const { interceptor, context, log, req } = setup();
+    Object.assign(req, { user: { id: 'from-req-user' } });
+
+    await requestContextStorage.run(
+      {
+        workspaceId: undefined,
+        userId: 'emp-1',
+        sessionId: 's-1',
+        correlationId: 'c-1',
+        traceparent: undefined,
+      },
+      () => firstValueFrom(interceptor.intercept(context, { handle: () => of({}) })),
+    );
+
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ userId: 'emp-1' }));
+  });
+
   it('records the route TEMPLATE, the method and the status, once', async () => {
     const { interceptor, context, record } = setup();
 

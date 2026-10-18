@@ -2,15 +2,12 @@ import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } fr
 import {
   DomainException as SharedDomainException,
   clientIp,
+  currentUserId,
 } from '@quynhonsemiconductor/platform-http';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
-import {
-  HttpMetrics,
-  RequestContextService,
-  normalizeRoute,
-} from '@quynhonsemiconductor/observability';
+import { HttpMetrics, normalizeRoute } from '@quynhonsemiconductor/observability';
 import { albReceivedAtMs, albWaitMs, arrivalAtMs } from '@quynhonsemiconductor/platform-runtime';
 
 /** Health/readiness probes — suppress from access logs to avoid noise. */
@@ -76,8 +73,6 @@ export class HttpLoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
   /** RED metrics (`http.server.requests` / `.errors` / `.duration`) that the HTTP alarms are written against. */
   private readonly metrics = new HttpMetrics();
-
-  constructor(private readonly ctx: RequestContextService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
@@ -156,7 +151,7 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     albWaitMs?: number,
     bodyWaitMs?: number,
   ): void {
-    const userId = this.ctx.getUserId();
+    const userId = currentUserId();
     const base = {
       method: req.method,
       url: req.url,

@@ -1,6 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { GlobalExceptionFilter } from '@quynhonsemiconductor/platform-http';
+import { requestContextStorage } from '@quynhonsemiconductor/observability';
+import { GlobalExceptionFilter, KEYED_BY_ADDRESS } from '@quynhonsemiconductor/platform-http';
 import { SESSION_COOKIE } from '../auth/session-cookie';
 import { RateLimitGuard } from './rate-limit.guard';
 
@@ -239,5 +240,78 @@ describe('RateLimitGuard identity', () => {
     await guard.canActivate(contextFor({ 'x-forwarded-for': '203.0.113.44, 10.0.0.1' }));
 
     expect(cache.consumeRateLimit.mock.calls[0][0]).toBe('DEFAULT:203.0.113.44');
+  });
+});
+
+describe('RateLimitGuard, and who the caller is', () => {
+  /** A request as the global guard sees it: no `req.user` (route guards have not run), optional cookie. */
+  function requestContext(over: { user?: { sub: string }; cookies?: Record<string, string> } = {}) {
+    const request = {
+      headers: {},
+      ip: '203.0.113.9',
+      user: over.user,
+      cookies: over.cookies ?? {},
+    };
+    return {
+      request,
+      context: {
+        switchToHttp: () => ({
+          getRequest: () => request,
+          getResponse: () => ({ header: vi.fn() }),
+        }),
+        getHandler: () => () => undefined,
+        getClass: () => class {},
+      } as never,
+    };
+  }
+
+  const inContext = <T>(userId: string, run: () => T): T =>
+    requestContextStorage.run(
+      {
+        workspaceId: undefined,
+        userId,
+        sessionId: 's-1',
+        correlationId: 'c-1',
+        traceparent: undefined,
+      },
+      run,
+    );
+
+  it('keys by the principal in the request context', async () => {
+    const cache = admittingCache();
+    const guard = new RateLimitGuard(reflector as never, cache as never);
+    const { context } = requestContext({ cookies: { [SESSION_COOKIE]: 'session-a' } });
+
+    await inContext('emp-1', () => guard.canActivate(context));
+
+    expect(cache.consumeRateLimit.mock.calls[0][0]).toBe('DEFAULT:uid:emp-1');
+  });
+
+  it('does not read req.user: an authenticated req.user with no principal keys by the session credential', async () => {
+    const cache = admittingCache();
+    const guard = new RateLimitGuard(reflector as never, cache as never);
+    const { context } = requestContext({
+      user: { sub: 'from-req-user' },
+      cookies: { [SESSION_COOKIE]: 'session-a' },
+    });
+
+    await guard.canActivate(context);
+
+    const key = cache.consumeRateLimit.mock.calls[0][0] as string;
+    expect(key).not.toContain('from-req-user');
+    expect(key).not.toContain('uid:');
+  });
+
+  it('marks a caller keyed by address, and not a session-keyed one', async () => {
+    const cache = admittingCache();
+    const guard = new RateLimitGuard(reflector as never, cache as never);
+    const byAddress = requestContext();
+    const bySession = requestContext({ cookies: { [SESSION_COOKIE]: 'session-a' } });
+
+    await guard.canActivate(byAddress.context);
+    await guard.canActivate(bySession.context);
+
+    expect((byAddress.request as Record<symbol, unknown>)[KEYED_BY_ADDRESS]).toBe(true);
+    expect((bySession.request as Record<symbol, unknown>)[KEYED_BY_ADDRESS]).toBeUndefined();
   });
 });

@@ -11,14 +11,13 @@ import { createHash } from 'node:crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { AppConfigService } from '../config/app-config.service';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { clientIp } from '@quynhonsemiconductor/platform-http';
+import { KEYED_BY_ADDRESS, clientIp, currentUserId } from '@quynhonsemiconductor/platform-http';
 import {
   RATE_LIMIT_TIER,
   SKIP_RATE_LIMIT,
   RATE_LIMIT_TIERS,
   type RateLimitTierName,
 } from './rate-limit.constants';
-import type { JwtPayload } from '../auth/principal';
 import { SESSION_COOKIE } from '../auth/session-cookie';
 import { failOpenLog } from '@quynhonsemiconductor/observability';
 
@@ -120,10 +119,12 @@ export class RateLimitGuard implements CanActivate {
       ]) ?? 'DEFAULT';
     const tier = RATE_LIMIT_TIERS[tierName] as import('./rate-limit.constants').RateLimitTier;
 
-    const req = context.switchToHttp().getRequest<FastifyRequest & { user?: JwtPayload }>();
+    const req = context.switchToHttp().getRequest<FastifyRequest>();
     const res = context.switchToHttp().getResponse<FastifyReply>();
 
-    const userId = req.user?.sub;
+    // The principal, from the request context. Nothing here reads `req.user`: that is set by SessionAuthGuard,
+    // which runs after this global guard, so `userId` is undefined on today's routes (see the docblock above).
+    const userId = currentUserId();
     // `clientIp()`, never a header read here: behind Cloudflare `x-real-ip` and the first `x-forwarded-for` entry
     // are whatever the caller chose to send, so a forged one would pick its own rate-limit bucket. It returns the
     // signed edge address when `EDGE_CLIENT_IP_SECRET` is set, else `cf-connecting-ip`, else the socket.
@@ -142,8 +143,12 @@ export class RateLimitGuard implements CanActivate {
          * carries the bucket. IP remains the last resort: a caller who sent no credential at all has no
          * other identity to be keyed on.
          */
-        identifier = userId ?? credentialOf(req) ?? ip;
+        identifier = userId ? `uid:${userId}` : (credentialOf(req) ?? ip);
     }
+    // Marks a caller keyed by address (one bucket per NAT) so identity's SessionGuard can warn when it runs after
+    // this guard. A session-keyed caller is not marked: its bucket is its own.
+    if (!userId && identifier === ip)
+      (req as unknown as Record<symbol, unknown>)[KEYED_BY_ADDRESS] = true;
     const rateLimitKey = `${tierName}:${identifier}`;
 
     // Consume one slot from the shared sliding-window limiter. The tier window is

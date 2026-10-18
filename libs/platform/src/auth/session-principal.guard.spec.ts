@@ -1,4 +1,5 @@
 import { UnauthorizedException } from '@nestjs/common';
+import { requestContextStorage } from '@quynhonsemiconductor/observability';
 import { describe, expect, it, vi } from 'vitest';
 import { IS_PUBLIC_KEY } from './decorators';
 import { SessionAuthGuard } from './session-principal.guard';
@@ -24,7 +25,10 @@ function setup(options: { isPublic?: boolean; session?: unknown } = {}) {
     getClass: () => class Controller {},
   } as never;
   const guard = new SessionAuthGuard(reflector as never, ctx as never);
-  return { guard, context, request, ctx };
+  const log = vi.fn();
+  (guard as unknown as { logger: Record<string, unknown> }).logger['error'] = log;
+  (guard as unknown as { logger: Record<string, unknown> }).logger['warn'] = log;
+  return { guard, context, request, ctx, log };
 }
 
 const SESSION = {
@@ -32,11 +36,25 @@ const SESSION = {
   user: { id: 'user-1', email: 'jane@qnsc.vn', name: 'Jane' },
 };
 
+/** A request context as enableCorrelationId seeds it, so setRequestPrincipal has somewhere to write. */
+function seeded<T>(run: () => T): T {
+  return requestContextStorage.run(
+    {
+      workspaceId: undefined,
+      userId: undefined,
+      sessionId: undefined,
+      correlationId: 'c-1',
+      traceparent: undefined,
+    },
+    run,
+  );
+}
+
 describe('SessionAuthGuard', () => {
   it('builds the principal from the identity session', () => {
     const { guard, context, request } = setup({ session: SESSION });
 
-    expect(guard.canActivate(context)).toBe(true);
+    expect(seeded(() => guard.canActivate(context))).toBe(true);
 
     expect(request.user).toEqual({
       sub: 'user-1',
@@ -49,12 +67,40 @@ describe('SessionAuthGuard', () => {
     });
   });
 
-  it('stamps the request context, so the logs and the audit log can name the actor', () => {
+  it('records the principal in the request context, which is what the rate limit and the access log read', () => {
     const { guard, context, ctx } = setup({ session: SESSION });
+    const store = {
+      workspaceId: undefined,
+      userId: undefined,
+      sessionId: undefined,
+      correlationId: 'c-1',
+      traceparent: undefined,
+    };
 
-    guard.canActivate(context);
+    requestContextStorage.run(store, () => guard.canActivate(context));
 
-    expect(ctx.setAuthContext).toHaveBeenCalledWith(undefined, 'user-1', 'session-1');
+    expect(store).toMatchObject({ userId: 'user-1', sessionId: 'session-1' });
+    expect(ctx.setAuthContext).not.toHaveBeenCalled();
+  });
+
+  it('logs once and still serves when there is no request context to record the principal in', () => {
+    const { guard, context, log } = setup({ session: SESSION });
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(guard.canActivate(context)).toBe(true);
+
+    expect(log).toHaveBeenCalledTimes(1);
+  });
+
+  it('serves a verified request whose id the context refuses, writing it unchecked and logging only the class', () => {
+    const { guard, context, ctx, log } = setup({
+      session: { session: { id: 'session-1' }, user: { id: 'bad\u0001id', email: 'a', name: 'a' } },
+    });
+
+    expect(seeded(() => guard.canActivate(context))).toBe(true);
+
+    expect(ctx.setAuthContext).toHaveBeenCalledWith(undefined, 'bad\u0001id', 'session-1');
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('TypeError'));
   });
 
   it('refuses a request with no session (fail closed, even if identity’s guard was not mounted)', () => {
