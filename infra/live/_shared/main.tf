@@ -48,13 +48,13 @@ module "ecr" {
   # dead: `tagPrefixList` is AND, so it only matched images carrying BOTH prefixes). rally
   # verified that live (105 `sha-` images under a policy claiming to keep 30).
   #
-  # No count/day override here: this call adopts the defaults — keep 20 builds (sha-*),
-  # expire releases (v*) after 180 days, untagged after 1 day. These repositories do not
-  # exist yet, so unlike rally there is nothing to preview: the policy applies from the
+  # No count/day override here: this call adopts the defaults — keep 10 builds (sha-*;
+  # ecr-v2.2.0 default, was 20), expire releases (v*) after 180 days, untagged after 1 day.
+  # These repositories do not exist yet, so unlike rally there is nothing to preview: the policy applies from the
   # first pushed image. Run the estate preview (infra/scripts/ecr_lifecycle_preview.py)
   # before changing the numbers later — a dry run, and the only way to see what a policy
   # will delete.
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecr?ref=ecr-v2.1.0"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecr?ref=ecr-v2.2.0"
 
   repository_names = ["opshub-api", "opshub-worker", "opshub-migrator"]
 
