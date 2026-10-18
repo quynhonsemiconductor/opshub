@@ -60,35 +60,44 @@ function contextFor(over: Overrides = {}) {
 }
 
 /**
- * A cache with the sliding window the shared limiter keeps: `consumeRateLimit` records a request under `rl:<key>`
- * and `redis` reads that window without recording anything, as `readWindow` does against the real client.
+ * A cache with the sliding window the shared limiter keeps, and the reserve/refund pair on top. `consumeRateLimit`
+ * takes a slot and returns its id, atomically (one synchronous step, as the Lua script is on the server);
+ * `refundRateLimit` removes exactly that entry. `sets` holds what the window holds, by key.
  */
 function windowCache() {
-  const sets = new Map<string, number[]>();
-  const members = (key: string, from: number) =>
-    (sets.get(`rl:${key}`) ?? []).filter((t) => t >= from);
+  const sets = new Map<string, Array<{ id: string; at: number }>>();
+  const live = (key: string, from: number) =>
+    (sets.get(`rl:${key}`) ?? []).filter((e) => e.at >= from);
+  let seq = 0;
   return {
     sets,
-    redis: {
-      zcount: vi.fn((key: string, from: number) =>
-        Promise.resolve(members(key.slice(3), from).length),
-      ),
-      zrangebyscore: vi.fn((key: string, from: number) => {
-        const [oldest] = members(key.slice(3), from);
-        return Promise.resolve(oldest === undefined ? [] : ['member', String(oldest)]);
-      }),
-    },
+    live,
     consumeRateLimit: vi.fn((key: string, limit: number, windowSeconds: number) => {
       const now = Date.now();
-      const from = now - windowSeconds * 1000;
-      const kept = members(key, from);
-      const allowed = kept.length < limit;
-      if (allowed) sets.set(`rl:${key}`, [...kept, now]);
+      const kept = live(key, now - windowSeconds * 1000);
+      if (kept.length >= limit) {
+        return Promise.resolve({
+          allowed: false,
+          remaining: 0,
+          resetAt: Math.ceil(now / 1000) + windowSeconds,
+        });
+      }
+      const id = `slot-${++seq}`;
+      sets.set(`rl:${key}`, [...kept, { id, at: now }]);
       return Promise.resolve({
-        allowed,
+        allowed: true,
         remaining: Math.max(0, limit - kept.length - 1),
-        resetAt: Math.ceil(now / 1000) + 60,
+        resetAt: Math.ceil(now / 1000) + windowSeconds,
+        id,
       });
+    }),
+    refundRateLimit: vi.fn((key: string, id: string) => {
+      const entries = sets.get(`rl:${key}`) ?? [];
+      sets.set(
+        `rl:${key}`,
+        entries.filter((e) => e.id !== id),
+      );
+      return Promise.resolve();
     }),
   };
 }
@@ -108,18 +117,20 @@ function asUser<T>(userId: string, fn: () => T): T {
 }
 
 describe('RateLimitGuard (pre-auth, failed authentications per verified address)', () => {
-  it('counts nothing for a signed-in caller: a 200 is not a failed authentication', async () => {
+  it('reserves a slot before the request runs, and gives it back when a signed-in request finishes', async () => {
     const cache = windowCache();
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
     const { context, finish } = contextFor({ cookies: { session_token: 'valid' } });
 
     await guard.canActivate(context);
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(1); // held while the request is in flight
     finish(200);
 
-    expect(cache.consumeRateLimit).not.toHaveBeenCalled();
+    expect(cache.refundRateLimit).toHaveBeenCalledTimes(1);
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(0); // a signed-in request leaves no trace
   });
 
-  it('counts a failed authentication (401) against the address, and never against a cookie', async () => {
+  it('keeps the slot for a failed authentication (401), and never refunds it', async () => {
     const cache = windowCache();
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
     const { context, finish } = contextFor({ cookies: { session_token: 'random' } });
@@ -127,10 +138,24 @@ describe('RateLimitGuard (pre-auth, failed authentications per verified address)
     await guard.canActivate(context);
     finish(401);
 
-    expect(cache.consumeRateLimit.mock.calls[0][0]).toBe('IP:203.0.113.9');
+    expect(cache.refundRateLimit).not.toHaveBeenCalled();
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(1);
   });
 
-  it('refuses a caller who mints a fresh random cookie per request once the address has failed too often', async () => {
+  it('keeps the slot when the socket closes before the reply finishes (an aborted request still counts)', async () => {
+    const cache = windowCache();
+    const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const { context, response } = contextFor({ cookies: { session_token: 'random' } });
+
+    await guard.canActivate(context);
+    // An aborted connection emits 'close' and never 'finish': no refund hook runs.
+    response.raw.emit('close');
+
+    expect(cache.refundRateLimit).not.toHaveBeenCalled();
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(1);
+  });
+
+  it('refuses before the request runs once the failures fill the window, and counts the refused request for nothing', async () => {
     const cache = windowCache();
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
 
@@ -142,23 +167,35 @@ describe('RateLimitGuard (pre-auth, failed authentications per verified address)
 
     const next = contextFor({ cookies: { session_token: 'one-more' } });
     const refused = await guard.canActivate(next.context).catch((err: unknown) => err);
-    expect(refused).toBeInstanceOf(HttpException);
     expect((refused as HttpException).getStatus()).toBe(429);
-    // The refused request never reached identity, so nothing was counted for it.
-    expect(cache.sets.get('rl:IP:203.0.113.9')).toHaveLength(PRE_AUTH_IP_BUCKET.limit);
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(PRE_AUTH_IP_BUCKET.limit);
   });
 
-  it('does not refuse a whole office behind one address: signed-in traffic is limited per user, not here', async () => {
+  it('admits EXACTLY the limit of a parallel burst of failing requests, not all of them', async () => {
     const cache = windowCache();
-    const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const guard = new RateLimitGuard(
+      reflectorFor() as never,
+      cache as never,
+      {
+        get: vi.fn(() => 30),
+      } as never,
+    );
 
-    for (let i = 0; i < PRE_AUTH_IP_BUCKET.limit + 500; i++) {
-      const { context, finish } = contextFor({ cookies: { session_token: 'valid' } });
-      await guard.canActivate(context);
-      finish(200);
-    }
+    // 500 requests start before any reply finishes: the reservations are atomic, so only 30 get a slot.
+    const replies = Array.from({ length: 500 }, () =>
+      contextFor({ cookies: { session_token: 'random' } }),
+    );
+    const outcomes = await Promise.all(
+      replies.map(({ context }) =>
+        guard.canActivate(context).then(
+          () => 'through',
+          () => 'refused',
+        ),
+      ),
+    );
 
-    expect(cache.consumeRateLimit).not.toHaveBeenCalled();
+    expect(outcomes.filter((o) => o === 'through')).toHaveLength(30);
+    expect(outcomes.filter((o) => o === 'refused')).toHaveLength(470);
   });
 
   it('gives two addresses two windows', async () => {
@@ -191,9 +228,7 @@ describe('RateLimitGuard (pre-auth, failed authentications per verified address)
     const keyFor = async (headers: Record<string, string>, ip = '10.0.0.1') => {
       const cache = windowCache();
       const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
-      const { context, finish } = contextFor({ headers, ip });
-      await guard.canActivate(context);
-      finish(401);
+      await guard.canActivate(contextFor({ headers, ip }).context);
       return cache.consumeRateLimit.mock.calls[0][0];
     };
 
@@ -221,7 +256,7 @@ describe('RateLimitGuard (pre-auth, failed authentications per verified address)
     const cache = windowCache();
     cache.sets.set(
       'rl:IP:203.0.113.9',
-      Array.from({ length: PRE_AUTH_IP_BUCKET.limit }, () => Date.now()),
+      Array.from({ length: PRE_AUTH_IP_BUCKET.limit }, (_, i) => ({ id: `s${i}`, at: Date.now() })),
     );
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
 
@@ -250,13 +285,24 @@ describe('RateLimitGuard (pre-auth, failed authentications per verified address)
   });
 
   it('fails open when the cache is down', async () => {
-    const cache = {
-      redis: { zcount: vi.fn().mockRejectedValue(new Error('valkey down')) },
-      consumeRateLimit: vi.fn(),
-    };
+    const cache = { consumeRateLimit: vi.fn().mockRejectedValue(new Error('valkey down')) };
     const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
 
     await expect(guard.canActivate(contextFor().context)).resolves.toBe(true);
+  });
+
+  it('takes no slot and refunds nothing when the cache is disabled (no id)', async () => {
+    const cache = {
+      consumeRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 1, resetAt: 0 }),
+      refundRateLimit: vi.fn(),
+    };
+    const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const { context, finish } = contextFor();
+
+    await guard.canActivate(context);
+    finish(200);
+
+    expect(cache.refundRateLimit).not.toHaveBeenCalled();
   });
 
   it('honours @SkipRateLimit()', async () => {

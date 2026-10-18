@@ -28,11 +28,14 @@ export const RATE_LIMIT_TIERS = {
 export type RateLimitTierName = keyof typeof RATE_LIMIT_TIERS;
 
 /**
- * The PRE-AUTH bucket: every request, authenticated or not, is counted against its client address before any
- * credential is looked at. It is NAT-sized on purpose: an office behind one address shares it, so it is set
- * high enough that a normal day of page loads never reaches it. Its job is to stop one network from flooding
- * the authentication path and from minting unlimited unverified credentials; it does not bound a signed-in
- * user (the tiers above do). Keyed by the verified address from `clientIp()`, never by a cookie: a cookie is
- * unverified until identity reads it, so a per-cookie bucket could be made fresh with every request.
+ * The PRE-AUTH bucket, per verified client address (`clientIp()`), never per cookie: a cookie is unverified until
+ * identity reads it, so a per-cookie bucket could be made fresh with every request. Every request reserves a slot
+ * before it runs; a signed-in request gives its slot back when it finishes, so only FAILED authentications (401s)
+ * and requests whose connection closed before the reply finished stay counted. NAT-sized on purpose: an office behind
+ * one address shares it, so the ceiling is high enough that a normal day of signed-in traffic never reaches it. It
+ * stops one network from flooding the authentication path; it does not bound a signed-in user (the tiers do).
+ *
+ * RUNBOOK: when this window is full, every caller at that address gets 429 for at most `windowMs`. A mass session
+ * revocation can fill it (every client reauthenticates and some fail), and it then clears by itself.
  */
 export const PRE_AUTH_IP_BUCKET: RateLimitTier = { name: 'IP', windowMs: 60_000, limit: 1000 };

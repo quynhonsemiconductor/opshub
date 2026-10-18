@@ -103,9 +103,9 @@ export async function createTestApp(): Promise<NestFastifyApplication> {
  * The counters live in Valkey, which OUTLIVES the test process, so they accumulate across
  * runs. Two failure modes, both measured rather than predicted:
  *
- *   • The per-address pre-auth bucket allows 1000 requests per minute per IP (`PRE_AUTH_IP_BUCKET`), and
- *     every spec file signs in as two or three fixtures from the same runner. Run the suite serially (see
- *     vitest.e2e.config.ts) and a 429 here reads as `test-login failed`, which looks like an unseeded database.
+ *   • The per-address pre-auth bucket counts FAILED authentications (`PRE_AUTH_IP_BUCKET`, 1000 per minute per IP).
+ *     Signed-in traffic gives its slot back, so the bucket fills only from 401s and aborted requests. The suite
+ *     runs serially (see vitest.e2e.config.ts), and the e2e config raises the ceiling for the run.
  *   • `DEFAULT` allows 200 requests per minute per userId. One full suite pass is well over
  *     100 requests as `hr` alone, so a SECOND pass started inside the same minute 429s partway
  *     in, on whichever spec happens to be running. Clearing only the login tier left this half

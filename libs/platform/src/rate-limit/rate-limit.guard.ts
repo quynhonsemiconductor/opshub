@@ -24,9 +24,10 @@ import { failOpenLog } from '@quynhonsemiconductor/observability';
 /**
  * Two buckets, and neither is keyed by a cookie.
  *
- * 1. `RateLimitGuard` — GLOBAL, runs first, before any credential is read. Counts every request against its
- *    verified client address (`clientIp()`: the signed edge address, else `cf-connecting-ip`, else the socket)
- *    with the NAT-sized {@link PRE_AUTH_IP_BUCKET}.
+ * 1. `RateLimitGuard` — GLOBAL, runs first, before any credential is read. Reserves a slot against the verified
+ *    client address (`clientIp()`: the signed edge address, else `cf-connecting-ip`, else the socket) for every request,
+ *    and keeps it only for a failed authentication (401) or a request that never finishes. A signed-in request gives its
+ *    slot back, so only failures are counted against the NAT-sized {@link PRE_AUTH_IP_BUCKET}.
  *
  * 2. `UserRateLimitGuard` — GLOBAL, registered in a module imported AFTER the identity module, so it runs after
  *    identity's `SessionGuard` has verified the session and recorded the principal. It counts an authenticated
@@ -99,6 +100,13 @@ function refuse(res: FastifyReply, resetAt: number): never {
   }
 }
 
+/** The RFC 6585 + draft-ietf-httpapi-ratelimit-headers values for the bucket that answered. */
+function setHeaders(res: FastifyReply, limit: number, remaining: number, resetAt: number): void {
+  void res.header('RateLimit-Limit', limit);
+  void res.header('RateLimit-Remaining', Math.max(0, remaining));
+  void res.header('RateLimit-Reset', resetAt);
+}
+
 /** Shared by both guards: the tier name a route declared, or DEFAULT. */
 function tierOf(reflector: Reflector, context: ExecutionContext): RateLimitTierName {
   return (
@@ -118,7 +126,15 @@ function skipped(reflector: Reflector, context: ExecutionContext): boolean {
   );
 }
 
-/** Bucket 1: the pre-auth, per-address ceiling every request passes through first. */
+/**
+ * Bucket 1: the pre-auth, per-address ceiling every request passes through first.
+ *
+ * It RESERVES a slot before the request runs, and gives the slot back when the reply finishes with a status other
+ * than 401. So an unauthenticated request keeps its slot (a failed authentication), a signed-in request leaves no
+ * trace, and a request refused by the window never runs. Reserving before the request is what makes a burst exact:
+ * the reservation is one atomic step on the server, so N parallel requests admit exactly the limit, not all of them.
+ * A request whose socket closes before the reply finishes never refunds, so it keeps its slot too.
+ */
 @Injectable()
 export class RateLimitGuard implements CanActivate {
   private readonly logger = new Logger(RateLimitGuard.name);
@@ -130,14 +146,6 @@ export class RateLimitGuard implements CanActivate {
     private readonly config?: AppConfigService,
   ) {}
 
-  /**
-   * Only FAILED authentications count against the address. The window is read before the request runs, and the
-   * count is taken after the response, and only when it is a 401. A signed-in caller is limited per user by bucket 2,
-   * so an office behind one address is not spent by its normal traffic.
-   *
-   * The count after the response is what makes this a count of failures: the guard cannot know yet whether identity
-   * will refuse the request. It is fire-and-forget, after the reply, so it never delays the caller.
-   */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     if (skipped(this.reflector, context)) return true;
 
@@ -148,59 +156,39 @@ export class RateLimitGuard implements CanActivate {
     const ip = clientIp(req);
     const key = `IP:${ip}`;
     const limit = this.config?.get('RATE_LIMIT_IP_LIMIT') ?? PRE_AUTH_IP_BUCKET.limit;
+    const windowSeconds = Math.ceil(PRE_AUTH_IP_BUCKET.windowMs / 1000);
 
-    const window = await readWindow(this.cache, this.logger, key, limit, PRE_AUTH_IP_BUCKET);
-    if (window?.full) refuse(res, window.resetAt);
+    let slot: Awaited<ReturnType<CacheService['consumeRateLimit']>>;
+    try {
+      slot = await this.cache.consumeRateLimit(key, limit, windowSeconds);
+    } catch (err) {
+      // Fail open, as everywhere in the limiter: a cache that cannot answer does not block traffic.
+      this.logger.error(
+        failOpenLog('rate_limit', { err, key }),
+        'RateLimitGuard: backend unavailable — allowing request',
+      );
+      return true;
+    }
+
+    setHeaders(res, limit, slot.remaining, slot.resetAt);
+    if (!slot.allowed) refuse(res, slot.resetAt);
+
+    // No id: the cache is disabled, so no slot was taken and there is nothing to give back.
+    const id = slot.id;
+    if (id === undefined) return true;
 
     res.raw.once('finish', () => {
-      if (res.statusCode !== 401) return;
+      if (res.statusCode === 401) return; // a failed authentication keeps its slot
       this.cache
-        .consumeRateLimit(key, limit, Math.ceil(PRE_AUTH_IP_BUCKET.windowMs / 1000))
+        .refundRateLimit(key, id)
         .catch((err: unknown) =>
           this.logger.error(
             failOpenLog('rate_limit', { err, key }),
-            'RateLimitGuard: failed-auth count not recorded',
+            'RateLimitGuard: slot not refunded',
           ),
         );
     });
     return true;
-  }
-}
-
-/**
- * The window's state without spending a slot: `full` when the counted requests have reached `limit`, with `resetAt`
- * the Unix-seconds time the oldest one leaves the window. `undefined` when the cache is absent or down, so the caller
- * fails open. Reads the sorted set the shared limiter writes (`rl:<key>`, score = request time in ms).
- */
-async function readWindow(
-  cache: CacheService,
-  logger: Logger,
-  key: string,
-  limit: number,
-  tier: RateLimitTier,
-): Promise<{ full: boolean; resetAt: number } | undefined> {
-  const redis = cache.redis;
-  if (!redis) return undefined;
-  try {
-    const from = Date.now() - tier.windowMs;
-    const count = await redis.zcount(`rl:${key}`, from, '+inf');
-    if (count < limit) return { full: false, resetAt: 0 };
-    const [, oldest] = await redis.zrangebyscore(
-      `rl:${key}`,
-      from,
-      '+inf',
-      'WITHSCORES',
-      'LIMIT',
-      0,
-      1,
-    );
-    return { full: true, resetAt: Math.ceil((Number(oldest) + tier.windowMs) / 1000) };
-  } catch (err) {
-    logger.error(
-      failOpenLog('rate_limit', { err, key }),
-      'RateLimitGuard: backend unavailable — allowing request',
-    );
-    return undefined;
   }
 }
 
