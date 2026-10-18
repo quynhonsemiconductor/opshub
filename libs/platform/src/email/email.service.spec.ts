@@ -129,4 +129,68 @@ describe('EmailService.sendTemplate — a send has a deadline', () => {
       vi.useRealTimers();
     }
   });
+
+  it('hands the provider a signal that ABORTS at the deadline, so a late 202 cannot arrive after the relay has retried the row', async () => {
+    vi.useFakeTimers();
+    try {
+      let seen: AbortSignal | undefined;
+      const provider = {
+        send: vi.fn((_payload: unknown, options?: { signal?: AbortSignal }) => {
+          seen = options?.signal;
+          return new Promise<never>(() => undefined);
+        }),
+      };
+      const service = new EmailService(provider, { get: vi.fn() } as never);
+
+      const sending = service
+        .sendTemplate('a@example.com', 'notification', {
+          title: 't',
+          body: 'b',
+          appUrl: 'https://x',
+        })
+        .catch((e: unknown) => e);
+      expect(seen?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(EMAIL_SEND_TIMEOUT_MS + 1);
+
+      expect(seen?.aborted).toBe(true);
+      await sending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not log a deferred row as an error, and never logs the recipient of a failure', async () => {
+    const { Logger } = await import('@nestjs/common');
+    const { DeferError } = await import('../outbox/abstract-outbox-relay');
+    const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    try {
+      const deferring = new EmailService(
+        { send: vi.fn(() => Promise.reject(new DeferError('sender blocked', 900_000))) },
+        { get: vi.fn() } as never,
+      );
+      await expect(
+        deferring.sendTemplate('person@example.com', 'notification', {
+          title: 't',
+          body: 'b',
+          appUrl: 'https://x',
+        }),
+      ).rejects.toBeInstanceOf(DeferError);
+      expect(error).not.toHaveBeenCalled();
+
+      const failing = new EmailService({ send: vi.fn(() => Promise.reject(new Error('boom'))) }, {
+        get: vi.fn(),
+      } as never);
+      await failing
+        .sendTemplate('person@example.com', 'notification', {
+          title: 't',
+          body: 'b',
+          appUrl: 'https://x',
+        })
+        .catch(() => undefined);
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(error.mock.calls)).not.toContain('person@example.com');
+    } finally {
+      error.mockRestore();
+    }
+  });
 });
