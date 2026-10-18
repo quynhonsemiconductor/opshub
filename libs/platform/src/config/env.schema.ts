@@ -16,6 +16,23 @@ const emptyToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema);
 
 /**
+ * A documented placeholder such as `<OPSHUB_PROD_SERVICE_APP_ID>`: a value a release template leaves for the owner to replace. Refused for the
+ * Graph mail settings, so an unreplaced template fails closed at start-up instead of reaching Entra.
+ */
+export const PLACEHOLDER_VALUE = /^<[^<>\s]+>$/;
+
+const refusePlaceholder = (ctx: z.RefinementCtx, name: string, value: string | undefined): void => {
+  if (value === undefined || !PLACEHOLDER_VALUE.test(value)) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: [name],
+    message:
+      `${name} is still the placeholder "${value}" from the release template: replace it with the real value ` +
+      'before EMAIL_PROVIDER=graph can start.',
+  });
+};
+
+/**
  * Validated environment schema.
  * The process refuses to start if any required variable is missing or malformed.
  */
@@ -275,6 +292,8 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
           'MAIL_SMTP_HOST and MAIL_SMTP_PORT are required when EMAIL_PROVIDER is "smtp" (Mailpit: localhost and 1110 on the host, mailpit and 1025 in a container).',
       });
     }
+    if (env.EMAIL_PROVIDER === 'graph')
+      refusePlaceholder(ctx, 'MAIL_GRAPH_SENDER', env.MAIL_GRAPH_SENDER);
     if (env.EMAIL_PROVIDER !== 'dev' && env.EMAIL_PROVIDER !== 'graph' && !env.MAIL_FROM_EMAIL) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -516,6 +535,8 @@ const refineWorkerMail = (
   if (!env.ENTRA_TENANT_ID) {
     need('ENTRA_TENANT_ID', 'EMAIL_PROVIDER=graph signs in to this directory.');
   }
+  refusePlaceholder(ctx, 'ENTRA_TENANT_ID', env.ENTRA_TENANT_ID);
+  refusePlaceholder(ctx, 'GRAPH_CLIENT_ID', env.GRAPH_CLIENT_ID);
   if (!env.GRAPH_CLIENT_ID) {
     need(
       'GRAPH_CLIENT_ID',
