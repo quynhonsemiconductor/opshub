@@ -15,16 +15,6 @@ import {
   LeaveSummaryResponseDto,
   OvertimeSummaryResponseDto,
 } from './dto/reports.dto';
-import { MS_PER_DAY } from '@shared-kernel';
-
-/** 30 days in milliseconds */
-const THIRTY_DAYS_MS = 30 * MS_PER_DAY;
-
-function resolveDateRange(from?: string, to?: string): { from: Date; to: Date } {
-  const toDate = to ? new Date(to) : new Date();
-  const fromDate = from ? new Date(from) : new Date(toDate.getTime() - THIRTY_DAYS_MS);
-  return { from: fromDate, to: toDate };
-}
 
 @ApiTags('reports')
 @Controller('reports')
@@ -62,7 +52,7 @@ export class ReportsController {
   @ApiResponse({ status: 200, type: RequestSummaryResponseDto })
   @ApiCommonErrors(401, 403)
   async getRequestSummary(@Query() query: DateRangeQueryDto): Promise<RequestSummaryResponseDto> {
-    const { from, to } = resolveDateRange(query.from, query.to);
+    const { from, to } = await this.reportsService.resolveRange(query.from, query.to);
     const rows = await this.reportsService.getRequestSummary({ from, to, type: query.type });
     return { from: from.toISOString(), to: to.toISOString(), rows };
   }
@@ -79,7 +69,7 @@ export class ReportsController {
   @ApiResponse({ status: 200, type: CycleTimeResponseDto })
   @ApiCommonErrors(401, 403)
   async getRequestCycleTime(@Query() query: DateRangeQueryDto): Promise<CycleTimeResponseDto> {
-    const { from, to } = resolveDateRange(query.from, query.to);
+    const { from, to } = await this.reportsService.resolveRange(query.from, query.to);
     const rows = await this.reportsService.getRequestCycleTime({ from, to, type: query.type });
     return { from: from.toISOString(), to: to.toISOString(), rows };
   }
@@ -98,7 +88,7 @@ export class ReportsController {
   async getRequestSlaCompliance(
     @Query() query: DateRangeQueryDto,
   ): Promise<SlaComplianceResponseDto> {
-    const { from, to } = resolveDateRange(query.from, query.to);
+    const { from, to } = await this.reportsService.resolveRange(query.from, query.to);
     const rows = await this.reportsService.getRequestSlaCompliance({ from, to, type: query.type });
     return { from: from.toISOString(), to: to.toISOString(), rows };
   }
@@ -128,7 +118,7 @@ export class ReportsController {
   @ApiResponse({ status: 200, type: ThroughputResponseDto })
   @ApiCommonErrors(401, 403)
   async getRequestThroughput(@Query() query: DateRangeQueryDto): Promise<ThroughputResponseDto> {
-    const { from, to } = resolveDateRange(query.from, query.to);
+    const { from, to } = await this.reportsService.resolveRange(query.from, query.to);
     const points = await this.reportsService.getRequestThroughput({ from, to, type: query.type });
     return { from: from.toISOString(), to: to.toISOString(), points };
   }
@@ -148,7 +138,7 @@ export class ReportsController {
   async getComplianceFindingsSummary(
     @Query() query: DateRangeOnlyQueryDto,
   ): Promise<FindingsSummaryResponseDto> {
-    const { from, to } = resolveDateRange(query.from, query.to);
+    const { from, to } = await this.reportsService.resolveRange(query.from, query.to);
     const rows = await this.reportsService.getComplianceFindingsSummary({ from, to });
     return { from: from.toISOString(), to: to.toISOString(), rows };
   }
@@ -180,7 +170,7 @@ export class ReportsController {
   @ApiResponse({ status: 200, type: LeaveSummaryResponseDto })
   @ApiCommonErrors(401, 403)
   async getLeaveSummary(@Query() query: DateRangeOnlyQueryDto): Promise<LeaveSummaryResponseDto> {
-    const { from, to } = resolveDateRange(query.from, query.to);
+    const { from, to } = await this.reportsService.resolveRange(query.from, query.to);
     const rows = await this.reportsService.getLeaveSummary({ from, to });
     return { from: from.toISOString(), to: to.toISOString(), rows };
   }
@@ -198,7 +188,7 @@ export class ReportsController {
   async getOvertimeSummary(
     @Query() query: DateRangeOnlyQueryDto,
   ): Promise<OvertimeSummaryResponseDto> {
-    const { from, to } = resolveDateRange(query.from, query.to);
+    const { from, to } = await this.reportsService.resolveRange(query.from, query.to);
     const rows = await this.reportsService.getOvertimeSummary({ from, to });
     return { from: from.toISOString(), to: to.toISOString(), rows };
   }
