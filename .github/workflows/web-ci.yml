@@ -213,7 +213,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:17.11-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -226,7 +226,7 @@ jobs:
           --health-retries 10
 
       redis:
-        image: valkey/valkey:8.1.10-alpine
+        image: valkey/valkey:7.2.14-alpine
         ports: ['6379:6379']
         options: >-
           --health-cmd "valkey-cli ping"
@@ -252,7 +252,7 @@ jobs:
       # `waitForResponse` timeout rather than anything naming CORS. Reproduced by running both majors
       # side by side locally before changing this line.
       localstack:
-        image: localstack/localstack:4
+        image: localstack/localstack:4.14
         env:
           SERVICES: s3
           AWS_DEFAULT_REGION: ap-southeast-1
@@ -297,6 +297,7 @@ jobs:
       # The env schema REFUSES this value above 200 when NODE_ENV=production, so it cannot become a dial
       # in a deployed environment — see `env.schema.ts` and its spec.
       RATE_LIMIT_DEFAULT_LIMIT: '5000'
+      RATE_LIMIT_IP_LIMIT: '100000'
       LOG_LEVEL: warn
       OTEL_ENABLED: 'false'
       # Object storage points at LocalStack. `STORAGE_ENDPOINT` and not `AWS_ENDPOINT_URL`:
@@ -490,7 +491,7 @@ jobs:
       # login is refused, so ask the database directly and fail by name rather than at a 401 later.
       - name: The demo users exist
         run: |
-          n=$(docker exec opshub-postgres psql -U opshub -d opshub -Atc "select count(*) from identity.\"user\" where email = 'admin@opshub.local'")
+          n=$(docker compose -f docker-compose.dev.yml exec -T postgres psql -U opshub -d opshub -Atc "select count(*) from identity.\"user\" where email = 'admin@opshub.local'")
           echo "admin@opshub.local rows: $n"
           test "$n" = 1
 
@@ -530,11 +531,11 @@ jobs:
           fi
 
       # THROUGH THE VITE PROXY (:5173), not the API directly: this is the call a browser makes, and it is the one that
-      # breaks when the example's PORT and the proxy target disagree.
+      # breaks when the proxy cannot reach the API on the PORT in .env.example.
       - name: Sign in with the test login and make an authenticated /v1 call, through the SPA's proxy
         run: |
           for _ in $(seq 1 30); do curl -sf http://localhost:5173/v1/healthz >/dev/null && break; sleep 2; done
-          curl -sf http://localhost:5173/v1/healthz || { echo "::error::/v1 through the Vite proxy failed: .env.example PORT must equal the proxy target in apps/web/vite.config.ts"; exit 1; }
+          curl -sf http://localhost:5173/v1/healthz || { echo "::error::/v1 through the Vite proxy failed: the API must listen on PORT (.env.example), which the proxy forwards to (apps/web/vite.config.ts)"; exit 1; }
           curl -sf -c "$LOGS/jar.txt" -H 'content-type: application/json' \
             -d '{"email":"admin@opshub.local"}' http://localhost:5173/api/auth/test-login
           me=$(curl -sf -b "$LOGS/jar.txt" http://localhost:5173/v1/auth/me)

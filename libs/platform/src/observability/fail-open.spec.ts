@@ -31,10 +31,10 @@ describe('failOpenLog', () => {
     // The guards pass `{ err }` and, for the rate limiter, the key. Losing that would leave
     // an alarm that fires with nothing to debug it from.
     const err = new Error('valkey unreachable');
-    expect(failOpenLog('rate_limit', { err, key: 'AUTH_LOGIN:127.0.0.1' })).toEqual({
+    expect(failOpenLog('rate_limit', { err, key: 'IP:127.0.0.1' })).toEqual({
       securityFailOpen: 'rate_limit',
       err,
-      key: 'AUTH_LOGIN:127.0.0.1',
+      key: 'IP:127.0.0.1',
     });
   });
 

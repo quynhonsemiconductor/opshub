@@ -39,4 +39,7 @@ regexes = [
   # Smoke-test webhook secret in scripts/smoke-api.py — a fixed placeholder posted to
   # https://example.invalid, named for the length rule it exists to satisfy.
   '''smoke-secret-at-least-16-chars''',
+  # Image version tags in the dev compose files (e.g. valkey/valkey:7.2.14-alpine). The tag has enough entropy to trip
+  # generic-api-key, because "valkey" contains "key". Anchored to a bare version tag, so no secret can match.
+  '''^\d+(\.\d+){1,2}-alpine$''',
 ]

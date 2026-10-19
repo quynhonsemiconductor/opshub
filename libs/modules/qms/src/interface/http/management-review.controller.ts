@@ -30,7 +30,7 @@ import type {
   ReviewActionRow,
 } from '../../domain/management-review.types';
 import {
-  CancelReviewDto,
+  QmsCancelReviewDto,
   CarriedForwardActionResponseDto,
   CloseReviewDto,
   HoldReviewDto,
@@ -396,7 +396,7 @@ export class ManagementReviewController {
   @ApiCommonErrors(400, 401, 403, 404, 409, 412)
   async cancel(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: CancelReviewDto,
+    @Body() dto: QmsCancelReviewDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<ManagementReviewResponseDto> {
     return toDto(await this.service.cancel(id, dto.reason, user));
