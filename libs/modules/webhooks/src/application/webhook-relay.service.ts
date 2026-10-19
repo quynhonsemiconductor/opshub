@@ -124,6 +124,10 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     );
   }
 
+  override get wakeKind(): string {
+    return 'webhook';
+  }
+
   @Cron('*/10 * * * * *', { name: 'webhook-relay' })
   @Span('webhook.relay')
   override async relay(): Promise<void> {

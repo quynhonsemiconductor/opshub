@@ -4,17 +4,24 @@
  */
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { OUTBOX_WAKE_APPLICATION_NAME, OutboxWakeListener } from './outbox-wake';
+import {
+  OUTBOX_WAKE_APPLICATION_NAME,
+  OutboxWakeListener,
+  relaysWokenBy,
+  type OutboxWakeListenerOptions,
+} from './outbox-wake';
 
 class FakeClient extends EventEmitter {
   static created: FakeClient[] = [];
   static queries: string[] = [];
   /** How many of the next connect() calls fail. */
   static failConnects = 0;
+  /** How the watchdog's SELECT 1 behaves: it answers, hangs, or fails. */
+  static watchdog: 'ok' | 'hang' | 'fail' = 'ok';
 
-  readonly config: { application_name?: string };
+  readonly config: { application_name?: string; keepAlive?: boolean };
 
-  constructor(config: { application_name?: string }) {
+  constructor(config: { application_name?: string; keepAlive?: boolean }) {
     super();
     this.config = config;
     FakeClient.created.push(this);
@@ -30,6 +37,10 @@ class FakeClient extends EventEmitter {
 
   query(text: string): Promise<unknown> {
     FakeClient.queries.push(text);
+    if (text === 'SELECT 1') {
+      if (FakeClient.watchdog === 'hang') return new Promise(() => undefined);
+      if (FakeClient.watchdog === 'fail') return Promise.reject(new Error('socket closed'));
+    }
     return Promise.resolve({});
   }
 
@@ -41,7 +52,9 @@ class FakeClient extends EventEmitter {
 
 const logger = () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn() });
 
-function listener(opts: { minBackoffMs?: number; maxBackoffMs?: number } = {}) {
+function listener(
+  opts: Omit<OutboxWakeListenerOptions, 'config' | 'logger' | 'createClient'> = {},
+) {
   const log = logger();
   const l = new OutboxWakeListener({
     config: { connectionString: 'postgres://unused' },
@@ -58,6 +71,7 @@ beforeEach(() => {
   FakeClient.created = [];
   FakeClient.queries = [];
   FakeClient.failConnects = 0;
+  FakeClient.watchdog = 'ok';
   vi.useFakeTimers();
 });
 
@@ -71,6 +85,7 @@ describe('OutboxWakeListener', () => {
     await l.start();
     expect(FakeClient.queries).toEqual(['LISTEN outbox']);
     expect(current().config.application_name).toBe(OUTBOX_WAKE_APPLICATION_NAME);
+    expect(current().config.keepAlive).toBe(true);
     expect(l.listening).toBe(true);
     await l.stop();
   });
@@ -172,6 +187,54 @@ describe('OutboxWakeListener', () => {
     await l.stop();
   });
 
+  it('probes the LISTEN connection with SELECT 1 on an interval, and keeps it while it answers', async () => {
+    const { listener: l } = listener({ watchdogIntervalMs: 30_000, watchdogTimeoutMs: 5_000 });
+    await l.start();
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    expect(FakeClient.queries.filter((q) => q === 'SELECT 1')).toHaveLength(3);
+    expect(FakeClient.created).toHaveLength(1);
+    expect(l.listening).toBe(true);
+    await l.stop();
+  });
+
+  it('a probe that does not answer in time drops the connection and reconnects', async () => {
+    const { listener: l } = listener({
+      minBackoffMs: 1000,
+      watchdogIntervalMs: 30_000,
+      watchdogTimeoutMs: 5_000,
+    });
+    await l.start();
+    FakeClient.watchdog = 'hang';
+
+    await vi.advanceTimersByTimeAsync(30_000); // the probe starts and never answers
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(l.listening).toBe(true);
+    await vi.advanceTimersByTimeAsync(1); // 5 s on: judged dead
+    expect(l.listening).toBe(false);
+
+    FakeClient.watchdog = 'ok';
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeClient.created).toHaveLength(2);
+    expect(l.listening).toBe(true);
+    await l.stop();
+  });
+
+  it('a probe that fails drops the connection at once and reconnects', async () => {
+    const { listener: l } = listener({ minBackoffMs: 1000, watchdogIntervalMs: 30_000 });
+    await l.start();
+    FakeClient.watchdog = 'fail';
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(l.listening).toBe(false);
+
+    FakeClient.watchdog = 'ok';
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeClient.created).toHaveLength(2);
+    expect(l.listening).toBe(true);
+    await l.stop();
+  });
+
   it('stop() ends the connection and cancels a pending reconnect', async () => {
     const { listener: l } = listener({ minBackoffMs: 1000 });
     await l.start();
@@ -182,5 +245,18 @@ describe('OutboxWakeListener', () => {
 
     expect(FakeClient.created).toHaveLength(1);
     expect(l.listening).toBe(false);
+  });
+});
+
+describe('relaysWokenBy', () => {
+  it('wakes only the relays whose wakeKind is the notified kind', () => {
+    const email = { wakeKind: 'email' as string | undefined };
+    const graphScan = { wakeKind: 'graph-scan' as string | undefined };
+    const polledOnly = { wakeKind: undefined as string | undefined };
+    const relays = [email, graphScan, polledOnly];
+
+    expect(relaysWokenBy('email', relays)).toEqual([email]);
+    expect(relaysWokenBy('graph-scan', relays)).toEqual([graphScan]);
+    expect(relaysWokenBy('unknown', relays)).toEqual([]);
   });
 });

@@ -73,6 +73,10 @@ export class NotificationRelayService
     this.logger.log('Notification relay started — polling notification_outbox every 5s');
   }
 
+  override get wakeKind(): string {
+    return 'notification';
+  }
+
   @Cron('*/5 * * * * *', { name: 'notification-relay' })
   @Span('notification.relay')
   override async relay(): Promise<void> {

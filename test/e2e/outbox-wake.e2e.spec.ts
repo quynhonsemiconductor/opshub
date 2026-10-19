@@ -10,7 +10,7 @@ import { eq, sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { GraphAccountRelayService } from '../../libs/modules/graph/src/application/graph-task-relay.service';
-import { GRAPH_TASK } from '../../libs/modules/graph/src/graph-task';
+import { GRAPH_TASK, GRAPH_WAKE } from '../../libs/modules/graph/src/graph-task';
 import * as schema from '../../db/schema';
 import type { DrizzleDB, DrizzleTx } from '@platform';
 import { notifyOutbox, OUTBOX_WAKE_APPLICATION_NAME, OutboxWakeListener } from '@platform';
@@ -112,7 +112,7 @@ describe('outbox wake-up: NOTIFY from the writer, LISTEN in the worker', () => {
           orderingKey: employee,
         })
         .returning();
-      await notifyOutbox(tx, 'graph');
+      await notifyOutbox(tx, GRAPH_WAKE.ACCOUNT);
       return inserted;
     });
 

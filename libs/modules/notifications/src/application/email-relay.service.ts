@@ -60,6 +60,10 @@ export class EmailRelayService
     this.logger.log('Email relay started — polling email_outbox every 5s');
   }
 
+  override get wakeKind(): string {
+    return 'email';
+  }
+
   @Cron('*/5 * * * * *', { name: 'email-relay' })
   @Span('email.relay')
   override async relay(): Promise<void> {

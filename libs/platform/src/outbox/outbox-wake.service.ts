@@ -13,7 +13,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { databaseClientConfig } from '../database/drizzle.provider';
 import { getProcessRole } from '../config/process-role';
 import { AbstractOutboxRelay } from './abstract-outbox-relay';
-import { OutboxWakeListener } from './outbox-wake';
+import { OutboxWakeListener, relaysWokenBy } from './outbox-wake';
 
 @Injectable()
 export class OutboxWakeService implements OnModuleInit, OnModuleDestroy {
@@ -45,8 +45,8 @@ export class OutboxWakeService implements OnModuleInit, OnModuleDestroy {
         error: (message) => this.logger.error(message),
       },
     });
-    this.listener.onWake(() => {
-      for (const relay of relays) {
+    this.listener.onWake((kind) => {
+      for (const relay of relaysWokenBy(kind, relays)) {
         relay
           .relay()
           .catch((err: unknown) =>

@@ -15,18 +15,29 @@ import { sql } from 'drizzle-orm';
 import { Client, type ClientConfig } from 'pg';
 import type { DbExecutor } from '../database/drizzle.provider';
 
-/** The one channel every outbox shares. The payload says which outbox (the relay's queue name). */
+/** The one channel every outbox shares. The payload says which relay to wake (its {@link wakeKind}). */
 export const OUTBOX_WAKE_CHANNEL = 'outbox';
 
 /** Shown in pg_stat_activity, so an operator can tell the listener's connection from the pool's. */
 export const OUTBOX_WAKE_APPLICATION_NAME = 'opshub-outbox-wake';
 
 /**
- * Tell the listeners that `kind` has a row to relay. Call it in the SAME transaction as the insert: `tx` is the caller's
- * transaction, and the notify is held until that transaction commits.
+ * Tell the listeners that the outbox `kind` has a row to relay. Call it in the SAME transaction as the insert: `tx` is the
+ * caller's transaction, and the notify is held until that transaction commits.
  */
 export async function notifyOutbox(tx: DbExecutor, kind: string): Promise<void> {
   await tx.execute(sql`select pg_notify(${OUTBOX_WAKE_CHANNEL}, ${kind})`);
+}
+
+/**
+ * The relays a notify with this `kind` wakes: those whose wakeKind matches. A relay with no wakeKind is never woken early;
+ * it runs on its cron alone.
+ */
+export function relaysWokenBy<R extends { readonly wakeKind: string | undefined }>(
+  kind: string,
+  relays: readonly R[],
+): R[] {
+  return relays.filter((relay) => relay.wakeKind === kind);
 }
 
 export interface WakeLogger {
@@ -36,13 +47,17 @@ export interface WakeLogger {
 }
 
 export interface OutboxWakeListenerOptions {
-  /** The connection settings, the same ones the pool uses. `application_name` is set by the listener. */
+  /** The connection settings, the same ones the pool uses. `application_name` and keepalive are set by the listener. */
   config: ClientConfig;
   logger: WakeLogger;
   /** Built by default from `pg`. A test passes a fake. */
   createClient?: (config: ClientConfig) => Client;
   minBackoffMs?: number;
   maxBackoffMs?: number;
+  /** How often the LISTEN connection is probed with `SELECT 1`. */
+  watchdogIntervalMs?: number;
+  /** How long a probe may take before the connection is judged dead. */
+  watchdogTimeoutMs?: number;
 }
 
 /**
@@ -50,6 +65,10 @@ export interface OutboxWakeListenerOptions {
  *
  * A dropped connection is rebuilt with exponential backoff (minBackoffMs, doubling, capped at maxBackoffMs). The backoff
  * resets once a connection has LISTENed again. Until then nothing is woken, and the relays' cron polling carries the load.
+ *
+ * An idle LISTEN socket can go half-open (a failover, a NAT or security-group idle drop) with no 'error' and no 'end'. TCP
+ * keepalive shortens that, and a watchdog `SELECT 1` on the same connection settles it: a probe that fails or does not
+ * answer in time drops the connection and reconnects, instead of leaving the listener deaf until a restart.
  */
 export class OutboxWakeListener {
   private client: Client | null = null;
@@ -57,14 +76,19 @@ export class OutboxWakeListener {
   private ready = false;
   private stopped = true;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
   private backoffMs: number;
   private readonly minBackoffMs: number;
   private readonly maxBackoffMs: number;
+  private readonly watchdogIntervalMs: number;
+  private readonly watchdogTimeoutMs: number;
   private readonly handlers = new Set<(kind: string) => void>();
 
   constructor(private readonly opts: OutboxWakeListenerOptions) {
     this.minBackoffMs = opts.minBackoffMs ?? 1_000;
     this.maxBackoffMs = opts.maxBackoffMs ?? 30_000;
+    this.watchdogIntervalMs = opts.watchdogIntervalMs ?? 30_000;
+    this.watchdogTimeoutMs = opts.watchdogTimeoutMs ?? 5_000;
     this.backoffMs = this.minBackoffMs;
   }
 
@@ -86,6 +110,7 @@ export class OutboxWakeListener {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.stopWatchdog();
     const client = this.client;
     this.client = null;
     this.ready = false;
@@ -103,6 +128,9 @@ export class OutboxWakeListener {
     const client = create({
       ...this.opts.config,
       application_name: OUTBOX_WAKE_APPLICATION_NAME,
+      // Turn the OS keepalive on, so an idle socket is probed by the kernel too. The watchdog below is the real check.
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000,
     });
     this.client = client;
     client.on('notification', (message) => {
@@ -122,9 +150,41 @@ export class OutboxWakeListener {
       await client.query(`LISTEN ${OUTBOX_WAKE_CHANNEL}`);
       this.ready = true;
       this.backoffMs = this.minBackoffMs;
+      this.startWatchdog(client);
       this.opts.logger.log('outbox wake listener connected');
     } catch (err) {
       this.lost(client, err);
+    }
+  }
+
+  private startWatchdog(client: Client): void {
+    this.stopWatchdog();
+    this.watchdog = setInterval(() => void this.probe(client), this.watchdogIntervalMs);
+  }
+
+  private stopWatchdog(): void {
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
+  }
+
+  /** One `SELECT 1` on the LISTEN connection. A failure, or no answer within the timeout, means the socket is dead. */
+  private async probe(client: Client): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        client.query('SELECT 1'),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(new Error(`no answer to the watchdog within ${this.watchdogTimeoutMs} ms`)),
+            this.watchdogTimeoutMs,
+          );
+        }),
+      ]);
+    } catch (err) {
+      this.lost(client, err);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -133,6 +193,7 @@ export class OutboxWakeListener {
     if (client !== this.client || this.stopped) return;
     this.client = null;
     this.ready = false;
+    this.stopWatchdog();
     client.end().catch(() => undefined);
     const delay = this.backoffMs;
     this.backoffMs = Math.min(this.backoffMs * 2, this.maxBackoffMs);

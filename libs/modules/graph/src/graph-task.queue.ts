@@ -15,6 +15,7 @@ import {
   dedupeKeyFor,
   orderingKeyFor,
   type GraphTask,
+  graphWakeKind,
 } from './graph-task';
 
 /**
@@ -44,7 +45,7 @@ export class GraphTaskQueue {
       .onConflictDoNothing()
       .returning({ id: graphTaskOutbox.id });
     if (rows.length === 0) return false;
-    await notifyOutbox(tx ?? this.db, 'graph');
+    await notifyOutbox(tx ?? this.db, graphWakeKind(task.kind));
     return true;
   }
 
