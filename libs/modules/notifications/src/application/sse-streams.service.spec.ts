@@ -3,10 +3,17 @@ import type { ServerResponse } from 'node:http';
 import { describe, expect, it, vi } from 'vitest';
 import { SseStreams } from './sse-streams.service';
 
-function stream(
-  writable = true,
-): ServerResponse & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> } {
-  return Object.assign(new EventEmitter(), { writable, write: vi.fn(), end: vi.fn() }) as never;
+// The mocks come back as locals, so the assertions never read a method off the response
+// object (unbound-method): the response is what the service holds, the mocks are what we check.
+function stream(writable = true) {
+  const write = vi.fn();
+  const end = vi.fn();
+  const res = Object.assign(new EventEmitter(), {
+    writable,
+    write,
+    end,
+  }) as unknown as ServerResponse;
+  return { res, write, end };
 }
 
 describe('SseStreams', () => {
@@ -17,8 +24,8 @@ describe('SseStreams', () => {
     streams.onModuleInit();
     const a = stream();
     const b = stream();
-    streams.register(a);
-    streams.register(b);
+    streams.register(a.res);
+    streams.register(b.res);
 
     await hooks['preClose']();
 
@@ -32,9 +39,9 @@ describe('SseStreams', () => {
     const streams = new SseStreams({} as never);
     const gone = stream();
     const dead = stream(false);
-    streams.register(gone);
-    streams.register(dead);
-    gone.emit('close');
+    streams.register(gone.res);
+    streams.register(dead.res);
+    gone.res.emit('close');
 
     streams.endAll();
 

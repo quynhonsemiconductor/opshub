@@ -54,10 +54,8 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
   // Assert at the DECLARATION, not at each call site: these are partial doubles, so
   // the cast belongs where the shape is narrowed, and the constructor call below
   // stays free of noise.
-  const authz = {
-    invalidate: vi.fn().mockResolvedValue(undefined),
-    resolve: vi.fn(),
-  } as unknown as AuthzService & { invalidate: ReturnType<typeof vi.fn> };
+  const invalidate = vi.fn().mockResolvedValue(undefined);
+  const authz = { invalidate, resolve: vi.fn() } as unknown as AuthzService;
   const audit = createFakeAudit();
   /** The transaction each mutation and its audit entry now share. */
   const TX = { tx: true };
@@ -71,7 +69,7 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
     audit as never,
   );
 
-  return { service, roleRepo, assignmentRepo, authz, holders, audit, TX };
+  return { service, roleRepo, assignmentRepo, authz, invalidate, holders, audit, TX };
 }
 
 describe('AuthzAdminService — the audit entry rides the mutation', () => {
@@ -113,14 +111,14 @@ describe('AuthzAdminService — the audit entry rides the mutation', () => {
 
 describe('AuthzAdminService — role-definition changes', () => {
   it('invalidates every holder when a role’s permissions change', async () => {
-    const { service, authz, holders } = build();
+    const { service, invalidate, holders } = build();
 
     await service.setRolePermissions('role-1', ['asset.read'], actor);
 
     for (const userId of holders) {
-      expect(authz.invalidate).toHaveBeenCalledWith(userId);
+      expect(invalidate).toHaveBeenCalledWith(userId);
     }
-    expect(authz.invalidate).toHaveBeenCalledTimes(holders.length);
+    expect(invalidate).toHaveBeenCalledTimes(holders.length);
   });
 
   it('does not re-sync role claims when only permissions change', async () => {
@@ -136,12 +134,12 @@ describe('AuthzAdminService — role-definition changes', () => {
   it('invalidates AND re-syncs claims when a role is deleted', async () => {
     // Deleting a role makes both caches wrong: the permission cache still grants its
     // codes, and `employees.roles` still lists its key.
-    const { service, authz, assignmentRepo, holders } = build();
+    const { service, invalidate, assignmentRepo, holders } = build();
 
     await service.deleteRole('role-1', actor);
 
     for (const userId of holders) {
-      expect(authz.invalidate).toHaveBeenCalledWith(userId);
+      expect(invalidate).toHaveBeenCalledWith(userId);
       expect(assignmentRepo.syncEmployeeRoleClaims).toHaveBeenCalledWith(userId);
     }
   });
@@ -166,21 +164,21 @@ describe('AuthzAdminService — role-definition changes', () => {
   });
 
   it('refuses to delete a system role, and touches no cache', async () => {
-    const { service, roleRepo, authz } = build({ system: true });
+    const { service, roleRepo, invalidate } = build({ system: true });
 
     await expect(service.deleteRole('role-1', actor)).rejects.toMatchObject({
       code: 'ROLE_IMMUTABLE',
     });
     expect(roleRepo.delete).not.toHaveBeenCalled();
-    expect(authz.invalidate).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it('is a no-op on caches when a role has no holders', async () => {
-    const { service, authz } = build({ holders: [] });
+    const { service, invalidate } = build({ holders: [] });
 
     await service.setRolePermissions('role-1', ['asset.read'], actor);
 
-    expect(authz.invalidate).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });
 
