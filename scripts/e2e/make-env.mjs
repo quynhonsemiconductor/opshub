@@ -2,14 +2,16 @@
 // Writes the env file for an isolated e2e stack: `.env.example` with the e2e port block in place of the dev block, and every
 // URL that points at a port moved with it.
 //
-//   node scripts/e2e/make-env.mjs .env.e2e
+//   node scripts/e2e/make-env.mjs <out> [--strict]
 //
-// A port set in the environment (E2E_PORT_<NAME>) wins over the e2e block: scripts/e2e/run.sh sets them to the ephemeral
-// ports Docker picked, so the file always matches the stack that is actually running. The project name is set here too.
-// The output is generated and git-ignored.
+// Without --strict, a port missing from the environment (E2E_PORT_<NAME>) falls back to the e2e block: that file is for compose
+// to start from, before any port exists. With --strict every port must be set and non-empty, or the script throws: the file the
+// harness reads must match the stack that is actually running. scripts/e2e/run.sh writes the strict one. Output is git-ignored.
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const [out = '.env.e2e'] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const strict = args.includes('--strict');
+const [out = '.env.e2e'] = args.filter((a) => a !== '--strict');
 
 // [dev port, name for E2E_PORT_<name>, e2e block default]
 const TARGETS = [
@@ -26,7 +28,9 @@ const TARGETS = [
 
 let text = readFileSync('.env.example', 'utf8');
 for (const [dev, name, block] of TARGETS) {
-  const port = process.env[`E2E_PORT_${name}`] ?? String(block);
+  const set = process.env[`E2E_PORT_${name}`];
+  if (strict && !set) throw new Error(`E2E_PORT_${name} is not set: the stack's port for ${dev} was not discovered`);
+  const port = set || String(block);
   text = text.replace(new RegExp(`(?<![0-9])${dev}(?![0-9])`, 'g'), port);
 }
 text = text.replace(/^# COMPOSE_PROJECT_NAME=.*$/m, '');
