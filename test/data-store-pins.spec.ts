@@ -65,4 +65,13 @@ describe('data-store image pins', () => {
       for (const image of inCi) expect(image).toBe(pinned);
     },
   );
+  it('develop RDS major equals the compose PostgreSQL major', () => {
+    const terraform = readFileSync(join(ROOT, 'infra/live/develop/main.tf'), 'utf8');
+    const developMajor = terraform.match(/rds = \{[\s\S]*?engine_version\s*=\s*"(\d+)"/)?.[1];
+    const composeMajor = composeImages
+      .find((image) => engines.postgres.test(image))
+      ?.match(/^postgres:(\d+)\./)?.[1];
+    expect(developMajor).toBeDefined();
+    expect(developMajor).toBe(composeMajor);
+  });
 });
