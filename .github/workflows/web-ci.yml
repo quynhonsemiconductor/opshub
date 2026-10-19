@@ -284,8 +284,8 @@ jobs:
       # Better Auth trusts only APP_URL for sign-in: without it the API falls back to the schema default and every test login
       # is refused with INVALID_ORIGIN.
       APP_URL: http://localhost:5174
-      # 3001, because apps/web/vite.config.ts proxies /v1 there. A different port here means
-      # every request 502s through the proxy and every spec fails on its first assertion.
+      # PORT is the API port. apps/web/vite.config.ts forwards /v1 to PORT (3001 when unset), so the API and the proxy must
+      # agree. A different port here means every request 502s through the proxy and every spec fails on its first assertion.
       PORT: '3001'
       # `POST /api/auth/test-login` (identity 8) loads only with IDENTITY_TEST_LOGIN=enabled AND NODE_ENV
       # exactly `test` or `development`, and it is how global-setup signs in — OpsHub's login page is a

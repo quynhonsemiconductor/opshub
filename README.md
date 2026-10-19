@@ -92,8 +92,8 @@ curl -s -b /tmp/opshub.jar localhost:3001/v1/auth/me
 Each product owns its own block, so opshub, rova and the knowledge base all run at once. The full table is in the
 org's "Local development" page (`.github`); the defaults here are the opshub column.
 
-|                                    | opshub (this repo)  | rova        | knowledge base |
-| ---------------------------------- | ------------------- | ----------- | -------------- |
+|                                    | opshub (this repo)  | rova (pending #742) | knowledge base |
+| ---------------------------------- | ------------------- | ------------------- | -------------- |
 | API                                | **3001**            | 3010        | 8000           |
 | SPA (Vite)                         | **5174**            | 5175        | 5173           |
 | Postgres                           | **5410**            | 5420        | 5432           |
@@ -106,6 +106,10 @@ bucket's CORS are set for that origin. To use a different web port, set `WEB_DEV
 
 (File uploads in the browser need LocalStack's bucket CORS to allow that origin too: `WEB_ORIGIN` in `scripts/localstack/01-bootstrap.sh`,
 which follows `WEB_DEV_PORT`.)
+
+**Upgrade note.** A `.env` written before this block still has the old ports. Either start again from `cp .env.example .env`, or
+re-copy the port keys from `.env.example`: `WEB_DEV_PORT`, `PORT`, `CORS_ORIGINS`, `APP_URL`, the `*_HOST_PORT` keys, and the URLs
+that embed them (`DATABASE_URL`, `REDIS_URL`, `STORAGE_ENDPOINT`, `AWS_ENDPOINT_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`).
 
 ### Run a second copy
 
