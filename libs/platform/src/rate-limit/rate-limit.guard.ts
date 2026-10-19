@@ -43,6 +43,13 @@ import { failOpenLog } from '@quynhonsemiconductor/observability';
  * Responses carry RFC 6585 + draft-ietf-httpapi-ratelimit-headers headers.
  */
 
+/** The RFC 6585 + draft-ietf-httpapi-ratelimit-headers values for the bucket that answered. */
+function setHeaders(res: FastifyReply, limit: number, remaining: number, resetAt: number): void {
+  void res.header('RateLimit-Limit', limit);
+  void res.header('RateLimit-Remaining', Math.max(0, remaining));
+  void res.header('RateLimit-Reset', resetAt);
+}
+
 /** Consumes one slot from a bucket. Returns the response headers' values, or throws 429 when the bucket is empty. */
 async function consume(
   cache: CacheService,
@@ -72,32 +79,27 @@ async function consume(
     return true;
   }
 
-  void res.header('RateLimit-Limit', limit);
-  void res.header('RateLimit-Remaining', Math.max(0, remaining));
-  void res.header('RateLimit-Reset', resetAt);
-
+  setHeaders(res, limit, remaining, resetAt);
   if (!allowed) refuse(res, resetAt);
   return true;
 }
 
 /** Writes Retry-After and throws the 429. Shared by both buckets, so the refusal reads the same from either. */
 function refuse(res: FastifyReply, resetAt: number): never {
-  {
-    const retryAfterSecs = Math.max(resetAt - Math.floor(Date.now() / 1000), 1);
-    void res.header('Retry-After', retryAfterSecs);
-    /**
-     * A FLAT response body, because that is the only shape the exception filter reads: it builds the envelope
-     * from `res['message']`. A nested `{ error: { message } }` made every rate-limited response read "Error".
-     * The `code` is derived by the filter from the status (429 -> RATE_LIMITED).
-     */
-    throw new HttpException(
-      {
-        message: `Too many requests — retry after ${retryAfterSecs}s.`,
-        retryAfter: retryAfterSecs,
-      },
-      HttpStatus.TOO_MANY_REQUESTS,
-    );
-  }
+  const retryAfterSecs = Math.max(resetAt - Math.floor(Date.now() / 1000), 1);
+  void res.header('Retry-After', retryAfterSecs);
+  /**
+   * A FLAT response body, because that is the only shape the exception filter reads: it builds the envelope
+   * from `res['message']`. A nested `{ error: { message } }` made every rate-limited response read "Error".
+   * The `code` is derived by the filter from the status (429 -> RATE_LIMITED).
+   */
+  throw new HttpException(
+    {
+      message: `Too many requests — retry after ${retryAfterSecs}s.`,
+      retryAfter: retryAfterSecs,
+    },
+    HttpStatus.TOO_MANY_REQUESTS,
+  );
 }
 
 /** A pre-auth slot taken for one request, and whether it has been given back. */
@@ -109,13 +111,6 @@ interface Reservation {
 
 /** Where the pre-auth guard leaves its reservation for the rest of the request. */
 const PRE_AUTH_RESERVATION = Symbol('PRE_AUTH_RESERVATION');
-
-/** The RFC 6585 + draft-ietf-httpapi-ratelimit-headers values for the bucket that answered. */
-function setHeaders(res: FastifyReply, limit: number, remaining: number, resetAt: number): void {
-  void res.header('RateLimit-Limit', limit);
-  void res.header('RateLimit-Remaining', Math.max(0, remaining));
-  void res.header('RateLimit-Reset', resetAt);
-}
 
 /** Shared by both guards: the tier name a route declared, or DEFAULT. */
 function tierOf(reflector: Reflector, context: ExecutionContext): RateLimitTierName {
@@ -139,11 +134,11 @@ function skipped(reflector: Reflector, context: ExecutionContext): boolean {
 /**
  * Bucket 1: the pre-auth, per-address ceiling every request passes through first.
  *
- * It RESERVES a slot before the request runs, and gives the slot back when the reply finishes with a status other
- * than 401. So an unauthenticated request keeps its slot (a failed authentication), a signed-in request leaves no
- * trace, and a request refused by the window never runs. Reserving before the request is what makes a burst exact:
- * the reservation is one atomic step on the server, so N parallel requests admit exactly the limit, not all of them.
- * A request whose socket closes before the reply finishes never refunds, so it keeps its slot too.
+ * It RESERVES a slot before the request runs. The slot is given back only once identity has verified the caller
+ * (`UserRateLimitGuard`): a signed-in request then leaves no trace on the address. Every other request keeps its slot,
+ * whatever status it ends with, so a forged cookie, a 5xx from identity, or a future public route is still counted
+ * against its address. Reserving before the request is what makes a burst exact: the reservation is one atomic step on
+ * the server, so N parallel requests admit exactly the limit, not all of them.
  */
 @Injectable()
 export class RateLimitGuard implements CanActivate {
@@ -191,14 +186,9 @@ export class RateLimitGuard implements CanActivate {
     const reservation: Reservation = { key, id, settled: false };
     (req as unknown as Record<symbol, unknown>)[PRE_AUTH_RESERVATION] = reservation;
 
-    // A reply that finishes is settled here, unless it is a failed authentication (401), which keeps its slot. A reply
-    // that never finishes (an aborted socket, a streaming response) is settled by the per-user guard, or never.
-    res.raw.once('finish', () => {
-      if (reservation.settled) return;
-      reservation.settled = true;
-      if (res.statusCode === 401) return;
-      refundReservation(this.cache, this.logger, reservation);
-    });
+    // Settled only by the per-user guard, once identity has verified the caller. Nothing else refunds it: an
+    // unverified request keeps its slot whatever status it ends with (a forged cookie, a 5xx from identity, a route
+    // that is not behind identity at all).
     return true;
   }
 }

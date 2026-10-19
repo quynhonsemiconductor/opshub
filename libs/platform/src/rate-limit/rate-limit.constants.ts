@@ -12,7 +12,8 @@ export interface RateLimitTier {
 
 /**
  * Named tiers for intent-based rate limiting. Each is applied PER AUTHENTICATED USER (`uid:<userId>`), after
- * identity has verified the session. Append-only: never change the semantics of an existing tier name.
+ * identity has verified the session. Each name is used by `@RateLimit(...)` declarations: renaming or removing one is a
+ * change to every declaration that uses it.
  */
 export const RATE_LIMIT_TIERS = {
   /** Default: most read/write endpoints — 200 req/min per user. Configurable downwards in production. */

@@ -151,6 +151,52 @@ describe('RateLimitGuard (pre-auth, failed authentications per verified address)
     expect(cache.refundRateLimit).toHaveBeenCalledTimes(500);
   });
 
+  it('keeps the address slot of an UNVERIFIED request that ends in a non-401 (a forged cookie, a 5xx from identity)', async () => {
+    const cache = windowCache();
+    const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const { context, finish } = contextFor({ cookies: { session_token: 'forged' } });
+
+    await pre.canActivate(context);
+    finish(200); // identity never verified the caller, so nothing gives the slot back
+    finish(500);
+
+    expect(cache.refundRateLimit).not.toHaveBeenCalled();
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(1);
+  });
+
+  it('keeps the address slot of a request on a route with no principal (a future @Public() route)', async () => {
+    const cache = windowCache();
+    const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const user = new UserRateLimitGuard(reflectorFor() as never, cache as never);
+    const { context, finish } = contextFor({ cookies: { session_token: 'anonymous' } });
+
+    await pre.canActivate(context);
+    await user.canActivate(context); // no principal: this guard leaves the slot alone
+    finish(200);
+
+    expect(cache.refundRateLimit).not.toHaveBeenCalled();
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(1);
+  });
+
+  it('still admits the request when the refund fails, logs the error, and leaves the slot in place', async () => {
+    const cache = windowCache();
+    cache.refundRateLimit.mockImplementationOnce(() =>
+      Promise.reject(new Error('valkey went away')),
+    );
+    const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const user = new UserRateLimitGuard(reflectorFor() as never, cache as never);
+    const log = vi.fn();
+    (user as unknown as { logger: { error: typeof log } }).logger.error = log;
+    const { context } = contextFor({ cookies: { session_token: 'valid' } });
+
+    await pre.canActivate(context);
+    await expect(asUser('emp-1', () => user.canActivate(context))).resolves.toBe(true);
+    await new Promise((resolve) => setImmediate(resolve)); // let the rejected refund settle
+
+    expect(log).toHaveBeenCalledWith(expect.anything(), 'RateLimitGuard: slot not refunded');
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(1);
+  });
+
   it('a request that never reaches identity and then aborts still holds its slot (a probe is counted)', async () => {
     const cache = windowCache();
     const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
