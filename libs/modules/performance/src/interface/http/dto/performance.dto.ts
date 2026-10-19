@@ -144,7 +144,7 @@ export const CancelReviewSchema = z.object({
   /** Recorded in the audit entry: a withdrawn review with no stated reason is unexplainable later. */
   reason: z.string().min(5).max(1000),
 });
-export class CancelReviewDto extends createZodDto(CancelReviewSchema) {}
+export class PerformanceCancelReviewDto extends createZodDto(CancelReviewSchema) {}
 
 export class ReviewResponseDto {
   id!: string;

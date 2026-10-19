@@ -6407,7 +6407,7 @@ export interface components {
         rating: 'unsatisfactory' | 'needs_improvement' | 'meets' | 'exceeds' | 'outstanding';
       }[];
     };
-    CancelReviewDto: {
+    PerformanceCancelReviewDto: {
       reason: string;
     };
     RiskResponseDto: {
@@ -7669,6 +7669,9 @@ export interface components {
       conclusion: string;
       /** Format: uuid */
       minutesDocumentId: string;
+    };
+    QmsCancelReviewDto: {
+      reason: string;
     };
     RaiseReviewActionDto: {
       /** @enum {string} */
@@ -16400,7 +16403,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CancelReviewDto'];
+        'application/json': components['schemas']['PerformanceCancelReviewDto'];
       };
     };
     responses: {
@@ -22816,7 +22819,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CancelReviewDto'];
+        'application/json': components['schemas']['QmsCancelReviewDto'];
       };
     };
     responses: {
