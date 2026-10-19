@@ -50,36 +50,45 @@ services:
       timeout: 3s
       retries: 10
 
-  localstack:
-    image: localstack/localstack:4.14
-    environment:
-      AWS_DEFAULT_REGION: ap-southeast-1
-      PERSISTENCE: 1
-      # Standard fake credentials — the AWS SDK v3 requires credentials to sign
-      # with even when the endpoint is an emulator that ignores them.
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
-      # The SPA origin the bucket's CORS allows (scripts/localstack/01-bootstrap.sh). Follows WEB_DEV_PORT in .env.
-      WEB_ORIGIN: http://localhost:${WEB_DEV_PORT:-5174}
+  # Garage is the local stand-in for the R2 bucket: one node, named volumes, so uploads survive `docker compose restart`
+  # (LocalStack's community edition does not keep data across a restart). Pinned to a full version. Development only.
+  garage:
+    image: dxflrs/garage:v1.3.1
     ports:
-      # STORAGE_ENDPOINT and AWS_ENDPOINT_URL in .env must carry the same port.
-      - '127.0.0.1:${LOCALSTACK_HOST_PORT:-4610}:4566'
+      # STORAGE_ENDPOINT in .env must carry the same port.
+      - '127.0.0.1:${STORAGE_HOST_PORT:-4610}:3900'
     volumes:
-      - opshub_localstack:/var/lib/localstack
-      # Init hook: runs every time LocalStack becomes ready, creating the files
-      # bucket and its CORS rules. Mirrors how db/init bootstraps Postgres above.
-      - ./scripts/localstack:/etc/localstack/init/ready.d:ro
+      - ./docker/garage/garage.toml:/etc/garage.toml:ro
+      - garagemeta:/var/lib/garage/meta
+      - garagedata:/var/lib/garage/data
     healthcheck:
-      # Healthy means the init hook has RUN, not merely that LocalStack answers: the bucket
-      # exists. `docker compose up --wait` therefore returns only when uploads can work, and
-      # the API never races a bucket that is still being created. Keep the name in step with
-      # S3_FILES_BUCKET in .env.example and BUCKET in scripts/localstack/01-bootstrap.sh
-      # (test/env-example.spec.ts checks all three).
-      test: ['CMD', 'awslocal', 's3api', 'head-bucket', '--bucket', 'opshub-files-dev']
-      interval: 10s
+      # The image has no shell and no curl; `garage status` answers once the node is up.
+      test: ['CMD', '/garage', 'status']
+      interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 15s
+      retries: 20
+      start_period: 5s
+    mem_limit: 512m
+
+  # One-shot: layout, the fixed local key, both buckets (the dev bucket and the e2e suite's), their lifecycle and CORS for the
+  # web origins, then a preflight proof per bucket and origin. It exits 0 only when all of that holds. Read its exit status after
+  # `up --wait` (see README → "Local stack"). Bucket names are kept in step with .env.example and test/env-example.spec.ts.
+  garage-init:
+    image: amazon/aws-cli:2.17.50
+    entrypoint: ['/bin/bash', '/init/init.sh']
+    depends_on:
+      garage:
+        condition: service_healthy
+    environment:
+      GARAGE_ADMIN_TOKEN: local-dev-garage-admin-token-not-a-secret
+      STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
+      # Quoted on purpose: an unquoted all-zero scalar is read by YAML as the integer 0, and Garage then gets "0".
+      STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+      BUCKETS: opshub-files-dev opshub-files-test
+      WEB_ORIGINS: http://localhost:${WEB_DEV_PORT:-5174},http://127.0.0.1:${WEB_DEV_PORT:-5174}
+    volumes:
+      - ./scripts/garage:/init:ro
+    restart: 'no'
 
   otel:
     image: otel/opentelemetry-collector-contrib:0.140.1
@@ -101,4 +110,5 @@ services:
 
 volumes:
   opshub_pgdata:
-  opshub_localstack:
+  garagemeta:
+  garagedata:

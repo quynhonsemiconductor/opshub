@@ -189,21 +189,6 @@ jobs:
       # one the client must send, that `Content-Disposition` ends up as STORED object metadata, and
       # that confirm rejects a size or checksum that does not match. Every one of those is invisible
       # to a stubbed StorageService — the stub would agree with whatever the code did.
-      localstack:
-        # Pinned to the SAME major as docker-compose.dev.yml. They diverged once — CI on 3 while
-        # local ran 4 — and a presigned PUT that succeeded locally answered 400 in CI, which reads
-        # as a product bug rather than an emulator difference.
-        image: localstack/localstack:4.14
-        env:
-          SERVICES: s3
-          DEBUG: '0'
-        ports: ['4566:4566']
-        options: >-
-          --health-cmd "curl -sf http://localhost:4566/_localstack/health || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -288,26 +273,21 @@ jobs:
       # The bucket has to exist before the app presigns into it: a presigned PUT against a missing
       # bucket succeeds at signing and fails at upload, which surfaces as a confirm-time
       # FILE_NOT_UPLOADED and reads like a product bug.
-      - name: Create the S3 bucket in LocalStack
+      # Garage is the same node the dev stack runs (docker-compose.dev.yml), started by compose. The one-shot init creates the
+      # e2e bucket and proves its CORS; `run --rm` returns the init's exit code, so a broken bucket fails this step.
+      - name: Start Garage and create its buckets
         run: |
-          for _ in $(seq 1 30); do
-            if curl -sf http://localhost:4566/_localstack/health > /dev/null; then break; fi
-            sleep 2
-          done
-          aws --endpoint-url http://localhost:4566 s3 mb s3://opshub-files-test
-        env:
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
-          AWS_DEFAULT_REGION: us-east-1
+          docker compose -f docker-compose.dev.yml up -d --wait garage
+          docker compose -f docker-compose.dev.yml run --rm garage-init
 
       - name: E2E tests
         run: pnpm test:e2e
         env:
           S3_FILES_BUCKET: opshub-files-test
-          STORAGE_ENDPOINT: http://localhost:4566
+          STORAGE_ENDPOINT: http://localhost:4610
           STORAGE_FORCE_PATH_STYLE: 'true'
-          STORAGE_ACCESS_KEY_ID: test
-          STORAGE_SECRET_ACCESS_KEY: test
+          STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
+          STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
           AWS_REGION: us-east-1
           NODE_ENV: test
           # The APP connects as the restricted role, the MIGRATOR as the owner — the same

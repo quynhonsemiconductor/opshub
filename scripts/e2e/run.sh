@@ -39,7 +39,7 @@ compose up -d --wait
 port_of() { compose port "$1" "$2" | awk -F: '{print $NF}'; }
 export E2E_PORT_POSTGRES=$(port_of postgres 5432)
 export E2E_PORT_VALKEY=$(port_of valkey 6379)
-export E2E_PORT_LOCALSTACK=$(port_of localstack 4566)
+export E2E_PORT_STORAGE=$(port_of garage 3900)
 export E2E_PORT_MAILPIT_SMTP=$(port_of mailpit 1025)
 export E2E_PORT_MAILPIT_UI=$(port_of mailpit 8025)
 export E2E_PORT_OTEL_OTLP=$(port_of otel 4318)
