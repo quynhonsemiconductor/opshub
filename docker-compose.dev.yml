@@ -1,16 +1,23 @@
+# Local stack for OpsHub. Project name `opshub` unless COMPOSE_PROJECT_NAME is set (in .env or the shell): that is
+# what lets a second copy of this repo run beside the first. No container_name is set on purpose, for the same reason.
+#
+# Image majors match production: RDS Postgres 17 (tf-modules rds module default) and ElastiCache Valkey 7.2
+# (tf-modules cache module default, node mode). Tags are pinned to a full version, not a moving major tag.
+#
+# Every host port is bound to 127.0.0.1 and read from .env (`*_HOST_PORT`, defaults below). `.env.example` lists them.
+name: opshub
+
 services:
   postgres:
-    image: postgres:18.6-alpine
-    container_name: opshub-postgres
+    image: postgres:17.11-alpine
     environment:
       POSTGRES_USER: opshub
       POSTGRES_PASSWORD: opshub
       POSTGRES_DB: opshub
     ports:
-      # 5433 avoids conflict with other local Postgres instances (e.g. rally on 5432).
-      - '5433:5432'
+      - '127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432'
     volumes:
-      - opshub_pgdata:/var/lib/postgresql
+      - opshub_pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U opshub']
@@ -19,11 +26,9 @@ services:
       retries: 5
 
   valkey:
-    image: valkey/valkey:8.1.10-alpine
-    container_name: opshub-valkey
+    image: valkey/valkey:7.2.14-alpine
     ports:
-      # 6380 avoids conflict with other local Redis/Valkey instances (e.g. rally on 6379).
-      - '6380:6379'
+      - '127.0.0.1:${VALKEY_HOST_PORT:-6380}:6379'
     healthcheck:
       test: ['CMD', 'valkey-cli', 'ping']
       interval: 5s
@@ -31,8 +36,7 @@ services:
       retries: 5
 
   localstack:
-    image: localstack/localstack:4
-    container_name: opshub-localstack
+    image: localstack/localstack:4.12
     environment:
       AWS_DEFAULT_REGION: ap-southeast-1
       PERSISTENCE: 1
@@ -41,15 +45,12 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
     ports:
-      # 4567 avoids conflict with other local LocalStack instances (rova/rally on 4566),
-      # matching how postgres and valkey are offset above. STORAGE_ENDPOINT and
-      # AWS_ENDPOINT_URL in .env must carry this port, not 4566.
-      - '4567:4566'
+      # STORAGE_ENDPOINT and AWS_ENDPOINT_URL in .env must carry the same port.
+      - '127.0.0.1:${LOCALSTACK_HOST_PORT:-4567}:4566'
     volumes:
       - opshub_localstack:/var/lib/localstack
       # Init hook: runs every time LocalStack becomes ready, creating the files
-      # bucket and its CORS rules (the SQS queue and DLQ it used to create went with
-      # the domain-event outbox). Mirrors how db/init bootstraps Postgres above.
+      # bucket and its CORS rules. Mirrors how db/init bootstraps Postgres above.
       - ./scripts/localstack:/etc/localstack/init/ready.d:ro
     healthcheck:
       # Healthy means the init hook has RUN, not merely that LocalStack answers: the bucket
@@ -65,17 +66,14 @@ services:
 
   otel:
     image: otel/opentelemetry-collector-contrib:0.140.1
-    container_name: opshub-otel
     command: ['--config=/etc/otel/collector.yaml']
     volumes:
       - ./scripts/otel/collector.yaml:/etc/otel/collector.yaml:ro
     ports:
-      # 4319 avoids conflict with other local collectors (rova/rally take 4318), matching
-      # how postgres (5433), valkey (6380) and localstack (4567) are offset. `.env` must
-      # point OTEL_EXPORTER_OTLP_ENDPOINT at this port, not 4318.
-      - '4319:4318'
+      # OTEL_EXPORTER_OTLP_ENDPOINT in .env must carry the OTLP port.
+      - '127.0.0.1:${OTEL_OTLP_HOST_PORT:-4319}:4318'
       # Prometheus scrape/inspect endpoint: `curl -s localhost:8890/metrics`.
-      - '8890:8889'
+      - '127.0.0.1:${OTEL_METRICS_HOST_PORT:-8890}:8889'
     healthcheck:
       # The collector image has no shell and no curl, so probe the OTLP port from the host
       # side instead — an open socket is all this needs to prove.

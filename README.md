@@ -109,10 +109,21 @@ pnpm dev:web --port 5174
 
 (File uploads in the browser need LocalStack's bucket CORS to allow that origin too: `WEB_ORIGIN` in `scripts/localstack/01-bootstrap.sh`.)
 
+### Run a second copy
+
+Two checkouts, or a branch you want to keep running beside your main one, need their own compose project and host ports. The
+compose file binds every port to `127.0.0.1` and reads it from `.env`, so nothing else changes. In `.env`:
+
+1. `COMPOSE_PROJECT_NAME=opshub-2` (any name; it prefixes the containers and volumes).
+2. Give each `*_HOST_PORT` a free number: `POSTGRES_HOST_PORT`, `VALKEY_HOST_PORT`, `LOCALSTACK_HOST_PORT`, `OTEL_OTLP_HOST_PORT`, `OTEL_METRICS_HOST_PORT`.
+3. Put the same Postgres, Valkey and LocalStack numbers into `DATABASE_URL`, `VALKEY_URL`, `STORAGE_ENDPOINT`, `AWS_ENDPOINT_URL` and the OTLP port into `OTEL_EXPORTER_OTLP_ENDPOINT`. The app reads URLs, not the `*_HOST_PORT` values.
+
+Then run the same commands as above. If both copies run their SPA, follow the "Ports" section for the API and web origins.
+
 ### Useful
 
 - `pnpm db:seed` re-runs the demo fixtures; `pnpm db:studio` opens Drizzle Studio.
-- Telemetry: `docker logs opshub-otel`, or `curl -s localhost:8890/metrics | grep queue_`. No collector? `OTEL_ENABLED=false` in `.env`.
+- Telemetry: `docker compose -f docker-compose.dev.yml logs otel`, or `curl -s localhost:8890/metrics | grep queue_`. No collector? `OTEL_ENABLED=false` in `.env`.
 - Mail is `EMAIL_PROVIDER=dev`: messages are written to the API log and not sent.
 - Uploads go to LocalStack's `opshub-files-dev` bucket; `aws --endpoint-url http://localhost:4567 s3 ls s3://opshub-files-dev` (any credentials).
 - Reset everything: `docker compose -f docker-compose.dev.yml down -v`, then `up -d --wait` and `pnpm db:migrate` again.

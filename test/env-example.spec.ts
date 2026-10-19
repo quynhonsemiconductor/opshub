@@ -64,12 +64,21 @@ function envAsSeenBy(script: string): Record<string, string> {
   return seen;
 }
 
-/** The host port a compose service publishes for a container port. */
-function hostPort(container: string, containerPort: number): string | undefined {
-  const service = new RegExp(
-    `container_name: ${container}\\b[\\s\\S]*?(?=\\n  \\w[\\w-]*:\\n|\\nvolumes:|$)`,
-  ).exec(compose)?.[0];
-  return new RegExp(`'(\\d+):${containerPort}'`).exec(service ?? '')?.[1];
+/**
+ * The host port a compose service publishes for a container port, as `127.0.0.1:${VARIABLE:-default}:containerPort`.
+ * The variable is the one `.env` overrides; the default is what `.env.example` has to carry.
+ */
+function publishedPort(
+  service: string,
+  containerPort: number,
+): { variable: string; port: string } | undefined {
+  const block = new RegExp(
+    `\\n  ${service}:\\n([\\s\\S]*?)(?=\\n  \\w[\\w-]*:\\n|\\nvolumes:|$)`,
+  ).exec(compose)?.[1];
+  const m = new RegExp(`'127\\.0\\.0\\.1:\\$\\{(\\w+):-(\\d+)\\}:${containerPort}'`).exec(
+    block ?? '',
+  );
+  return m ? { variable: m[1] ?? '', port: m[2] ?? '' } : undefined;
 }
 
 const portOf = (url: string | undefined) => new URL(url ?? 'http://invalid').port;
@@ -110,6 +119,13 @@ describe('.env.example boots the API and the worker from one file', () => {
     );
     // Read outside the schema: the migrator and its scripts, and platform-runtime's shutdown.
     const readElsewhere = new Set([
+      // Read by docker-compose.dev.yml for its host ports and project name, never by the app.
+      'COMPOSE_PROJECT_NAME',
+      'POSTGRES_HOST_PORT',
+      'VALKEY_HOST_PORT',
+      'LOCALSTACK_HOST_PORT',
+      'OTEL_OTLP_HOST_PORT',
+      'OTEL_METRICS_HOST_PORT',
       'SEED_ON_DEPLOY',
       'DATABASE_MIGRATION_URL',
       'DATABASE_APP_PASSWORD',
@@ -133,12 +149,50 @@ describe('.env.example agrees with the dev tooling', () => {
     expect(env['PORT']).toBe(targets[0]);
   });
 
-  it('points at the host ports docker-compose.dev.yml publishes', () => {
-    expect(portOf(env['DATABASE_URL'])).toBe(hostPort('opshub-postgres', 5432));
-    expect(portOf(env['VALKEY_URL'])).toBe(hostPort('opshub-valkey', 6379));
-    expect(portOf(env['STORAGE_ENDPOINT'])).toBe(hostPort('opshub-localstack', 4566));
-    expect(portOf(env['AWS_ENDPOINT_URL'])).toBe(hostPort('opshub-localstack', 4566));
-    expect(portOf(env['OTEL_EXPORTER_OTLP_ENDPOINT'])).toBe(hostPort('opshub-otel', 4318));
+  it('points at the host ports docker-compose.dev.yml publishes, through the .env variable that sets each', () => {
+    const postgres = publishedPort('postgres', 5432);
+    const valkey = publishedPort('valkey', 6379);
+    const localstack = publishedPort('localstack', 4566);
+    const otel = publishedPort('otel', 4318);
+    for (const published of [postgres, valkey, localstack, otel]) {
+      expect(published, 'a compose service publishes no 127.0.0.1-bound host port').toBeDefined();
+      expect(env[published?.variable ?? '']).toBe(published?.port);
+    }
+    expect(portOf(env['DATABASE_URL'])).toBe(env['POSTGRES_HOST_PORT']);
+    expect(portOf(env['VALKEY_URL'])).toBe(env['VALKEY_HOST_PORT']);
+    expect(portOf(env['STORAGE_ENDPOINT'])).toBe(env['LOCALSTACK_HOST_PORT']);
+    expect(portOf(env['AWS_ENDPOINT_URL'])).toBe(env['LOCALSTACK_HOST_PORT']);
+    expect(portOf(env['OTEL_EXPORTER_OTLP_ENDPOINT'])).toBe(env['OTEL_OTLP_HOST_PORT']);
+    expect(publishedPort('otel', 8889)?.variable).toBe('OTEL_METRICS_HOST_PORT');
+  });
+
+  it('publishes every host port on loopback only, never on the LAN', () => {
+    const published = [...compose.matchAll(/^\s+- '([^']+)'$/gm)].map((m) => m[1] ?? '');
+    expect(published.length).toBeGreaterThan(0);
+    expect(published.filter((p) => !p.startsWith('127.0.0.1:'))).toEqual([]);
+  });
+
+  it('gives every compose port variable a default that matches .env.example', () => {
+    const interpolated = [...compose.matchAll(/\$\{(\w+):-(\d+)\}/g)];
+    expect(interpolated.length).toBeGreaterThanOrEqual(5);
+    for (const [, variable, value] of interpolated) {
+      expect(env[variable ?? ''], `${variable} is missing from .env.example`).toBe(value);
+    }
+  });
+
+  it('names no fixed container, so a second copy with its own COMPOSE_PROJECT_NAME can run beside this one', () => {
+    expect(compose).not.toContain('container_name:');
+    expect(compose).toMatch(/^name: opshub$/m);
+  });
+
+  it('pins the images to the production majors: RDS Postgres 17, ElastiCache Valkey 7.2', () => {
+    expect(compose).toMatch(/image: postgres:17\.\d+-alpine/);
+    expect(compose).toMatch(/image: valkey\/valkey:7\.2\.\d+-alpine/);
+  });
+
+  it('nothing in CI or the README addresses a container by name, so both survive a second project', () => {
+    expect(read('.github/workflows/web-ci.yml')).not.toMatch(/docker (exec|logs|rm|stop) opshub-/);
+    expect(read('README.md')).not.toMatch(/docker (exec|logs|rm|stop) opshub-/);
   });
 
   it('uses the bucket the LocalStack init hook creates and the compose healthcheck waits for', () => {

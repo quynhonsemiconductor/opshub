@@ -490,7 +490,7 @@ jobs:
       # login is refused, so ask the database directly and fail by name rather than at a 401 later.
       - name: The demo users exist
         run: |
-          n=$(docker exec opshub-postgres psql -U opshub -d opshub -Atc "select count(*) from identity.\"user\" where email = 'admin@opshub.local'")
+          n=$(docker compose -f docker-compose.dev.yml exec -T postgres psql -U opshub -d opshub -Atc "select count(*) from identity.\"user\" where email = 'admin@opshub.local'")
           echo "admin@opshub.local rows: $n"
           test "$n" = 1
 
