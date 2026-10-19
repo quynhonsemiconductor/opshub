@@ -530,11 +530,11 @@ jobs:
           fi
 
       # THROUGH THE VITE PROXY (:5173), not the API directly: this is the call a browser makes, and it is the one that
-      # breaks when the example's PORT and the proxy target disagree.
+      # breaks when the proxy cannot reach the API on the PORT in .env.example.
       - name: Sign in with the test login and make an authenticated /v1 call, through the SPA's proxy
         run: |
           for _ in $(seq 1 30); do curl -sf http://localhost:5173/v1/healthz >/dev/null && break; sleep 2; done
-          curl -sf http://localhost:5173/v1/healthz || { echo "::error::/v1 through the Vite proxy failed: .env.example PORT must equal the proxy target in apps/web/vite.config.ts"; exit 1; }
+          curl -sf http://localhost:5173/v1/healthz || { echo "::error::/v1 through the Vite proxy failed: the API must listen on PORT (.env.example), which the proxy forwards to (apps/web/vite.config.ts)"; exit 1; }
           curl -sf -c "$LOGS/jar.txt" -H 'content-type: application/json' \
             -d '{"email":"admin@opshub.local"}' http://localhost:5173/api/auth/test-login
           me=$(curl -sf -b "$LOGS/jar.txt" http://localhost:5173/v1/auth/me)

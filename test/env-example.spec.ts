@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 import { ApiEnvSchema, WorkerEnvSchema } from '@platform/config/env.schema';
 
 /**
@@ -54,6 +55,7 @@ const example = read('.env.example');
 const env = parseEnv(example);
 const scripts = (JSON.parse(read('package.json')) as { scripts: Record<string, string> }).scripts;
 const compose = read('docker-compose.dev.yml');
+const composeDoc = parseYaml(compose) as { services: Record<string, { ports?: unknown[] }> };
 const bootstrap = read('scripts/localstack/01-bootstrap.sh');
 const vite = read('apps/web/vite.config.ts');
 
@@ -64,60 +66,19 @@ function envAsSeenBy(script: string): Record<string, string> {
   return seen;
 }
 
-const unquote = (value: string) => value.trim().replace(/^(['"])(.*)\1$/, '$2');
-
 /**
- * Every `ports:` entry of a compose service, as `host_ip:published:target` (short form unchanged, quotes removed, a bare
- * `5432` stays bare). Handles the short syntax quoted (single or double) or unquoted, and the long syntax with
- * `target:` / `published:` / `host_ip:` keys. A missing host_ip is kept empty so the loopback check fails on it.
+ * Every `ports:` entry of a compose service, as `host_ip:published:target`, parsed by a real YAML parser so the block,
+ * flow and quoted forms all read the same. Short syntax stays as written (a bare `5432` stays bare). Long syntax folds its
+ * keys into that shape, with an empty host_ip when none is given, so the loopback check fails on it.
  */
 function portEntries(service: string): string[] {
-  const lines = compose.split('\n');
-  const start = lines.indexOf(`  ${service}:`);
-  const entries: string[] = [];
-  if (start < 0) return entries;
-  const pending: Partial<Record<'host_ip' | 'published' | 'target', string>> = {};
-  let inLong = false;
-  let inPorts = false;
-  const flush = () => {
-    if (inLong)
-      entries.push(
-        [pending.host_ip ?? '', pending.published ?? '', pending.target ?? ''].join(':'),
-      );
-    inLong = false;
-    for (const key of Object.keys(pending) as (keyof typeof pending)[]) delete pending[key];
-  };
-  for (const raw of lines.slice(start + 1)) {
-    if (/^\S/.test(raw) || /^ {2}\w[\w-]*:\s*$/.test(raw)) break; // the next service or a top-level key
-    const line = raw.replace(/\s+#.*$/, '').trimEnd();
-    if (/^ {4}ports:\s*$/.test(line)) {
-      inPorts = true;
-      continue;
-    }
-    if (/^ {4}\S/.test(line)) {
-      flush();
-      inPorts = false;
-      continue;
-    }
-    if (!inPorts) continue;
-    const item = /^ {6}- (.*)$/.exec(line);
-    if (item) {
-      flush();
-      const body = item[1] ?? '';
-      const key = /^(host_ip|published|target):\s*(.*)$/.exec(body);
-      if (key) {
-        inLong = true;
-        pending[key[1] as 'host_ip'] = unquote(key[2] ?? '');
-      } else {
-        entries.push(unquote(body));
-      }
-      continue;
-    }
-    const nested = /^ {8}(host_ip|published|target):\s*(.*)$/.exec(line);
-    if (nested && inLong) pending[nested[1] as 'host_ip'] = unquote(nested[2] ?? '');
-  }
-  flush();
-  return entries;
+  const ports = composeDoc.services[service]?.ports ?? [];
+  return ports.map((port) => {
+    if (typeof port !== 'object' || port === null) return String(port);
+    const long = port as { host_ip?: unknown; published?: unknown; target?: unknown };
+    const field = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v) : '');
+    return [field(long.host_ip), field(long.published), field(long.target)].join(':');
+  });
 }
 
 /** The host port a compose service publishes for a container port, as `127.0.0.1:${VARIABLE:-default}:containerPort`. */
@@ -134,6 +95,16 @@ function publishedPort(
 }
 
 const portOf = (url: string | undefined) => new URL(url ?? 'http://invalid').port;
+
+/** Every service image a GitHub workflow runs, by job, parsed the same way as the compose file. */
+function workflowServiceImages(file: string): string[] {
+  const doc = parseYaml(read(file)) as {
+    jobs?: Record<string, { services?: Record<string, { image?: string }> }>;
+  };
+  return Object.values(doc.jobs ?? {}).flatMap((job) =>
+    Object.values(job.services ?? {}).flatMap((svc) => (svc.image ? [svc.image] : [])),
+  );
+}
 
 describe('.env.example boots the API and the worker from one file', () => {
   it('is accepted by the API schema, as `pnpm start:dev` runs it', () => {
@@ -222,7 +193,7 @@ describe('.env.example agrees with the dev tooling', () => {
   });
 
   it('publishes every host port on loopback only, whatever the syntax', () => {
-    const services = [...compose.matchAll(/^ {2}([\w-]+):\s*$/gm)].map((m) => m[1] ?? '');
+    const services = Object.keys(composeDoc.services);
     const published = services.flatMap((service) =>
       portEntries(service).map((e) => `${service}: ${e}`),
     );
@@ -364,4 +335,29 @@ describe('.env.example uses the current cache name', () => {
     expect(env['VALKEY_URL']).toBeTruthy();
     expect(Object.keys(env)).not.toContain('REDIS_URL');
   });
+});
+
+describe('CI runs the same images as the dev stack', () => {
+  // A service image in CI that drifts from docker-compose.dev.yml tests a different Postgres or Valkey than the one a
+  // developer and production run. Same repository, same tag.
+  const composeImages = Object.values(composeDoc.services).flatMap(
+    (svc) => (svc as { image?: string }).image ?? [],
+  );
+  it.each(['.github/workflows/backend-ci.yml', '.github/workflows/web-ci.yml'])(
+    '%s uses the compose tag for every image both run',
+    (file) => {
+      const repoOf = (image: string) => image.split(':')[0];
+      const shared = workflowServiceImages(file).filter((image) =>
+        composeImages.some((c) => repoOf(c) === repoOf(image)),
+      );
+      expect(shared.length, `${file} runs no service the compose file also runs`).toBeGreaterThan(
+        0,
+      );
+      for (const image of shared) {
+        expect(composeImages, `${file} runs ${image}, which the compose file does not`).toContain(
+          image,
+        );
+      }
+    },
+  );
 });

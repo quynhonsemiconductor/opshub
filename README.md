@@ -120,6 +120,8 @@ API and web ports. Every port is bound to `127.0.0.1` and read from `.env`. In t
 4. The API: `PORT` (the API's port; the SPA's proxy follows it).
 5. The web: `WEB_DEV_PORT` (the Vite port; LocalStack's bucket CORS follows it). Then `APP_URL=http://localhost:<WEB_DEV_PORT>` and `CORS_ORIGINS=http://localhost:<WEB_DEV_PORT>`, so sign-in redirects and the API's CORS match the new origin.
 
+For real Microsoft sign-in on the new web port, register `http://localhost:<WEB_DEV_PORT>/api/auth/callback/microsoft` as a redirect URI on your dev app; the test login needs none of this.
+
 Then run the same commands as above. The Playwright config's `baseURL` is pinned to 5173, so `pnpm --filter opshub-web test:e2e` runs in one copy at a time.
 
 ### Useful
