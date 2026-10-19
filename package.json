@@ -75,7 +75,7 @@
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "@quynhonsemiconductor/identity": "^8.4.1",
     "@quynhonsemiconductor/observability": "^0.6.0",
-    "@quynhonsemiconductor/platform-cache": "^3.2.0",
+    "@quynhonsemiconductor/platform-cache": "^3.3.0",
     "@quynhonsemiconductor/platform-db": "^0.1.2",
     "@quynhonsemiconductor/platform-http": "^5.0.0",
     "@quynhonsemiconductor/platform-mail": "^0.1.5",
