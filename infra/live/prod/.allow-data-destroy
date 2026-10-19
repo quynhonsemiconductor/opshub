@@ -1,2 +1,6 @@
 # PG 16 -> 18 major upgrade (this PR). Remove this line after the upgrade is verified.
 module.stack.module.rds.aws_db_parameter_group.this[0]  -- pg18 major upgrade: postgres16 parameter group replaced by postgres18 (create_before_destroy); PR in this branch
+# Destroys in the prod plan that are intended (owner decision 2026-10-19). Remove each line after its apply is verified.
+module.stack.module.secrets.aws_secretsmanager_secret.app["graph-client-secret"]  -- Graph client secret removed from config; the Graph sync runs only in the worker with its own app id (PR 354, merged)
+module.stack.module.secrets.aws_secretsmanager_secret.app["jwt-private"]  -- ES256 JWT private key removed from config with identity 8 (PR 355, merged)
+module.stack.module.api.aws_lb_target_group.this[0]  -- opshub-prod-api target group gone from config (owner decision 2026-10-19); PR reference to be added by owner
