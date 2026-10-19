@@ -161,7 +161,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:17.11-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -174,7 +174,7 @@ jobs:
           --health-retries 10
 
       redis:
-        image: valkey/valkey:8.1.10-alpine
+        image: valkey/valkey:7.2.14-alpine
         ports: ['6379:6379']
         options: >-
           --health-cmd "valkey-cli ping"
@@ -193,7 +193,7 @@ jobs:
         # Pinned to the SAME major as docker-compose.dev.yml. They diverged once — CI on 3 while
         # local ran 4 — and a presigned PUT that succeeded locally answered 400 in CI, which reads
         # as a product bug rather than an emulator difference.
-        image: localstack/localstack:4
+        image: localstack/localstack:4.14
         env:
           SERVICES: s3
           DEBUG: '0'
@@ -365,7 +365,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:17.11-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -508,7 +508,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:17.11-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -517,7 +517,7 @@ jobs:
         options: --health-cmd pg_isready --health-interval 5s --health-retries 10
 
       redis:
-        image: valkey/valkey:8.1.10-alpine
+        image: valkey/valkey:7.2.14-alpine
         ports: ['6379:6379']
         options: --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 5
 
