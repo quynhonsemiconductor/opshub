@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { and, asc, eq, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
 import {
   AbstractOutboxRelay,
+  DB_NOW,
   DeferError,
   dbDelay,
   ExclusiveJob,
@@ -32,6 +33,11 @@ export interface TaskRow {
   payload: Record<string, unknown>;
   attempts: number;
   createdAt: Date;
+  /**
+   * Milliseconds since the request was queued, measured by the DATABASE when the row was claimed (now() - created_at).
+   * The dead-letter bound reads this, never the host clock (the Time rule, .github#29).
+   */
+  waitedMs: number;
 }
 
 /**
@@ -108,15 +114,18 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
     return `${this.queueName}[${this.kinds.join(',')}]`;
   }
 
-  protected selectDue(tx: DrizzleTx, limit: number, now: SQL): Promise<TaskRow[]> {
-    if (!this.graph.isEnabled()) return Promise.resolve([]);
-    return tx
+  protected async selectDue(tx: DrizzleTx, limit: number, now: SQL): Promise<TaskRow[]> {
+    if (!this.graph.isEnabled()) return [];
+    const rows = await tx
       .select({
         id: graphTaskOutbox.id,
         kind: graphTaskOutbox.kind,
         payload: graphTaskOutbox.payload,
         attempts: graphTaskOutbox.attempts,
         createdAt: graphTaskOutbox.createdAt,
+        waitedMs: sql<
+          number | string
+        >`extract(epoch from (${DB_NOW} - ${graphTaskOutbox.createdAt})) * 1000`,
       })
       .from(graphTaskOutbox)
       .where(
@@ -141,6 +150,7 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
       .orderBy(asc(graphTaskOutbox.seq), asc(graphTaskOutbox.id))
       .limit(limit)
       .for('update', { skipLocked: true });
+    return rows.map((r) => ({ ...r, waitedMs: Number(r.waitedMs) }));
   }
 
   protected async deliver(row: Claimed<TaskRow>): Promise<void> {
@@ -187,10 +197,9 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
     });
     if (ran) return;
 
-    const waitedMs = Date.now() - row.createdAt.getTime();
-    if (waitedMs > lock.ttlMs + LOCK_WAIT_MARGIN_MS) {
+    if (row.waitedMs > lock.ttlMs + LOCK_WAIT_MARGIN_MS) {
       throw new NonRetryableError(
-        `${lock.name} stayed held for ${Math.round(waitedMs / 60_000)} min, longer than its ` +
+        `${lock.name} stayed held for ${Math.round(row.waitedMs / 60_000)} min, longer than its ` +
           `${Math.round(lock.ttlMs / 60_000)} min TTL: giving up on this request`,
       );
     }

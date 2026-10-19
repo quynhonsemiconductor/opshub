@@ -17,6 +17,7 @@ interface Row {
   payload: Record<string, unknown>;
   attempts: number;
   createdAt: Date;
+  waitedMs: number;
   leaseToken: string;
   leaseExpiresAt: Date;
 }
@@ -61,12 +62,14 @@ function make({ enabled = true, lockHeld = false } = {}) {
   };
 }
 
-const row = (kind: string, payload: Record<string, unknown> = {}, createdAt = new Date()): Row => ({
+/** `waitedMs` is what the database measured at claim: how long the request has been queued. */
+const row = (kind: string, payload: Record<string, unknown> = {}, waitedMs = 0): Row => ({
   id: 'r1',
   kind,
   payload,
   attempts: 1,
-  createdAt,
+  createdAt: new Date(Date.now() - waitedMs),
+  waitedMs,
   leaseToken: 't',
   leaseExpiresAt: new Date(Date.now() + 150_000),
 });
@@ -110,12 +113,11 @@ describe('Graph task relays — deliver', () => {
 
   describe('deferring on a held lock is BOUNDED', () => {
     const ttl = GRAPH_LOCK.SHADOW_IT.ttlMs;
-    const ago = (ms: number) => new Date(Date.now() - ms);
 
     it('keeps deferring while the request is younger than the lock TTL + margin', async () => {
       const { scanRelay } = make({ lockHeld: true });
       await expect(
-        scanRelay.deliver(row(GRAPH_TASK.SHADOW_IT_SCAN, {}, ago(ttl))),
+        scanRelay.deliver(row(GRAPH_TASK.SHADOW_IT_SCAN, {}, ttl)),
       ).rejects.toBeInstanceOf(DeferError);
     });
 
@@ -123,11 +125,18 @@ describe('Graph task relays — deliver', () => {
       const { scanRelay } = make({ lockHeld: true });
 
       const err: unknown = await scanRelay
-        .deliver(row(GRAPH_TASK.SHADOW_IT_SCAN, {}, ago(ttl + LOCK_WAIT_MARGIN_MS + 60_000)))
+        .deliver(row(GRAPH_TASK.SHADOW_IT_SCAN, {}, ttl + LOCK_WAIT_MARGIN_MS + 60_000))
         .catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(NonRetryableError);
       expect((err as Error).message).toMatch(/stayed held/);
+    });
+
+    it('measures the wait with the DATABASE (waitedMs, from the claim), not the host clock on createdAt', async () => {
+      const { scanRelay } = make({ lockHeld: true });
+      const oldButJustClaimed = { ...row(GRAPH_TASK.SHADOW_IT_SCAN, {}, 0) };
+      oldButJustClaimed.createdAt = new Date(Date.now() - 10 * 3_600_000);
+      await expect(scanRelay.deliver(oldButJustClaimed)).rejects.toBeInstanceOf(DeferError);
     });
 
     it.each([GRAPH_TASK.SHADOW_IT_SCAN, GRAPH_TASK.POSTURE_SYNC])(
@@ -135,11 +144,11 @@ describe('Graph task relays — deliver', () => {
       async (kind) => {
         const lock = kind === GRAPH_TASK.SHADOW_IT_SCAN ? GRAPH_LOCK.SHADOW_IT : GRAPH_LOCK.POSTURE;
         const { scanRelay } = make({ lockHeld: true });
+        await expect(scanRelay.deliver(row(kind, {}, lock.ttlMs - 60_000))).rejects.toBeInstanceOf(
+          DeferError,
+        );
         await expect(
-          scanRelay.deliver(row(kind, {}, ago(lock.ttlMs - 60_000))),
-        ).rejects.toBeInstanceOf(DeferError);
-        await expect(
-          scanRelay.deliver(row(kind, {}, ago(lock.ttlMs + LOCK_WAIT_MARGIN_MS + 60_000))),
+          scanRelay.deliver(row(kind, {}, lock.ttlMs + LOCK_WAIT_MARGIN_MS + 60_000)),
         ).rejects.toBeInstanceOf(NonRetryableError);
       },
     );
