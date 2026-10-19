@@ -224,6 +224,13 @@ module "stack" {
     deletion_protection      = true
     backup_retention_days    = 30
     monitoring_interval      = 0
+
+    // RELEASE WINDOW ONLY. PostgreSQL 17 -> 18 in place. Take the manual snapshot in
+    // docs/runbooks/postgres-18-upgrade.md FIRST. Flags return to false in the follow-up PR once
+    // the upgrade is verified. Do not merge outside the window: merge applies this change.
+    engine_version              = "18"
+    allow_major_version_upgrade = true
+    apply_immediately           = true
   }
 
   // On-demand, not Spot: an interruption here is user-visible. Tighter autoscale
