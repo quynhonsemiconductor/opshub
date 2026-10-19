@@ -49,9 +49,10 @@ export class ReportsService {
   /**
    * The reporting window for a request. The rows are stamped by the DATABASE's now() (the createdAt, submittedAt and
    * detectedAt defaults), so the default bounds come from that same clock, read once per request: `to` is the
-   * database's now() and `from` is thirty days before it. Bounds the caller supplies are used as given.
+   * database's now() and `from` is thirty days before it. Bounds the caller supplies are used as given. Every persisted
+   * timestamp in these windows is a database default (the Time rule, .github#29), so there is one clock to compare with.
    *
-   * Two clocks break this. A default taken from the application host can run behind the database, and then the newest
+   * Mixing clocks breaks this. A default taken from the application host can run behind the database, and then the newest
    * rows sort past `to` and drop out of their own report.
    */
   async resolveRange(from?: string, to?: string): Promise<{ from: Date; to: Date }> {
