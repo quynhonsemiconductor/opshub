@@ -38,7 +38,7 @@ import type {
   PerformanceReview,
 } from '../../domain/performance.types';
 import {
-  CancelReviewDto,
+  PerformanceCancelReviewDto,
   CoverageGapResponseDto,
   CoverageQueryDto,
   CreateCycleDto,
@@ -655,7 +655,7 @@ export class PerformanceController {
   @ApiCommonErrors(401, 403, 404, 412, 422)
   async cancel(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: CancelReviewDto,
+    @Body() dto: PerformanceCancelReviewDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<ReviewResponseDto> {
     return toReviewDto(await this.service.cancelReview(id, dto.reason, user));
