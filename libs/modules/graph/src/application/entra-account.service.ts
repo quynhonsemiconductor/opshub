@@ -5,6 +5,19 @@ import { employees } from '../../../../../db/schema';
 import { GraphClientService } from '../graph-client.service';
 import { MIN_LEASE_TO_MUTATE_MS } from '../graph-task';
 
+/**
+ * Milliseconds of lease left on a row, measured against the DATABASE's now() (the Time rule, .github#29), never the host's.
+ * NaN when the database gave no number. The instant is a bound parameter: drizzle's sql`` binds every interpolated value
+ * (only sql.raw inlines text), and the driver sends the Date with its UTC offset, so the ::timestamptz cast is exact
+ * whatever the session time zone is.
+ */
+export async function leaseLeftMs(db: DrizzleDB, leaseExpiresAt: Date): Promise<number> {
+  const left = await db.execute<{ left: number | string }>(
+    sql`SELECT extract(epoch FROM (${leaseExpiresAt}::timestamptz - now())) * 1000 AS left`,
+  );
+  return Number(left.rows[0]?.left);
+}
+
 /** Entra object ids are GUIDs. Anything else never reaches a URL. */
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -122,15 +135,15 @@ export class EntraAccountService {
    * the alarm, instead of being refunded for ever.
    */
   private async assertTimeToMutate(leaseExpiresAt: Date, employeeId: string): Promise<void> {
-    // The lease is the DATABASE's instant (locked_until, stamped from its own now()), so the time left is measured
-    // against the database's now(), never the host's (the Time rule, .github#29).
-    const left = await this.db.execute<{ left: number | string }>(
-      // The Date is BOUND as a parameter. A string here would be inlined as SQL text, not sent as a value.
-      sql`SELECT extract(epoch FROM (${leaseExpiresAt}::timestamptz - now())) * 1000 AS left`,
-    );
-    const remaining = Number(left.rows[0]?.left);
-    // Fails closed: an answer that is not a number (no lease, a failed read) is not enough lease.
-    if (!(remaining >= MIN_LEASE_TO_MUTATE_MS)) {
+    const remaining = await leaseLeftMs(this.db, leaseExpiresAt);
+    // Fails closed: an answer that is not a finite number (a failed read, no usable instant) is treated as no lease.
+    if (!Number.isFinite(remaining)) {
+      throw new Error(
+        `Account reconcile for employee ${employeeId}: the lease read returned no usable instant ` +
+          `(expected ms of lease left) — treating it as none, not starting a change`,
+      );
+    }
+    if (remaining < MIN_LEASE_TO_MUTATE_MS) {
       throw new Error(
         `Account reconcile for employee ${employeeId}: ${Math.max(0, Math.round(remaining / 1000))} s of ` +
           `lease left, less than a call needs (${MIN_LEASE_TO_MUTATE_MS / 1000} s) — not starting a change`,

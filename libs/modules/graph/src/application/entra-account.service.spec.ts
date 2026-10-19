@@ -292,6 +292,19 @@ describe('EntraAccountService.reconcile — will not START a change it may not f
     expect(query.queryChunks).toContain(lease);
   });
 
+  it('gives a read that returns no number its own message, not a measured "NaN s of lease left"', async () => {
+    const { service, execute, patch } = make([employee({ status: 'offboarded' })]);
+    execute.mockResolvedValueOnce({ rows: [] });
+
+    const err: unknown = await service
+      .reconcile('emp-1', new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS + 5_000))
+      .catch((e: unknown) => e);
+
+    expect((err as Error).message).toMatch(/no usable instant/);
+    expect((err as Error).message).not.toMatch(/NaN|\d+ s of\s+lease left/);
+    expect(patch).not.toHaveBeenCalled();
+  });
+
   it('proceeds when a full call deadline plus the margin remains', async () => {
     const { service, patch } = make([employee({ status: 'offboarded' })]);
     await service.reconcile('emp-1', new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS + 5_000));

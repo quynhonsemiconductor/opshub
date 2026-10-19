@@ -379,7 +379,14 @@ export abstract class AbstractOutboxRelay<
         attempts: o.attempts,
         lockedUntil: o.lockedUntil,
       } as never)) as Array<{ id: string; attempts: number; lockedUntil: Date }>;
-    const leaseExpiresAt = rows.length ? new Date(rows[0].lockedUntil) : new Date(0);
+    if (!rows.length) {
+      // The ids were selected FOR UPDATE inside this transaction, so no row should go untouched. If none did, a zero
+      // lease would hand every claimed row out already expired: fail the claim loudly instead (it rolls back).
+      throw new Error(
+        `${this.reapLabel()}: lease stamp touched none of ${ids.length} claimed row(s)`,
+      );
+    }
+    const leaseExpiresAt = new Date(rows[0].lockedUntil);
     return { attempts: new Map(rows.map((r) => [r.id, r.attempts])), leaseExpiresAt };
   }
 

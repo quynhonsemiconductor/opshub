@@ -246,6 +246,25 @@ function make() {
 const backoff = (relay: TestRelay, n: number) =>
   (relay as unknown as { backoffDelayMs(n: number): number }).backoffDelayMs(n);
 
+describe('AbstractOutboxRelay.stampLeases — an empty RETURNING fails the claim', () => {
+  it('throws instead of handing out rows with an invented, already-expired lease', async () => {
+    const { relay } = make();
+    // The UPDATE touched no row: the base implementation, not the test double's override, must refuse.
+    const tx = {
+      update: () => ({
+        set: () => ({ where: () => ({ returning: () => Promise.resolve([]) }) }),
+      }),
+    } as never;
+    const base = AbstractOutboxRelay.prototype as unknown as {
+      stampLeases(tx: DrizzleTx, ids: string[], token: string, holdMs: number): Promise<unknown>;
+    };
+
+    await expect(base.stampLeases.call(relay, tx, ['a', 'b'], 'token', 1_000)).rejects.toThrow(
+      /touched none of 2 claimed row/,
+    );
+  });
+});
+
 describe('AbstractOutboxRelay.backoffDelayMs()', () => {
   it('doubles the delay per attempt starting at 30s, capped at 30 minutes', () => {
     const { relay } = make();

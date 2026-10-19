@@ -14,6 +14,7 @@ import { GraphAccountRelayService } from '../../libs/modules/graph/src/applicati
 import { GRAPH_TASK } from '../../libs/modules/graph/src/graph-task';
 import * as schema from '../../db/schema';
 import type { DrizzleDB, DrizzleTx } from '@platform';
+import { leaseLeftMs } from '../../libs/modules/graph/src/application/entra-account.service';
 
 const { graphTaskOutbox } = schema;
 const HOUR = 60 * 60_000;
@@ -168,6 +169,22 @@ describe('outbox claims and leases on the database clock', () => {
 
     const row = (await db.select().from(graphTaskOutbox).where(eq(graphTaskOutbox.id, task.id)))[0];
     expect(row.status).toBe('sent');
+  });
+
+  it('reads the lease time left from the DATABASE through the real Graph lease SQL, whatever the host clock says', async () => {
+    const { rows } = await db.execute<{ at: Date }>(sql`select now() + interval '2 minutes' as at`);
+    const lease = rows[0].at;
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + HOUR);
+    try {
+      // The host is an hour ahead. Measured on the host this would be about -58 minutes; on the database it is about 2 minutes.
+      const left = await leaseLeftMs(db, lease);
+      expect(left).toBeGreaterThan(110_000);
+      expect(left).toBeLessThanOrEqual(120_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('schedules a retry on the database clock: a host an hour BEHIND does not make the retry due at once', async () => {
