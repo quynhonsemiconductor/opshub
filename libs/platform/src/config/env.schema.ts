@@ -42,7 +42,7 @@ const baseShape = {
   RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(200),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
-  CORS_ORIGINS: z.string().default('http://localhost:5173'),
+  CORS_ORIGINS: z.string().default('http://localhost:5174'),
 
   // ── Database ───────────────────────────────────────────────────────────────
   // Supply EITHER a complete DATABASE_URL (local dev, CI) OR the discrete parts
@@ -200,7 +200,7 @@ const baseShape = {
 
   // ── Frontend ───────────────────────────────────────────────────────────────
   /** Public base URL used to build links inside notification emails. */
-  APP_URL: z.string().url().default('http://localhost:5173'),
+  APP_URL: z.string().url().default('http://localhost:5174'),
 };
 
 /** What every role's schema shares. */
