@@ -100,6 +100,16 @@ function refuse(res: FastifyReply, resetAt: number): never {
   }
 }
 
+/** A pre-auth slot taken for one request, and whether it has been given back. */
+interface Reservation {
+  key: string;
+  id: string;
+  settled: boolean;
+}
+
+/** Where the pre-auth guard leaves its reservation for the rest of the request. */
+const PRE_AUTH_RESERVATION = Symbol('PRE_AUTH_RESERVATION');
+
 /** The RFC 6585 + draft-ietf-httpapi-ratelimit-headers values for the bucket that answered. */
 function setHeaders(res: FastifyReply, limit: number, remaining: number, resetAt: number): void {
   void res.header('RateLimit-Limit', limit);
@@ -177,19 +187,38 @@ export class RateLimitGuard implements CanActivate {
     const id = slot.id;
     if (id === undefined) return true;
 
+    // Held on the request, so the per-user guard can settle it as soon as identity has verified the caller.
+    const reservation: Reservation = { key, id, settled: false };
+    (req as unknown as Record<symbol, unknown>)[PRE_AUTH_RESERVATION] = reservation;
+
+    // A reply that finishes is settled here, unless it is a failed authentication (401), which keeps its slot. A reply
+    // that never finishes (an aborted socket, a streaming response) is settled by the per-user guard, or never.
     res.raw.once('finish', () => {
-      if (res.statusCode === 401) return; // a failed authentication keeps its slot
-      this.cache
-        .refundRateLimit(key, id)
-        .catch((err: unknown) =>
-          this.logger.error(
-            failOpenLog('rate_limit', { err, key }),
-            'RateLimitGuard: slot not refunded',
-          ),
-        );
+      if (reservation.settled) return;
+      reservation.settled = true;
+      if (res.statusCode === 401) return;
+      refundReservation(this.cache, this.logger, reservation);
     });
     return true;
   }
+}
+
+/** Gives a reserved slot back, once. A refund that fails is logged; the request has already been answered. */
+export function refundReservation(
+  cache: CacheService,
+  logger: Logger,
+  reservation: Reservation,
+): void {
+  if (reservation.settled) return;
+  reservation.settled = true;
+  cache
+    .refundRateLimit(reservation.key, reservation.id)
+    .catch((err: unknown) =>
+      logger.error(
+        failOpenLog('rate_limit', { err, key: reservation.key }),
+        'RateLimitGuard: slot not refunded',
+      ),
+    );
 }
 
 /**
@@ -231,6 +260,12 @@ export class UserRateLimitGuard implements CanActivate {
       req[KEYED_BY_ADDRESS] = true;
       return true;
     }
+
+    const req = context.switchToHttp().getRequest<Record<symbol, unknown>>();
+    // Identity has verified the caller, so the address slot taken before identity ran is no longer needed. Giving it
+    // back now (not when the reply finishes) keeps an open SSE stream or an aborted signed-in request from holding it.
+    const reservation = req[PRE_AUTH_RESERVATION] as Reservation | undefined;
+    if (reservation) refundReservation(this.cache, this.logger, reservation);
 
     const tierName = tierOf(this.reflector, context);
     const tier = RATE_LIMIT_TIERS[tierName] as RateLimitTier;

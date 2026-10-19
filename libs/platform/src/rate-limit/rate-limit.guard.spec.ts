@@ -117,17 +117,49 @@ function asUser<T>(userId: string, fn: () => T): T {
 }
 
 describe('RateLimitGuard (pre-auth, failed authentications per verified address)', () => {
-  it('reserves a slot before the request runs, and gives it back when a signed-in request finishes', async () => {
+  it('reserves a slot before the request runs, and gives it back as soon as identity has verified the caller', async () => {
     const cache = windowCache();
-    const guard = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const user = new UserRateLimitGuard(reflectorFor() as never, cache as never);
     const { context, finish } = contextFor({ cookies: { session_token: 'valid' } });
 
-    await guard.canActivate(context);
-    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(1); // held while the request is in flight
-    finish(200);
+    await pre.canActivate(context);
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(1); // held while identity verifies the session
+    await asUser('emp-1', () => user.canActivate(context));
 
-    expect(cache.refundRateLimit).toHaveBeenCalledTimes(1);
-    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(0); // a signed-in request leaves no trace
+    // Refunded before the reply finishes, so a stream that never finishes does not hold it.
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(0);
+    finish(200);
+    expect(cache.refundRateLimit).toHaveBeenCalledTimes(1); // and never twice
+  });
+
+  it('leaves a signed-in address bucket at zero however many streams stay open or requests abort', async () => {
+    // N open SSE streams (identity verified, reply never finishes) and aborted signed-in requests. Before the refund
+    // moved to identity verification these held one slot each until the window ran out.
+    const cache = windowCache();
+    const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const user = new UserRateLimitGuard(reflectorFor() as never, cache as never);
+
+    for (let i = 0; i < 500; i++) {
+      const { context, response } = contextFor({ cookies: { session_token: 'valid' } });
+      await pre.canActivate(context);
+      await asUser(`emp-${i % 3}`, () => user.canActivate(context));
+      if (i % 2 === 0) response.raw.emit('close'); // half abort; the other half are open streams
+    }
+
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(0);
+    expect(cache.refundRateLimit).toHaveBeenCalledTimes(500);
+  });
+
+  it('a request that never reaches identity and then aborts still holds its slot (a probe is counted)', async () => {
+    const cache = windowCache();
+    const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const { context, response } = contextFor({ cookies: { session_token: 'probe' } });
+
+    await pre.canActivate(context);
+    response.raw.emit('close');
+
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(1);
   });
 
   it('keeps the slot for a failed authentication (401), and never refunds it', async () => {
