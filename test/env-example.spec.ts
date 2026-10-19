@@ -149,6 +149,8 @@ describe('.env.example boots the API and the worker from one file', () => {
       'POSTGRES_HOST_PORT',
       'VALKEY_HOST_PORT',
       'LOCALSTACK_HOST_PORT',
+      'MAILPIT_SMTP_HOST_PORT',
+      'MAILPIT_UI_HOST_PORT',
       'OTEL_OTLP_HOST_PORT',
       'OTEL_METRICS_HOST_PORT',
       'WEB_DEV_PORT',
@@ -302,8 +304,9 @@ describe('.env.example holds no real secret and no foreign sender', () => {
     expect(env[key]).toBe('');
   });
 
-  it('sends mail from a domain this organisation owns (and, with the dev provider, sends none)', () => {
-    expect(env['EMAIL_PROVIDER']).toBe('dev');
+  it('sends mail from a domain this organisation owns, and locally only to Mailpit on this machine', () => {
+    expect(env['EMAIL_PROVIDER']).toBe('smtp');
+    expect(env['MAIL_SMTP_HOST']).toBe('localhost');
     expect(env['MAIL_FROM_EMAIL']).toMatch(/@qnsc\.vn$/);
   });
 });
@@ -374,6 +377,8 @@ const PORT_BLOCK = {
   LOCALSTACK_HOST_PORT: '4610',
   OTEL_OTLP_HOST_PORT: '4410',
   OTEL_METRICS_HOST_PORT: '8410',
+  MAILPIT_SMTP_HOST_PORT: '1110',
+  MAILPIT_UI_HOST_PORT: '8110',
   WEB_DEV_PORT: '5174',
   PORT: '3001',
 } as const;

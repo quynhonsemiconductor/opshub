@@ -637,3 +637,35 @@ describe('EnvSchema: EMAIL_PROVIDER=graph (Microsoft 365 mail)', () => {
     expect(WorkerEnvSchema.safeParse(workerEnv()).success).toBe(true);
   });
 });
+
+describe('EnvSchema — EMAIL_PROVIDER=smtp (Mailpit, development only)', () => {
+  const smtp = {
+    EMAIL_PROVIDER: 'smtp',
+    MAIL_SMTP_HOST: 'localhost',
+    MAIL_SMTP_PORT: '1110',
+    MAIL_FROM_EMAIL: 'noreply@qnsc.vn',
+  };
+
+  it('needs the relay host and port, and a sender', () => {
+    const missing = EnvSchema.safeParse(
+      env({ EMAIL_PROVIDER: 'smtp', MAIL_FROM_EMAIL: 'noreply@qnsc.vn' }),
+    );
+    expect(missing.success).toBe(false);
+    expect(
+      !missing.success && missing.error.issues.some((i) => i.path[0] === 'MAIL_SMTP_HOST'),
+    ).toBe(true);
+    expect(EnvSchema.safeParse(env(smtp)).success).toBe(true);
+  });
+
+  it('refuses the relay in production, whatever else is set', () => {
+    const result = EnvSchema.safeParse(env({ ...smtp, NODE_ENV: 'production' }));
+    expect(result.success).toBe(false);
+    expect(
+      !result.success && result.error.issues.some((i) => i.message.includes('development only')),
+    ).toBe(true);
+  });
+
+  it('rejects a port that is not a port', () => {
+    expect(EnvSchema.safeParse(env({ ...smtp, MAIL_SMTP_PORT: '70000' })).success).toBe(false);
+  });
+});
