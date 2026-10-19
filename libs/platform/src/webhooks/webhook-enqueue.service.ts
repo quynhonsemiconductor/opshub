@@ -3,6 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { newId } from '@shared-kernel';
 import { webhookSubscriptions, webhookDeliveries } from '../../../../db/schema';
 import type { DbExecutor } from '../database/drizzle.provider';
+import { notifyOutbox } from '../outbox/outbox-wake';
 
 /**
  * WebhookEnqueueService — used inside DB transactions to fan domain events out
@@ -20,11 +21,7 @@ export class WebhookEnqueueService {
    *
    * Silently no-ops if no subscriptions match.
    */
-  async fanout(
-    tx: DbExecutor,
-    eventType: string,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
+  async fanout(tx: DbExecutor, eventType: string, payload: Record<string, unknown>): Promise<void> {
     // PostgreSQL array containment: events @> ARRAY[eventType]::text[]
     const subs = await tx
       .select({ id: webhookSubscriptions.id })
@@ -49,5 +46,6 @@ export class WebhookEnqueueService {
         attempts: 0,
       })),
     );
+    await notifyOutbox(tx, 'webhook');
   }
 }

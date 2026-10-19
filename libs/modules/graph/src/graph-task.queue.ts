@@ -7,6 +7,7 @@ import {
   type DbExecutor,
   type DrizzleDB,
 } from '@platform';
+import { notifyOutbox } from '@platform';
 import { graphSyncState, graphTaskOutbox } from '../../../../db/schema';
 import {
   GRAPH_HEARTBEAT_PREFIX,
@@ -42,7 +43,9 @@ export class GraphTaskQueue {
       })
       .onConflictDoNothing()
       .returning({ id: graphTaskOutbox.id });
-    return rows.length > 0;
+    if (rows.length === 0) return false;
+    await notifyOutbox(tx ?? this.db, 'graph');
+    return true;
   }
 
   /**

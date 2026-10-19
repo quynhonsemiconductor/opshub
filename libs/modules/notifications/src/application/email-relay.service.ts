@@ -5,11 +5,10 @@
  * transaction management, and retry/fail logic.
  *
  * Adaptive polling:
- *   EmailSchedulerService.schedule() publishes an email:relay:wake signal to
- *   Redis immediately after writing to email_outbox.  onModuleInit() subscribes
- *   and calls super.relay() — delivery latency drops from ≤5s to ~ms.
+ *   EmailSchedulerService.schedule() sends a NOTIFY in the same transaction as the insert. OutboxWakeService
+ *   (worker only) calls relay() on it, so delivery does not wait for the 5s cron. The cron is the fallback.
  */
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
 import { DB_NOW, dbDelay, InjectDrizzle, Span } from '@platform';
@@ -20,7 +19,6 @@ import { getProcessRole } from '@platform/config/process-role';
 import { EmailService } from '@platform/email';
 import { EMAIL_SEND_TIMEOUT_MS } from '@platform/email';
 import type { EmailTemplateName, EmailTemplateVars } from '@platform/email';
-import { NotificationPubSubService } from '@platform/notifications';
 import { emailOutbox } from '../../../../../db/schema';
 
 /** Database round trips and scheduling slack on top of the send itself. */
@@ -38,19 +36,16 @@ type EmailOutboxRow = {
 @Injectable()
 export class EmailRelayService
   extends AbstractOutboxRelay<EmailOutboxRow, string | null>
-  implements OnModuleInit, OnModuleDestroy
+  implements OnModuleInit
 {
-  private unsubscribeRelayWake?: () => Promise<void>;
-
   constructor(
     @InjectDrizzle() db: DrizzleDB,
     private readonly emailService: EmailService,
-    private readonly pubSub: NotificationPubSubService,
   ) {
     super(db);
   }
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     /*
      * ONLY THE WORKER SENDS. The API writes outbox rows and publishes the wake signal; it holds no mail credential (its schema refuses the
      * Graph variables, and its task has no SES grant), so a relay pass in the API would try to send with none. Without this the API
@@ -63,15 +58,6 @@ export class EmailRelayService
     // Fail the deploy, not the first invitation, if the configured transport cannot work (a missing Graph variable).
     this.emailService.assertReady();
     this.logger.log('Email relay started — polling email_outbox every 5s');
-    this.unsubscribeRelayWake = await this.pubSub.subscribeEmailRelayWake(() => {
-      this.relay().catch((err: unknown) =>
-        this.logger.error({ err }, 'Email relay triggered by wake signal failed'),
-      );
-    });
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    await this.unsubscribeRelayWake?.();
   }
 
   @Cron('*/5 * * * * *', { name: 'email-relay' })

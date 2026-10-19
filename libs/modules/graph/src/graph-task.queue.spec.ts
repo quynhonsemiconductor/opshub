@@ -9,7 +9,11 @@ function makeDb(returning: unknown[]) {
     onConflictDoNothing: vi.fn().mockReturnThis(),
     returning: vi.fn().mockResolvedValue(returning),
   };
-  return { insert: vi.fn().mockReturnValue(chain), chain };
+  return {
+    insert: vi.fn().mockReturnValue(chain),
+    execute: vi.fn().mockResolvedValue(undefined),
+    chain,
+  };
 }
 
 describe('GraphTaskQueue', () => {
@@ -24,6 +28,9 @@ describe('GraphTaskQueue', () => {
 
     expect(tx.insert).toHaveBeenCalledWith(graphTaskOutbox);
     expect(root.insert).not.toHaveBeenCalled();
+    // The wake is in the same transaction, so it is delivered at its commit.
+    expect(tx.execute).toHaveBeenCalledTimes(1);
+    expect(root.execute).not.toHaveBeenCalled();
     // Keyed by employee, so two tasks for one person never overlap; never merged.
     expect(tx.chain.values).toHaveBeenCalledWith({
       kind: 'entra.account.reconcile',

@@ -6,10 +6,8 @@
  * transaction management, and retry/fail logic.
  *
  * Adaptive polling:
- *   NotificationSchedulerService.schedule() publishes a relay:wake signal to
- *   Redis immediately after writing to notification_outbox.  onModuleInit()
- *   subscribes and calls super.relay() directly — delivery latency drops from
- *   ≤5s (cron) to ~ms (wake signal).  The 5s cron is the catch-all fallback.
+ *   NotificationSchedulerService.schedule() sends a NOTIFY in the same transaction as the insert. OutboxWakeService
+ *   (worker only) calls relay() on it, so delivery does not wait for the 5s cron. The cron is the fallback.
  *
  * Post-commit SSE push:
  *   processRow() returns a PostCommitTask that publishes to Redis AFTER the
@@ -28,7 +26,7 @@
  *   dual write: the notification row is already `sent`, so a failure loses the email with nothing left
  *   pending to retry. Here a failure rolls the row back and the relay tries again.
  */
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
 import { DB_NOW, dbDelay, InjectDrizzle, Span } from '@platform';
@@ -58,10 +56,8 @@ type NotificationOutboxRow = {
 @Injectable()
 export class NotificationRelayService
   extends AbstractOutboxRelay<NotificationOutboxRow>
-  implements OnModuleInit, OnModuleDestroy
+  implements OnModuleInit
 {
-  private unsubscribeRelayWake?: () => Promise<void>;
-
   constructor(
     @InjectDrizzle() db: DrizzleDB,
     private readonly notificationsService: NotificationsService,
@@ -73,17 +69,8 @@ export class NotificationRelayService
     super(db);
   }
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     this.logger.log('Notification relay started — polling notification_outbox every 5s');
-    this.unsubscribeRelayWake = await this.pubSub.subscribeRelayWake(() => {
-      this.relay().catch((err: unknown) =>
-        this.logger.error({ err }, 'Notification relay triggered by wake signal failed'),
-      );
-    });
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    await this.unsubscribeRelayWake?.();
   }
 
   @Cron('*/5 * * * * *', { name: 'notification-relay' })
