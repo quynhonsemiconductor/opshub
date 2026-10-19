@@ -18,17 +18,16 @@ function setup(options: { isPublic?: boolean; session?: unknown } = {}) {
       key === IS_PUBLIC_KEY ? options.isPublic : undefined,
     ),
   };
-  const ctx = { setAuthContext: vi.fn() };
   const context = {
     switchToHttp: () => ({ getRequest: () => request }),
     getHandler: () => function handler() {},
     getClass: () => class Controller {},
   } as never;
-  const guard = new SessionAuthGuard(reflector as never, ctx as never);
+  const guard = new SessionAuthGuard(reflector as never);
   const log = vi.fn();
   (guard as unknown as { logger: Record<string, unknown> }).logger['error'] = log;
   (guard as unknown as { logger: Record<string, unknown> }).logger['warn'] = log;
-  return { guard, context, request, ctx, log };
+  return { guard, context, request, log };
 }
 
 const SESSION = {
@@ -68,7 +67,7 @@ describe('SessionAuthGuard', () => {
   });
 
   it('records the principal in the request context, which is what the rate limit and the access log read', () => {
-    const { guard, context, ctx } = setup({ session: SESSION });
+    const { guard, context } = setup({ session: SESSION });
     const store = {
       workspaceId: undefined,
       userId: undefined,
@@ -80,7 +79,6 @@ describe('SessionAuthGuard', () => {
     requestContextStorage.run(store, () => guard.canActivate(context));
 
     expect(store).toMatchObject({ userId: 'user-1', sessionId: 'session-1' });
-    expect(ctx.setAuthContext).not.toHaveBeenCalled();
   });
 
   it('logs once and still serves when there is no request context to record the principal in', () => {
@@ -92,14 +90,13 @@ describe('SessionAuthGuard', () => {
     expect(log).toHaveBeenCalledTimes(1);
   });
 
-  it('serves a verified request whose id the context refuses, and writes nothing unchecked for a non-uuid id', () => {
-    const { guard, context, ctx, log } = setup({
+  it('serves a verified request whose id the context refuses, writes no principal, and logs only the class', () => {
+    const { guard, context, log } = setup({
       session: { session: { id: 'session-1' }, user: { id: 'bad\u0001id', email: 'a', name: 'a' } },
     });
 
     expect(seeded(() => guard.canActivate(context))).toBe(true);
 
-    expect(ctx.setAuthContext).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('TypeError'));
   });
 
@@ -117,10 +114,9 @@ describe('SessionAuthGuard', () => {
   });
 
   it('lets a @Public() route through without a session, and sets no principal', () => {
-    const { guard, context, request, ctx } = setup({ isPublic: true });
+    const { guard, context, request } = setup({ isPublic: true });
 
     expect(guard.canActivate(context)).toBe(true);
     expect(request.user).toBeUndefined();
-    expect(ctx.setAuthContext).not.toHaveBeenCalled();
   });
 });
