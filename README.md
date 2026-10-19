@@ -111,14 +111,16 @@ pnpm dev:web --port 5174
 
 ### Run a second copy
 
-Two checkouts, or a branch you want to keep running beside your main one, need their own compose project and host ports. The
-compose file binds every port to `127.0.0.1` and reads it from `.env`, so nothing else changes. In `.env`:
+Two checkouts, or a branch you want to keep running beside your main one, need their own compose project, host ports, and
+API and web ports. Every port is bound to `127.0.0.1` and read from `.env`. In the second copy's `.env`:
 
-1. `COMPOSE_PROJECT_NAME=opshub-2` (any name; it prefixes the containers and volumes).
+1. `COMPOSE_PROJECT_NAME=opshub-2`: the containers, volumes and network take this prefix. Every checkout or worktree sets its own.
 2. Give each `*_HOST_PORT` a free number: `POSTGRES_HOST_PORT`, `VALKEY_HOST_PORT`, `LOCALSTACK_HOST_PORT`, `OTEL_OTLP_HOST_PORT`, `OTEL_METRICS_HOST_PORT`.
-3. Put the same Postgres, Valkey and LocalStack numbers into `DATABASE_URL`, `VALKEY_URL`, `STORAGE_ENDPOINT`, `AWS_ENDPOINT_URL` and the OTLP port into `OTEL_EXPORTER_OTLP_ENDPOINT`. The app reads URLs, not the `*_HOST_PORT` values.
+3. Put the same Postgres, Valkey and LocalStack numbers into `DATABASE_URL`, `VALKEY_URL`, `STORAGE_ENDPOINT`, `AWS_ENDPOINT_URL`, and the OTLP port into `OTEL_EXPORTER_OTLP_ENDPOINT`. The app reads URLs, not the `*_HOST_PORT` values.
+4. The API: `PORT` (the API's port; the SPA's proxy follows it).
+5. The web: `WEB_DEV_PORT` (the Vite port; LocalStack's bucket CORS follows it). Then `APP_URL=http://localhost:<WEB_DEV_PORT>` and `CORS_ORIGINS=http://localhost:<WEB_DEV_PORT>`, so sign-in redirects and the API's CORS match the new origin.
 
-Then run the same commands as above. If both copies run their SPA, follow the "Ports" section for the API and web origins.
+Then run the same commands as above. The Playwright config's `baseURL` is pinned to 5173, so `pnpm --filter opshub-web test:e2e` runs in one copy at a time.
 
 ### Useful
 
@@ -127,6 +129,7 @@ Then run the same commands as above. If both copies run their SPA, follow the "P
 - Mail is `EMAIL_PROVIDER=dev`: messages are written to the API log and not sent.
 - Uploads go to LocalStack's `opshub-files-dev` bucket; `aws --endpoint-url http://localhost:4567 s3 ls s3://opshub-files-dev` (any credentials).
 - Reset everything: `docker compose -f docker-compose.dev.yml down -v`, then `up -d --wait` and `pnpm db:migrate` again.
+- Upgrading an existing checkout (before `name: opshub`, or from a Postgres 18 stack): the Postgres 18 volume will not start on 17 (`initdb: directory exists but is not empty`). Run `docker compose -f docker-compose.dev.yml down -v` once in that checkout. The old containers were named `opshub-postgres`, `opshub-valkey`, `opshub-localstack` and `opshub-otel`, outside any project: remove them with `docker rm -f opshub-postgres opshub-valkey opshub-localstack opshub-otel`, or run `docker compose -p <old project dir> down -v` if you know the old project name. Do not share a project name between checkouts: `down -v` in one would wipe the other's data.
 - Tests: `pnpm test` (unit), `pnpm test:e2e` (needs the stack and a migrated, seeded database), `pnpm --filter opshub-web test:e2e` (Playwright, needs the API running).
 
 ## Build status

@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ApiEnvSchema, WorkerEnvSchema } from '@platform/config/env.schema';
@@ -64,20 +64,72 @@ function envAsSeenBy(script: string): Record<string, string> {
   return seen;
 }
 
+const unquote = (value: string) => value.trim().replace(/^(['"])(.*)\1$/, '$2');
+
 /**
- * The host port a compose service publishes for a container port, as `127.0.0.1:${VARIABLE:-default}:containerPort`.
- * The variable is the one `.env` overrides; the default is what `.env.example` has to carry.
+ * Every `ports:` entry of a compose service, as `host_ip:published:target` (short form unchanged, quotes removed, a bare
+ * `5432` stays bare). Handles the short syntax quoted (single or double) or unquoted, and the long syntax with
+ * `target:` / `published:` / `host_ip:` keys. A missing host_ip is kept empty so the loopback check fails on it.
  */
+function portEntries(service: string): string[] {
+  const lines = compose.split('\n');
+  const start = lines.indexOf(`  ${service}:`);
+  const entries: string[] = [];
+  if (start < 0) return entries;
+  const pending: Partial<Record<'host_ip' | 'published' | 'target', string>> = {};
+  let inLong = false;
+  let inPorts = false;
+  const flush = () => {
+    if (inLong)
+      entries.push(
+        [pending.host_ip ?? '', pending.published ?? '', pending.target ?? ''].join(':'),
+      );
+    inLong = false;
+    for (const key of Object.keys(pending) as (keyof typeof pending)[]) delete pending[key];
+  };
+  for (const raw of lines.slice(start + 1)) {
+    if (/^\S/.test(raw) || /^ {2}\w[\w-]*:\s*$/.test(raw)) break; // the next service or a top-level key
+    const line = raw.replace(/\s+#.*$/, '').trimEnd();
+    if (/^ {4}ports:\s*$/.test(line)) {
+      inPorts = true;
+      continue;
+    }
+    if (/^ {4}\S/.test(line)) {
+      flush();
+      inPorts = false;
+      continue;
+    }
+    if (!inPorts) continue;
+    const item = /^ {6}- (.*)$/.exec(line);
+    if (item) {
+      flush();
+      const body = item[1] ?? '';
+      const key = /^(host_ip|published|target):\s*(.*)$/.exec(body);
+      if (key) {
+        inLong = true;
+        pending[key[1] as 'host_ip'] = unquote(key[2] ?? '');
+      } else {
+        entries.push(unquote(body));
+      }
+      continue;
+    }
+    const nested = /^ {8}(host_ip|published|target):\s*(.*)$/.exec(line);
+    if (nested && inLong) pending[nested[1] as 'host_ip'] = unquote(nested[2] ?? '');
+  }
+  flush();
+  return entries;
+}
+
+/** The host port a compose service publishes for a container port, as `127.0.0.1:${VARIABLE:-default}:containerPort`. */
 function publishedPort(
   service: string,
   containerPort: number,
 ): { variable: string; port: string } | undefined {
-  const block = new RegExp(
-    `\\n  ${service}:\\n([\\s\\S]*?)(?=\\n  \\w[\\w-]*:\\n|\\nvolumes:|$)`,
-  ).exec(compose)?.[1];
-  const m = new RegExp(`'127\\.0\\.0\\.1:\\$\\{(\\w+):-(\\d+)\\}:${containerPort}'`).exec(
-    block ?? '',
-  );
+  const m = portEntries(service)
+    .map((entry) =>
+      new RegExp(`^127\\.0\\.0\\.1:\\$\\{(\\w+):-(\\d+)\\}:${containerPort}$`).exec(entry),
+    )
+    .find(Boolean);
   return m ? { variable: m[1] ?? '', port: m[2] ?? '' } : undefined;
 }
 
@@ -126,6 +178,7 @@ describe('.env.example boots the API and the worker from one file', () => {
       'LOCALSTACK_HOST_PORT',
       'OTEL_OTLP_HOST_PORT',
       'OTEL_METRICS_HOST_PORT',
+      'WEB_DEV_PORT',
       'SEED_ON_DEPLOY',
       'DATABASE_MIGRATION_URL',
       'DATABASE_APP_PASSWORD',
@@ -140,13 +193,15 @@ describe('.env.example boots the API and the worker from one file', () => {
 
 describe('.env.example agrees with the dev tooling', () => {
   it('serves the API on the port the Vite proxy forwards to', () => {
-    const targets = [...vite.matchAll(/target:\s*'http:\/\/localhost:(\d+)'/g)].map((m) => m[1]);
+    // Both proxies use one origin, built from PORT in the root .env (default 3001), which .env.example must set.
+    const proxies = (vite.match(/target: apiOrigin/g) ?? []).length;
     expect(
-      targets.length,
-      'no proxy targets found in apps/web/vite.config.ts',
+      proxies,
+      'the /v1 and /api/auth proxies do not both use apiOrigin',
     ).toBeGreaterThanOrEqual(2);
-    expect(new Set(targets).size, 'the /v1 and /api/auth proxies point at different ports').toBe(1);
-    expect(env['PORT']).toBe(targets[0]);
+    const fallback = /dotenv\.PORT \|\| (\d+)/.exec(vite)?.[1];
+    expect(fallback, 'no PORT fallback in apps/web/vite.config.ts').toBeDefined();
+    expect(env['PORT']).toBe(fallback);
   });
 
   it('points at the host ports docker-compose.dev.yml publishes, through the .env variable that sets each', () => {
@@ -166,10 +221,13 @@ describe('.env.example agrees with the dev tooling', () => {
     expect(publishedPort('otel', 8889)?.variable).toBe('OTEL_METRICS_HOST_PORT');
   });
 
-  it('publishes every host port on loopback only, never on the LAN', () => {
-    const published = [...compose.matchAll(/^\s+- '([^']+)'$/gm)].map((m) => m[1] ?? '');
+  it('publishes every host port on loopback only, whatever the syntax', () => {
+    const services = [...compose.matchAll(/^ {2}([\w-]+):\s*$/gm)].map((m) => m[1] ?? '');
+    const published = services.flatMap((service) =>
+      portEntries(service).map((e) => `${service}: ${e}`),
+    );
     expect(published.length).toBeGreaterThan(0);
-    expect(published.filter((p) => !p.startsWith('127.0.0.1:'))).toEqual([]);
+    expect(published.filter((p) => !/: 127\.0\.0\.1:/.test(p))).toEqual([]);
   });
 
   it('gives every compose port variable a default that matches .env.example', () => {
@@ -190,9 +248,20 @@ describe('.env.example agrees with the dev tooling', () => {
     expect(compose).toMatch(/image: valkey\/valkey:7\.2\.\d+-alpine/);
   });
 
-  it('nothing in CI or the README addresses a container by name, so both survive a second project', () => {
-    expect(read('.github/workflows/web-ci.yml')).not.toMatch(/docker (exec|logs|rm|stop) opshub-/);
-    expect(read('README.md')).not.toMatch(/docker (exec|logs|rm|stop) opshub-/);
+  it('names no fixed container anywhere a developer or CI reads, so a second project can run beside this one', () => {
+    const scripts = readdirSync(join(ROOT, 'scripts'), { recursive: true }) as string[];
+    // README.md is not in this list: its upgrade note names the old containers on purpose, to tell people to remove them.
+    const files = [
+      '.env.example',
+      '.github/workflows/web-ci.yml',
+      '.github/workflows/backend-ci.yml',
+      ...scripts
+        .filter((f) => statSync(join(ROOT, 'scripts', f)).isFile())
+        .map((f) => `scripts/${f}`),
+    ];
+    const named = /\bopshub-(postgres|valkey|localstack|otel)\b/;
+    for (const file of files)
+      expect(read(file), `${file} names a fixed container`).not.toMatch(named);
   });
 
   it('uses the bucket the LocalStack init hook creates and the compose healthcheck waits for', () => {
@@ -210,13 +279,14 @@ describe('.env.example agrees with the dev tooling', () => {
   });
 
   it('allows the browser origin the Vite server, LocalStack CORS and Playwright all use', () => {
-    const port = /port:\s*(\d+)/.exec(vite)?.[1];
+    const port = /WEB_DEV_PORT\)\s*\|\|\s*(\d+)/.exec(vite)?.[1];
     expect(port, 'apps/web/vite.config.ts does not pin its port').toBeDefined();
     const origin = `http://localhost:${port}`;
     expect(vite).toContain('strictPort: true');
     expect(env['APP_URL']).toBe(origin);
     expect(env['CORS_ORIGINS']).toBe(origin);
-    expect(bootstrap).toContain(`WEB_ORIGIN="${origin}"`);
+    expect(bootstrap).toContain(`WEB_ORIGIN="\${WEB_ORIGIN:-${origin}}"`);
+    expect(compose).toContain(`WEB_ORIGIN: http://localhost:\${WEB_DEV_PORT:-${port}}`);
     expect(read('apps/web/playwright.config.ts')).toContain(`baseURL: '${origin}'`);
   });
 });

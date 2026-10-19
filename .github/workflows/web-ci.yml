@@ -213,7 +213,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:17.11-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -226,7 +226,7 @@ jobs:
           --health-retries 10
 
       redis:
-        image: valkey/valkey:8.1.10-alpine
+        image: valkey/valkey:7.2.14-alpine
         ports: ['6379:6379']
         options: >-
           --health-cmd "valkey-cli ping"
@@ -252,7 +252,7 @@ jobs:
       # `waitForResponse` timeout rather than anything naming CORS. Reproduced by running both majors
       # side by side locally before changing this line.
       localstack:
-        image: localstack/localstack:4
+        image: localstack/localstack:4.14
         env:
           SERVICES: s3
           AWS_DEFAULT_REGION: ap-southeast-1

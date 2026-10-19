@@ -36,7 +36,7 @@ services:
       retries: 5
 
   localstack:
-    image: localstack/localstack:4.12
+    image: localstack/localstack:4.14
     environment:
       AWS_DEFAULT_REGION: ap-southeast-1
       PERSISTENCE: 1
@@ -44,6 +44,8 @@ services:
       # with even when the endpoint is an emulator that ignores them.
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
+      # The SPA origin the bucket's CORS allows (scripts/localstack/01-bootstrap.sh). Follows WEB_DEV_PORT in .env.
+      WEB_ORIGIN: http://localhost:${WEB_DEV_PORT:-5173}
     ports:
       # STORAGE_ENDPOINT and AWS_ENDPOINT_URL in .env must carry the same port.
       - '127.0.0.1:${LOCALSTACK_HOST_PORT:-4567}:4566'
