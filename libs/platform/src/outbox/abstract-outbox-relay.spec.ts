@@ -140,12 +140,13 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
     _tx: DrizzleTx,
     ids: string[],
     _token: string,
-    lockedUntil: Date,
-  ): Promise<Map<string, number>> {
+    holdMs: number,
+  ): Promise<{ attempts: Map<string, number>; leaseExpiresAt: Date }> {
     const map = new Map(ids.map((id) => [id, this.byId.get(id)!.attempts + 1]));
     this.stampedAttempts = map;
-    this.heldUntil.push(lockedUntil);
-    return Promise.resolve(map);
+    const leaseExpiresAt = new Date(Date.now() + holdMs);
+    this.heldUntil.push(leaseExpiresAt);
+    return Promise.resolve({ attempts: map, leaseExpiresAt });
   }
 
   /** The `locked_until` each claim stamped. */

@@ -11,7 +11,7 @@
  */
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, asc, eq, lt, lte } from 'drizzle-orm';
+import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
 import { InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
 import { AbstractOutboxRelay } from '@platform';
@@ -107,7 +107,7 @@ export class EmailRelayService
     return EMAIL_SEND_TIMEOUT_MS + EMAIL_LEASE_MARGIN_MS;
   }
 
-  protected async selectDue(tx: DrizzleTx, limit: number, now: Date): Promise<EmailOutboxRow[]> {
+  protected async selectDue(tx: DrizzleTx, limit: number, now: SQL): Promise<EmailOutboxRow[]> {
     return tx
       .select({
         id: emailOutbox.id,

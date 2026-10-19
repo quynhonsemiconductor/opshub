@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, asc, eq, inArray, lt, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
 import {
   AbstractOutboxRelay,
   DeferError,
@@ -107,7 +107,7 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
     return `${this.queueName}[${this.kinds.join(',')}]`;
   }
 
-  protected selectDue(tx: DrizzleTx, limit: number, now: Date): Promise<TaskRow[]> {
+  protected selectDue(tx: DrizzleTx, limit: number, now: SQL): Promise<TaskRow[]> {
     if (!this.graph.isEnabled()) return Promise.resolve([]);
     return tx
       .select({
@@ -133,7 +133,7 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
                AND other.id <> ${graphTaskOutbox.id}
                AND other.status = 'pending'
                AND (other.seq < ${graphTaskOutbox.seq}
-                    OR (other.lease_token IS NOT NULL AND other.locked_until > ${now.toISOString()}::timestamptz))
+                    OR (other.lease_token IS NOT NULL AND other.locked_until > ${now}))
           ))`,
         ),
       )

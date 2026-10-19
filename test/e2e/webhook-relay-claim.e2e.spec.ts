@@ -28,6 +28,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WebhookRelayService } from '../../libs/modules/webhooks/src/application/webhook-relay.service';
+import { DB_NOW } from '../../libs/platform/src/outbox/abstract-outbox-relay';
 import * as schema from '../../db/schema';
 import type { AppConfigService, DrizzleDB, DrizzleTx } from '@platform';
 
@@ -55,7 +56,7 @@ class CappedRelay extends WebhookRelayService {
 /** Exposes the protected claim query: the thing that was broken. */
 class ProbeRelay extends WebhookRelayService {
   probeClaim(tx: DrizzleTx, limit = 100) {
-    return this.selectDue(tx, limit, new Date());
+    return this.selectDue(tx, limit, DB_NOW);
   }
 }
 

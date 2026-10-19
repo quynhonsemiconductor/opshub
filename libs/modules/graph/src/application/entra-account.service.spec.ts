@@ -44,8 +44,27 @@ function make(reads: Array<Row | undefined>, directory: Record<string, unknown> 
   reads.forEach((r) => limit.mockResolvedValueOnce(r ? [r] : []));
   const chain = { from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit };
   select.mockReturnValue(chain);
-  const db = { select };
-  return { service: new EntraAccountService(graph as never, db as never), get, patch, post, limit };
+  // The lease check asks the DATABASE how much lease is left. The stub answers from the instant the query carries,
+  // measured on this host's clock as a stand-in for the database's (the stub has no database of its own).
+  const execute = vi.fn((q: { queryChunks: unknown[] }) =>
+    Promise.resolve({ rows: [{ left: leaseLeftFromSql(q) }] }),
+  );
+  const db = { select, execute };
+  return {
+    service: new EntraAccountService(graph as never, db as never),
+    get,
+    patch,
+    post,
+    limit,
+    execute,
+  };
+}
+
+/** The lease instant the check sent, as the stub's database reads it: the time left from now. */
+function leaseLeftFromSql(q: { queryChunks: unknown[] }): number {
+  // drizzle keeps a bound Date as the chunk itself.
+  const lease = q.queryChunks.find((chunk): chunk is Date => chunk instanceof Date);
+  return (lease as Date).getTime() - Date.now();
 }
 
 describe('EntraAccountService.reconcile — identity check', () => {
@@ -244,17 +263,32 @@ describe('EntraAccountService.reconcile — will not START a change it may not f
   });
 
   it('re-checks before the SECOND change: a slow disable must not be followed by a revoke that cannot finish', async () => {
-    const { service, patch, post } = make([employee({ status: 'offboarded' })]);
-    let calls = 0;
-    // Plenty of lease for the disable, then (after it) too little for the revoke.
-    const lease = {
-      getTime: () => (calls++ === 0 ? Date.now() + 150_000 : Date.now() + 5_000),
-    } as unknown as Date;
+    const { service, patch, post, execute } = make([employee({ status: 'offboarded' })]);
+    // Plenty of lease for the disable, then (after it) too little for the revoke: the DATABASE answers each time.
+    execute
+      .mockResolvedValueOnce({ rows: [{ left: 150_000 }] })
+      .mockResolvedValueOnce({ rows: [{ left: 5_000 }] });
 
-    await expect(service.reconcile('emp-1', lease)).rejects.toThrow(NOT_ENOUGH_LEASE);
+    await expect(service.reconcile('emp-1', LEASE_OK())).rejects.toThrow(NOT_ENOUGH_LEASE);
 
     expect(patch).toHaveBeenCalledTimes(1);
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('BINDS the lease instant to the lease query, never inlines it as SQL text', async () => {
+    // A timestamp string interpolated into a `sql` template is sent as raw SQL, and the query fails on the server.
+    // The lease instant must reach the database as a bound value: a Date chunk, and no ISO text in the SQL.
+    const { service, execute } = make([employee({ status: 'offboarded' })]);
+    const lease = new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS + 5_000);
+    await service.reconcile('emp-1', lease);
+
+    const query = execute.mock.calls[0][0];
+    const iso = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+    const inlinedText = query.queryChunks.filter(
+      (chunk): chunk is string => typeof chunk === 'string' && iso.test(chunk),
+    );
+    expect(inlinedText, 'an ISO timestamp was inlined into the SQL text').toEqual([]);
+    expect(query.queryChunks).toContain(lease);
   });
 
   it('proceeds when a full call deadline plus the margin remains', async () => {

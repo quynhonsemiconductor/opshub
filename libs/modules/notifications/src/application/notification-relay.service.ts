@@ -30,7 +30,7 @@
  */
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, asc, eq, lt, lte } from 'drizzle-orm';
+import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
 import { InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
 import { AbstractOutboxRelay } from '@platform';
@@ -116,7 +116,7 @@ export class NotificationRelayService
   protected async selectDue(
     tx: DrizzleTx,
     limit: number,
-    now: Date,
+    now: SQL,
   ): Promise<NotificationOutboxRow[]> {
     return tx
       .select({

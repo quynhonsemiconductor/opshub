@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { InjectDrizzle, NonRetryableError, type DrizzleDB } from '@platform';
 import { employees } from '../../../../../db/schema';
 import { GraphClientService } from '../graph-client.service';
@@ -89,10 +89,10 @@ export class EntraAccountService {
     await this.assertBelongsTo(employee.entraOid, employee.email, employeeId);
 
     if (employee.status === 'offboarded') {
-      this.assertTimeToMutate(leaseExpiresAt, employeeId);
+      await this.assertTimeToMutate(leaseExpiresAt, employeeId);
       await this.setEnabled(employee.entraOid, false);
       // Disabling stops NEW sign-ins; a refresh token already issued keeps working until revoked.
-      this.assertTimeToMutate(leaseExpiresAt, employeeId);
+      await this.assertTimeToMutate(leaseExpiresAt, employeeId);
       await this.revokeSessions(employee.entraOid);
       return;
     }
@@ -111,7 +111,7 @@ export class EntraAccountService {
       );
       return;
     }
-    this.assertTimeToMutate(leaseExpiresAt, employeeId);
+    await this.assertTimeToMutate(leaseExpiresAt, employeeId);
     await this.setEnabled(employee.entraOid, true);
   }
 
@@ -121,9 +121,16 @@ export class EntraAccountService {
    * here (its identity check always eats the lease) backs off, runs out of attempts and dead-letters with
    * the alarm, instead of being refunded for ever.
    */
-  private assertTimeToMutate(leaseExpiresAt: Date, employeeId: string): void {
-    const remaining = leaseExpiresAt.getTime() - Date.now();
-    if (remaining < MIN_LEASE_TO_MUTATE_MS) {
+  private async assertTimeToMutate(leaseExpiresAt: Date, employeeId: string): Promise<void> {
+    // The lease is the DATABASE's instant (locked_until, stamped from its own now()), so the time left is measured
+    // against the database's now(), never the host's (the Time rule, .github#29).
+    const left = await this.db.execute<{ left: number | string }>(
+      // The Date is BOUND as a parameter. A string here would be inlined as SQL text, not sent as a value.
+      sql`SELECT extract(epoch FROM (${leaseExpiresAt}::timestamptz - now())) * 1000 AS left`,
+    );
+    const remaining = Number(left.rows[0]?.left);
+    // Fails closed: an answer that is not a number (no lease, a failed read) is not enough lease.
+    if (!(remaining >= MIN_LEASE_TO_MUTATE_MS)) {
       throw new Error(
         `Account reconcile for employee ${employeeId}: ${Math.max(0, Math.round(remaining / 1000))} s of ` +
           `lease left, less than a call needs (${MIN_LEASE_TO_MUTATE_MS / 1000} s) — not starting a change`,
