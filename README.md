@@ -130,7 +130,7 @@ Then run the same commands as above. The Playwright config's `baseURL` is pinned
 
 - `pnpm db:seed` re-runs the demo fixtures; `pnpm db:studio` opens Drizzle Studio.
 - Telemetry: `docker compose -f docker-compose.dev.yml logs otel`, or `curl -s localhost:8410/metrics | grep queue_`. No collector? `OTEL_ENABLED=false` in `.env`.
-- Mail is `EMAIL_PROVIDER=dev`: messages are written to the API log and not sent.
+- Mail is `EMAIL_PROVIDER=smtp`: messages go to Mailpit at `http://localhost:8110` and nothing leaves the machine. With Mailpit down, sends fail and retry; `EMAIL_PROVIDER=dev` logs them instead.
 - Uploads go to LocalStack's `opshub-files-dev` bucket; `aws --endpoint-url http://localhost:4610 s3 ls s3://opshub-files-dev` (any credentials).
 - Reset everything: `docker compose -f docker-compose.dev.yml down -v`, then `up -d --wait` and `pnpm db:migrate` again.
 - Upgrading an existing checkout (before `name: opshub`, or from a Postgres 18 stack): the Postgres 18 volume will not start on 17 (`initdb: directory exists but is not empty`). Run `docker compose -f docker-compose.dev.yml down -v` once in that checkout; it removes only the volumes of the project that checkout runs (its `COMPOSE_PROJECT_NAME`, or `opshub`). The old containers were named `opshub-postgres`, `opshub-valkey`, `opshub-localstack` and `opshub-otel`, outside any project: remove them with `docker rm -f opshub-postgres opshub-valkey opshub-localstack opshub-otel`, or run `docker compose -p <old project dir> down -v` if you know the old project name. Do not share a project name between checkouts: `down -v` in one would wipe the other's data.

@@ -35,19 +35,23 @@ WEB_ORIGIN="${WEB_ORIGIN:-http://localhost:5174}"
 
 echo "[localstack-init] provisioning S3…"
 
-# create-bucket is not idempotent the way create-queue is: it returns
-# BucketAlreadyOwnedByYou on re-run, which `set -e` would otherwise treat as
-# fatal on every restart.
-aws_cmd s3api create-bucket \
-  --bucket "$BUCKET" \
-  --region "$REGION" \
-  --create-bucket-configuration "LocationConstraint=$REGION" \
-  >/dev/null 2>&1 || true
-aws_cmd s3api create-bucket \
-  --bucket "$E2E_BUCKET" \
-  --region "$REGION" \
-  --create-bucket-configuration "LocationConstraint=$REGION" \
-  >/dev/null 2>&1 || true
+# create-bucket answers BucketAlreadyOwnedByYou on a re-run, which is the normal state after a restart: that is success. Any other
+# failure stops the hook, so a LocalStack that did not finish creating its buckets never reports healthy.
+ensure_bucket() {
+  local name=$1 out
+  if out=$(aws_cmd s3api create-bucket --bucket "$name" --region "$REGION" \
+      --create-bucket-configuration "LocationConstraint=$REGION" 2>&1); then
+    echo "[localstack-init] created bucket $name"
+  elif grep -q -e BucketAlreadyOwnedByYou -e BucketAlreadyExists <<<"$out"; then
+    echo "[localstack-init] bucket $name already exists"
+  else
+    echo "$out" >&2
+    exit 1
+  fi
+}
+# The e2e bucket is the one scripts/e2e/run.sh and backend-ci use (E2E_BUCKET above).
+ensure_bucket "$BUCKET"
+ensure_bucket "$E2E_BUCKET"
 
 # CORS mirrors the rules the app-bucket module applies in real AWS.
 #

@@ -43,6 +43,12 @@ services:
       # MAIL_SMTP_PORT in .env must carry the SMTP port; the UI and API are on the UI port.
       - '127.0.0.1:${MAILPIT_SMTP_HOST_PORT:-1110}:1025'
       - '127.0.0.1:${MAILPIT_UI_HOST_PORT:-8110}:8025'
+    healthcheck:
+      # The image has wget and serves /readyz on the UI port once the SMTP listener is up.
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://localhost:8025/readyz']
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   localstack:
     image: localstack/localstack:4.14
