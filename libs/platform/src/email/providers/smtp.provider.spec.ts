@@ -53,6 +53,12 @@ describe('SmtpEmailProvider', () => {
     );
   });
 
+  it('derives the text part from the HTML when the caller sent none', async () => {
+    const { provider, send } = harness();
+    await provider.send({ ...payload, text: undefined });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ text: ' Hello ' }), {});
+  });
+
   it('refuses a message with no idempotency key before the transport is touched', async () => {
     const { provider, send } = harness();
     await expect(provider.send({ ...payload, idempotencyKey: '' })).rejects.toBeInstanceOf(
