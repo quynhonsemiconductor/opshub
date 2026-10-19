@@ -28,6 +28,8 @@ fi
 
 REGION="ap-southeast-1"
 BUCKET="opshub-files-dev"
+# The e2e suite's bucket (backend-ci uses the same name). Created here too, so a LocalStack restart does not drop it.
+E2E_BUCKET="opshub-files-test"
 # Vite dev-server origin — the SPA PUTs directly to the bucket from here.
 WEB_ORIGIN="${WEB_ORIGIN:-http://localhost:5174}"
 
@@ -38,6 +40,11 @@ echo "[localstack-init] provisioning S3…"
 # fatal on every restart.
 aws_cmd s3api create-bucket \
   --bucket "$BUCKET" \
+  --region "$REGION" \
+  --create-bucket-configuration "LocationConstraint=$REGION" \
+  >/dev/null 2>&1 || true
+aws_cmd s3api create-bucket \
+  --bucket "$E2E_BUCKET" \
   --region "$REGION" \
   --create-bucket-configuration "LocationConstraint=$REGION" \
   >/dev/null 2>&1 || true
