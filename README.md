@@ -94,12 +94,12 @@ org's "Local development" page (`.github`); the defaults here are the opshub col
 
 |                                    | opshub (this repo)  | rova (pending #742) | knowledge base |
 | ---------------------------------- | ------------------- | ------------------- | -------------- |
-| API                                | **3001**            | 3010        | 8000           |
-| SPA (Vite)                         | **5174**            | 5175        | 5173           |
-| Postgres                           | **5410**            | 5420        | 5432           |
-| Valkey                             | **6310**            | 6320        | 6379           |
-| LocalStack (S3)                    | **4610**            | 4620        | 4570           |
-| OTel collector (OTLP / Prometheus) | **4410** / **8410** | 4420 / 8420 | (none)         |
+| API                                | **3001**            | 3010                | 8000           |
+| SPA (Vite)                         | **5174**            | 5175                | 5173           |
+| Postgres                           | **5410**            | 5420                | 5432           |
+| Valkey                             | **6310**            | 6320                | 6379           |
+| LocalStack (S3)                    | **4610**            | 4620                | 4570           |
+| OTel collector (OTLP / Prometheus) | **4410** / **8410** | 4420 / 8420         | (none)         |
 
 The Vite server uses `strictPort`: a taken port fails the start instead of moving, because the Microsoft redirect (`APP_URL`) and the
 bucket's CORS are set for that origin. To use a different web port, set `WEB_DEV_PORT` and the `APP_URL` and `CORS_ORIGINS` that embed it.
