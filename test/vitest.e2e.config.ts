@@ -29,6 +29,11 @@ export default defineConfig({
      */
     env: {
       IDENTITY_TEST_LOGIN: 'enabled',
+      // Every e2e request comes from one loopback address, and the suite runs as a handful of seeded users, so the
+      // pre-auth ceiling and the DEFAULT tier are raised for the run. CI web e2e does the same (web-ci.yml). Production
+      // refuses both values above their defaults (env.schema.ts).
+      RATE_LIMIT_IP_LIMIT: '100000',
+      RATE_LIMIT_DEFAULT_LIMIT: '5000',
       BETTER_AUTH_SECRET:
         process.env['BETTER_AUTH_SECRET'] ?? 'e2e-better-auth-secret-minimum-32-chars!!',
     },
@@ -59,7 +64,7 @@ export default defineConfig({
     /**
      * Run spec FILES one at a time. These specs share ONE Postgres and ONE Valkey, and
      * vitest runs files in parallel workers by default — so two files can mutate
-     * overlapping rows, and both draw from the same per-IP `AUTH_LOGIN` bucket during their
+     * overlapping rows, and both draw from the same per-address pre-auth bucket during their
      * `beforeAll` logins. Both are cross-file interference, not real product flake. Serial
      * execution removes the class; tests within a file still run in order. Slower, but a
      * shared stateful backend cannot be driven in parallel without per-spec isolation,

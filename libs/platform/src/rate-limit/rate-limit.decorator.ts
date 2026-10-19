@@ -3,7 +3,7 @@ import { RATE_LIMIT_TIER, SKIP_RATE_LIMIT, type RateLimitTierName } from './rate
 
 /**
  * Override the rate-limit tier for a route or controller.
- * @example  @RateLimit('AUTH_LOGIN')
+ * @example  @RateLimit('AI')
  */
 export const RateLimit = (tier: RateLimitTierName) => SetMetadata(RATE_LIMIT_TIER, tier);
 

@@ -11,12 +11,27 @@
  *
  * Runs as a vitest `setupFiles` entry, i.e. before the spec imports anything.
  */
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /** What a worker legitimately needs, taken from the caller's environment when present (CI supplies the services). */
 const INHERIT = ['PATH', 'HOME', 'TMPDIR', 'DATABASE_URL', 'VALKEY_URL', 'REDIS_URL'] as const;
+
+/**
+ * A key from this checkout's `.env`, read before the environment is replaced. A second copy of the stack points DATABASE_URL
+ * and VALKEY_URL at its own ports there, so the fixture must follow that file rather than the first copy's defaults.
+ */
+function dotenvValue(key: string): string | undefined {
+  try {
+    const line = readFileSync(join(process.cwd(), '.env'), 'utf8')
+      .split('\n')
+      .find((l) => l.startsWith(`${key}=`));
+    return line?.slice(key.length + 1).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const inherited = Object.fromEntries(
   INHERIT.flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]])),
@@ -26,10 +41,10 @@ for (const key of Object.keys(process.env)) delete process.env[key];
 
 Object.assign(process.env, {
   // Local defaults, overridden by what the caller (CI) provides.
-  DATABASE_URL: 'postgres://opshub:opshub@localhost:5433/opshub',
+  DATABASE_URL: dotenvValue('DATABASE_URL') ?? 'postgres://opshub:opshub@localhost:5433/opshub',
   ...(inherited['VALKEY_URL'] || inherited['REDIS_URL']
     ? {}
-    : { VALKEY_URL: 'redis://localhost:6380' }),
+    : { VALKEY_URL: dotenvValue('VALKEY_URL') ?? 'redis://localhost:6380' }),
   ...inherited,
   NODE_ENV: 'production', // pinned to production in every deployed environment, on purpose
   DEPLOYMENT_ENV: 'develop',

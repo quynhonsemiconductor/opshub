@@ -366,9 +366,12 @@ describe('overlap and ordering, against PostgreSQL', () => {
      */
     const client = await pool.connect();
     await client.query('BEGIN');
+    // next_attempt_at is set from the HOST clock, like every other row here (see DUE): the column default is the
+    // database's now(), which runs a few milliseconds ahead, and a row inserted that moment is not yet due.
     const { rows } = await client.query<{ id: string }>(
-      `INSERT INTO messaging.graph_task_outbox (kind, payload, ordering_key)
-       VALUES ('entra.account.reconcile', '{"employeeId":"e-race"}', 'e-race') RETURNING id`,
+      `INSERT INTO messaging.graph_task_outbox (kind, payload, ordering_key, next_attempt_at)
+       VALUES ('entra.account.reconcile', '{"employeeId":"e-race"}', 'e-race', $1) RETURNING id`,
+      [DUE()],
     );
     const t1 = rows[0].id; // seq allocated, NOT visible yet
     const t2 = (await insertTask('e-race')).id; // higher seq, committed
