@@ -1,0 +1,2 @@
+# PG 16 -> 18 major upgrade (this PR). Remove this line after the upgrade is verified.
+module.stack.module.rds.aws_db_parameter_group.this[0]  -- pg18 major upgrade: postgres16 parameter group replaced by postgres18 (create_before_destroy); PR in this branch
