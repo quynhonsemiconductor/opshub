@@ -81,7 +81,16 @@ describe('the overtime summary', () => {
     );
     expect(reviewed.status, JSON.stringify(reviewed.body)).toBe(201);
 
-    const res = await apiRequest(app, reader, 'GET', '/reports/workforce/overtime');
+    // The window's end is the HOST clock at request time, and createdAt is the DATABASE's now(), a few milliseconds
+    // ahead (see outbox-lease's DUE). An entry logged a moment before the request can then sort just past `to` and
+    // drop out of its bucket. The window is widened by an hour on the right: the test asserts buckets, not the period.
+    const to = new Date(Date.now() + 60 * 60_000).toISOString();
+    const res = await apiRequest(
+      app,
+      reader,
+      'GET',
+      `/reports/workforce/overtime?to=${encodeURIComponent(to)}`,
+    );
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     const rows = unwrap<{ rows: OvertimeRow[] }>(res.body).rows;
 
