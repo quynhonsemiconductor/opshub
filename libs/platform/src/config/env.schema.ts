@@ -161,7 +161,11 @@ const baseShape = {
    * `dev` logs to the console and sends nothing, which is the default so that a fresh checkout needs no
    * mail setup at all.
    */
-  EMAIL_PROVIDER: z.enum(['dev', 'graph', 'resend', 'ses']).default('dev'),
+  EMAIL_PROVIDER: z.enum(['dev', 'graph', 'resend', 'ses', 'smtp']).default('dev'),
+  /** SMTP relay host for EMAIL_PROVIDER=smtp: Mailpit (`localhost` on the host, `mailpit` in a container). Development only. */
+  MAIL_SMTP_HOST: emptyToUndefined(z.string().min(1).optional()),
+  /** SMTP relay port for EMAIL_PROVIDER=smtp: Mailpit's SMTP port (1025 in the container). */
+  MAIL_SMTP_PORT: emptyToUndefined(z.coerce.number().int().min(1).max(65535).optional()),
   /**
    * The shared mailbox mail goes out as (`noreply-opshub@qnsc.vn`). Required for `graph`. Not a secret.
    * Graph sends as this mailbox and no other; the display name is the mailbox's own, so `MAIL_FROM_NAME`
@@ -253,6 +257,22 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
         message:
           'MAIL_GRAPH_SENDER is required when EMAIL_PROVIDER is "graph": it is the shared mailbox Graph sends as ' +
           '(noreply-opshub@qnsc.vn), and the Exchange role assignment names exactly that mailbox.',
+      });
+    }
+    if (env.EMAIL_PROVIDER === 'smtp' && env.NODE_ENV === 'production') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['EMAIL_PROVIDER'],
+        message:
+          'EMAIL_PROVIDER=smtp is for development only (Mailpit): an unauthenticated relay must never send in production. Use graph.',
+      });
+    }
+    if (env.EMAIL_PROVIDER === 'smtp' && (!env.MAIL_SMTP_HOST || !env.MAIL_SMTP_PORT)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['MAIL_SMTP_HOST'],
+        message:
+          'MAIL_SMTP_HOST and MAIL_SMTP_PORT are required when EMAIL_PROVIDER is "smtp" (Mailpit: localhost and 1110 on the host, mailpit and 1025 in a container).',
       });
     }
     if (env.EMAIL_PROVIDER !== 'dev' && env.EMAIL_PROVIDER !== 'graph' && !env.MAIL_FROM_EMAIL) {
