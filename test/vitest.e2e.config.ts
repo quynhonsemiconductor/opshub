@@ -7,10 +7,16 @@ import swc from 'unplugin-swc';
 // Load .env before this config — and the AppModule it boots — reads process.env. Node does
 // not auto-load .env files, and nothing else in the e2e path did, so ConfigModule's Zod
 // validation failed on any machine without these already exported in the shell.
-try {
-  process.loadEnvFile('.env');
-} catch {
-  /* no .env file — CI injects the vars directly */
+// E2E_ENV_FILE names an isolated stack's env (scripts/e2e/run.sh writes it). A name that does not exist fails here, loudly: a
+// misspelled path must not fall back to the developer's .env. Only the default .env may be absent (CI injects the vars directly).
+if (process.env.E2E_ENV_FILE) {
+  process.loadEnvFile(process.env.E2E_ENV_FILE);
+} else {
+  try {
+    process.loadEnvFile('.env');
+  } catch {
+    /* no .env file — CI injects the vars directly */
+  }
 }
 
 // E2E config: runs the real AppModule against a real Postgres + Valkey.

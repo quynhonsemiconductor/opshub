@@ -111,6 +111,23 @@ which follows `WEB_DEV_PORT`.)
 re-copy the port keys from `.env.example`: `WEB_DEV_PORT`, `PORT`, `CORS_ORIGINS`, `APP_URL`, the `*_HOST_PORT` keys, and the URLs
 that embed them (`DATABASE_URL`, `REDIS_URL`, `STORAGE_ENDPOINT`, `AWS_ENDPOINT_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`).
 
+### Isolated e2e run
+
+The e2e suite writes to the database and cache it points at, so it never runs on a dev stack, and two runs never share a stack.
+`scripts/e2e/run.sh` starts the services under its own compose project with **ephemeral loopback ports** (Docker picks them; no
+fixed host port is used), finds them with `docker compose port`, writes a per-run env file (`.env.e2e.<project>`, removed on exit),
+migrates and resets the database, runs the suite, and removes the stack and its volumes.
+
+```bash
+scripts/e2e/run.sh                                     # the whole e2e suite
+scripts/e2e/run.sh test/e2e/employee-email-case.e2e.spec.ts   # or the files you name
+E2E_PROJECT=opshub-e2e-alice scripts/e2e/run.sh        # a name for this run (default: random)
+E2E_KEEP=1 scripts/e2e/run.sh                          # keep the stack up; the run prints how to remove it
+```
+
+The run refuses to start when its project already has containers. A misspelled `E2E_ENV_FILE` fails the suite at load time rather
+than falling back to `.env`.
+
 ### Run a second copy
 
 Two checkouts, or a branch you want to keep running beside your main one, need their own compose project, host ports, and
