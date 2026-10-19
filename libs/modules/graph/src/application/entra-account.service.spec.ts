@@ -275,9 +275,10 @@ describe('EntraAccountService.reconcile — will not START a change it may not f
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('BINDS the lease instant to the lease query, never inlines it as SQL text', async () => {
-    // A timestamp string interpolated into a `sql` template is sent as raw SQL, and the query fails on the server.
-    // The lease instant must reach the database as a bound value: a Date chunk, and no ISO text in the SQL.
+  it('passes the lease instant to the lease query as a bound Date value, not as SQL text', async () => {
+    // drizzle's sql`` binds EVERY interpolated value, a string included; only sql.raw() inlines text. So the premise is
+    // the Date itself: the driver sends it with its UTC offset, and the ::timestamptz cast reads it exactly. The check
+    // below is that the instant is a value chunk, and that no ISO timestamp text sits in the SQL.
     const { service, execute } = make([employee({ status: 'offboarded' })]);
     const lease = new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS + 5_000);
     await service.reconcile('emp-1', lease);

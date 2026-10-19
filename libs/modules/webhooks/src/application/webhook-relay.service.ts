@@ -91,7 +91,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
         and(
           eq(webhookDeliveries.status, 'pending'),
           lt(webhookDeliveries.createdAt, cutoff),
-          or(isNull(webhookDeliveries.lockedUntil), lte(webhookDeliveries.lockedUntil, sql`now()`)),
+          or(isNull(webhookDeliveries.lockedUntil), lte(webhookDeliveries.lockedUntil, DB_NOW)),
         ),
       )
       .orderBy(asc(webhookDeliveries.seq), asc(webhookDeliveries.id))
@@ -161,7 +161,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     // THE AGE LIMIT AGAIN, on the claim itself. `beforeSelect` expires at most `expirePerClaim` rows, so with a bigger
     // backlog the rest are still over-age here; without this predicate they would be claimed and SENT in this very pass.
     // The cutoff is the one `beforeSelect` used for this claim (or, for a caller that skipped it, derived from `now`).
-    const cutoff = this.claimCutoff ?? sql`now() - make_interval(hours => ${this.maxAgeHours})`;
+    const cutoff = this.claimCutoff ?? sql`${DB_NOW} - make_interval(hours => ${this.maxAgeHours})`;
     this.claimCutoff = null;
     return tx
       .select({

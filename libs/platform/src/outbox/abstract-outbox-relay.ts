@@ -147,9 +147,10 @@ export interface OutboxLeaseTable {
 export type Claimed<TRow> = TRow & {
   leaseToken: string;
   /**
-   * When this relay's lease on the row lapses, as the DATABASE stamped it (its now() plus the lease), as of the last
-   * renewal. Compare it with the database's now() (never the host's): a delivery that is about to make a call it cannot
-   * take back must check, in SQL, that enough of the lease remains for the call to finish.
+   * When this relay's lease on the row lapses, as the DATABASE stamped it (statement_timestamp() plus the lease — see
+   * {@link leaseDelay}; not now(), which is the transaction's start), as of the last renewal. Compare it with the
+   * database's now() (never the host's): a delivery that is about to make a call it cannot take back must check, in
+   * SQL, that enough of the lease remains for the call to finish.
    */
   leaseExpiresAt: Date;
 };
@@ -364,7 +365,7 @@ export abstract class AbstractOutboxRelay<
     holdMs: number,
   ): Promise<{ attempts: Map<string, number>; leaseExpiresAt: Date }> {
     const o = this.outbox;
-    // The lease is stamped by the database: its now() plus the hold, returned so the relay works from the same instant.
+    // The lease is stamped by the database: statement_timestamp() plus the hold, returned so the relay works from the same instant.
     const rows = (await tx
       .update(o.table)
       .set({
@@ -481,8 +482,9 @@ export abstract class AbstractOutboxRelay<
       }
 
       await this.beforeSelect(tx);
-      // The database's now(), read inside the claim's own SQL: AFTER beforeSelect, so a relay that serializes its
-      // claims and waited for the lock does not judge due-ness or leases from before the wait.
+      // now() is the TRANSACTION's start, not the statement's: a relay whose beforeSelect waited for a serialization lock
+      // judges due-ness from BEFORE that wait. That is conservative: a row that became due (or whose lease lapsed) during
+      // the wait is left for the next pass. The leases this claim stamps use statement_timestamp() (leaseDelay), after it.
       const rows = await this.selectDue(tx, this.batchSize, DB_NOW);
       if (!rows.length) return [];
 
