@@ -40,7 +40,7 @@ export default defineConfig({
   reporter: [['list']],
   globalSetup: './e2e/global-setup.ts',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:5174',
     // Written by global-setup: the session cookie, so every spec starts signed in.
     storageState: AUTH_STATE,
     trace: 'retain-on-failure',
@@ -61,8 +61,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm dev --port 5173',
-    url: 'http://localhost:5173',
+    command: 'pnpm dev --port 5174',
+    url: 'http://localhost:5174',
     reuseExistingServer: true,
     timeout: 60_000,
   },

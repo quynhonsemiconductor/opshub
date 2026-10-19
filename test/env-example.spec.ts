@@ -363,3 +363,30 @@ describe('CI runs the same images as the dev stack', () => {
     },
   );
 });
+
+/**
+ * The host ports every product owns, as published in the "Local development" page of .github. Each product's compose
+ * defaults and .env.example must equal this block, so the three stacks run side by side without a clash.
+ */
+const PORT_BLOCK = {
+  POSTGRES_HOST_PORT: '5410',
+  VALKEY_HOST_PORT: '6310',
+  LOCALSTACK_HOST_PORT: '4610',
+  OTEL_OTLP_HOST_PORT: '4410',
+  OTEL_METRICS_HOST_PORT: '8410',
+  WEB_DEV_PORT: '5174',
+  PORT: '3001',
+} as const;
+
+describe('the port block is the one the .github table publishes', () => {
+  it.each(Object.entries(PORT_BLOCK))('%s defaults to %s in .env.example', (key, value) => {
+    expect(env[key]).toBe(value);
+  });
+
+  it('the compose defaults match the same block', () => {
+    for (const [key, value] of Object.entries(PORT_BLOCK)) {
+      if (key === 'PORT') continue;
+      expect(compose).toContain('${' + key + ':-' + value + '}');
+    }
+  });
+});
