@@ -47,7 +47,7 @@ let hr: Session;
 /**
  * Holds `*`, so it can decide any request regardless of type.
  *
- * Logged in once here rather than inside the tests that need it: `AUTH_LOGIN` is rate limited, and a
+ * Logged in once here rather than inside the tests that need it: logins share a per-address bucket, and a
  * suite that logs the same identity in from three places starts failing on a 429 that has nothing to do
  * with what it is testing.
  */

@@ -297,6 +297,7 @@ jobs:
       # The env schema REFUSES this value above 200 when NODE_ENV=production, so it cannot become a dial
       # in a deployed environment — see `env.schema.ts` and its spec.
       RATE_LIMIT_DEFAULT_LIMIT: '5000'
+      RATE_LIMIT_IP_LIMIT: '100000'
       LOG_LEVEL: warn
       OTEL_ENABLED: 'false'
       # Object storage points at LocalStack. `STORAGE_ENDPOINT` and not `AWS_ENDPOINT_URL`:
