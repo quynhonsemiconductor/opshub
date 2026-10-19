@@ -390,3 +390,57 @@ describe('the port block is the one the .github table publishes', () => {
     }
   });
 });
+
+describe('every place the port block is written agrees with the table', () => {
+  // The web origin and the API's ports are written in more places than .env.example: each of these must follow the table,
+  // or a sign-in breaks in one of them only (the e2e job once sent test logins from a 5173 origin the API did not trust).
+  const web = PORT_BLOCK.WEB_DEV_PORT;
+  const origin = `http://localhost:${web}`;
+
+  it('the Vite fallback port is the table port', () => {
+    expect(read('apps/web/vite.config.ts')).toMatch(new RegExp(`WEB_DEV_PORT\\) \\|\\| ${web}\\b`));
+  });
+
+  it('the LocalStack bucket CORS default is the table origin', () => {
+    expect(bootstrap).toContain(`WEB_ORIGIN="\${WEB_ORIGIN:-${origin}}"`);
+  });
+
+  it('the schema defaults for CORS_ORIGINS and APP_URL are the table origin', () => {
+    const schema = read('libs/platform/src/config/env.schema.ts');
+    expect(schema).toContain(`CORS_ORIGINS: z.string().default('${origin}')`);
+    expect(schema).toContain(`APP_URL: z.string().url().default('${origin}')`);
+  });
+
+  it('Playwright drives the table origin, and starts the dev server on the table port', () => {
+    const playwright = read('apps/web/playwright.config.ts');
+    expect(playwright).toContain(`baseURL: '${origin}'`);
+    expect(playwright).toContain(`'pnpm dev --port ${web}'`);
+    expect(playwright).toContain(`url: '${origin}'`);
+  });
+
+  it.each([
+    'apps/web/e2e/global-setup.ts',
+    'apps/web/e2e/sign-in-out.e2e.ts',
+    'apps/web/e2e/support/fixtures.ts',
+  ])('%s sends its requests to the table origin', (file) => {
+    const text = read(file);
+    expect(text).not.toContain('localhost:5173');
+    expect(text).toContain(origin);
+  });
+
+  it('the vitest config uses the table origin for CORS', () => {
+    expect(read('vitest.config.ts')).toContain(`CORS_ORIGINS: '${origin}'`);
+  });
+
+  it('the worker fixture defaults are the table database and cache', () => {
+    const fixture = read('test/logging/worker-env.fixture.ts');
+    expect(fixture).toContain(`localhost:${PORT_BLOCK.POSTGRES_HOST_PORT}/opshub`);
+    expect(fixture).toContain(`redis://localhost:${PORT_BLOCK.VALKEY_HOST_PORT}`);
+  });
+
+  it('the CI e2e job tells the API its web origin (sign-in trusts APP_URL only)', () => {
+    const ci = read('.github/workflows/web-ci.yml');
+    expect(ci).toMatch(new RegExp(`APP_URL: ${origin}\\b`));
+    expect(ci).toMatch(new RegExp(`CORS_ORIGINS: ${origin}\\b`));
+  });
+});

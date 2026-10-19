@@ -281,6 +281,9 @@ jobs:
       COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
       CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
       CORS_ORIGINS: http://localhost:5174
+      # Better Auth trusts only APP_URL for sign-in: without it the API falls back to the schema default and every test login
+      # is refused with INVALID_ORIGIN.
+      APP_URL: http://localhost:5174
       # 3001, because apps/web/vite.config.ts proxies /v1 there. A different port here means
       # every request 502s through the proxy and every spec fails on its first assertion.
       PORT: '3001'

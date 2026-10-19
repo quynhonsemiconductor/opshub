@@ -23,7 +23,7 @@ export default defineConfig({
       DATABASE_URL: 'postgresql://test:test@localhost:5432/opshub_test',
       // identity 8 signs and encrypts with this; test-only value (the schema wants >= 32 characters).
       BETTER_AUTH_SECRET: 'test-better-auth-secret-minimum-32-chars!',
-      CORS_ORIGINS: 'http://localhost:5173',
+      CORS_ORIGINS: 'http://localhost:5174',
       LOG_LEVEL: 'fatal',
       LOG_PRETTY: 'false',
       LOG_SQL: 'false',
