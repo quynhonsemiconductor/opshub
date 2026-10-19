@@ -44,7 +44,9 @@ export class EmailSchedulerService {
         status: 'pending',
         idempotencyKey: opts?.idempotencyKey ?? null,
         recipientId: opts?.recipientId ?? null,
-        scheduledAt: opts?.scheduledAt ?? new Date(),
+        // Omitted unless the caller has a time to keep: the column default is the database's now() (the Time rule,
+        // .github#29). The relay claims with the database's now() too.
+        scheduledAt: opts?.scheduledAt,
       })
       /*
        * THE INDEX IS PARTIAL, so the conflict target must carry its predicate.
