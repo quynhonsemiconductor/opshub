@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { RequestContextService, setRequestPrincipal } from '@quynhonsemiconductor/observability';
+import { setRequestPrincipal } from '@quynhonsemiconductor/observability';
 import { IS_PUBLIC_KEY } from './decorators';
 import type { JwtPayload } from './principal';
 
@@ -21,9 +21,6 @@ interface RequestWithSession {
 
 /** Set once per process: the request context is missing, so every later request would log the same line. */
 let loggedNoRequestContext = false;
-
-/** identity ids are uuid (`identity.user.id`, `identity.session.id`); anything else is not written unchecked. */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Authentication for opshub's routes, on top of identity 8.
@@ -43,10 +40,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export class SessionAuthGuard implements CanActivate {
   private readonly logger = new Logger(SessionAuthGuard.name);
 
-  constructor(
-    private readonly reflector: Reflector,
-    private readonly ctx: RequestContextService,
-  ) {}
+  constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -80,8 +74,8 @@ export class SessionAuthGuard implements CanActivate {
    * `setRequestPrincipal` returns false when nothing seeded a request context (`CORRELATION_ID_MODE=disabled`).
    * Then the rate limit keys this caller by session and the access log has no `userId`, and nothing else says
    * so, so it is logged once per process. It throws for a value that is not a plain id (control characters,
-   * too long). The request is already verified, so it is served anyway. The value is written unchecked only when
-   * both ids are uuids, as identity issues them; otherwise nothing is written and only the error class is logged.
+   * too long). The request is already verified, so it is served anyway. Nothing is written in that case, and only the
+   * error class is logged: identity ids are uuids, which always pass the check, so a refusal is not an identity id.
    */
   private recordPrincipal(userId: string, sessionId: string): void {
     try {
@@ -95,8 +89,6 @@ export class SessionAuthGuard implements CanActivate {
       this.logger.warn(
         `SessionAuthGuard: platform-http refused the principal (${err instanceof Error ? err.name : 'unknown'})`,
       );
-      if (UUID.test(userId) && UUID.test(sessionId))
-        this.ctx.setAuthContext(undefined, userId, sessionId);
     }
   }
 }

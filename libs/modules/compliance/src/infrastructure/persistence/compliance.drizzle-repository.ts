@@ -107,7 +107,9 @@ export class ComplianceDrizzleRepository implements IComplianceRepository {
         softwareVersion: input.softwareVersion ?? null,
         severity: input.severity,
         source: input.source,
-        detectedAt: input.detectedAt ?? new Date(),
+        // Left undefined unless the caller has a timestamp to keep: an omitted column takes the database's now(), the
+        // single time authority (the Time rule, .github#29).
+        detectedAt: input.detectedAt,
       })
       .returning();
     return row;

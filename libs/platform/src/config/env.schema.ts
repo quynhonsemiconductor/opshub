@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getProcessRole, type ProcessRole } from './process-role';
+import { PRE_AUTH_IP_BUCKET } from '../rate-limit/rate-limit.constants';
 
 const booleanish = (defaultValue: boolean) =>
   z
@@ -32,6 +33,12 @@ const baseShape = {
    * `NODE_ENV=production`, so this is a test-environment accommodation and not a control with a dial on
    * it. Lowering it is always allowed.
    */
+  /**
+   * The pre-auth ceiling per client address (the first bucket every request passes through). The default is the
+   * shipped `PRE_AUTH_IP_BUCKET` limit. CI's e2e suites drive every request from one loopback address, so they
+   * raise it; `NODE_ENV=production` refuses a value above the default, so it is not a dial in a deployed environment.
+   */
+  RATE_LIMIT_IP_LIMIT: z.coerce.number().int().positive().default(PRE_AUTH_IP_BUCKET.limit),
   RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(200),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
@@ -208,6 +215,17 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
     // A RATE LIMIT TESTS CAN RAISE IS NOT A CONTROL. The knob exists for CI; production keeps the
     // shipped ceiling, and this refusal is what makes that a rule rather than a comment. Deliberately
     // placed above the early return below, for the reason that comment gives.
+    if (env.NODE_ENV === 'production' && env.RATE_LIMIT_IP_LIMIT > PRE_AUTH_IP_BUCKET.limit) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RATE_LIMIT_IP_LIMIT'],
+        message:
+          'RATE_LIMIT_IP_LIMIT cannot exceed ' +
+          PRE_AUTH_IP_BUCKET.limit +
+          ' when NODE_ENV=production: the per-address bucket is a protective ' +
+          'control, and an environment that raises it stops describing production. Lowering it is allowed.',
+      });
+    }
     if (env.NODE_ENV === 'production' && env.RATE_LIMIT_DEFAULT_LIMIT > 200) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -384,7 +402,7 @@ const refineApiAuth = (
         path: [key],
         message:
           key === 'EDGE_CLIENT_IP_SECRET'
-            ? "EDGE_CLIENT_IP_SECRET is required when NODE_ENV=production: every browser request reaches the API through the Pages Function, which signs the visitor address with it. Without it the API sees one shared Cloudflare address and the AUTH_LOGIN bucket is the whole company's."
+            ? "EDGE_CLIENT_IP_SECRET is required when NODE_ENV=production: every browser request reaches the API through the Pages Function, which signs the visitor address with it. Without it the API sees one shared Cloudflare address and the per-address rate-limit bucket is the whole company's."
             : `${key} is required when NODE_ENV=production: staff sign in with Microsoft Entra.`,
       });
     }
@@ -438,7 +456,7 @@ export const ApiEnvSchema = z
     /**
      * The key the Cloudflare Pages Function signs the visitor's address with (`@quynhonsemiconductor/platform-http/edge`),
      * and `clientIp()` verifies. Behind a Pages Function the API's `cf-connecting-ip` is a Cloudflare address shared
-     * by every visitor, so without a verifiable address one `AUTH_LOGIN` bucket (5 attempts per 15 minutes) would be
+     * by every visitor, so without a verifiable address one per-address rate-limit bucket (`PRE_AUTH_IP_BUCKET`) would be
      * the whole company's. The SAME value as the Pages project's secret of that name; at least 32 characters.
      * Optional so development and CI (no Pages Function in front) boot, where `clientIp()` treats an absent secret as
      * "no signed address, use cf-connecting-ip"; REQUIRED in production (`refineApiAuth`), where an empty value stops

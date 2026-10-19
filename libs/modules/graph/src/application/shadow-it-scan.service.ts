@@ -130,7 +130,6 @@ export class ShadowItScanService {
         severity,
         source: sourceKey,
         status: 'open',
-        detectedAt: new Date(),
       });
 
       newFindings++;
