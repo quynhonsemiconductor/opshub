@@ -11,8 +11,8 @@
  */
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, asc, eq, lt, lte } from 'drizzle-orm';
-import { InjectDrizzle, Span } from '@platform';
+import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
+import { DB_NOW, dbDelay, InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
 import { AbstractOutboxRelay } from '@platform';
 import type { Claimed, OutboxLeaseTable } from '@platform';
@@ -107,7 +107,7 @@ export class EmailRelayService
     return EMAIL_SEND_TIMEOUT_MS + EMAIL_LEASE_MARGIN_MS;
   }
 
-  protected async selectDue(tx: DrizzleTx, limit: number, now: Date): Promise<EmailOutboxRow[]> {
+  protected async selectDue(tx: DrizzleTx, limit: number, now: SQL): Promise<EmailOutboxRow[]> {
     return tx
       .select({
         id: emailOutbox.id,
@@ -152,7 +152,7 @@ export class EmailRelayService
     // risks a `sent` row that can never be bounce-matched.
     await tx
       .update(emailOutbox)
-      .set({ status: 'sent', sentAt: new Date(), messageId })
+      .set({ status: 'sent', sentAt: DB_NOW, messageId })
       .where(eq(emailOutbox.id, row.id));
   }
 
@@ -161,13 +161,13 @@ export class EmailRelayService
     row: Claimed<EmailOutboxRow>,
     newStatus: 'pending' | 'failed',
     lastError: string,
-    nextAttemptAt: Date,
+    delayMs: number,
   ): Promise<void> {
     await tx
       .update(emailOutbox)
       // scheduledAt IS the retry gate — selectDue selects on `scheduledAt <= now()`, so leaving it alone
       // made every retry immediate and burned all five attempts inside ~25 seconds.
-      .set({ status: newStatus, lastError, scheduledAt: nextAttemptAt })
+      .set({ status: newStatus, lastError, scheduledAt: dbDelay(delayMs) })
       .where(eq(emailOutbox.id, row.id));
   }
 }

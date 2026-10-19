@@ -1,9 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { InjectDrizzle, NonRetryableError, type DrizzleDB } from '@platform';
 import { employees } from '../../../../../db/schema';
 import { GraphClientService } from '../graph-client.service';
 import { MIN_LEASE_TO_MUTATE_MS } from '../graph-task';
+
+/**
+ * Milliseconds of lease left on a row, measured against the DATABASE's now() (the Time rule, .github#29), never the host's.
+ * NaN when the database gave no number. The instant is a bound parameter: drizzle's sql`` binds every interpolated value
+ * (only sql.raw inlines text), and the driver sends the Date with its UTC offset, so the ::timestamptz cast is exact
+ * whatever the session time zone is.
+ */
+export async function leaseLeftMs(db: DrizzleDB, leaseExpiresAt: Date): Promise<number> {
+  const left = await db.execute<{ left: number | string }>(
+    sql`SELECT extract(epoch FROM (${leaseExpiresAt}::timestamptz - now())) * 1000 AS left`,
+  );
+  return Number(left.rows[0]?.left);
+}
 
 /** Entra object ids are GUIDs. Anything else never reaches a URL. */
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -89,10 +102,10 @@ export class EntraAccountService {
     await this.assertBelongsTo(employee.entraOid, employee.email, employeeId);
 
     if (employee.status === 'offboarded') {
-      this.assertTimeToMutate(leaseExpiresAt, employeeId);
+      await this.assertTimeToMutate(leaseExpiresAt, employeeId);
       await this.setEnabled(employee.entraOid, false);
       // Disabling stops NEW sign-ins; a refresh token already issued keeps working until revoked.
-      this.assertTimeToMutate(leaseExpiresAt, employeeId);
+      await this.assertTimeToMutate(leaseExpiresAt, employeeId);
       await this.revokeSessions(employee.entraOid);
       return;
     }
@@ -111,7 +124,7 @@ export class EntraAccountService {
       );
       return;
     }
-    this.assertTimeToMutate(leaseExpiresAt, employeeId);
+    await this.assertTimeToMutate(leaseExpiresAt, employeeId);
     await this.setEnabled(employee.entraOid, true);
   }
 
@@ -121,8 +134,15 @@ export class EntraAccountService {
    * here (its identity check always eats the lease) backs off, runs out of attempts and dead-letters with
    * the alarm, instead of being refunded for ever.
    */
-  private assertTimeToMutate(leaseExpiresAt: Date, employeeId: string): void {
-    const remaining = leaseExpiresAt.getTime() - Date.now();
+  private async assertTimeToMutate(leaseExpiresAt: Date, employeeId: string): Promise<void> {
+    const remaining = await leaseLeftMs(this.db, leaseExpiresAt);
+    // Fails closed: an answer that is not a finite number (a failed read, no usable instant) is treated as no lease.
+    if (!Number.isFinite(remaining)) {
+      throw new Error(
+        `Account reconcile for employee ${employeeId}: the lease read returned no usable instant ` +
+          `(expected ms of lease left) — treating it as none, not starting a change`,
+      );
+    }
     if (remaining < MIN_LEASE_TO_MUTATE_MS) {
       throw new Error(
         `Account reconcile for employee ${employeeId}: ${Math.max(0, Math.round(remaining / 1000))} s of ` +

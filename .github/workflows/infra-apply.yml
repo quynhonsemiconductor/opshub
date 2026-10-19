@@ -341,6 +341,15 @@ jobs:
           # cannot go stale.
           TF_VAR_image_tag:            ${{ github.ref_name }}
 
+      # TASK 0.3 / §17b: refuse a prod plan that destroys or replaces a database, secret, parameter group or target
+      # group unless the stack's .allow-data-destroy names that address with a reason. It reads the saved plan, so it
+      # judges exactly what the next step applies.
+      - name: plan-guard (tfplan)
+        uses: quynhonsemiconductor/ci/actions/plan-guard@v1
+        with:
+          plan-file: tfplan
+          working-directory: infra/live/prod
+
       # Refuse a saved plan that DELETES or REPLACES a DNS, edge, mail-identity, certificate or key resource (the
       # 2026-10-09 outage) unless this run is allowed to: the PR being merged carries the label `allow-dns-destroy`
       # (ON TAG RUNS THE LOOKUP RESOLVES TO THE RELEASE PR, so a destructive prod change needs the label on the
