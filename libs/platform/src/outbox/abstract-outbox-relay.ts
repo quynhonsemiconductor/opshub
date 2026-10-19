@@ -221,6 +221,14 @@ export abstract class AbstractOutboxRelay<
     return this.constructor.name;
   }
 
+  /**
+   * The payload of the NOTIFY that wakes THIS relay early (see outbox-wake.ts). A relay that returns undefined is never
+   * woken early: it runs on its cron alone. A subclass that wants the wake overrides this with its own kind.
+   */
+  get wakeKind(): string | undefined {
+    return undefined;
+  }
+
   constructor(protected readonly db: DrizzleDB) {
     // Logger name is the concrete subclass name for precise log attribution.
     this.logger = new Logger(this.constructor.name);

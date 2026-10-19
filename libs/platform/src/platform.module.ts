@@ -28,6 +28,7 @@ import { EmailSchedulerService } from './email/email-scheduler.service';
 import { EmailDeliveryService } from './email/email-delivery.service';
 import { NotificationSchedulerService } from './notifications/notification-scheduler.service';
 import { NotificationPubSubService } from './notifications/notification-pubsub.service';
+import { OutboxWakeService } from './outbox/outbox-wake.service';
 import { DelegationService } from './authz/delegation.service';
 import { WebhookEnqueueService } from './webhooks/webhook-enqueue.service';
 import { StorageService } from './storage/storage.service';
@@ -74,6 +75,8 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     RequestEngine,
     HttpLoggingInterceptor,
     ResilienceService,
+    // Worker only (see OutboxWakeService): the API holds no LISTEN connection.
+    OutboxWakeService,
     {
       provide: EMAIL_PROVIDER,
       inject: [AppConfigService, WorkerConfigService],

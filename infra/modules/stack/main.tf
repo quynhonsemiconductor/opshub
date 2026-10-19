@@ -81,8 +81,9 @@ locals {
 
   # Reserved off the top: 3 for Postgres' superuser slots, 10 for migrations (which
   # run DURING a deploy while api and worker are still up), 5 for an operator holding
-  # a psql session while debugging.
-  db_pool_budget = local.db_max_connections - 18
+  # a psql session while debugging. One more per worker task: the outbox wake's LISTEN
+  # connection (libs/platform/src/outbox/outbox-wake.ts), held outside the pool.
+  db_pool_budget = local.db_max_connections - 18 - var.worker.max_count
 
   # Split 60/40 api:worker, each divided by that service's autoscaling ceiling. The
   # worker's share is not proportional to its task count: a relay tick holds one
@@ -355,9 +356,6 @@ module "rds" {
 #   - SSE notifications publish on `user:{id}` from whichever api task handled the
 #     write, and the browser is subscribed through a different one, so the event was
 #     delivered only when the two happened to be the same task;
-#   - `relay:wake` is published by the api and subscribed by the WORKER, in a
-#     different task entirely, so it never arrived and delivery silently fell back to
-#     the 5s cron poll;
 #   - the authorization cache is invalidated on role writes, and an invalidation that
 #     reaches only the publishing task leaves every other task serving revoked
 #     permissions until the 300s TTL expires.

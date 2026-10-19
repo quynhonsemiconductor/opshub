@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 import { graphTaskOutbox } from '../../../../db/schema';
 import { dedupeKeyFor, GRAPH_TASK } from './graph-task';
 import { GraphTaskQueue } from './graph-task.queue';
@@ -9,7 +11,11 @@ function makeDb(returning: unknown[]) {
     onConflictDoNothing: vi.fn().mockReturnThis(),
     returning: vi.fn().mockResolvedValue(returning),
   };
-  return { insert: vi.fn().mockReturnValue(chain), chain };
+  return {
+    insert: vi.fn().mockReturnValue(chain),
+    execute: vi.fn().mockResolvedValue(undefined),
+    chain,
+  };
 }
 
 describe('GraphTaskQueue', () => {
@@ -24,6 +30,9 @@ describe('GraphTaskQueue', () => {
 
     expect(tx.insert).toHaveBeenCalledWith(graphTaskOutbox);
     expect(root.insert).not.toHaveBeenCalled();
+    // The wake is in the same transaction, so it is delivered at its commit.
+    expect(tx.execute).toHaveBeenCalledTimes(1);
+    expect(root.execute).not.toHaveBeenCalled();
     // Keyed by employee, so two tasks for one person never overlap; never merged.
     expect(tx.chain.values).toHaveBeenCalledWith({
       kind: 'entra.account.reconcile',
@@ -31,6 +40,24 @@ describe('GraphTaskQueue', () => {
       orderingKey: 'emp-1',
       dedupeKey: null,
     });
+  });
+
+  it('wakes the graph relay that owns the task: account tasks the account relay, the rest the scan relay', async () => {
+    const dialect = new PgDialect();
+    const wakeOf = async (
+      kind: typeof GRAPH_TASK.ACCOUNT_RECONCILE | typeof GRAPH_TASK.SHADOW_IT_SCAN,
+    ) => {
+      const tx = makeDb([{ id: 'x' }]);
+      const payload = kind === GRAPH_TASK.ACCOUNT_RECONCILE ? { employeeId: 'emp-1' } : {};
+      await new GraphTaskQueue(makeDb([]) as never).enqueue(
+        { kind, payload } as never,
+        tx as never,
+      );
+      return dialect.sqlToQuery(tx.execute.mock.calls[0][0] as SQL).params;
+    };
+
+    expect(await wakeOf(GRAPH_TASK.ACCOUNT_RECONCILE)).toEqual(['outbox', 'graph-account']);
+    expect(await wakeOf(GRAPH_TASK.SHADOW_IT_SCAN)).toEqual(['outbox', 'graph-scan']);
   });
 
   it('reports whether a new row was written (false when an equal pending task absorbed it)', async () => {

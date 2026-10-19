@@ -13,7 +13,7 @@ import {
 } from '@platform';
 import type { Claimed, DrizzleDB, DrizzleTx, OutboxLeaseTable } from '@platform';
 import { graphTaskOutbox } from '../../../../../db/schema';
-import { GRAPH_TASK, graphLeaseMs } from '../graph-task';
+import { GRAPH_TASK, GRAPH_WAKE, graphLeaseMs } from '../graph-task';
 import { classifyGraphError } from '../graph-errors';
 import { GRAPH_LOCK } from '../graph-locks';
 import { GraphClientService } from '../graph-client.service';
@@ -235,6 +235,9 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
 @Injectable()
 export class GraphAccountRelayService extends GraphTaskRelay {
   protected readonly kinds = [GRAPH_TASK.ACCOUNT_RECONCILE];
+  override get wakeKind(): string {
+    return GRAPH_WAKE.ACCOUNT;
+  }
   /** Held for the SUM of the batch's leases (150 s each): 3 rows is 7.5 minutes if a worker dies. */
   protected override readonly batchSize = 3;
 
@@ -260,6 +263,9 @@ export class GraphAccountRelayService extends GraphTaskRelay {
 @Injectable()
 export class GraphScanRelayService extends GraphTaskRelay {
   protected readonly kinds = [GRAPH_TASK.SHADOW_IT_SCAN, GRAPH_TASK.POSTURE_SYNC];
+  override get wakeKind(): string {
+    return GRAPH_WAKE.SCAN;
+  }
   protected override readonly batchSize = 1;
 
   constructor(

@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import { type DrizzleDB, type DbExecutor } from '../database/drizzle.provider';
 import { emailOutbox } from '../../../../db/schema';
 import { type EmailTemplateName, type EmailTemplateVars } from './templates';
-import { NotificationPubSubService } from '../notifications/notification-pubsub.service';
+import { notifyOutbox } from '../outbox/outbox-wake';
 
 /**
  * EmailSchedulerService — enqueue an email into email_outbox inside the
@@ -14,7 +14,6 @@ import { NotificationPubSubService } from '../notifications/notification-pubsub.
  */
 @Injectable()
 export class EmailSchedulerService {
-  constructor(private readonly pubSub: NotificationPubSubService) {}
   async schedule<K extends EmailTemplateName>(
     tx: DbExecutor,
     to: string,
@@ -69,9 +68,7 @@ export class EmailSchedulerService {
         where: sql`${emailOutbox.idempotencyKey} IS NOT NULL`,
       });
 
-    // Best-effort wake signal — reduces relay latency from ≤5s to ~ms.
-    this.pubSub.wakeEmailRelay().catch(() => {
-      /* non-critical */
-    });
+    // The wake hint, in the caller's transaction: delivered at commit. Polling stays the source of truth.
+    await notifyOutbox(tx, 'email');
   }
 }

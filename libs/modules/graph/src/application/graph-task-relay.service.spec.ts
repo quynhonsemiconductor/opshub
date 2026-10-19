@@ -5,6 +5,8 @@
  * queued offboarding waits for the app rather than being dropped.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 import { DeferError, NonRetryableError, RetryAfterError } from '@platform';
 import { GRAPH_TASK, graphLeaseMs } from '../graph-task';
 import { GRAPH_LOCK } from '../graph-locks';
@@ -246,5 +248,33 @@ describe('Graph task relays — separation, leases and claiming', () => {
 
     expect(tx.execute).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(tx.execute.mock.calls[0][0])).toMatch(/pg_advisory_xact_lock/);
+  });
+});
+
+describe('graph relay writes on the database clock', () => {
+  it('markSent stamps sentAt as now(), not a host Date', async () => {
+    const set = vi.fn().mockReturnThis();
+    const tx = {
+      update: vi.fn().mockReturnThis(),
+      set,
+      where: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = new GraphAccountRelayService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    ) as unknown as { markSent(tx: unknown, row: unknown): Promise<void> };
+
+    await service.markSent(tx, row(GRAPH_TASK.ACCOUNT_RECONCILE, { employeeId: 'emp-1' }));
+
+    expect(
+      new PgDialect().sqlToQuery((set.mock.calls[0][0] as Record<string, SQL>)['sentAt']),
+    ).toMatchObject({
+      sql: 'now()',
+      params: [],
+    });
   });
 });
