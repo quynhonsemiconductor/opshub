@@ -82,7 +82,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
   protected override async beforeSelect(tx: DrizzleTx): Promise<void> {
     // Computed ONCE per claim, in the database's clock: `selectDue` uses this same expression, so a row is either
     // expired here or too old to claim there, never sent in between (the Time rule, .github#29).
-    const cutoff = sql`now() - make_interval(hours => ${this.maxAgeHours})`;
+    const cutoff = sql`${DB_NOW} - make_interval(hours => ${this.maxAgeHours})`;
     this.claimCutoff = cutoff;
     const stale = await tx
       .select({ id: webhookDeliveries.id })
@@ -245,7 +245,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
   protected async markSent(tx: DrizzleTx, row: Claimed<DeliveryRow>): Promise<void> {
     await tx
       .update(webhookDeliveries)
-      .set({ status: 'delivered', deliveredAt: new Date() })
+      .set({ status: 'delivered', deliveredAt: DB_NOW })
       .where(eq(webhookDeliveries.id, row.id));
   }
 

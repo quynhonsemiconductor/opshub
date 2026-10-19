@@ -209,7 +209,7 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
   protected async markSent(tx: DrizzleTx, row: Claimed<TaskRow>): Promise<void> {
     await tx
       .update(graphTaskOutbox)
-      .set({ status: 'sent', sentAt: new Date(), lastError: null })
+      .set({ status: 'sent', sentAt: DB_NOW, lastError: null })
       .where(eq(graphTaskOutbox.id, row.id));
   }
 

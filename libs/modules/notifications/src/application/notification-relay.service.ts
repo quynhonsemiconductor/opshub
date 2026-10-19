@@ -31,7 +31,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
-import { dbDelay, InjectDrizzle, Span } from '@platform';
+import { DB_NOW, dbDelay, InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
 import { AbstractOutboxRelay } from '@platform';
 import type { Claimed, OutboxLeaseTable, PostCommitTask } from '@platform';
@@ -273,7 +273,7 @@ export class NotificationRelayService
   protected async markSent(tx: DrizzleTx, row: Claimed<NotificationOutboxRow>): Promise<void> {
     await tx
       .update(notificationOutbox)
-      .set({ status: 'sent', dispatchedAt: new Date() })
+      .set({ status: 'sent', dispatchedAt: DB_NOW })
       .where(eq(notificationOutbox.id, row.id));
   }
 

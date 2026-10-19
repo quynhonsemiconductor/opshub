@@ -30,6 +30,8 @@ vi.mock('node:dns/promises', () => ({
 import { createHmac } from 'crypto';
 import { WebhookRelayService } from './webhook-relay.service';
 import type { DrizzleTx } from '@platform';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 
 // ── Test subclass exposing protected methods ──────────────────────────────────
 
@@ -283,7 +285,7 @@ describe('WebhookRelayService — markFailed() backoff delays', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('WebhookRelayService — markSent()', () => {
-  it('sets status=delivered and deliveredAt to now', async () => {
+  it('sets status=delivered and deliveredAt to the database now()', async () => {
     const chain = {
       update: vi.fn(),
       set: vi.fn(),
@@ -297,15 +299,15 @@ describe('WebhookRelayService — markSent()', () => {
       { get: () => 24 } as never,
     );
 
-    const before = Date.now();
     await service.exposedMarkSent(chain as never, 'del-1');
-    const after = Date.now();
 
     const setArgs = chain.set.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(setArgs?.['status']).toBe('delivered');
-    const deliveredAt = (setArgs?.['deliveredAt'] as Date).getTime();
-    expect(deliveredAt).toBeGreaterThanOrEqual(before - 50);
-    expect(deliveredAt).toBeLessThanOrEqual(after + 50);
+    // The timestamp is the database's clock, rendered as SQL, not a host Date.
+    expect(new PgDialect().sqlToQuery(setArgs?.['deliveredAt'] as SQL)).toEqual({
+      sql: 'now()',
+      params: [],
+    });
   });
 });
 

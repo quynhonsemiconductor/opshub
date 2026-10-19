@@ -12,7 +12,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
-import { dbDelay, InjectDrizzle, Span } from '@platform';
+import { DB_NOW, dbDelay, InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
 import { AbstractOutboxRelay } from '@platform';
 import type { Claimed, OutboxLeaseTable } from '@platform';
@@ -152,7 +152,7 @@ export class EmailRelayService
     // risks a `sent` row that can never be bounce-matched.
     await tx
       .update(emailOutbox)
-      .set({ status: 'sent', sentAt: new Date(), messageId })
+      .set({ status: 'sent', sentAt: DB_NOW, messageId })
       .where(eq(emailOutbox.id, row.id));
   }
 

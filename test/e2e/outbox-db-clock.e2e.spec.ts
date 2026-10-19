@@ -1,10 +1,9 @@
 /**
  * The outbox claims and leases run on the DATABASE's clock (the Time rule, .github#29), not the host's.
  *
- * Both tests inject host/DB clock skew with the host's Date (the database keeps its own clock). They fail on a build
- * whose claim compares a lease or a due time with the host:
- *  - the host AHEAD of the database: a live lease that another relay holds must not look lapsed to it;
- *  - the host BEHIND the database: a row the database says is due must be claimed now.
+ * The rows here are moved by SQL intervals against the database's now(), so no test fakes the host clock. The one
+ * exception is labelled below: the host runs an hour AHEAD while a live lease is held, the case where a host-clock
+ * comparison would wrongly take the row over.
  */
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { eq, sql } from 'drizzle-orm';
@@ -110,7 +109,71 @@ describe('outbox claims and leases on the database clock', () => {
     ).toBeGreaterThanOrEqual(holdMs + relay.waitedMs - 300);
   });
 
-  it('does not let a host clock AHEAD of the database take a live lease another relay holds', async () => {
+  it('does not take a row whose lease another relay holds on the database clock', async () => {
+    const employee = `lease-held-${Date.now()}`;
+    const task = await insertTaskByDatabase(employee);
+    // Another relay's lease, stamped by the database: it runs 10 minutes past the database's now().
+    await db.execute(
+      sql`update messaging.graph_task_outbox
+            set lease_token = gen_random_uuid(), locked_until = now() + interval '10 minutes'
+          where id = ${task.id}`,
+    );
+
+    const reconcile = vi.fn(() => Promise.resolve());
+    await relayWith(reconcile).relay();
+
+    expect(
+      reconcile.mock.calls.filter((c: unknown[]) => c[0] === employee),
+      'a live lease held by another relay was taken over',
+    ).toHaveLength(0);
+  });
+
+  it('claims a row the database says is due, once its lease has lapsed', async () => {
+    const employee = `lease-lapsed-${Date.now()}`;
+    const task = await insertTaskByDatabase(employee);
+    // A lease that ended a minute ago, by the database's clock.
+    await db.execute(
+      sql`update messaging.graph_task_outbox
+            set lease_token = gen_random_uuid(), locked_until = now() - interval '1 minute'
+          where id = ${task.id}`,
+    );
+
+    const reconcile = vi.fn(() => Promise.resolve());
+    await relayWith(reconcile).relay();
+
+    expect(
+      reconcile.mock.calls.filter((c: unknown[]) => c[0] === employee),
+      'a row whose lease the database had lapsed was not claimed',
+    ).toHaveLength(1);
+    const row = (await db.select().from(graphTaskOutbox).where(eq(graphTaskOutbox.id, task.id)))[0];
+    expect(row.status).toBe('sent');
+  });
+
+  it('reads the lease time left from the DATABASE through the real Graph lease SQL', async () => {
+    const { rows } = await db.execute<{ at: Date }>(sql`select now() + interval '2 minutes' as at`);
+
+    const left = await leaseLeftMs(db, rows[0].at);
+    expect(left).toBeGreaterThan(110_000);
+    expect(left).toBeLessThanOrEqual(120_000);
+  });
+
+  it('schedules a retry 30 s out on the database clock', async () => {
+    const employee = `retry-due-${Date.now()}`;
+    const task = await insertTaskByDatabase(employee);
+
+    await relayWith(() => Promise.reject(new Error('graph is down'))).relay();
+
+    const row = (await db.select().from(graphTaskOutbox).where(eq(graphTaskOutbox.id, task.id)))[0];
+    expect(row.status).toBe('pending');
+    // The first retry is 30 s after the DATABASE's now(), measured by the database itself.
+    const left = await db.execute<{ left: number | string }>(
+      sql`select extract(epoch from (next_attempt_at - now())) as left from messaging.graph_task_outbox where id = ${task.id}`,
+    );
+    expect(Number(left.rows[0]?.left)).toBeGreaterThan(20);
+    expect(Number(left.rows[0]?.left)).toBeLessThan(40);
+  });
+
+  it('DELIBERATE HOST-SKEW EXCEPTION: a host clock an hour AHEAD does not take a live lease another relay holds', async () => {
     const employee = `skew-ahead-${Date.now()}`;
     const task = await insertTaskByDatabase(employee);
 
@@ -133,8 +196,7 @@ describe('outbox claims and leases on the database clock', () => {
     vi.setSystemTime(Date.now() + HOUR);
     try {
       const reconcileSecond = vi.fn(() => Promise.resolve());
-      const second = relayWith(reconcileSecond);
-      await second.relay();
+      await relayWith(reconcileSecond).relay();
       // Other specs leave due rows in the shared database, so count only THIS task's employee.
       expect(
         reconcileSecond.mock.calls.filter((c: unknown[]) => c[0] === employee),
@@ -148,65 +210,5 @@ describe('outbox claims and leases on the database clock', () => {
     await firstPass;
     const row = (await db.select().from(graphTaskOutbox).where(eq(graphTaskOutbox.id, task.id)))[0];
     expect(row.status).toBe('sent');
-  });
-
-  it('claims a row the database says is due, even when the host clock runs an hour BEHIND', async () => {
-    const employee = `skew-behind-${Date.now()}`;
-    const task = await insertTaskByDatabase(employee);
-
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(Date.now() - HOUR);
-    try {
-      const reconcile = vi.fn(() => Promise.resolve());
-      await relayWith(reconcile).relay();
-      expect(
-        reconcile.mock.calls.filter((c: unknown[]) => c[0] === employee),
-        'a row the database had due was not claimed',
-      ).toHaveLength(1);
-    } finally {
-      vi.useRealTimers();
-    }
-
-    const row = (await db.select().from(graphTaskOutbox).where(eq(graphTaskOutbox.id, task.id)))[0];
-    expect(row.status).toBe('sent');
-  });
-
-  it('reads the lease time left from the DATABASE through the real Graph lease SQL, whatever the host clock says', async () => {
-    const { rows } = await db.execute<{ at: Date }>(sql`select now() + interval '2 minutes' as at`);
-    const lease = rows[0].at;
-
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(Date.now() + HOUR);
-    try {
-      // The host is an hour ahead. Measured on the host this would be about -58 minutes; on the database it is about 2 minutes.
-      const left = await leaseLeftMs(db, lease);
-      expect(left).toBeGreaterThan(110_000);
-      expect(left).toBeLessThanOrEqual(120_000);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('schedules a retry on the database clock: a host an hour BEHIND does not make the retry due at once', async () => {
-    const employee = `retry-behind-${Date.now()}`;
-    const task = await insertTaskByDatabase(employee);
-
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(Date.now() - HOUR);
-    try {
-      await relayWith(() => Promise.reject(new Error('graph is down'))).relay();
-    } finally {
-      vi.useRealTimers();
-    }
-
-    const row = (await db.select().from(graphTaskOutbox).where(eq(graphTaskOutbox.id, task.id)))[0];
-    expect(row.status).toBe('pending');
-    // The first retry is 30 s after the DATABASE's now(), measured by the database itself. A host-clock due time
-    // would sit an hour in the past, and the row would be re-claimed on the very next pass.
-    const left = await db.execute<{ left: number | string }>(
-      sql`select extract(epoch from (next_attempt_at - now())) as left from messaging.graph_task_outbox where id = ${task.id}`,
-    );
-    expect(Number(left.rows[0]?.left)).toBeGreaterThan(20);
-    expect(Number(left.rows[0]?.left)).toBeLessThan(40);
   });
 });

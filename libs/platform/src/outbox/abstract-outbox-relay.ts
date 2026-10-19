@@ -14,7 +14,7 @@
  * A pass is now three steps, and no transaction is open during the middle one:
  *
  *   1. CLAIM  (short transaction) — select the due rows `FOR UPDATE SKIP LOCKED`, and stamp each with
- *             `attempts = attempts + 1`, a fresh `lease_token` and `locked_until = now() + lease`.
+ *             `attempts = attempts + 1`, a fresh `lease_token` and `locked_until = statement_timestamp() + lease` (leaseDelay).
  *             Commit. The attempt is spent at claim time, so a process that dies mid-call still uses up
  *             its budget instead of looping.
  *   2. DELIVER (no transaction) — `deliver(row)` does the external work.
@@ -503,6 +503,8 @@ export abstract class AbstractOutboxRelay<
         return !acc || createdAt < acc ? createdAt : acc;
       }, undefined);
       if (oldest) {
+        // A metric, not a decision: nothing reads this lag to choose a row, so the host-clock subtraction only skews the
+        // gauge by the host/database offset. Kept off the database clock on purpose (one extra query per claim for a gauge).
         this.queueMetrics.recordLag(this.queueName, (Date.now() - oldest.getTime()) / 1000);
       }
 
