@@ -8,7 +8,8 @@ import swc from 'unplugin-swc';
 // not auto-load .env files, and nothing else in the e2e path did, so ConfigModule's Zod
 // validation failed on any machine without these already exported in the shell.
 try {
-  process.loadEnvFile('.env');
+  // E2E_ENV_FILE picks an isolated stack's env (scripts/e2e/make-env.mjs writes .env.e2e); default is the local .env.
+  process.loadEnvFile(process.env.E2E_ENV_FILE ?? '.env');
 } catch {
   /* no .env file — CI injects the vars directly */
 }
