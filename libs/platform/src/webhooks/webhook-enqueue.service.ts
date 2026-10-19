@@ -20,7 +20,11 @@ export class WebhookEnqueueService {
    *
    * Silently no-ops if no subscriptions match.
    */
-  async fanout(tx: DbExecutor, eventType: string, payload: Record<string, unknown>): Promise<void> {
+  async fanout(
+    tx: DbExecutor,
+    eventType: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
     // PostgreSQL array containment: events @> ARRAY[eventType]::text[]
     const subs = await tx
       .select({ id: webhookSubscriptions.id })

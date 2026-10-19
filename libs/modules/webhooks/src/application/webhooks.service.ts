@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
-import { InjectDrizzle, NotFoundException, ErrorCodes } from '@platform';
+import { DB_NOW, InjectDrizzle, NotFoundException, ErrorCodes } from '@platform';
 import type { DrizzleDB } from '@platform';
 import { newId } from '@shared-kernel';
 import { webhookSubscriptions, webhookDeliveries } from '../../../../../db/schema';
@@ -104,12 +104,12 @@ export class WebhooksService {
   }
 
   /**
-   * Retry a failed delivery by resetting it to pending with nextAttemptAt = now.
+   * Retry a failed delivery by resetting it to pending with nextAttemptAt = the database now() (DB_NOW).
    */
   async retryDelivery(deliveryId: string): Promise<WebhookDelivery> {
     const [row] = await this.db
       .update(webhookDeliveries)
-      .set({ status: 'pending', nextAttemptAt: new Date(), lastError: null })
+      .set({ status: 'pending', nextAttemptAt: DB_NOW, lastError: null })
       .where(eq(webhookDeliveries.id, deliveryId))
       .returning();
     if (!row)
