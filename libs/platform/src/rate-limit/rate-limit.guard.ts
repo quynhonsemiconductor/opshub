@@ -25,9 +25,10 @@ import { failOpenLog } from '@quynhonsemiconductor/observability';
  * Two buckets, and neither is keyed by a cookie.
  *
  * 1. `RateLimitGuard` — GLOBAL, runs first, before any credential is read. Reserves a slot against the verified
- *    client address (`clientIp()`: the signed edge address, else `cf-connecting-ip`, else the socket) for every request,
- *    and keeps it only for a failed authentication (401) or a request that never finishes. A signed-in request gives its
- *    slot back, so only failures are counted against the NAT-sized {@link PRE_AUTH_IP_BUCKET}.
+ *    client address (`clientIp()`: the signed edge address, else `cf-connecting-ip`, else the socket) for every request.
+ *    The slot is given back only once identity has verified the caller (`UserRateLimitGuard`). Every other request keeps
+ *    it, so the NAT-sized {@link PRE_AUTH_IP_BUCKET} counts unverified requests: failed authentications, forged cookies,
+ *    and requests that never reach identity.
  *
  * 2. `UserRateLimitGuard` — GLOBAL, registered in a module imported AFTER the identity module, so it runs after
  *    identity's `SessionGuard` has verified the session and recorded the principal. It counts an authenticated

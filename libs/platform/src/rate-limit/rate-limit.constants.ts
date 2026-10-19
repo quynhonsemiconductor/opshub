@@ -31,8 +31,8 @@ export type RateLimitTierName = keyof typeof RATE_LIMIT_TIERS;
 /**
  * The PRE-AUTH bucket, per verified client address (`clientIp()`), never per cookie: a cookie is unverified until
  * identity reads it, so a per-cookie bucket could be made fresh with every request. Every request reserves a slot
- * before it runs; a signed-in request gives its slot back when it finishes, so only FAILED authentications (401s)
- * and requests whose connection closed before the reply finished stay counted. NAT-sized on purpose: an office behind
+ * before it runs. Only identity verifying the caller gives the slot back (a signed-in request then leaves no trace), so
+ * failed authentications, forged cookies and requests whose connection closed all stay counted. NAT-sized on purpose: an office behind
  * one address shares it, so the ceiling is high enough that a normal day of signed-in traffic never reaches it. It
  * stops one network from flooding the authentication path; it does not bound a signed-in user (the tiers do).
  *

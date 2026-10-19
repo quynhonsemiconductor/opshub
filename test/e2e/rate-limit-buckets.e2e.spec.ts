@@ -2,8 +2,8 @@
  * The two rate-limit buckets against the real app, Valkey and identity.
  *
  * WHAT THIS PINS. A signed-in request is counted against its USER (`rl:DEFAULT:uid:<id>`), not against the address,
- * so an office behind one address is not spent by its normal traffic. A FAILED authentication (a 401) is counted
- * against the address. The first is only true if the per-user guard runs AFTER identity's SessionGuard has recorded
+ * so an office behind one address is not spent by its normal traffic. A request identity does not verify (a 401, a
+ * forged cookie) keeps its slot against the address. The first is only true if the per-user guard runs AFTER identity's SessionGuard has recorded
  * the principal, so this suite is also the check on the module order in `auth.module.ts`.
  *
  * Reads the counts straight from Valkey: the keys are the contract, and there is no HTTP surface for them.
@@ -49,7 +49,7 @@ describe('rate-limit buckets', () => {
     expect(await windowSize(addressKey)).toBe(addressBefore);
   });
 
-  it('counts a failed authentication (401) against the address', async () => {
+  it('keeps the address slot of a request identity does not verify (a 401)', async () => {
     const addressKey = 'rl:IP:127.0.0.1';
     const before = await windowSize(addressKey);
 

@@ -7,8 +7,9 @@ import { PRE_AUTH_IP_BUCKET, RATE_LIMIT_TIER, SKIP_RATE_LIMIT } from './rate-lim
 import { RateLimitGuard, UserRateLimitGuard } from './rate-limit.guard';
 
 /**
- * Two buckets. The pre-auth one per verified address counts FAILED authentications only (a 401 after the response),
- * and refuses before the request runs once the window is full. The per-user one counts an authenticated caller.
+ * Two buckets. The pre-auth one per verified address reserves a slot for every request and keeps it unless identity
+ * verified the caller, and refuses before the request runs once the window is full. The per-user one counts an
+ * authenticated caller.
  * Neither is keyed by a cookie. See the guard's docblock for why.
  */
 
@@ -33,7 +34,7 @@ function reflectorFor(over: Overrides = {}) {
 
 /**
  * A request and its reply. `status` is the response code the guard sees when the reply finishes; `finish()` plays
- * the reply going out, which is when a failed authentication is counted.
+ * the reply going out. Nothing refunds or counts on finish: only the per-user guard gives a slot back.
  */
 function contextFor(over: Overrides = {}) {
   const request = {
@@ -116,7 +117,7 @@ function asUser<T>(userId: string, fn: () => T): T {
   );
 }
 
-describe('RateLimitGuard (pre-auth, failed authentications per verified address)', () => {
+describe('RateLimitGuard (pre-auth, per verified address: kept unless identity verifies the caller)', () => {
   it('reserves a slot before the request runs, and gives it back as soon as identity has verified the caller', async () => {
     const cache = windowCache();
     const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
@@ -131,6 +132,20 @@ describe('RateLimitGuard (pre-auth, failed authentications per verified address)
     expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(0);
     finish(200);
     expect(cache.refundRateLimit).toHaveBeenCalledTimes(1); // and never twice
+  });
+
+  it('gives the slot back ONCE, however many times the per-user guard runs for one request', async () => {
+    const cache = windowCache();
+    const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const user = new UserRateLimitGuard(reflectorFor() as never, cache as never);
+    const { context } = contextFor({ cookies: { session_token: 'valid' } });
+
+    await pre.canActivate(context);
+    await asUser('emp-1', () => user.canActivate(context));
+    await asUser('emp-1', () => user.canActivate(context));
+
+    expect(cache.refundRateLimit).toHaveBeenCalledTimes(1);
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(0);
   });
 
   it('leaves a signed-in address bucket at zero however many streams stay open or requests abort', async () => {
