@@ -20,7 +20,7 @@ processors:
     timeout: 1s
 
 exporters:
-  # Spans and metrics land in this container's log, so `docker logs opshub-otel` is the
+  # Spans and metrics land in this container's log, so `docker compose -f docker-compose.dev.yml logs otel` is the
   # whole debugging story — no UI to run, no volume to mount.
   debug:
     verbosity: detailed

@@ -29,7 +29,7 @@ fi
 REGION="ap-southeast-1"
 BUCKET="opshub-files-dev"
 # Vite dev-server origin — the SPA PUTs directly to the bucket from here.
-WEB_ORIGIN="http://localhost:5173"
+WEB_ORIGIN="${WEB_ORIGIN:-http://localhost:5173}"
 
 echo "[localstack-init] provisioning S3…"
 
