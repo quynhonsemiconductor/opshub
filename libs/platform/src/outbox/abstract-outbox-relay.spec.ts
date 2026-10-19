@@ -85,7 +85,7 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
     attempts: number;
     status: 'pending' | 'failed';
     error: string;
-    nextAttemptAt: Date;
+    delayMs: number;
   }> = [];
   stampedAttempts = new Map<string, number>();
   reaped = 0;
@@ -229,10 +229,10 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
     row: Claimed<TestRow>,
     status: 'pending' | 'failed',
     error: string,
-    nextAttemptAt: Date,
+    delayMs: number,
   ): Promise<void> {
     if (this.markFailedThrows) return Promise.reject(new Error('could not record the failure'));
-    this.failed.push({ id: row.id, attempts: row.attempts, status, error, nextAttemptAt });
+    this.failed.push({ id: row.id, attempts: row.attempts, status, error, delayMs });
     return Promise.resolve();
   }
 }
@@ -293,18 +293,16 @@ describe('AbstractOutboxRelay — attempts are spent at claim', () => {
   it('counts the claim as an attempt, so markFailed sees attempt 1 on the first failure', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 0, deliver: 'fail' }]);
-    const before = Date.now();
-
     await relay.relay();
 
     expect(relay.failed).toHaveLength(1);
     const call = relay.failed[0];
     expect(call.attempts).toBe(1);
     expect(call.status).toBe('pending');
-    // attempt 1 -> ~30s. Immediate retry is the defect backoff replaced: five of them fit inside a
-    // brief outage and the fifth dead-letters the row for good.
-    expect(call.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(before + 29_000);
-    expect(call.nextAttemptAt.getTime()).toBeLessThanOrEqual(before + 31_000);
+    // attempt 1 -> 30s. Immediate retry is the defect backoff replaced: five of them fit inside a
+    // brief outage and the fifth dead-letters the row for good. The delay is handed over as a number; the
+    // relay writes it as dbDelay(delayMs), so the database computes the instant, not this host.
+    expect(call.delayMs).toBe(30_000);
   });
 
   it('dead-letters once the claimed attempt is the last one', async () => {
@@ -348,14 +346,10 @@ describe('AbstractOutboxRelay — failure classification', () => {
   it('honours Retry-After when it is longer than the backoff', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 0, deliver: 'retry-after' }]);
-    const before = Date.now();
-
     await relay.relay();
 
     expect(relay.failed[0].status).toBe('pending');
-    expect(relay.failed[0].nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
-      before + 5 * 60_000 - 1_000,
-    );
+    expect(relay.failed[0].delayMs).toBe(5 * 60_000);
   });
 });
 
@@ -363,28 +357,18 @@ describe('AbstractOutboxRelay — Retry-After is clamped, never an Invalid Date'
   it('clamps a huge hint to the maximum', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 0, deliver: 'huge-retry-after' }]);
-    const before = Date.now();
-
     await relay.relay();
 
-    const at = relay.failed[0].nextAttemptAt;
-    expect(Number.isNaN(at.getTime())).toBe(false);
-    expect(at.getTime()).toBeLessThanOrEqual(before + MAX_RETRY_AFTER_MS + 2_000);
-    expect(at.getTime()).toBeGreaterThanOrEqual(before + MAX_RETRY_AFTER_MS - 2_000);
+    expect(relay.failed[0].delayMs).toBe(MAX_RETRY_AFTER_MS);
   });
 
   it('falls back to ordinary backoff for a non-finite hint, and still records the failure', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 0, deliver: 'bad-retry-after' }]);
-    const before = Date.now();
-
     await relay.relay();
 
     expect(relay.failed).toHaveLength(1);
-    const at = relay.failed[0].nextAttemptAt.getTime();
-    expect(Number.isNaN(at)).toBe(false);
-    expect(at).toBeGreaterThanOrEqual(before + 29_000);
-    expect(at).toBeLessThanOrEqual(before + 31_000);
+    expect(relay.failed[0].delayMs).toBe(30_000);
   });
 });
 
@@ -392,15 +376,11 @@ describe('AbstractOutboxRelay — DeferError is not an attempt', () => {
   it('puts the row back to pending and REFUNDS the attempt (the BOUND on deferring belongs to the caller)', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 4, deliver: 'defer' }]); // the claim makes it the 5th (the last)
-    const before = Date.now();
-
     await relay.relay();
 
     expect(relay.refunded).toEqual(['a']);
     expect(relay.failed[0]).toMatchObject({ id: 'a', status: 'pending', attempts: 4 });
-    expect(relay.failed[0].nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
-      before + 5 * 60_000 - 1_000,
-    );
+    expect(relay.failed[0].delayMs).toBe(5 * 60_000);
     expect(relay.sent).toEqual([]);
   });
 

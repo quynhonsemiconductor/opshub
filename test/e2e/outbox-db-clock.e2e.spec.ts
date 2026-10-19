@@ -169,4 +169,27 @@ describe('outbox claims and leases on the database clock', () => {
     const row = (await db.select().from(graphTaskOutbox).where(eq(graphTaskOutbox.id, task.id)))[0];
     expect(row.status).toBe('sent');
   });
+
+  it('schedules a retry on the database clock: a host an hour BEHIND does not make the retry due at once', async () => {
+    const employee = `retry-behind-${Date.now()}`;
+    const task = await insertTaskByDatabase(employee);
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() - HOUR);
+    try {
+      await relayWith(() => Promise.reject(new Error('graph is down'))).relay();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const row = (await db.select().from(graphTaskOutbox).where(eq(graphTaskOutbox.id, task.id)))[0];
+    expect(row.status).toBe('pending');
+    // The first retry is 30 s after the DATABASE's now(), measured by the database itself. A host-clock due time
+    // would sit an hour in the past, and the row would be re-claimed on the very next pass.
+    const left = await db.execute<{ left: number | string }>(
+      sql`select extract(epoch from (next_attempt_at - now())) as left from messaging.graph_task_outbox where id = ${task.id}`,
+    );
+    expect(Number(left.rows[0]?.left)).toBeGreaterThan(20);
+    expect(Number(left.rows[0]?.left)).toBeLessThan(40);
+  });
 });

@@ -166,8 +166,16 @@ export const DB_NOW = sql`now()`;
  * lapse early. statement_timestamp() is taken when the UPDATE runs, after any wait (the same helper as rova, #741).
  * Due checks stay on now().
  */
-export function dbDelay(ms: number): SQL {
+export function leaseDelay(ms: number): SQL {
   return sql`statement_timestamp() + make_interval(secs => ${ms / 1000})`;
+}
+
+/**
+ * A retry's due time: the database's now() plus `ms`, computed in the statement that writes it (rova's dbDelay). A retry
+ * is scheduled on the database clock, so a host behind the database cannot make it due at once and burn its attempts.
+ */
+export function dbDelay(ms: number): SQL {
+  return sql`now() + make_interval(secs => ${ms / 1000})`;
 }
 
 const DEFAULT_LEASE_MS = 2 * 60_000;
@@ -263,11 +271,12 @@ export abstract class AbstractOutboxRelay<
     newStatus: 'pending' | 'failed',
     lastError: string,
     /**
-     * When the row becomes eligible again. A relay whose table has a delay column (`scheduled_at`,
-     * `next_attempt_at`) MUST write it, or the row is re-read on the very next tick and the whole retry
-     * budget burns in seconds. A relay with its own curve names the parameter `_nextAttemptAt`.
+     * How long until the row is eligible again, in milliseconds. A relay whose table has a delay column (`scheduled_at`,
+     * `next_attempt_at`) MUST write it as `dbDelay(delayMs)`, or the row is re-read on the very next tick and the whole
+     * retry budget burns in seconds. The database computes the instant (never the host clock). A relay with its own
+     * curve names the parameter `_delayMs`.
      */
-    nextAttemptAt: Date,
+    delayMs: number,
   ): Promise<void>;
 
   /** How long a claimed row is hidden from other relays. Must exceed the longest `deliver` for the row. */
@@ -361,7 +370,7 @@ export abstract class AbstractOutboxRelay<
       .set({
         attempts: sql`${o.attempts} + 1`,
         leaseToken: token,
-        lockedUntil: dbDelay(holdMs),
+        lockedUntil: leaseDelay(holdMs),
       })
       .where(inArray(o.id, ids))
       .returning({
@@ -392,7 +401,7 @@ export abstract class AbstractOutboxRelay<
     const o = this.outbox;
     const renewed = (await this.db
       .update(o.table)
-      .set({ lockedUntil: dbDelay(this.leaseMsFor(row)) })
+      .set({ lockedUntil: leaseDelay(this.leaseMsFor(row)) })
       .where(and(sql`${o.id} = ${row.id}`, sql`${o.leaseToken} = ${row.leaseToken}`))
       .returning({ id: o.id, lockedUntil: o.lockedUntil } as never)) as Array<{
       id: string;
@@ -604,7 +613,6 @@ export abstract class AbstractOutboxRelay<
     const delayMs = Number.isFinite(err.delayMs)
       ? Math.min(Math.max(err.delayMs, 0), MAX_RETRY_AFTER_MS)
       : 5 * 60_000;
-    const nextAttemptAt = new Date(Date.now() + delayMs);
     try {
       const done = await this.finish(row, async (tx) => {
         await this.refundAttempt(tx, row);
@@ -613,7 +621,7 @@ export abstract class AbstractOutboxRelay<
           { ...row, attempts: Math.max(row.attempts - 1, 0) },
           'pending',
           err.message,
-          nextAttemptAt,
+          delayMs,
         );
       });
       if (done === LEASE_LOST) return 'lost';
@@ -643,11 +651,10 @@ export abstract class AbstractOutboxRelay<
         ? Math.min(Math.max(err.retryAfterMs, 0), MAX_RETRY_AFTER_MS)
         : 0;
     const delayMs = Math.max(hinted, this.backoffDelayMs(row.attempts));
-    const nextAttemptAt = new Date(Date.now() + delayMs);
 
     try {
       const recorded = await this.finish(row, (tx) =>
-        this.markFailed(tx, row, newStatus, errMsg, nextAttemptAt),
+        this.markFailed(tx, row, newStatus, errMsg, delayMs),
       );
       if (recorded === LEASE_LOST) return 'lost';
     } catch (markErr) {

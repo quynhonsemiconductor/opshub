@@ -6,6 +6,8 @@ import { createHmac } from 'crypto';
 import {
   AbstractOutboxRelay,
   AppConfigService,
+  DB_NOW,
+  dbDelay,
   InjectDrizzle,
   Span,
   describeUnsafeResolvedTarget,
@@ -255,17 +257,16 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     // Deliberately IGNORED: webhook deliveries follow their own RETRY_DELAYS_SECONDS curve,
     // which is a per-endpoint contract rather than a generic backoff. The base class passes
     // its default so a relay that has no opinion gets one for free; this one has an opinion.
-    _nextAttemptAt: Date,
+    _delayMs: number,
   ): Promise<void> {
     const delaySeconds =
       RETRY_DELAYS_SECONDS[Math.min(row.attempts - 1, RETRY_DELAYS_SECONDS.length - 1)] ?? 3600;
-    const nextAttemptAt = new Date(Date.now() + delaySeconds * MS_PER_SEC);
     await tx
       .update(webhookDeliveries)
       .set({
         status: newStatus,
         lastError: error.slice(0, MAX_DELIVERY_ERROR_LENGTH),
-        nextAttemptAt: newStatus === 'failed' ? new Date() : nextAttemptAt,
+        nextAttemptAt: newStatus === 'failed' ? DB_NOW : dbDelay(delaySeconds * MS_PER_SEC),
       })
       .where(eq(webhookDeliveries.id, row.id));
   }

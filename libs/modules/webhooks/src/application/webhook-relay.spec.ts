@@ -60,8 +60,8 @@ class TestableRelayService extends WebhookRelayService {
     error: string,
   ) {
     // The base class's generic backoff, which this relay ignores in favour of its own
-    // RETRY_DELAYS_SECONDS curve. A recognisable sentinel keeps that visible: if epoch 0 ever
-    // shows up in an assertion below, the relay stopped honouring its own schedule.
+    // RETRY_DELAYS_SECONDS curve. A recognisable sentinel keeps that visible: if a 0 ever
+    // shows up as the delay in an assertion below, the relay stopped honouring its own schedule.
     return this.markFailed(
       tx,
       {
@@ -71,7 +71,7 @@ class TestableRelayService extends WebhookRelayService {
       },
       newStatus,
       error,
-      new Date(0),
+      0,
     );
   }
 }
@@ -239,8 +239,7 @@ describe('WebhookRelayService — markFailed() backoff delays', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   for (let attempt = 1; attempt <= 4; attempt++) {
-    it(`sets nextAttemptAt ≈ now + ${EXPECTED_DELAYS[attempt - 1]}s on attempt ${attempt}`, async () => {
-      const before = Date.now();
+    it(`sets nextAttemptAt = the database's now() + ${EXPECTED_DELAYS[attempt - 1]}s on attempt ${attempt}`, async () => {
       await service.exposedMarkFailed(
         updateChain as never,
         'del-1',
@@ -248,14 +247,14 @@ describe('WebhookRelayService — markFailed() backoff delays', () => {
         'pending',
         'some error',
       );
-      const after = Date.now();
 
       const setArgs = updateChain.set.mock.calls[0]?.[0] as Record<string, unknown>;
-      const nextAt = (setArgs?.['nextAttemptAt'] as Date).getTime();
-      const expectedDelay = (EXPECTED_DELAYS[attempt - 1] ?? 3600) * 1000;
-
-      expect(nextAt).toBeGreaterThanOrEqual(before + expectedDelay - 50);
-      expect(nextAt).toBeLessThanOrEqual(after + expectedDelay + 50);
+      // A SQL expression computed by the database (never a host Date): now() plus the curve's seconds.
+      const nextAt = setArgs?.['nextAttemptAt'] as { queryChunks: unknown[] };
+      const text = JSON.stringify(nextAt.queryChunks);
+      expect(text).toContain('now() + make_interval');
+      expect(text).not.toContain('statement_timestamp');
+      expect(nextAt.queryChunks).toContain(EXPECTED_DELAYS[attempt - 1] ?? 3600);
     });
   }
 

@@ -12,7 +12,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
-import { InjectDrizzle, Span } from '@platform';
+import { dbDelay, InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
 import { AbstractOutboxRelay } from '@platform';
 import type { Claimed, OutboxLeaseTable } from '@platform';
@@ -161,13 +161,13 @@ export class EmailRelayService
     row: Claimed<EmailOutboxRow>,
     newStatus: 'pending' | 'failed',
     lastError: string,
-    nextAttemptAt: Date,
+    delayMs: number,
   ): Promise<void> {
     await tx
       .update(emailOutbox)
       // scheduledAt IS the retry gate — selectDue selects on `scheduledAt <= now()`, so leaving it alone
       // made every retry immediate and burned all five attempts inside ~25 seconds.
-      .set({ status: newStatus, lastError, scheduledAt: nextAttemptAt })
+      .set({ status: newStatus, lastError, scheduledAt: dbDelay(delayMs) })
       .where(eq(emailOutbox.id, row.id));
   }
 }

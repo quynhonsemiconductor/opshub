@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
 import {
   AbstractOutboxRelay,
   DeferError,
+  dbDelay,
   ExclusiveJob,
   InjectDrizzle,
   NonRetryableError,
@@ -208,11 +209,15 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
     row: Claimed<TaskRow>,
     newStatus: 'pending' | 'failed',
     error: string,
-    nextAttemptAt: Date,
+    delayMs: number,
   ): Promise<void> {
     await tx
       .update(graphTaskOutbox)
-      .set({ status: newStatus, lastError: error.slice(0, MAX_ERROR_LENGTH), nextAttemptAt })
+      .set({
+        status: newStatus,
+        lastError: error.slice(0, MAX_ERROR_LENGTH),
+        nextAttemptAt: dbDelay(delayMs),
+      })
       .where(eq(graphTaskOutbox.id, row.id));
   }
 }
