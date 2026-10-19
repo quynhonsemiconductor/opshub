@@ -243,7 +243,7 @@ jobs:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
           BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
-          CORS_ORIGINS: http://localhost:5173
+          CORS_ORIGINS: http://localhost:5174
           VALKEY_URL: redis://localhost:6379
           COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
           CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
@@ -319,7 +319,7 @@ jobs:
           # identity 8's passwordless sign-in, which the harness' login() uses. Loads only with NODE_ENV test or
           # development, and the env schema refuses it in production.
           IDENTITY_TEST_LOGIN: enabled
-          CORS_ORIGINS: http://localhost:5173
+          CORS_ORIGINS: http://localhost:5174
           VALKEY_URL: redis://localhost:6379
           COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
           CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
@@ -560,7 +560,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_openapi?sslmode=disable
           BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
-          CORS_ORIGINS: http://localhost:5173
+          CORS_ORIGINS: http://localhost:5174
           VALKEY_URL: redis://localhost:6379
           COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
           CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay

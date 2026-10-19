@@ -26,10 +26,11 @@ export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss(), securityHeadersPlugin],
   server: {
     host: '0.0.0.0',
-    // 5173 (WEB_DEV_PORT in .env to change it) is the origin the rest of the stack is wired to (.env.example CORS_ORIGINS and APP_URL, the Microsoft redirect
-    // URI, LocalStack's bucket CORS, Playwright's baseURL). strictPort: if another dev server holds it, FAIL instead of
-    // silently moving to 5174, where the Microsoft sign-in redirect (APP_URL) and the upload bucket's CORS no longer match.
-    port: Number(dotenv.WEB_DEV_PORT) || 5173,
+    // 5174 (WEB_DEV_PORT in .env) is the origin the rest of the stack is wired to: .env.example CORS_ORIGINS and APP_URL,
+    // the Microsoft redirect URI, LocalStack's bucket CORS and Playwright's baseURL. strictPort: if another server holds it,
+    // FAIL instead of silently moving to the next free port (5175 is rova's block, pending rova #742), where the sign-in redirect and bucket CORS would
+    // no longer match.
+    port: Number(dotenv.WEB_DEV_PORT) || 5174,
     strictPort: true,
     proxy: {
       '/v1': { target: apiOrigin, changeOrigin: true, secure: false },

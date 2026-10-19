@@ -85,17 +85,17 @@ test.describe('sign out', () => {
   test('ends the server-side session, not only the tab', async ({ browser }) => {
     // A session of its OWN: signing out deletes the session row, and the shared seat sessions are reused by
     // every other spec in the run.
-    const api = await request.newContext({ baseURL: 'http://localhost:5173' });
+    const api = await request.newContext({ baseURL: 'http://localhost:5174' });
     const login = await api.post('/api/auth/test-login', {
       data: { email: 'employee@opshub.local' },
-      headers: { origin: 'http://localhost:5173' },
+      headers: { origin: 'http://localhost:5174' },
     });
     expect(login.ok(), await login.text()).toBe(true);
     const context = await browser.newContext({ storageState: await api.storageState() });
     const page = await context.newPage();
     try {
       await gotoInShell(page, '/');
-      const before = await context.request.get('http://localhost:5173/v1/auth/me');
+      const before = await context.request.get('http://localhost:5174/v1/auth/me');
       expect(before.status()).toBe(200);
 
       await page.getByRole('button', { name: /sign out/i }).click();

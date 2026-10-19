@@ -59,7 +59,7 @@ def login(email):
     req = urllib.request.Request(
         ORIGIN + '/api/auth/test-login', data=json.dumps({'email': email}).encode(), method='POST')
     req.add_header('content-type', 'application/json')
-    req.add_header('origin', 'http://localhost:5173')  # Better Auth checks the Origin of every write
+    req.add_header('origin', 'http://localhost:5174')  # Better Auth checks the Origin of every write
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             session = _cookies(r.headers)

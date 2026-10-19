@@ -141,10 +141,10 @@ export async function csrfHeaders(request: APIRequestContext): Promise<Record<st
  * Dispose it when done.
  */
 export async function contextAs(email: string): Promise<APIRequestContext> {
-  const context = await request.newContext({ baseURL: 'http://localhost:5173' });
+  const context = await request.newContext({ baseURL: 'http://localhost:5174' });
   const res = await context.post('/api/auth/test-login', {
     data: { email },
-    headers: { origin: 'http://localhost:5173' },
+    headers: { origin: 'http://localhost:5174' },
   });
   expect(res.ok(), `test-login failed for ${email}: ${res.status()} ${await res.text()}`).toBe(
     true,

@@ -14,7 +14,7 @@ import { AUTH_STATES, SEAT_EMAILS } from './support/fixtures';
  * So this posts to `/api/auth/test-login` (identity 8; it loads only with IDENTITY_TEST_LOGIN=enabled and
  * NODE_ENV `development`/`test`) through Playwright's request context. The API replies with
  * `Set-Cookie: __Secure-opshub.session_token`, and because the request
- * goes to the Vite origin the cookie is stored for `localhost:5173` — exactly as a real login
+ * goes to the Vite origin the cookie is stored for `localhost:5174` — exactly as a real login
  * leaves it. Nothing is forged: no cookie is hand-assembled and no token is injected into the
  * page, which is what makes this a real session rather than a lookalike.
  *
@@ -30,12 +30,12 @@ export default async function globalSetup(): Promise<void> {
 }
 
 async function signIn(email: string, statePath: string): Promise<void> {
-  const api = await request.newContext({ baseURL: 'http://localhost:5173' });
+  const api = await request.newContext({ baseURL: 'http://localhost:5174' });
 
   // Origin: the same header the browser sends; Better Auth checks it on every write.
   const res = await api.post('/api/auth/test-login', {
     data: { email },
-    headers: { origin: 'http://localhost:5173' },
+    headers: { origin: 'http://localhost:5174' },
   });
   if (!res.ok()) {
     throw new Error(

@@ -280,9 +280,12 @@ jobs:
       BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
       COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
       CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
-      CORS_ORIGINS: http://localhost:5173
-      # 3001, because apps/web/vite.config.ts proxies /v1 there. A different port here means
-      # every request 502s through the proxy and every spec fails on its first assertion.
+      CORS_ORIGINS: http://localhost:5174
+      # Better Auth trusts only APP_URL for sign-in: without it the API falls back to the schema default and every test login
+      # is refused with INVALID_ORIGIN.
+      APP_URL: http://localhost:5174
+      # PORT is the API port. apps/web/vite.config.ts forwards /v1 to PORT (3001 when unset), so the API and the proxy must
+      # agree. A different port here means every request 502s through the proxy and every spec fails on its first assertion.
       PORT: '3001'
       # `POST /api/auth/test-login` (identity 8) loads only with IDENTITY_TEST_LOGIN=enabled AND NODE_ENV
       # exactly `test` or `development`, and it is how global-setup signs in — OpsHub's login page is a
@@ -355,7 +358,7 @@ jobs:
             --cors-configuration '{
               "CORSRules": [{
                 "AllowedMethods": ["PUT", "GET", "HEAD"],
-                "AllowedOrigins": ["http://localhost:5173"],
+                "AllowedOrigins": ["http://localhost:5174"],
                 "AllowedHeaders": ["Content-Type", "Content-Disposition"],
                 "ExposeHeaders": ["ETag"],
                 "MaxAgeSeconds": 3600
@@ -530,18 +533,18 @@ jobs:
             exit 1
           fi
 
-      # THROUGH THE VITE PROXY (:5173), not the API directly: this is the call a browser makes, and it is the one that
+      # THROUGH THE VITE PROXY (:5174), not the API directly: this is the call a browser makes, and it is the one that
       # breaks when the proxy cannot reach the API on the PORT in .env.example.
       - name: Sign in with the test login and make an authenticated /v1 call, through the SPA's proxy
         run: |
-          for _ in $(seq 1 30); do curl -sf http://localhost:5173/v1/healthz >/dev/null && break; sleep 2; done
-          curl -sf http://localhost:5173/v1/healthz || { echo "::error::/v1 through the Vite proxy failed: the API must listen on PORT (.env.example), which the proxy forwards to (apps/web/vite.config.ts)"; exit 1; }
+          for _ in $(seq 1 30); do curl -sf http://localhost:5174/v1/healthz >/dev/null && break; sleep 2; done
+          curl -sf http://localhost:5174/v1/healthz || { echo "::error::/v1 through the Vite proxy failed: the API must listen on PORT (.env.example), which the proxy forwards to (apps/web/vite.config.ts)"; exit 1; }
           curl -sf -c "$LOGS/jar.txt" -H 'content-type: application/json' \
-            -d '{"email":"admin@opshub.local"}' http://localhost:5173/api/auth/test-login
-          me=$(curl -sf -b "$LOGS/jar.txt" http://localhost:5173/v1/auth/me)
+            -d '{"email":"admin@opshub.local"}' http://localhost:5174/api/auth/test-login
+          me=$(curl -sf -b "$LOGS/jar.txt" http://localhost:5174/v1/auth/me)
           echo "$me" | jq '{email, roles}'
           echo "$me" | jq -e '.email == "admin@opshub.local" and (.roles | index("admin"))'
-          curl -sf -b "$LOGS/jar.txt" -o /dev/null -w 'GET /v1/assets -> %{http_code}\n' http://localhost:5173/v1/assets
+          curl -sf -b "$LOGS/jar.txt" -o /dev/null -w 'GET /v1/assets -> %{http_code}\n' http://localhost:5174/v1/assets
 
       - name: Logs
         if: always()

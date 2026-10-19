@@ -25,7 +25,7 @@ exporters:
   debug:
     verbosity: detailed
   # Metrics also served in Prometheus text format, which makes them assertable:
-  # `curl -s localhost:8890/metrics | grep queue_` answers "is this instrument real?"
+  # `curl -s localhost:8410/metrics | grep queue_` answers "is this instrument real?"
   # without reading any code.
   prometheus:
     endpoint: 0.0.0.0:8889

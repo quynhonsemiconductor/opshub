@@ -7,7 +7,7 @@ TanStack Router/Query + a typed `openapi-fetch` client).
 
 ```bash
 pnpm install
-pnpm dev          # http://localhost:5173 (proxies /v1 and /api/auth → API on :3001)
+pnpm dev          # http://localhost:5174 (proxies /v1 and /api/auth → API on :3001)
 ```
 
 Start the API (`opshub-api`) first. The login page is one "Sign in with Microsoft" button. With no Entra

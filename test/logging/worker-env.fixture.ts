@@ -41,10 +41,10 @@ for (const key of Object.keys(process.env)) delete process.env[key];
 
 Object.assign(process.env, {
   // Local defaults, overridden by what the caller (CI) provides.
-  DATABASE_URL: dotenvValue('DATABASE_URL') ?? 'postgres://opshub:opshub@localhost:5433/opshub',
+  DATABASE_URL: dotenvValue('DATABASE_URL') ?? 'postgres://opshub:opshub@localhost:5410/opshub',
   ...(inherited['VALKEY_URL'] || inherited['REDIS_URL']
     ? {}
-    : { VALKEY_URL: dotenvValue('VALKEY_URL') ?? 'redis://localhost:6380' }),
+    : { VALKEY_URL: dotenvValue('VALKEY_URL') ?? 'redis://localhost:6310' }),
   ...inherited,
   NODE_ENV: 'production', // pinned to production in every deployed environment, on purpose
   DEPLOYMENT_ENV: 'develop',
