@@ -13,7 +13,7 @@ import { AUTH_STATES, SEAT_EMAILS } from './support/fixtures';
  *
  * So this posts to `/api/auth/test-login` (identity 8; it loads only with IDENTITY_TEST_LOGIN=enabled and
  * NODE_ENV `development`/`test`) through Playwright's request context. The API replies with
- * `Set-Cookie: __Secure-opshub.session_token`, and because the request
+ * `Set-Cookie: opshub.session_token` (`__Host-` in production), and because the request
  * goes to the Vite origin the cookie is stored for `localhost:5174` — exactly as a real login
  * leaves it. Nothing is forged: no cookie is hand-assembled and no token is injected into the
  * page, which is what makes this a real session rather than a lookalike.

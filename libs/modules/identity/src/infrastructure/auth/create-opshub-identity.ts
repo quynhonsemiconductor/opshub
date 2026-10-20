@@ -10,7 +10,7 @@ import {
 import type { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { failOpenLog } from '@quynhonsemiconductor/observability';
 import type { PinoLogger } from 'nestjs-pino';
-import { IDENTITY_PRODUCT, type ApiConfigService, type DrizzleDB } from '@platform';
+import { HOST_COOKIES, IDENTITY_PRODUCT, type ApiConfigService, type DrizzleDB } from '@platform';
 import * as identityAuthSchema from '../../../../../../db/schema/identity-auth';
 import { STAFF_EMAIL_DOMAINS } from './staff-domains';
 import type { StaffSignInHandler } from './staff-sign-in.handler';
@@ -65,6 +65,8 @@ export function createOpshubIdentity(deps: OpshubIdentityDeps): Identity {
     baseURL: appUrl,
     trustedOrigins: [appUrl],
     presets: ['staff'],
+    // `__Host-` cookie names in production (see SESSION_COOKIE): the same constant the CSRF gate reads.
+    hostCookies: HOST_COOKIES,
     staff: {
       tenantId: config.get('ENTRA_TENANT_ID') || UNCONFIGURED_ID,
       clientId: config.get('ENTRA_CLIENT_ID') || UNCONFIGURED_ID,

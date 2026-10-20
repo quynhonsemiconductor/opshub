@@ -16,7 +16,7 @@ import { AUTH_STATE } from './e2e/support/fixtures';
  *
  * SHARED LOGINS, EIGHT OF THEM, unlike rally, which logs in per test. rally has to: its bearer flow
  * rotates the refresh token on every use and revokes the family on reuse, so a shared session trips
- * that protection. OpsHub's SPA holds no tokens at all — auth is an opaque `__Secure-opshub.session_token`
+ * that protection. OpsHub's SPA holds no tokens at all — auth is an opaque opshub.session_token (`__Host-` in production)
  * cookie backed by Valkey, and nothing rotates it within its 12 h life — so `global-setup.ts` signs in once PER SEAT and
  * `support/test.ts` hands each TEST one of those seats.
  *

@@ -7,7 +7,7 @@ import { ENV } from '@/shared/config/env';
 /**
  * Cookie-authenticated middleware (identity 8 session cookie).
  *
- * Every request carries the opaque `__Secure-opshub.session_token` cookie, and every
+ * Every request carries the opaque opshub.session_token cookie (`__Host-` in production, `__Secure-` elsewhere), and every
  * state-changing one echoes the session-bound CSRF token. No Authorization header, no
  * token in the JS heap.
  *
