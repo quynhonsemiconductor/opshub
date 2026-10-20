@@ -218,9 +218,9 @@ describe('.env.example agrees with the dev tooling', () => {
     expect(compose).toMatch(/^name: opshub$/m);
   });
 
-  it('pins the images to the production majors: RDS Postgres 17, ElastiCache Valkey 7.2', () => {
-    expect(compose).toMatch(/image: postgres:17\.\d+-alpine/);
-    expect(compose).toMatch(/image: valkey\/valkey:7\.2\.\d+-alpine/);
+  it('pins the images to the data-store track: PostgreSQL 18.6, Valkey 8.1.10', () => {
+    expect(compose).toMatch(/image: postgres:18\.\d+\s*$/m);
+    expect(compose).toMatch(/image: valkey\/valkey:8\.1\.\d+-alpine/);
   });
 
   it('names no fixed container anywhere a developer or CI reads, so a second project can run beside this one', () => {
