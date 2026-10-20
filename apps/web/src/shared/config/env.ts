@@ -10,7 +10,7 @@ export const ENV = {
   // ever sees one origin.
   //
   // Do NOT point VITE_API_URL at the API host. Same-origin is a requirement, not a
-  // preference: identity 8 sets its `__Secure-` session cookie on the response the
+  // preference: identity 8 sets its `__Host-` (production) / `__Secure-` session cookie on the response the
   // browser lands on after Entra, on the SPA host; talking to the API directly would
   // put the cookie on another site and break login while appearing to work for
   // unauthenticated requests.
