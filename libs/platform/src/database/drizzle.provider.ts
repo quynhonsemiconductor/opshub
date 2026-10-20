@@ -36,6 +36,13 @@ export function databaseClientConfig(config: AppConfigService): ClientConfig {
       DATABASE_PASSWORD: config.get('DATABASE_PASSWORD'),
       DATABASE_SSLMODE: config.get('DATABASE_SSLMODE'),
     }),
+    // TLS is decided HERE, not inside resolveDatabaseUrl: the URL builder composes
+    // connection STRING parts and has no business reading a file. Both the pool and
+    // the outbox worker's LISTEN connection get the same verify-full decision.
+    {
+      caFile: config.get('DATABASE_SSL_CA'),
+      isProduction: config.get('NODE_ENV') === 'production',
+    },
   );
 }
 

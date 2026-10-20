@@ -27,7 +27,7 @@ try {
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { inArray, eq, sql } from 'drizzle-orm';
 import { Pool } from 'pg';
-import { pgOptions } from './pg-ssl';
+import { pgOptions, tlsFromEnv } from './pg-ssl';
 import { resolveDatabaseUrl } from './database-url';
 import { log } from './script-log';
 import { permissions, roles, rolePermissions, userRoleAssignments } from './schema/authz';
@@ -293,7 +293,7 @@ export async function seedRbacCatalog(connectionUrl?: string): Promise<void> {
   // DATABASE_* parts, and throws naming what is missing. See db/database-url.ts.
   const url = connectionUrl ?? resolveDatabaseUrl();
 
-  const pool = new Pool({ ...pgOptions(url), max: 1 });
+  const pool = new Pool({ ...pgOptions(url, tlsFromEnv()), max: 1 });
   const db = drizzle(pool);
   try {
     await seedRbacCatalogInto(db);
@@ -404,7 +404,7 @@ export async function seed(connectionUrl?: string): Promise<void> {
   // DATABASE_* parts, and throws naming what is missing. See db/database-url.ts.
   const url = connectionUrl ?? resolveDatabaseUrl();
 
-  const pool = new Pool({ ...pgOptions(url), max: 1 });
+  const pool = new Pool({ ...pgOptions(url, tlsFromEnv()), max: 1 });
   const db = drizzle(pool);
   try {
     // Reference catalogue first so role assignments below resolve.
