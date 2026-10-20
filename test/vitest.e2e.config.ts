@@ -40,6 +40,9 @@ export default defineConfig({
       // refuses both values above their defaults (env.schema.ts).
       RATE_LIMIT_IP_LIMIT: '100000',
       RATE_LIMIT_DEFAULT_LIMIT: '5000',
+      // .env.example sends mail to Mailpit (EMAIL_PROVIDER=smtp). The e2e suite must never send real mail, so it runs on the
+      // dev provider, as the CI job (which has no .env) does.
+      EMAIL_PROVIDER: 'dev',
       BETTER_AUTH_SECRET:
         process.env['BETTER_AUTH_SECRET'] ?? 'e2e-better-auth-secret-minimum-32-chars!!',
     },

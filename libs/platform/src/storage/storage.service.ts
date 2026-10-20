@@ -70,6 +70,10 @@ export class StorageService {
       region: endpoint ? 'auto' : config.get('AWS_REGION'),
       ...(endpoint ? { endpoint, forcePathStyle: config.get('STORAGE_FORCE_PATH_STYLE') } : {}),
       ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
+      // SDK v3 attaches a CRC32 checksum to PutObject by default, and a presigned PUT then carries that checksum for a body it
+      // cannot see. S3-compatible stores that verify it (Garage) refuse every upload with InvalidDigest. Compute it only when a
+      // request requires it, as rova's StorageService does.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
     });
   }
 

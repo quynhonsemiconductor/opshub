@@ -34,10 +34,15 @@ grep -qs 'npm.pkg.github.com/:_authToken' ~/.npmrc || echo '//npm.pkg.github.com
 
 export NODE_AUTH_TOKEN="$(gh auth token)"      # per shell; or a PAT with read:packages
 cp .env.example .env                           # every value is already wired, secrets are local placeholders
-docker compose -f docker-compose.dev.yml up -d --wait    # Postgres, Valkey, LocalStack (S3), OTel collector
+docker compose -f docker-compose.dev.yml up -d --wait    # Postgres, Valkey, Garage (S3), Mailpit, OTel collector, and the bucket setup
 pnpm install
 pnpm db:migrate                                # migrations + RBAC catalogue + the demo users (SEED_ON_DEPLOY=true in .env)
 ```
+
+One command does the steps above, starts the three processes and waits for the API: `make local` (logs go to `.local/`). Then `make check`
+proves the stack end to end: the API's `/readyz`, a live worker heartbeat in Valkey, sign-in through the web proxy as the demo admin,
+a storage round trip through Garage, and a message landing in Mailpit. `make down` stops the processes and the containers; volumes are kept.
+`make local` stops if the bucket setup did not exit 0: `docker compose -f docker-compose.dev.yml ps -a garage-init` shows `Exited (0)` when it did.
 
 Then one terminal per process:
 
@@ -98,14 +103,14 @@ org's "Local development" page (`.github`); the defaults here are the opshub col
 | SPA (Vite)                         | **5174**            | 5175                | 5173           |
 | Postgres                           | **5410**            | 5420                | 5432           |
 | Valkey                             | **6310**            | 6320                | 6379           |
-| LocalStack (S3)                    | **4610**            | 4620                | 4570           |
+| Object storage (S3)                | **4610** (Garage)   | 4620                | 4570 (Garage)  |
 | OTel collector (OTLP / Prometheus) | **4410** / **8410** | 4420 / 8420         | (none)         |
 
 The Vite server uses `strictPort`: a taken port fails the start instead of moving, because the Microsoft redirect (`APP_URL`) and the
 bucket's CORS are set for that origin. To use a different web port, set `WEB_DEV_PORT` and the `APP_URL` and `CORS_ORIGINS` that embed it.
 
-(File uploads in the browser need LocalStack's bucket CORS to allow that origin too: `WEB_ORIGIN` in `scripts/localstack/01-bootstrap.sh`,
-which follows `WEB_DEV_PORT`.)
+(File uploads in the browser need Garage's bucket CORS to allow that origin too: `WEB_ORIGINS` in `docker-compose.dev.yml`, for
+`localhost` and `127.0.0.1`, which follows `WEB_DEV_PORT`.)
 
 **Upgrade note.** A `.env` written before this block still has the old ports. Either start again from `cp .env.example .env`, or
 re-copy the port keys from `.env.example`: `WEB_DEV_PORT`, `PORT`, `CORS_ORIGINS`, `APP_URL`, the `*_HOST_PORT` keys, and the URLs
@@ -134,10 +139,10 @@ Two checkouts, or a branch you want to keep running beside your main one, need t
 API and web ports. Every port is bound to `127.0.0.1` and read from `.env`. In the second copy's `.env`:
 
 1. `COMPOSE_PROJECT_NAME=opshub-2`: the containers, volumes and network take this prefix. Every checkout or worktree sets its own.
-2. Give each `*_HOST_PORT` a free number: `POSTGRES_HOST_PORT`, `VALKEY_HOST_PORT`, `LOCALSTACK_HOST_PORT`, `OTEL_OTLP_HOST_PORT`, `OTEL_METRICS_HOST_PORT`.
-3. Put the same Postgres, Valkey and LocalStack numbers into `DATABASE_URL`, `VALKEY_URL`, `STORAGE_ENDPOINT`, `AWS_ENDPOINT_URL`, and the OTLP port into `OTEL_EXPORTER_OTLP_ENDPOINT`. The app reads URLs, not the `*_HOST_PORT` values.
+2. Give each `*_HOST_PORT` a free number: `POSTGRES_HOST_PORT`, `VALKEY_HOST_PORT`, `STORAGE_HOST_PORT`, `OTEL_OTLP_HOST_PORT`, `OTEL_METRICS_HOST_PORT`, `MAILPIT_SMTP_HOST_PORT`, `MAILPIT_UI_HOST_PORT`.
+3. Put the same Postgres, Valkey and storage numbers into `DATABASE_URL`, `VALKEY_URL` and `STORAGE_ENDPOINT`, and the OTLP port into `OTEL_EXPORTER_OTLP_ENDPOINT`. The app reads URLs, not the `*_HOST_PORT` values.
 4. The API: `PORT` (the API's port; the SPA's proxy follows it).
-5. The web: `WEB_DEV_PORT` (the Vite port; LocalStack's bucket CORS follows it). Then `APP_URL=http://localhost:<WEB_DEV_PORT>` and `CORS_ORIGINS=http://localhost:<WEB_DEV_PORT>`, so sign-in redirects and the API's CORS match the new origin.
+5. The web: `WEB_DEV_PORT` (the Vite port; Garage's bucket CORS follows it). Then `APP_URL=http://localhost:<WEB_DEV_PORT>` and `CORS_ORIGINS=http://localhost:<WEB_DEV_PORT>`, so sign-in redirects and the API's CORS match the new origin.
 
 For real Microsoft sign-in on the new web port, register `http://localhost:<WEB_DEV_PORT>/api/auth/callback/microsoft` as a redirect URI on your dev app; the test login needs none of this.
 
@@ -148,7 +153,8 @@ Then run the same commands as above. The Playwright config's `baseURL` is pinned
 - `pnpm db:seed` re-runs the demo fixtures; `pnpm db:studio` opens Drizzle Studio.
 - Telemetry: `docker compose -f docker-compose.dev.yml logs otel`, or `curl -s localhost:8410/metrics | grep queue_`. No collector? `OTEL_ENABLED=false` in `.env`.
 - Mail is `EMAIL_PROVIDER=smtp`: messages go to Mailpit at `http://localhost:8110` and nothing leaves the machine. With Mailpit down, sends fail and retry; `EMAIL_PROVIDER=dev` logs them instead.
-- Uploads go to LocalStack's `opshub-files-dev` bucket; `aws --endpoint-url http://localhost:4610 s3 ls s3://opshub-files-dev` (any credentials).
+- Uploads go to Garage's `opshub-files-dev` bucket. List it with `aws`, `AWS_DEFAULT_REGION=auto`, `--endpoint-url http://localhost:4610`, and the `STORAGE_ACCESS_KEY_ID` and `STORAGE_SECRET_ACCESS_KEY` values from `.env` as the credentials (local-only, see `.env.example`).
+- Uploads survive a restart of the storage node. To check: upload with the stack up, run `docker compose -f docker-compose.dev.yml restart garage`, then list the bucket again. `make check` does not restart anything, so it does not run this check.
 - Reset everything: `docker compose -f docker-compose.dev.yml down -v`, then `up -d --wait` and `pnpm db:migrate` again.
 - Upgrading an existing checkout from PostgreSQL 17 to 18.6: a 17 data directory will not start on the 18.6 image. The container stops with `Error: in 18+, these Docker images are configured to store database data in a format which is compatible with "pg_ctlcluster" (specifically, using major-version-specific directory names).`. Run `docker compose -f docker-compose.dev.yml down -v` once in that checkout, which **drops that checkout's local data** (only its own project volumes). To keep the data, first run `pg_dumpall` against the 17 container and restore it into the 18 container. Then `up -d --wait` starts a fresh 18.6 database.
 - Upgrading an existing checkout from before `name: opshub`: the containers were named `opshub-postgres`, `opshub-valkey`, `opshub-localstack` and `opshub-otel`, outside any project. Remove them with `docker rm -f opshub-postgres opshub-valkey opshub-localstack opshub-otel`, or run `docker compose -p <old project dir> down -v` if you know the old project name. Do not share a project name between checkouts: `down -v` in one would wipe the other's data.

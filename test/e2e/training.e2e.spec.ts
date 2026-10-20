@@ -22,7 +22,7 @@
  * GET returned a Promise cast to a string. Both were invisible until something PUT and fetched.
  *
  * Prereqs: `docker compose -f docker-compose.dev.yml up -d`, `pnpm db:migrate`, `pnpm db:seed`.
- * CI runs a LocalStack service and creates the bucket before this suite — see backend-ci.yml.
+ * CI starts Garage and creates the bucket before this suite — see backend-ci.yml.
  */
 import { createHash } from 'node:crypto';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
