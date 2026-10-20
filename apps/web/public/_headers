@@ -3,11 +3,16 @@
 # move Workers Static Assets reads the same file. Matching is order-sensitive and MERGED:
 # /* carries the security headers, and the asset rules below only add Cache-Control.
 #
-# connect-src stays 'self' — the SPA is same-origin by design (the Pages Functions proxy
-# today, no-Worker routes through the edge after the move). Attachments render from
-# time-limited presigned GETs on the uploads bucket: AWS S3 in every deployed environment
-# (STORAGE_ENDPOINT is set only for the local Garage stand-in), virtual-hosted style, so
-# img-src names the regional S3 host rather than a wildcard over qnsc.vn.
+# connect-src is 'self' PLUS the uploads bucket: the SPA is same-origin by design (the
+# Pages Functions proxy today, no-Worker routes through the edge after the move), but
+# the file-upload widget PUTs bytes DIRECTLY to presigned S3 URLs (use-upload.ts), so
+# those requests are fetches, not navigations, and 'self' alone blocks every upload.
+# Attachments render from time-limited presigned GETs on the same bucket: AWS S3 in
+# every deployed environment (STORAGE_ENDPOINT is set only for the local Garage
+# stand-in), virtual-hosted style, so the policy names the regional S3 host rather than
+# a wildcard over qnsc.vn. AT THE ON-PREM MOVE both hosts switch to R2 (M-6 renames the
+# bucket and carries its custom domain) — this static file cannot specialise, so that
+# is an edit in the move PR, not here.
 
 /*
   X-Content-Type-Options: nosniff
@@ -15,7 +20,7 @@
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=()
   Strict-Transport-Security: max-age=31536000; includeSubDomains
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://*.s3.ap-southeast-1.amazonaws.com https://*.s3.amazonaws.com; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-src 'self' blob:; worker-src 'self' blob:;
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://*.s3.ap-southeast-1.amazonaws.com https://*.s3.amazonaws.com; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.s3.ap-southeast-1.amazonaws.com; frame-src 'self' blob:; worker-src 'self' blob:;
   Cache-Control: no-cache
 
 # Content-hashed filenames: the bytes behind a given URL never change.
