@@ -499,6 +499,17 @@ variable "container_insights" {
   }
 }
 
+variable "rds_free_storage_pct" {
+  description = <<-EOT
+    Free-storage alarm floor as a percent of the allocated RDS storage
+    (`rds.allocated_storage_gb`). 0 keeps the module's absolute 2 GiB floor. Set in
+    live/<env> only where the percent should apply: develop sets 20 (the alarm fires at
+    4 GiB free of 20). Prod stays 0 until its own change.
+  EOT
+  type        = number
+  default     = 0
+}
+
 variable "rds" {
   description = "Database sizing and durability. No defaults for storage or protection — both callers state them explicitly, so neither is production-critical by accident."
   type = object({

@@ -1517,7 +1517,7 @@ module "observability" {
   # caller of this module.
   #
   # THIS TAG DOES NOT EXIST YET — it must be cut in tf-modules before this plans.
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability?ref=observability-v4.3.0"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability?ref=observability-v4.4.0"
 
   create_dashboard = var.create_dashboard
 
@@ -1555,6 +1555,9 @@ module "observability" {
   # this fails the plan rather than regressing silently.
   rds_instance_id = module.rds.identifier
 
+  # Storage the free-space floor is a percent of; the value is the one the rds module allocates.
+  rds_allocated_storage_gb = var.rds.allocated_storage_gb
+
   # The FIRST thresholds passthrough in this module — every other key keeps the module's
   # default, which is deliberate and unchanged. Only the two burstable alarms are set,
   # because they are the only two that default OFF and therefore the only two that a
@@ -1563,6 +1566,7 @@ module "observability" {
   thresholds = {
     rds_cpu_credit_min     = local.rds_burst_alarm_thresholds.cpu_credit_min
     rds_freeable_memory_mb = local.rds_burst_alarm_thresholds.freeable_memory_mb
+    rds_free_storage_pct   = var.rds_free_storage_pct
   }
 
   # No target groups while tunnelled, so the latency and UnHealthyHostCount alarms are not

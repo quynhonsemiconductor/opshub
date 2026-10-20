@@ -249,6 +249,10 @@ module "stack" {
   // from the weekends and the 21:00-08:00 window, which the idle schedule already owned.
   wake_schedule = null // OFF since 2026-10-14; see idle_schedule above
 
+  # Free-space alarm at 20% of allocated storage (fires at 4 GiB free of 20 GiB). Keep
+  # allocated_storage_gb in step with growth: the alarm reads the value above.
+  rds_free_storage_pct = 20
+
   rds = {
     instance_class           = "db.t4g.micro"
     allocated_storage_gb     = 20
