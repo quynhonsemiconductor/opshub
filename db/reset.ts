@@ -23,7 +23,7 @@
  * helper is exactly what invites that, so the gate is that `seed()` never calls this itself.
  */
 import { Pool } from 'pg';
-import { pgOptions } from './pg-ssl';
+import { pgOptions, tlsFromEnv } from './pg-ssl';
 import { resolveMigrationUrl } from './database-url';
 
 /**
@@ -189,7 +189,7 @@ export async function resetFixtureTables(connectionUrl?: string): Promise<void> 
   // application role is not guaranteed to hold it.
   const url = connectionUrl ?? resolveMigrationUrl();
 
-  const pool = new Pool({ ...pgOptions(url), max: 1 });
+  const pool = new Pool({ ...pgOptions(url, tlsFromEnv()), max: 1 });
   try {
     await pool.query(`TRUNCATE TABLE ${FIXTURE_TABLES.join(', ')} CASCADE`);
   } finally {

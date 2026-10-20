@@ -56,6 +56,10 @@ const baseShape = {
   DATABASE_USER: z.string().optional(),
   DATABASE_PASSWORD: z.string().optional(),
   DATABASE_SSLMODE: z.string().default('require'),
+  // Path to the CA bundle database certificates must chain to (RDS global bundle in the
+  // image today, the CNPG ca.crt on-prem). REQUIRED in production: without it the
+  // process refuses to connect (see db/pg-ssl.ts) instead of encrypting unverified.
+  DATABASE_SSL_CA: emptyToUndefined(z.string().optional()),
   DATABASE_POOL_MIN: z.coerce.number().int().positive().default(2),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(20),
 
