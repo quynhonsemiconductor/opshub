@@ -125,7 +125,7 @@ jobs:
         # awaited run, live in the shared action — see `quynhonsemiconductor/ci`. This was
         # hand-written here, with `gh run watch --exit-status`, which reports a 403 the same
         # way it reports a failed run: rova lost both deploys on 2026-09-13 to exactly that.
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@5a57261635f88c46fa1e6e553f9b930a138b4b2e # v1.22.0
         with:
           workflow: infra-apply.yml
           label: Infrastructure · Apply
@@ -193,7 +193,7 @@ jobs:
     steps:
       - name: Wait for Backend · CI on this commit
         if: github.ref_type != 'tag'
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@5a57261635f88c46fa1e6e553f9b930a138b4b2e # v1.22.0
         with:
           workflow: backend-ci.yml
           # `main` and not the tag ref: Backend · CI only runs on main.
@@ -208,7 +208,7 @@ jobs:
       # precondition. See the block comment above this job for the race it closes.
       - name: Wait for the develop deploy of this commit
         if: github.ref_type == 'tag'
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@5a57261635f88c46fa1e6e553f9b930a138b4b2e # v1.22.0
         with:
           workflow: backend-deploy.yml
           # `main` is what excludes THIS run: the develop deploy's headBranch is `main` while
@@ -240,7 +240,7 @@ jobs:
       id-token: write
       attestations: write
       packages: read # build-push-ecr pulls private @quynhonsemiconductor/* from GitHub Packages
-    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@v1
+    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@5a57261635f88c46fa1e6e553f9b930a138b4b2e # v1.22.0
     with:
       product: opshub
       has_worker: true
