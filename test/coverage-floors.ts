@@ -8,8 +8,8 @@
  * suite can be deleted and `pnpm test:cov` still passes, which is the opposite of what a
  * floor is for.
  *
- * Adapted from rally's `coverage-include.spec.ts`, which guards the same class of bug in the
- * shape rally has it: a hand-enumerated `include` list that silently rots. opshub's include
+ * Adapted from rova's `coverage-include.spec.ts`, which guards the same class of bug in the
+ * shape rova has it: a hand-enumerated `include` list that silently rots. opshub's include
  * is a glob, so that exact ratchet would pass forever and prove nothing — the drift here is
  * in the thresholds instead.
  *

@@ -144,7 +144,7 @@ export class DrizzleProvider implements OnModuleInit, OnApplicationShutdown {
    * what forces the pool to create `n` distinct clients; releasing them then returns
    * them as idle, which is the state we want.
    *
-   * FAILURE IS LOGGED, NOT THROWN, and the usual reason does not apply here. Rally
+   * FAILURE IS LOGGED, NOT THROWN, and the usual reason does not apply here. Rova
    * argues that a hard throw is safe because its pipeline gates on a readiness endpoint
    * that does check the database. OpsHub does have such an endpoint — `/v1/readyz`
    * runs `SELECT 1` — but NOTHING CONSUMES IT as a gate: the ALB health-checks

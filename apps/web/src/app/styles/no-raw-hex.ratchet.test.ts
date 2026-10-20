@@ -13,18 +13,18 @@ import { describe, expect, it } from 'vitest';
  * drifts: nothing then keeps light and dark in step, and nothing reports that two pages
  * picked different greys for the same meaning.
  *
- * Unlike rally's, this baseline is NOT zero. opshub has not done the migration — the
+ * Unlike rova's, this baseline is NOT zero. opshub has not done the migration — the
  * literals here are hard-coded Tailwind palette values (`#a1a1aa` is zinc-400, `#2563eb`
  * blue-600, `#ef4444` red-500) sitting in chart-heavy pages. Freezing the count is worth
  * doing on its own: it stops the number growing while the migration is pending, which is
- * the entire value rally's docblock claims for it.
+ * the entire value rova's docblock claims for it.
  *
  * NEVER raise this number. If a genuinely new palette colour is needed, add it to the token
  * layer in globals.css and reference it — that is the migration, one file at a time.
  *
  * What the migration still needs, and why it is not attempted here: the remaining literals
  * are mostly chart series and SVG paint, which cannot read a CSS custom property directly.
- * rally solved that with a typed mirror of the tokens (`shared/config/brand.ts`) that charts
+ * rova solved that with a typed mirror of the tokens (`shared/config/brand.ts`) that charts
  * import. opshub has no such mirror yet, so there is nowhere for those values to move to —
  * and changing colours is visually consequential, so it wants someone who can see the
  * result rather than a mechanical edit.
@@ -33,7 +33,7 @@ import { describe, expect, it } from 'vitest';
 // ── Ratchet baseline — LOWER as files migrate, NEVER raise ────────────────────
 //
 // Measured by forcing this to -1 and reading the count the failure reports, not by grepping
-// alongside — rally's equivalent records that an approximate grep set one of its bars in the
+// alongside — rova's equivalent records that an approximate grep set one of its bars in the
 // wrong place, and a baseline above the real count is slack a ratchet cannot have.
 const MAX_RAW_HEX = 46;
 

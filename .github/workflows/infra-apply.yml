@@ -19,7 +19,7 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Infrastructure
 # apply fails if the runtime state doesn't exist yet. The platform pipeline
 # applies runtime first.
 #
-# Structure is intentionally identical to rally/.github/workflows/infra-apply.yml
+# Structure is intentionally identical to rova/.github/workflows/infra-apply.yml
 # (shared composite actions + the same staged/gated jobs); only the values differ
 # (role prefix, TF_VARs). Keep the two products in lock-step.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -53,7 +53,7 @@ on:
 # infra/live/_shared state concurrently — a real bug, state-lock failure on every
 # release. But a repo-wide group also makes DEVELOP queue behind PROD, and prod is
 # gated on a required reviewer, so an unapproved production apply freezes every
-# develop apply until a human notices. rally shipped that variant, found it
+# develop apply until a human notices. rova shipped that variant, found it
 # silently swallowed two develop applies, and moved the lock to where the
 # collision actually lives.
 #
@@ -204,7 +204,7 @@ jobs:
           # (see infra-plan.yml); develop's image_tag is `latest` in the caller; and
           # acm_cert_arn was a required variable no resource read.
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # Org-level secret, same one rally already maps. Without this,
+          # Org-level secret, same one rova already maps. Without this,
           # grafana_alerting_auth stays empty and module.alerts/grafana_slo/
           # grafana_dashboard all count-gate to zero — apply "succeeds" but creates
           # no Grafana resources at all, silently.
@@ -326,7 +326,7 @@ jobs:
         run: tofu plan -input=false -out=tfplan
         env:
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # Org-level secret, same one rally already maps. Without this,
+          # Org-level secret, same one rova already maps. Without this,
           # grafana_alerting_auth stays empty and module.alerts/grafana_slo/
           # grafana_dashboard all count-gate to zero — apply "succeeds" but creates
           # no Grafana resources at all, silently.

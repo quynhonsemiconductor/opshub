@@ -1,5 +1,5 @@
 /**
- * Seed script — two tiers (mirrors rally's seed architecture):
+ * Seed script — two tiers (mirrors rova's seed architecture):
  *
  *   1. RBAC reference catalogue (permissions + roles + grants) — PROD-SAFE.
  *      Reference data the PolicyGuard and JIT SSO provisioning depend on; it

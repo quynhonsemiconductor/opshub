@@ -29,7 +29,7 @@ import { describe, expect, it } from 'vitest';
  * wants. The number is here so the gap is counted rather than invisible, and so it cannot grow while
  * the routes are closed a module at a time.
  *
- * WHY NOT THE SIBLING REPO'S FIX. Rally makes the descriptor a REQUIRED overload parameter, so
+ * WHY NOT THE SIBLING REPO'S FIX. Rova makes the descriptor a REQUIRED overload parameter, so
  * omitting it is a compile error rather than something a test notices. That works there because its
  * permissions are split by TIER — workspace-wide versus project-scoped — and the requirement attaches
  * to the project tier. opshub has no tier: the same `asset.write` gates `POST /assets` (no row exists

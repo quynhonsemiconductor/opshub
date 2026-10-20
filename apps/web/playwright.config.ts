@@ -14,7 +14,7 @@ import { AUTH_STATE } from './e2e/support/fixtures';
  * "the thing I just made appears in this list". Parallel workers would interleave writes into
  * each other's lists, and the failure would look like a UI bug.
  *
- * SHARED LOGINS, EIGHT OF THEM, unlike rally, which logs in per test. rally has to: its bearer flow
+ * SHARED LOGINS, EIGHT OF THEM, unlike rova, which logs in per test. rova has to: its bearer flow
  * rotates the refresh token on every use and revokes the family on reuse, so a shared session trips
  * that protection. OpsHub's SPA holds no tokens at all — auth is an opaque opshub.session_token (`__Host-` in production)
  * cookie backed by Valkey, and nothing rotates it within its 12 h life — so `global-setup.ts` signs in once PER SEAT and

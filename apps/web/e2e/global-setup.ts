@@ -8,7 +8,7 @@ import { AUTH_STATES, SEAT_EMAILS } from './support/fixtures';
  *
  * HOW, AND WHY NOT THROUGH THE UI: OpsHub's login page is a single Entra SSO button — there is
  * no passwordless form for a browser to fill, because the product has exactly one directory.
- * rally renders a dev-login form behind a Vite flag and drives it; adding one here would be a
+ * rova renders a dev-login form behind a Vite flag and drives it; adding one here would be a
  * production UI change made for a test.
  *
  * So this posts to `/api/auth/test-login` (identity 8; it loads only with IDENTITY_TEST_LOGIN=enabled and

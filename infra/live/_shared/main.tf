@@ -45,12 +45,12 @@ module "ecr" {
   # so this bump plans and validates today.
   #
   # v2.0.0 already split the keep rule by tag prefix (the combined ["sha-","v"] rule was
-  # dead: `tagPrefixList` is AND, so it only matched images carrying BOTH prefixes). rally
+  # dead: `tagPrefixList` is AND, so it only matched images carrying BOTH prefixes). rova
   # verified that live (105 `sha-` images under a policy claiming to keep 30).
   #
   # No count/day override here: this call adopts the defaults — keep 10 builds (sha-*;
   # ecr-v2.2.0 default, was 20), expire releases (v*) after 180 days, untagged after 1 day.
-  # These repositories do not exist yet, so unlike rally there is nothing to preview: the policy applies from the
+  # These repositories do not exist yet, so unlike rova there is nothing to preview: the policy applies from the
   # first pushed image. Run the estate preview (infra/scripts/ecr_lifecycle_preview.py)
   # before changing the numbers later — a dry run, and the only way to see what a policy
   # will delete.

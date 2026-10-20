@@ -270,7 +270,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
    *
    * AFTER THE COMMIT, NOT INSIDE IT. Invalidating inside the transaction leaves a window in which a
    * concurrent request misses the cache, re-resolves from rows that have not yet committed, and caches
-   * the OLD permissions again. Rally's `removeMember` records the same ordering rule.
+   * the OLD permissions again. Rova's `removeMember` records the same ordering rule.
    *
    * The Entra disable is not here any more: it is a task queued by `onApprove`, in the transaction.
    */

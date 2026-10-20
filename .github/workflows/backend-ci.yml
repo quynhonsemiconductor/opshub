@@ -142,7 +142,7 @@ jobs:
 
       - name: Typecheck (including tests)
         # `tsconfig.build.json` excludes `test` and `**/*spec.ts`, so the step above cannot
-        # see a type error in a test file. Rally hit exactly this gap (incident #262): a
+        # see a type error in a test file. Rova hit exactly this gap (incident #262): a
         # wrong service-call signature reached main behind a green check because the spec
         # mocked the call, so it still passed at runtime with the wrong signature. `tsconfig.json`
         # is a superset, hence both steps rather than a replacement — the first one stays as

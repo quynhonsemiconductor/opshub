@@ -4,7 +4,7 @@
  * Why this exists. Nothing in the e2e suite tears down what it creates — every `afterAll`
  * closes the Nest app and cleans nothing — while the specs insert timesheets, leave and
  * requests on every pass. So a developer's database grows forever, and two things follow,
- * both of which rally hit for real before this pattern was adopted there:
+ * both of which rova hit for real before this pattern was adopted there:
  *
  *   • Tests read each other's leftovers. A list assertion that holds on a clean database
  *     becomes order- or count-dependent once fifty rows from earlier runs exist, and the

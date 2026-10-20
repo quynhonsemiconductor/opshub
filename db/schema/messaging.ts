@@ -13,7 +13,7 @@
  *
  * A fourth table, outbox_events, used to sit here — a generic domain-event outbox relayed
  * to SQS. Nothing consumed the queue and nothing read the table, so migration 0013 dropped
- * it. Do not reintroduce a generic event outbox without a consumer: rally shipped exactly
+ * it. Do not reintroduce a generic event outbox without a consumer: rova shipped exactly
  * that shape and lost 100% of its domain events in every deployed environment for months,
  * because nothing exercised the middle of the chain.
  */

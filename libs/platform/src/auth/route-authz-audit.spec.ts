@@ -104,7 +104,7 @@ describe('assertEveryRouteDeclaresAuthz', () => {
     Get('one')(proto, 'one', { value: proto['one'] } as PropertyDescriptor);
     SelfScoped('declared')(proto, 'one', { value: proto['one'] } as PropertyDescriptor);
 
-    // A SMALL module is legitimate — rally has an e2e that builds a 15-controller one — so only
+    // A SMALL module is legitimate — rova has an e2e that builds a 15-controller one — so only
     // an EMPTY scan proves the scanner is broken.
     expect(() =>
       assertEveryRouteDeclaresAuthz(discoveryOf(TinyController as unknown as new () => unknown)),

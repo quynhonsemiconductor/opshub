@@ -32,7 +32,7 @@ variable "cloudflare_api_token" {
 // replacements.
 
 variable "entra_tenant_id" {
-  description = "Microsoft Entra tenant id for QNSC (public) — the same directory rally authenticates against."
+  description = "Microsoft Entra tenant id for QNSC (public) — the same directory rova authenticates against."
   type        = string
   default     = "dc0f2078-ac28-4ff2-b21a-d4b28df32361"
 }
@@ -68,7 +68,7 @@ variable "cloudflare_account_id" {
 variable "otlp_endpoint" {
   description = <<-EOT
     OTLP/HTTP base URL of the telemetry backend — qnsc-infra's live/observability
-    stack, region prod-ap-southeast-0 (the SAME shared Grafana Cloud stack rally
+    stack, region prod-ap-southeast-0 (the SAME shared Grafana Cloud stack rova
     already pushes to — one stack, every product, tenancy is the
     product/environment resource attributes each sidecar sets), with the `/otlp`
     suffix the otlphttp exporter needs.
@@ -76,7 +76,7 @@ variable "otlp_endpoint" {
     Setting this creates the `observability-token` Secrets Manager secret (empty)
     and flips the sidecar on in the task definition — but the secret's VALUE must
     be populated by hand (Basic base64(stack_id:token), the SAME shared
-    write-only otlp-sidecar-push token rally uses, never through Terraform — see
+    write-only otlp-sidecar-push token rova uses, never through Terraform — see
     modules/stack/main.tf) and the service must be DEPLOYED before telemetry
     actually flows.
   EOT
@@ -112,7 +112,7 @@ variable "grafana_alerting_prometheus_datasource_name" {
 }
 
 variable "grafana_logs_datasource_name" {
-  description = "Grafana Cloud's auto-provisioned Loki datasource name for this stack, same as rally's. Same value in every environment; not a secret."
+  description = "Grafana Cloud's auto-provisioned Loki datasource name for this stack, same as rova's. Same value in every environment; not a secret."
   type        = string
   default     = "grafanacloud-qnsc-logs"
 }
@@ -120,9 +120,9 @@ variable "grafana_logs_datasource_name" {
 variable "grafana_alerting_folder_uid" {
   description = <<-EOT
     qnsc-infra's live/observability stack's `alerting_folder_uid` output — the
-    shared folder every product's rule groups live under, rally's included.
+    shared folder every product's rule groups live under, rova's included.
     Same value in every environment and every product; not a secret. See
-    rally's own copy of this variable for the destroy+recreate fragility of
+    rova's own copy of this variable for the destroy+recreate fragility of
     hardcoding a Grafana folder UID — a `terraform_remote_state` read would
     self-heal instead of silently going stale.
   EOT
@@ -131,7 +131,7 @@ variable "grafana_alerting_folder_uid" {
 }
 
 variable "grafana_dashboards_folder_uid" {
-  description = "qnsc-infra's live/observability stack's `dashboards_folder_uid` output — the PARENT folder every product's own dashboard subfolder nests under. Unused directly here (opshub's dashboards nest under grafana_opshub_dashboards_folder_uid below), kept for parity with rally's own copy of this variable."
+  description = "qnsc-infra's live/observability stack's `dashboards_folder_uid` output — the PARENT folder every product's own dashboard subfolder nests under. Unused directly here (opshub's dashboards nest under grafana_opshub_dashboards_folder_uid below), kept for parity with rova's own copy of this variable."
   type        = string
   default     = ""
 }
@@ -140,7 +140,7 @@ variable "grafana_opshub_dashboards_folder_uid" {
   description = <<-EOT
     qnsc-infra's live/observability stack's `opshub_dashboards_folder_uid`
     output — opshub's own dashboard SUBFOLDER, created once, centrally (see
-    qnsc-infra PR #105 and rally's own duplicate-folder incident for why it
+    qnsc-infra PR #105 and rova's own duplicate-folder incident for why it
     is not a `grafana_folder` resource inside this stack module instead).
   EOT
   type        = string

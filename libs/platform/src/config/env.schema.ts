@@ -293,7 +293,7 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
     // BEFORE the database early-return below, and that placement is the point. This
     // superRefine returns as soon as a complete DATABASE_URL is present, so anything
     // written after that line is dead in exactly the configuration developers and CI run.
-    // (rally's equivalent storage-pair check sits after its return and is inert there.)
+    // (rova's equivalent storage-pair check sits after its return and is inert there.)
     //
     // Half a credential pair is a misconfiguration, not a partial feature. With only one
     // half set, the S3Client silently omits `credentials` and falls back to the task

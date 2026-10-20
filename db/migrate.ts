@@ -72,7 +72,7 @@ async function run() {
      *
      * Deployed migrator tasks run with `NODE_ENV=production` and nothing else does —
      * CI's ephemeral Postgres and a developer's machine do not — so the floor cannot
-     * block a legitimate local or CI seed. Ported from rally, whose develop database
+     * block a legitimate local or CI seed. Ported from rova, whose develop database
      * really did carry a fixture project for a while.
      */
     if (process.env['SEED_ON_DEPLOY'] === 'true') {

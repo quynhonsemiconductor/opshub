@@ -78,7 +78,7 @@ export const storedFiles = storageSchema.table(
  * relationship — there is no list to page, no quota to enforce, and no second file to name — so
  * moving them would add a join to every avatar render in exchange for uniformity alone.
  *
- * Polymorphic on `(entity_type, entity_id)`, following rally's `work.attachments`: `entity_id`
+ * Polymorphic on `(entity_type, entity_id)`, following rova's `work.attachments`: `entity_id`
  * carries no FK because it cannot point at two tables, which is the standing cost of this shape.
  * `file_id` DOES cascade, so deleting the file drops its links. Deleting the owning entity is the
  * owning service's job, and the reaper collects files nothing references.
