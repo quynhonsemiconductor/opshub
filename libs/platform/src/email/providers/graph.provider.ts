@@ -21,8 +21,12 @@ export interface GraphMailConfig {
   tenantId: string | undefined;
   /** The Entra app that holds the Exchange `Application Mail.Send` role for that mailbox (no Graph permission in Entra). */
   clientId: string | undefined;
-  /** PEM, key + certificate (ECS). */
-  certificate: string | undefined;
+  /**
+   * Path of the worker-only file holding the ONE combined PEM (private key first, then the
+   * certificate), read through `AZURE_CLIENT_CERTIFICATE_PATH` (ONPREM-PLAN §7.3) — a path, never
+   * a PEM env value.
+   */
+  certificatePath: string | undefined;
   /** Projected ServiceAccount token (k3s). Wins over the certificate, so the move is adding this and deleting the certificate. */
   federatedTokenFile: string | undefined;
   nodeEnv: string;
@@ -147,14 +151,15 @@ export class GraphEmailProvider implements IEmailProvider {
 
   private transport(): EmailSender {
     if (!this.sender) {
-      const { sender, tenantId, clientId, certificate, federatedTokenFile, nodeEnv } = this.config;
+      const { sender, tenantId, clientId, certificatePath, federatedTokenFile, nodeEnv } =
+        this.config;
       this.sender = this.makeSender({
         MAIL_TRANSPORT: 'graph',
         MAIL_GRAPH_SENDER: sender,
         NODE_ENV: nodeEnv,
         ...(tenantId ? { AZURE_TENANT_ID: tenantId } : {}),
         ...(clientId ? { AZURE_CLIENT_ID: clientId } : {}),
-        ...(certificate ? { AZURE_CLIENT_CERTIFICATE: certificate } : {}),
+        ...(certificatePath ? { AZURE_CLIENT_CERTIFICATE_PATH: certificatePath } : {}),
         ...(federatedTokenFile ? { AZURE_FEDERATED_TOKEN_FILE: federatedTokenFile } : {}),
       });
     }

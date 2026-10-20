@@ -5,8 +5,12 @@ import type { TokenCredential } from '@azure/identity';
 export interface GraphCredentialConfig {
   tenantId: string | undefined;
   clientId: string | undefined;
-  /** PEM with the private key and certificate (ECS, now). */
-  certificatePem: string | undefined;
+  /**
+   * Path of the worker-only file holding the ONE combined PEM (private key first, then the
+   * certificate), read through `AZURE_CLIENT_CERTIFICATE_PATH` (ONPREM-PLAN §7.3) — a path, never a
+   * PEM env value.
+   */
+  certificatePath: string | undefined;
   /** Projected ServiceAccount token (k3s, later). Wins over the certificate. */
   federatedTokenFile: string | undefined;
 }
@@ -24,7 +28,7 @@ export function graphCredentialKind(
 ): GraphCredentialKind | undefined {
   if (!config.tenantId || !config.clientId) return undefined;
   if (config.federatedTokenFile) return 'federated';
-  if (config.certificatePem) return 'certificate';
+  if (config.certificatePath) return 'certificate';
   return undefined;
 }
 
@@ -43,11 +47,11 @@ export function buildGraphCredential(config: GraphCredentialConfig): TokenCreden
   }
   if (kind === 'certificate') {
     return new ClientCertificateCredential(config.tenantId!, config.clientId!, {
-      certificate: config.certificatePem!,
+      certificatePath: config.certificatePath!,
     });
   }
   throw new Error(
     'Microsoft Graph is not configured: set GRAPH_CLIENT_ID (the Graph worker app) and either ' +
-      'GRAPH_FEDERATED_TOKEN_FILE or GRAPH_CLIENT_CERTIFICATE.',
+      'GRAPH_FEDERATED_TOKEN_FILE or AZURE_CLIENT_CERTIFICATE_PATH.',
   );
 }

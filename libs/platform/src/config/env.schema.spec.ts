@@ -379,7 +379,7 @@ describe('EnvSchema — email transports', () => {
 describe('role-specific schemas — the API and the worker hold different credentials', () => {
   const GRAPH = {
     GRAPH_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
-    GRAPH_CLIENT_CERTIFICATE: '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----',
+    AZURE_CLIENT_CERTIFICATE_PATH: '/mnt/secrets/opshub-graph-cert.pem',
     GRAPH_FEDERATED_TOKEN_FILE: '/var/run/secrets/tokens/graph',
   };
 
@@ -564,7 +564,6 @@ describe('role-specific schemas — the API and the worker hold different creden
 describe('EnvSchema: EMAIL_PROVIDER=graph (Microsoft 365 mail)', () => {
   const TENANT = '11111111-1111-4111-8111-111111111111';
   const APP = '22222222-2222-4222-8222-222222222222';
-  const PEM = '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----';
   const graph = { EMAIL_PROVIDER: 'graph', MAIL_GRAPH_SENDER: 'noreply-opshub@qnsc.vn' };
 
   it('needs the mailbox it sends as, in both roles, and no MAIL_FROM_EMAIL (Graph sends as the mailbox)', () => {
@@ -598,13 +597,13 @@ describe('EnvSchema: EMAIL_PROVIDER=graph (Microsoft 365 mail)', () => {
       ...graph,
       ENTRA_TENANT_ID: TENANT,
       GRAPH_CLIENT_ID: APP,
-      GRAPH_CLIENT_CERTIFICATE: PEM,
+      AZURE_CLIENT_CERTIFICATE_PATH: '/mnt/secrets/opshub-graph-cert.pem',
     });
     expect(WorkerEnvSchema.safeParse(complete).success).toBe(true);
     for (const name of [
       'ENTRA_TENANT_ID',
       'GRAPH_CLIENT_ID',
-      'GRAPH_CLIENT_CERTIFICATE',
+      'AZURE_CLIENT_CERTIFICATE_PATH',
     ] as const) {
       const result = WorkerEnvSchema.safeParse({ ...complete, [name]: undefined });
       expect(result.success, `${name} missing should fail`).toBe(false);

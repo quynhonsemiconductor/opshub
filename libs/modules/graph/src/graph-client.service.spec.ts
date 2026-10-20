@@ -23,7 +23,7 @@ type Env = Partial<
   Record<
     | 'ENTRA_TENANT_ID'
     | 'GRAPH_CLIENT_ID'
-    | 'GRAPH_CLIENT_CERTIFICATE'
+    | 'AZURE_CLIENT_CERTIFICATE_PATH'
     | 'GRAPH_FEDERATED_TOKEN_FILE',
     string
   >
@@ -39,11 +39,10 @@ function makeService(env: Env) {
   return { service, config, log };
 }
 
-const PEM = '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----';
 const CERT: Env = {
   ENTRA_TENANT_ID: 'tenant-1',
   GRAPH_CLIENT_ID: 'graph-app',
-  GRAPH_CLIENT_CERTIFICATE: PEM,
+  AZURE_CLIENT_CERTIFICATE_PATH: '/mnt/secrets/opshub-graph-cert.pem',
 };
 const FEDERATED: Env = {
   ENTRA_TENANT_ID: 'tenant-1',
@@ -74,7 +73,7 @@ describe('GraphClientService', () => {
     makeService(CERT).service.client();
 
     expect(identity.ClientCertificateCredential).toHaveBeenCalledWith('tenant-1', 'graph-app', {
-      certificate: PEM,
+      certificatePath: '/mnt/secrets/opshub-graph-cert.pem',
     });
     expect(identity.WorkloadIdentityCredential).not.toHaveBeenCalled();
   });
@@ -100,11 +99,15 @@ describe('GraphClientService', () => {
     ['nothing set', {}, undefined],
     [
       'no GRAPH_CLIENT_ID (the switch)',
-      { ENTRA_TENANT_ID: 't', GRAPH_CLIENT_CERTIFICATE: PEM },
+      { ENTRA_TENANT_ID: 't', AZURE_CLIENT_CERTIFICATE_PATH: '/mnt/secrets/c.pem' },
       undefined,
     ],
     ['no credential', { ENTRA_TENANT_ID: 't', GRAPH_CLIENT_ID: 'c' }, undefined],
-    ['no tenant', { GRAPH_CLIENT_ID: 'c', GRAPH_CLIENT_CERTIFICATE: PEM }, undefined],
+    [
+      'no tenant',
+      { GRAPH_CLIENT_ID: 'c', AZURE_CLIENT_CERTIFICATE_PATH: '/mnt/secrets/c.pem' },
+      undefined,
+    ],
     ['certificate', CERT, 'certificate'],
     ['federated', FEDERATED, 'federated'],
   ] as const)('credential kind: %s', (_name, env, expected) => {
@@ -112,7 +115,7 @@ describe('GraphClientService', () => {
       graphCredentialKind({
         tenantId: (env as Env).ENTRA_TENANT_ID,
         clientId: (env as Env).GRAPH_CLIENT_ID,
-        certificatePem: (env as Env).GRAPH_CLIENT_CERTIFICATE,
+        certificatePath: (env as Env).AZURE_CLIENT_CERTIFICATE_PATH,
         federatedTokenFile: (env as Env).GRAPH_FEDERATED_TOKEN_FILE,
       }),
     ).toBe(expected);
