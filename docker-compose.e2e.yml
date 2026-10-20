@@ -8,9 +8,9 @@ services:
   valkey:
     ports: !override
       - '127.0.0.1::6379'
-  localstack:
+  garage:
     ports: !override
-      - '127.0.0.1::4566'
+      - '127.0.0.1::3900'
   mailpit:
     ports: !override
       - '127.0.0.1::1025'

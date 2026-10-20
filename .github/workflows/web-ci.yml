@@ -241,31 +241,6 @@ jobs:
       # upload paths reached main: a missing CSRF header, a CORS allow-list that refused a header the
       # presign signs, and a replacement lookup by key through a by-id finder. None of them are
       # visible without a bucket to PUT to.
-      # Image pinned to the SAME MAJOR as docker-compose.dev.yml. Not a preference — MEASURED. With
-      # identical bucket CORS applied, the browser's preflight for the presigned PUT is:
-      #
-      #   LocalStack 3 → 403 AccessForbidden "CORSResponse: This CORS request is not allowed"
-      #   LocalStack 4 → 200
-      #
-      # …for `Access-Control-Request-Headers: content-type,content-disposition`. On `:3` the presign
-      # therefore succeeded and the PUT produced no response at all, which surfaced as a
-      # `waitForResponse` timeout rather than anything naming CORS. Reproduced by running both majors
-      # side by side locally before changing this line.
-      localstack:
-        image: localstack/localstack:4.14
-        env:
-          SERVICES: s3
-          AWS_DEFAULT_REGION: ap-southeast-1
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
-          DEBUG: '0'
-        ports: ['4566:4566']
-        options: >-
-          --health-cmd "curl -sf http://localhost:4566/_localstack/health || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 12
-
     env:
       # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -303,15 +278,15 @@ jobs:
       RATE_LIMIT_IP_LIMIT: '100000'
       LOG_LEVEL: warn
       OTEL_ENABLED: 'false'
-      # Object storage points at LocalStack. `STORAGE_ENDPOINT` and not `AWS_ENDPOINT_URL`:
+      # Object storage points at Garage, the node docker-compose.dev.yml runs. `STORAGE_ENDPOINT` and not `AWS_ENDPOINT_URL`:
       # StorageService selects its backend separately, because in production the bucket may live in
-      # Cloudflare R2 under different credentials. Path-style addressing, which LocalStack and R2 both
+      # Cloudflare R2 under different credentials. Path-style addressing, which Garage and R2 both
       # require — virtual-host style resolves a bucket subdomain that does not exist here.
       AWS_REGION: ap-southeast-1
       S3_FILES_BUCKET: opshub-files-ci
-      STORAGE_ENDPOINT: http://localhost:4566
-      STORAGE_ACCESS_KEY_ID: test
-      STORAGE_SECRET_ACCESS_KEY: test
+      STORAGE_ENDPOINT: http://localhost:4610
+      STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
+      STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
       STORAGE_FORCE_PATH_STYLE: 'true'
 
     steps:
@@ -341,29 +316,13 @@ jobs:
       # The bucket AND its CORS rules. The rules are not optional decoration: the browser PUTs
       # straight to the presigned URL, and `presignUpload` signs `content-disposition` as well as
       # `content-type`, so a preflight that allows only Content-Type refuses every upload with an
-      # opaque `net::ERR_FAILED`. Mirrors scripts/localstack/01-bootstrap.sh and the app-bucket
-      # module's `cors_rules`; the origin is the Vite dev server Playwright starts.
-      - name: Create the CI bucket
-        env:
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
-          AWS_DEFAULT_REGION: ap-southeast-1
+      # opaque `net::ERR_FAILED`. scripts/garage/init.sh writes those rules and proves a preflight for
+      # each origin; the origin is the Vite dev server Playwright starts (WEB_DEV_PORT, 5174). `run --rm`
+      # returns the init's exit code, so a broken bucket fails this step.
+      - name: Start Garage and create the CI bucket
         run: |
-          aws --endpoint-url http://localhost:4566 s3api create-bucket \
-            --bucket opshub-files-ci \
-            --region ap-southeast-1 \
-            --create-bucket-configuration LocationConstraint=ap-southeast-1
-          aws --endpoint-url http://localhost:4566 s3api put-bucket-cors \
-            --bucket opshub-files-ci \
-            --cors-configuration '{
-              "CORSRules": [{
-                "AllowedMethods": ["PUT", "GET", "HEAD"],
-                "AllowedOrigins": ["http://localhost:5174"],
-                "AllowedHeaders": ["Content-Type", "Content-Disposition"],
-                "ExposeHeaders": ["ETag"],
-                "MaxAgeSeconds": 3600
-              }]
-            }'
+          docker compose -f docker-compose.dev.yml up -d --wait garage
+          docker compose -f docker-compose.dev.yml run --rm -e BUCKETS=opshub-files-ci garage-init
 
       - name: Build API
         run: pnpm build:api
@@ -483,9 +442,16 @@ jobs:
           cp .env.example .env
           mkdir -p "$LOGS"
 
-      # `--wait` returns when every healthcheck passes; LocalStack's means the init hook has created the bucket.
+      # `--wait` returns when every healthcheck passes. The bucket setup is a one-shot (garage-init), so its exit status is read
+      # on the next step: 0 means both buckets, their lifecycle and CORS for localhost and 127.0.0.1 are set and each preflight passed.
       - name: docker compose -f docker-compose.dev.yml up -d --wait
         run: docker compose -f docker-compose.dev.yml up -d --wait --wait-timeout 240
+
+      - name: The bucket setup exited 0 (garage-init)
+        run: |
+          code=$(docker inspect -f '{{.State.ExitCode}}' "$(docker compose -f docker-compose.dev.yml ps -aq garage-init)")
+          echo "garage-init exit code: $code"
+          test "$code" = 0 || { docker compose -f docker-compose.dev.yml logs garage-init; exit 1; }
 
       - name: pnpm db:migrate
         run: pnpm db:migrate

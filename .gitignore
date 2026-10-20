@@ -57,3 +57,6 @@ junit.xml
 apps/web/test-results/
 apps/web/playwright-report/
 apps/web/e2e/.auth/
+
+# `make local` writes each process log here (scripts/local/up.sh).
+.local/
