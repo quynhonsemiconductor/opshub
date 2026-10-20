@@ -31,7 +31,7 @@ import { Cron } from '@nestjs/schedule';
 import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
 import { DB_NOW, dbDelay, InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
-import { AbstractOutboxRelay } from '@platform';
+import { AbstractOutboxRelay, NOTIFICATION_WAKE } from '@platform';
 import type { Claimed, OutboxLeaseTable, PostCommitTask } from '@platform';
 import { renderNotification, NotificationPubSubService } from '@platform/notifications';
 import type { NotificationTemplateName, NotificationTemplateVars } from '@platform/notifications';
@@ -74,7 +74,7 @@ export class NotificationRelayService
   }
 
   override get wakeKind(): string {
-    return 'notification';
+    return NOTIFICATION_WAKE;
   }
 
   @Cron('*/5 * * * * *', { name: 'notification-relay' })

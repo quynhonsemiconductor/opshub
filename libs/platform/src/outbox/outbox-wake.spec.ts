@@ -235,6 +235,12 @@ describe('OutboxWakeListener', () => {
     await l.stop();
   });
 
+  it('refuses a watchdog timeout that is not shorter than its interval', () => {
+    expect(() => listener({ watchdogIntervalMs: 5_000, watchdogTimeoutMs: 5_000 })).toThrow(
+      /must be shorter than its interval/,
+    );
+  });
+
   it('stop() ends the connection and cancels a pending reconnect', async () => {
     const { listener: l } = listener({ minBackoffMs: 1000 });
     await l.start();

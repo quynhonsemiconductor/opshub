@@ -18,6 +18,14 @@ import type { DbExecutor } from '../database/drizzle.provider';
 /** The one channel every outbox shares. The payload says which relay to wake (its {@link wakeKind}). */
 export const OUTBOX_WAKE_CHANNEL = 'outbox';
 
+/*
+ * The wake kinds: the payload of a NOTIFY, and the wakeKind of the relay it wakes. A writer and its relay both name the
+ * kind from here, so they cannot drift apart. GRAPH_WAKE lives beside the Graph task kinds (graph-task.ts).
+ */
+export const EMAIL_WAKE = 'email';
+export const NOTIFICATION_WAKE = 'notification';
+export const WEBHOOK_WAKE = 'webhook';
+
 /** Shown in pg_stat_activity, so an operator can tell the listener's connection from the pool's. */
 export const OUTBOX_WAKE_APPLICATION_NAME = 'opshub-outbox-wake';
 
@@ -89,6 +97,12 @@ export class OutboxWakeListener {
     this.maxBackoffMs = opts.maxBackoffMs ?? 30_000;
     this.watchdogIntervalMs = opts.watchdogIntervalMs ?? 30_000;
     this.watchdogTimeoutMs = opts.watchdogTimeoutMs ?? 5_000;
+    // A probe that outlasts its own interval would overlap the next one, so the timeout must fit inside the interval.
+    if (this.watchdogTimeoutMs >= this.watchdogIntervalMs) {
+      throw new Error(
+        `outbox wake watchdog timeout (${this.watchdogTimeoutMs} ms) must be shorter than its interval (${this.watchdogIntervalMs} ms)`,
+      );
+    }
     this.backoffMs = this.minBackoffMs;
   }
 

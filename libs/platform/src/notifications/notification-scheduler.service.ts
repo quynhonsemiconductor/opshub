@@ -5,7 +5,7 @@ import {
   type NotificationTemplateName,
   type NotificationTemplateVars,
 } from './notification.templates';
-import { notifyOutbox } from '../outbox/outbox-wake';
+import { NOTIFICATION_WAKE, notifyOutbox } from '../outbox/outbox-wake';
 
 export interface ScheduleNotificationInput<K extends NotificationTemplateName> {
   type: K;
@@ -43,6 +43,6 @@ export class NotificationSchedulerService {
       .onConflictDoNothing();
 
     // The wake hint. Polling is the source of truth: a lost notify is picked up by the next tick.
-    await notifyOutbox(tx, 'notification');
+    await notifyOutbox(tx, NOTIFICATION_WAKE);
   }
 }

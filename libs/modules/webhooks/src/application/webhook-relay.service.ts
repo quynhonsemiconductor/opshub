@@ -13,6 +13,7 @@ import {
   describeUnsafeResolvedTarget,
 } from '@platform';
 import type { Claimed, DrizzleDB, DrizzleTx, OutboxLeaseTable } from '@platform';
+import { WEBHOOK_WAKE } from '@platform';
 import { webhookDeliveries, webhookSubscriptions } from '../../../../../db/schema';
 import { MS_PER_SEC } from '@shared-kernel';
 
@@ -125,7 +126,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
   }
 
   override get wakeKind(): string {
-    return 'webhook';
+    return WEBHOOK_WAKE;
   }
 
   @Cron('*/10 * * * * *', { name: 'webhook-relay' })

@@ -3,7 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { newId } from '@shared-kernel';
 import { webhookSubscriptions, webhookDeliveries } from '../../../../db/schema';
 import type { DbExecutor } from '../database/drizzle.provider';
-import { notifyOutbox } from '../outbox/outbox-wake';
+import { notifyOutbox, WEBHOOK_WAKE } from '../outbox/outbox-wake';
 
 /**
  * WebhookEnqueueService — used inside DB transactions to fan domain events out
@@ -46,6 +46,6 @@ export class WebhookEnqueueService {
         attempts: 0,
       })),
     );
-    await notifyOutbox(tx, 'webhook');
+    await notifyOutbox(tx, WEBHOOK_WAKE);
   }
 }
