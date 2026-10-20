@@ -67,7 +67,7 @@ describe('data-store image pins', () => {
   );
   it('develop RDS major equals the compose PostgreSQL major', () => {
     const terraform = readFileSync(join(ROOT, 'infra/live/develop/main.tf'), 'utf8');
-    const developMajor = terraform.match(/rds = \{[\s\S]*?engine_version\s*=\s*"(\d+)"/)?.[1];
+    const developMajor = terraform.match(/rds = \{[\s\S]*?engine_version\s*=\s*"(\d+)(?:\.\d+)?"/)?.[1];
     const composeMajor = composeImages
       .find((image) => engines.postgres.test(image))
       ?.match(/^postgres:(\d+)\./)?.[1];
