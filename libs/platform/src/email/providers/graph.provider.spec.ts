@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Logger } from '@nestjs/common';
@@ -22,7 +22,7 @@ const CONFIG: GraphMailConfig = {
   sender: 'noreply-opshub@qnsc.vn',
   tenantId: '11111111-1111-1111-1111-111111111111',
   clientId: '22222222-2222-2222-2222-222222222222',
-  certificate: undefined,
+  certificatePath: undefined,
   federatedTokenFile: undefined,
   nodeEnv: 'production',
 };
@@ -254,7 +254,11 @@ describe('GraphEmailProvider', () => {
         () => fakeSender(() => Promise.resolve({ id: 'r', transport: 'graph' })).sender,
       );
       new GraphEmailProvider(
-        { ...CONFIG, certificate: 'PEM', federatedTokenFile: '/var/run/token' },
+        {
+          ...CONFIG,
+          certificatePath: '/mnt/secrets/opshub-graph-cert.pem',
+          federatedTokenFile: '/var/run/token',
+        },
         make,
       ).assertReady();
       expect(make).toHaveBeenCalledWith({
@@ -263,7 +267,7 @@ describe('GraphEmailProvider', () => {
         NODE_ENV: 'production',
         AZURE_TENANT_ID: CONFIG.tenantId,
         AZURE_CLIENT_ID: CONFIG.clientId,
-        AZURE_CLIENT_CERTIFICATE: 'PEM',
+        AZURE_CLIENT_CERTIFICATE_PATH: '/mnt/secrets/opshub-graph-cert.pem',
         AZURE_FEDERATED_TOKEN_FILE: '/var/run/token',
       });
     });
@@ -274,11 +278,11 @@ describe('GraphEmailProvider', () => {
       ).toThrow(/AZURE_CLIENT_ID/);
       expect(() => new GraphEmailProvider(CONFIG).assertReady()).toThrow(MailConfigError);
       expect(() => new GraphEmailProvider(CONFIG).assertReady()).toThrow(
-        /AZURE_FEDERATED_TOKEN_FILE|AZURE_CLIENT_CERTIFICATE/,
+        /AZURE_FEDERATED_TOKEN_FILE|AZURE_CLIENT_CERTIFICATE_PATH/,
       );
     });
 
-    it('builds the REAL transport from a certificate, in production (a generated key and certificate, never committed)', () => {
+    it('builds the REAL transport from the certificate FILE at AZURE_CLIENT_CERTIFICATE_PATH, in production (a generated key and certificate, never committed)', () => {
       const dir = mkdtempSync(join(tmpdir(), 'opshub-mail-cert-'));
       try {
         execFileSync(
@@ -300,18 +304,22 @@ describe('GraphEmailProvider', () => {
           ],
           { stdio: 'ignore' },
         );
-        const certificate =
-          readFileSync(join(dir, 'k.pem'), 'utf8') + readFileSync(join(dir, 'c.pem'), 'utf8');
+        // ONE combined PEM, private key FIRST, then the certificate — the mounted file's shape.
+        const pemPath = join(dir, 'graph-cert.pem');
+        writeFileSync(
+          pemPath,
+          readFileSync(join(dir, 'k.pem'), 'utf8') + readFileSync(join(dir, 'c.pem'), 'utf8'),
+        );
         expect(() =>
-          new GraphEmailProvider({ ...CONFIG, certificate }).assertReady(),
+          new GraphEmailProvider({ ...CONFIG, certificatePath: pemPath }).assertReady(),
         ).not.toThrow();
-        // and base64, which is how the secret may hold it
+        // a path to nothing fails at configuration time, naming the variable
         expect(() =>
           new GraphEmailProvider({
             ...CONFIG,
-            certificate: Buffer.from(certificate).toString('base64'),
+            certificatePath: join(dir, 'missing.pem'),
           }).assertReady(),
-        ).not.toThrow();
+        ).toThrow(MailConfigError);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

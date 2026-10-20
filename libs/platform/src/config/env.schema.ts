@@ -486,7 +486,7 @@ export const ApiEnvSchema = z
     /** The previous key, accepted for verification only while the Pages secret is being rotated. */
     EDGE_CLIENT_IP_SECRET_PREVIOUS: emptyToUndefined(edgeSecret.optional()),
     GRAPH_CLIENT_ID: forbidden('GRAPH_CLIENT_ID', 'API', GRAPH_WHY),
-    GRAPH_CLIENT_CERTIFICATE: forbidden('GRAPH_CLIENT_CERTIFICATE', 'API', GRAPH_WHY),
+    AZURE_CLIENT_CERTIFICATE_PATH: forbidden('AZURE_CLIENT_CERTIFICATE_PATH', 'API', GRAPH_WHY),
     GRAPH_FEDERATED_TOKEN_FILE: forbidden('GRAPH_FEDERATED_TOKEN_FILE', 'API', GRAPH_WHY),
   })
   .superRefine(refineEnv)
@@ -501,7 +501,7 @@ export const ApiEnvSchema = z
 const refineWorkerMail = (
   env: Common & {
     GRAPH_CLIENT_ID?: string;
-    GRAPH_CLIENT_CERTIFICATE?: string;
+    AZURE_CLIENT_CERTIFICATE_PATH?: string;
     GRAPH_FEDERATED_TOKEN_FILE?: string;
   },
   ctx: z.RefinementCtx,
@@ -522,10 +522,10 @@ const refineWorkerMail = (
       'EMAIL_PROVIDER=graph sends as the Graph worker app, which holds the Exchange "Application Mail.Send" role for the mailbox.',
     );
   }
-  if (!env.GRAPH_CLIENT_CERTIFICATE && !env.GRAPH_FEDERATED_TOKEN_FILE) {
+  if (!env.AZURE_CLIENT_CERTIFICATE_PATH && !env.GRAPH_FEDERATED_TOKEN_FILE) {
     need(
-      'GRAPH_CLIENT_CERTIFICATE',
-      'EMAIL_PROVIDER=graph has no credential (set it on ECS, or GRAPH_FEDERATED_TOKEN_FILE on k3s).',
+      'AZURE_CLIENT_CERTIFICATE_PATH',
+      'EMAIL_PROVIDER=graph has no credential (the worker-only certificate file, or GRAPH_FEDERATED_TOKEN_FILE on k3s).',
     );
   }
 };
@@ -550,25 +550,18 @@ export const WorkerEnvSchema = z
      */
     GRAPH_CLIENT_ID: emptyToUndefined(z.string().uuid().optional()),
     /**
-     * Credential, option 1 (ECS, now): PEM holding the app's private key AND its certificate, raw or
-     * base64. The public half is uploaded to the Graph worker app registration. No client secret exists
-     * for that app.
+     * Credential, option 1: PATH of the worker-only file holding the app's ONE combined PEM (private
+     * key first, then the certificate), synced from the standalone secret `<product>-<env>-graph-cert`
+     * and mounted INTO THE WORKER only. The public half is uploaded to the Graph worker app
+     * registration; no client secret exists for that app. The azure-identity standard name
+     * (ONPREM-PLAN §7.3) — a path, never a PEM env value.
      */
-    GRAPH_CLIENT_CERTIFICATE: emptyToUndefined(
-      z
-        .string()
-        .min(1)
-        .transform((v) =>
-          v.includes('-----BEGIN') ? v : Buffer.from(v, 'base64').toString('utf8'),
-        )
-        .refine((v) => v.includes('-----BEGIN'), 'GRAPH_CLIENT_CERTIFICATE must be a PEM')
-        .optional(),
-    ),
+    AZURE_CLIENT_CERTIFICATE_PATH: emptyToUndefined(z.string().min(1).optional()),
     /**
      * Credential, option 2 (k3s, later): path of the projected ServiceAccount token that Entra
      * exchanges through a federated identity credential on the Graph worker app. No secret and no
-     * certificate. Wins over GRAPH_CLIENT_CERTIFICATE when both are set, so the cut-over is adding
-     * this variable.
+     * certificate. Wins over AZURE_CLIENT_CERTIFICATE_PATH when both are set, so the cut-over is
+     * adding this variable.
      */
     GRAPH_FEDERATED_TOKEN_FILE: emptyToUndefined(z.string().min(1).optional()),
     ENTRA_CLIENT_SECRET: forbidden(
@@ -602,7 +595,7 @@ export const WorkerEnvSchema = z
   .transform(deriveEnv);
 
 /** Role-specific variables are typed on {@link ApiEnv} / {@link WorkerEnv}. */
-type GraphKey = 'GRAPH_CLIENT_ID' | 'GRAPH_CLIENT_CERTIFICATE' | 'GRAPH_FEDERATED_TOKEN_FILE';
+type GraphKey = 'GRAPH_CLIENT_ID' | 'AZURE_CLIENT_CERTIFICATE_PATH' | 'GRAPH_FEDERATED_TOKEN_FILE';
 /** The variables only the API has (sign-in). The worker's schema refuses to start with any of them set. */
 type ApiOnlyKey =
   | 'ENTRA_CLIENT_SECRET'
