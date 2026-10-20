@@ -188,7 +188,7 @@ module "stack" {
 
   // ── Graviton ────────────────────────────────────────────────────────────────
   // ARM64 bills ~20% less per vCPU-hour and GB-hour than X86_64 for identical sizing,
-  // with no capability difference. rally has run this since its own build moved; opshub
+  // with no capability difference. rova has run this since its own build moved; opshub
   // was still on the module's X86_64 default, which is drift rather than a decision — it
   // is not recorded in docs/DIVERGENCE.md, and nothing about opshub's workload argues for
   // x86.

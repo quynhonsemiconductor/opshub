@@ -1,6 +1,6 @@
-# Declared divergence from rally
+# Declared divergence from rova
 
-opshub and rally share one architecture on purpose, and the boilerplate is meant to
+opshub and rova share one architecture on purpose, and the boilerplate is meant to
 stay identical: `.github/workflows`, `infra/`, `libs/platform`, `libs/shared-kernel`,
 `apps/*/bootstrap`, `apps/web/src/{shared,app}`.
 
@@ -8,26 +8,26 @@ Where they differ, it is either **declared here** or it is drift. The point of t
 list is that an unlisted difference is a bug, so nobody has to guess whether they
 found a decision or an accident.
 
-Keep the rally copy of this file in sync — it is the same register from the other
+Keep the rova copy of this file in sync — it is the same register from the other
 side.
 
 ## Allowed: product domain
 
-Not drift, never converging. opshub runs IT operations; rally plans software
+Not drift, never converging. opshub runs IT operations; rova plans software
 delivery.
 
-| | opshub | rally |
+| | opshub | rova |
 | --- | --- | --- |
 | domain modules | assets, access requests, compliance, workforce, licences, security posture, catalog | work items, iterations, releases, milestones, backlog, quality, SCM |
 | tenancy | single-tenant (`contextId` unused) | workspace-scoped (`contextId` is the workspace) |
 | permission vocabulary | `resource.action` with `*` wildcard (`asset.read`) | `namespace:action` with `ns:*` wildcards (`work_item:edit`) |
 
 The vocabulary difference is why `permissionGrants` could not stay in the shared
-package: our dotted codes cannot express rally's `ns:*` semantics.
+package: our dotted codes cannot express rova's `ns:*` semantics.
 
 ## Allowed: authorization scope model
 
-| | opshub | rally |
+| | opshub | rova |
 | --- | --- | --- |
 | scope dimensions | `global`, `self`, `team`, `dept`, `region` | `global`, `workspace`, `project` |
 | delegation | `authz/delegation.service.ts` | none |
@@ -36,17 +36,17 @@ package: our dotted codes cannot express rally's `ns:*` semantics.
 | custom roles | none | editor UI + backend CRUD |
 
 Both resolve from the database, cached per user, invalidated on write — that part is
-the same model (`docs/superpowers/specs/2026-07-28-auth-convergence.md`, in rally).
+the same model (`docs/superpowers/specs/2026-07-28-auth-convergence.md`, in rova).
 Only the dimensions differ, and they differ because the products do.
 
-**Convergence intent:** our evaluator is the more general one. If rally ever needs
+**Convergence intent:** our evaluator is the more general one. If rova ever needs
 to *subtract* a permission at project scope — the additive-only limitation in
-`RALLY_HARDENING_PLAN.md` R3 — the answer is for rally to adopt our shape, not to
+`RALLY_HARDENING_PLAN.md` R3 — the answer is for rova to adopt our shape, not to
 invent a third.
 
 ## Allowed: how domain events reach their read model
 
-| | opshub | rally |
+| | opshub | rova |
 | --- | --- | --- |
 | transport | none — the generic domain-event outbox was removed (our migration 0013) | DB-to-DB. `AuditProjectionRelay` polls `messaging.outbox_events` and writes `audit.audit_logs` |
 | consumers | n/a | one, in-process |
@@ -59,19 +59,19 @@ nothing read the table either — every `enqueue` call sat immediately beside a
 second write of something already delivered. Notifications, email, webhooks and audit
 each had their own path with a real reader, which is why nobody missed it.
 
-Rally deleted its SNS topic and four SQS queues to get to the same conclusion from
+Rova deleted its SNS topic and four SQS queues to get to the same conclusion from
 the other end, and the reason is worth carrying over before we grow a consumer again:
 the queue leg was broken in every deployed environment for as long as it existed, in
 three independent ways at once (the audit queue had no subscription, the one
 subscription that existed filtered on event types the code never emits, and the
 module set no `raw_message_delivery`). Nothing alarmed, because SNS reports a publish
-with no matching subscription as a success — rally's develop measured 12 published,
+with no matching subscription as a success — rova's develop measured 12 published,
 12 FilteredOut, 0 delivered, **0 failed**. Local dev worked throughout, because the
 LocalStack bootstrap subscribed all four queues unfiltered with raw delivery on: it
 was more permissive than the Terraform, so dev could not reproduce prod.
 
 So neither product now has a generic domain-event bus. We have three purpose-built
-outboxes, each with a consumer; rally has a DB-to-DB projection with one reader. Both
+outboxes, each with a consumer; rova has a DB-to-DB projection with one reader. Both
 kept the shared `AbstractOutboxRelay`, its backoff and metrics, and the
 `outboxDeadLetter` alarm.
 
@@ -98,7 +98,7 @@ Both products authenticate with `@quynhonsemiconductor/identity`; what each conf
 The sign-in app registration is **delegated-only** (OpenID scopes). Microsoft Graph runs under its own
 worker-only app (`GRAPH_CLIENT_ID`), so a stolen sign-in secret cannot call Graph.
 
-## Temporary: rally is ahead, we should catch up
+## Temporary: rova is ahead, we should catch up
 
 Tracked as work, not as divergence. Ordered plan in the convergence spec.
 
@@ -114,9 +114,9 @@ Tracked as work, not as divergence. Ordered plan in the convergence spec.
 | e2e depth | no Playwright, no service-level flow suite |
 | R2 storage | S3 app-buckets, while our `opshub_attachments_*` R2 buckets already exist unused |
 
-## Temporary: we are ahead, rally should catch up
+## Temporary: we are ahead, rova should catch up
 
-| gap | rally state |
+| gap | rova state |
 | --- | --- |
 | scoped authorization dimensions, delegation, grant expiry | workspace/project only |
 | IdP role mapping (`ISsoProvisioningHook`) | not bound; roles are app-assigned only |

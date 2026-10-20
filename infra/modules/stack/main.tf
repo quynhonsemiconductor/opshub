@@ -480,8 +480,8 @@ module "api" {
   memory_target_pct  = var.api.memory_target_pct
   log_retention_days = var.log_retention_days
 
-  # Host-based routing on the SHARED ALB, so opshub and rally coexist on one listener.
-  # Priority 200 is opshub's slot in both environments (rally holds 100) — a constant,
+  # Host-based routing on the SHARED ALB, so opshub and rova coexist on one listener.
+  # Priority 200 is opshub's slot in both environments (rova holds 100) — a constant,
   # not a variable, because two products colliding on a priority is a deploy failure
   # and the value has to be reasoned about across repos, not per environment.
   # Tunnel and ALB are mutually exclusive. A task served by a tunnel must not also be an
@@ -517,7 +517,7 @@ module "api" {
   # to pull secrets") — a boot failure, not a runtime error. The migrator reuses the
   # api's roles, so it is covered by the api's copy of this list too.
   #
-  # aws_secretsmanager_secret.tunnel_token[*].arn (not [0].arn): matches rally's own
+  # aws_secretsmanager_secret.tunnel_token[*].arn (not [0].arn): matches rova's own
   # fix for a real prod outage — tunnel_token's ARN is unknown-until-apply on an
   # environment where the secret doesn't exist yet, so a `[0]` index or a `length()`
   # call on it makes this whole expression's count unknown. `[*].arn` takes its
@@ -730,10 +730,10 @@ module "migrator" {
 #
 # The WORKER gets none — it is a relay with no HTTP surface.
 #
-# Created and owned by Terraform, unlike rally's two tunnels (created by hand, then
+# Created and owned by Terraform, unlike rova's two tunnels (created by hand, then
 # adopted) — opshub has never had one, so there is nothing existing to preserve and no
 # adopt-then-manage two-step needed. `hostname` is set from creation, so this tunnel
-# is never inert (rally production once went live with an ingress-rule-less tunnel
+# is never inert (rova production once went live with an ingress-rule-less tunnel
 # that connected, reported healthy, and 503'd every request).
 module "tunnel" {
   count  = var.tunnel_enabled && var.cloudflare_account_id != "" ? 1 : 0
@@ -851,7 +851,7 @@ module "otel_agent_worker" {
 }
 
 # Ships each service's router (task-level, non-app) logs to Loki, same shared stack the
-# OTel sidecars push metrics/traces to. Adopted from rally — opshub previously had no log
+# OTel sidecars push metrics/traces to. Adopted from rova — opshub previously had no log
 # shipping at all, so an incident meant reading CloudWatch Logs Insights by hand instead
 # of Grafana Explore alongside the metrics and traces for the same request.
 module "firelens_agent_api" {
@@ -966,7 +966,7 @@ module "dns_api" {
 
 # ── Guard: the OTel/FireLens sidecars must watch the log group the app actually
 # writes to ────────────────────────────────────────────────────────────────────
-# Mirrors rally's stack module exactly. ENFORCED as a resource precondition, not a
+# Mirrors rova's stack module exactly. ENFORCED as a resource precondition, not a
 # `check` block — a violated check emits a warning and the plan exits 0, which
 # would leave a collector silently pointed at the wrong log group, exactly what
 # this guard exists to prevent.
@@ -1014,7 +1014,7 @@ resource "terraform_data" "otel_agent_log_groups_match_services" {
 # the resource already exists in state.
 #
 # Left as a check in #116 on the grounds that it "needs a lifecycle precondition and is worth
-# its own change"; rally then did exactly that in quynhonsemiconductor/rally#392, so this closes the gap
+# its own change"; rova then did exactly that in quynhonsemiconductor/rova#392, so this closes the gap
 # rather than leaving the two repos with different mechanisms for the same guard.
 resource "terraform_data" "db_pool_fits_instance_class" {
   input = {
@@ -1194,7 +1194,7 @@ resource "aws_scheduler_schedule" "ecs_scale_down" {
 #
 # BOTH gates are required. `tunnel_enabled` says the ALB alarm cannot do this job;
 # `monitor_ingress` says there is something running worth watching. See the variable for why
-# the second defaults to false here while rally defaults it true.
+# the second defaults to false here while rova defaults it true.
 locals {
   # An environment whose service floors are 0 spends most of its time at zero tasks, and a
   # health check against a hostname with nothing behind it sits in ALARM for every one of
@@ -1420,13 +1420,13 @@ resource "aws_scheduler_schedule" "ecs_scale_up" {
 # ALB — per-target-group latency and unhealthy hosts. The module also OWNS the alert topic, so
 # there is exactly one topic and one subscription to confirm per environment.
 #
-# Adopted from rally. opshub had no alarms at all, which is the state where an outage is
+# Adopted from rova. opshub had no alarms at all, which is the state where an outage is
 # discovered by a person rather than by a page.
 
 # ── Burstable-RDS alarm sizing, keyed by instance class ──────────────────────
 # opshub runs `db.t4g.micro` in BOTH environments (infra/live/develop/main.tf and
 # infra/live/prod/main.tf), so both of the observability module's opt-in burstable alarms
-# apply here and both get a real floor. This is not an assumption inherited from rally —
+# apply here and both get a real floor. This is not an assumption inherited from rova —
 # it was read off opshub's own live files.
 #
 # Why these alarms matter to this product in particular: a burstable class does not fail
@@ -1435,7 +1435,7 @@ resource "aws_scheduler_schedule" "ecs_scale_up" {
 # sits pinned at its baseline percentage, so `CPUUtilization` reads healthy while every
 # query slows; a memory-starved one loses its filesystem cache and reads fall through to
 # EBS. Both surface downstream as application p99 latency — which is exactly the alert
-# that just paged rally with an uninterpretable value, and exactly the alert this change
+# that just paged rova with an uninterpretable value, and exactly the alert this change
 # has now made quieter. Removing noise from the symptom while leaving the cause unalarmed
 # would be a net loss of coverage, so the two halves belong in one change.
 #
@@ -1527,7 +1527,7 @@ module "observability" {
   ecs_service_names = [module.api.service_name, module.worker.service_name]
 
   # Node mode only (var.cache.mode default), null for serverless — same guard
-  # rally's stack uses. opshub's cache is always its own dedicated node/instance
+  # rova's stack uses. opshub's cache is always its own dedicated node/instance
   # per environment (no shared-node concept here), so this is always safe to
   # wire when the cache is enabled at all.
   #
@@ -1550,7 +1550,7 @@ module "observability" {
 
   # `identifier` (opshub-dev), NOT `instance_id` (db-XXXX…). CloudWatch publishes RDS metrics
   # under the DBInstanceIdentifier dimension, and passing the resource id leaves the RDS alarms
-  # in INSUFFICIENT_DATA permanently while appearing covered — a trap rally fell into for six
+  # in INSUFFICIENT_DATA permanently while appearing covered — a trap rova fell into for six
   # alarms across both environments. observability-v3.0.0+ rejects a resource id outright, so
   # this fails the plan rather than regressing silently.
   rds_instance_id = module.rds.identifier
@@ -1644,7 +1644,7 @@ resource "aws_cloudwatch_metric_alarm" "security_fail_open" {
 # would break the day someone rewords the log line.
 #
 # Until this existed the field was greppable and nothing more: three relays emitted it
-# and no alarm watched it. Ported from rally, where it is the same pair.
+# and no alarm watched it. Ported from rova, where it is the same pair.
 resource "aws_cloudwatch_log_metric_filter" "outbox_dead_letter" {
   name           = "${local.name}-outbox-dead-letter"
   log_group_name = module.worker.log_group_name
@@ -1784,7 +1784,7 @@ resource "aws_iam_role_policy" "worker_ses_send" {
 }
 
 # ── SES bounce/complaint feedback loop ──────────────────────────────────────────
-# Mirrors rally's stack module exactly. Unconditional, like rally — a configuration
+# Mirrors rova's stack module exactly. Unconditional, like rova — a configuration
 # set, its SNS topic and its SQS queue cost nothing idle and don't depend on
 # mail_from_email being set yet, unlike the send grants above.
 #
@@ -1793,7 +1793,7 @@ resource "aws_iam_role_policy" "worker_ses_send" {
 # addresses SES already told us are bad — a compliance-relevant failure mode, not
 # just a delivery one.
 resource "aws_sesv2_configuration_set" "email_feedback" {
-  # `configuration_set_name`, not `name`: matches the pinned provider version rally uses.
+  # `configuration_set_name`, not `name`: matches the pinned provider version rova uses.
   configuration_set_name = "${local.name}-email-feedback"
 }
 
@@ -1900,19 +1900,19 @@ resource "aws_iam_role_policy" "worker_sqs_bounce_feedback" {
 }
 
 # ── Grafana Alerting + Dashboards ──────────────────────────────────────────────
-# Mirrors rally's stack module — same thresholds philosophy (per-env, single
+# Mirrors rova's stack module — same thresholds philosophy (per-env, single
 # source of truth shared between the alert condition and the dashboard's threshold
 # line), same `or vector(0)`/absent-vector fix on every ratio query (confirmed live
-# in rally's own prod: a zero-failure series is ABSENT, not present-at-zero, and
+# in rova's own prod: a zero-failure series is ABSENT, not present-at-zero, and
 # dividing by an absent vector renders as "No data" instead of the honest 0%).
 #
 # `db-pool-contention` and its dashboard panel read `db_pool_in_use` / `db_pool_waiting`, which
 # `DrizzleProvider` now emits (observability's `DbPoolMetrics`) from BOTH the api and the worker pool. Before that
 # they were absent series and the alert could not fire.
 #
-# NO LONGER a byte-for-byte mirror of rally as of this change: the four
+# NO LONGER a byte-for-byte mirror of rova as of this change: the four
 # statistically-unsound rules gained a minimum-sample gate and `http-slow-request-count`
-# was added. rally carries the same fix for the same defect — see the gate comment below
+# was added. rova carries the same fix for the same defect — see the gate comment below
 # for the production page that prompted it.
 locals {
   # ── Minimum-sample gates: why four rules carry one ──────────────────────────
@@ -1920,7 +1920,7 @@ locals {
   # handful of samples is not a rate. Both of the affected rule shapes here were
   # capable of paging on a single request.
   #
-  # The evidence is a real page on the sibling `rally` product, which runs these SAME
+  # The evidence is a real page on the sibling `rova` product, which runs these SAME
   # rules from this SAME shared module: `http-p99-latency` fired in production with
   # `A=10000` and resolved at `A=48.5`. Neither number is what it looks like:
   #
@@ -1952,7 +1952,7 @@ locals {
   # worse than no alarm." The Grafana rules never got the same treatment. Same bug, one
   # side unfixed until now.
   #
-  # WHERE OPSHUB'S NUMBERS COME FROM — and where they do NOT. Unlike rally, opshub has no
+  # WHERE OPSHUB'S NUMBERS COME FROM — and where they do NOT. Unlike rova, opshub has no
   # measured traffic to derive a floor from, because opshub has never served any: per
   # docs/system-roadmap.md `infra/` has never been applied and there is no deployed
   # environment, production is provisioned with `min_count = 0`, autoscaling off and a
@@ -2237,7 +2237,7 @@ module "alerts" {
     # over 4 requests as over 40,000, so no sample floor is needed or wanted, and none is
     # applied.
     #
-    # It is also the rule that would have described rally's page HONESTLY. Where p99
+    # It is also the rule that would have described rova's page HONESTLY. Where p99
     # reported `A=10000` — a clamped bucket boundary that an on-call reader has to know the
     # histogram's internals to interpret — this reports a plain integer count of requests
     # that crossed the line, which needs no interpretation at all.
@@ -2432,7 +2432,7 @@ data "grafana_data_source" "tempo" {
   name     = var.grafana_alerting.traces_datasource_name
 }
 
-# TWO dashboards, not one growing page — same RED/USE split as rally: "is something
+# TWO dashboards, not one growing page — same RED/USE split as rova: "is something
 # wrong" (Overview) is a different question from "why" (Runtime & Dependencies).
 resource "grafana_dashboard" "overview" {
   count     = var.grafana_alerting_auth != "" ? 1 : 0
@@ -2579,7 +2579,7 @@ resource "grafana_dashboard" "overview" {
         ]
       },
       # "Is login itself working" — moved ABOVE DB pool/worker rate, same reordering
-      # rally applied: this and the HTTP error rate above are the two golden-signal
+      # rova applied: this and the HTTP error rate above are the two golden-signal
       # panels most worth seeing without scrolling.
       {
         id         = 5
@@ -2606,7 +2606,7 @@ resource "grafana_dashboard" "overview" {
         }]
       },
       # DARK until DbPoolMetrics is wired app-side — see this block's own header
-      # comment. Kept for structural/layout parity with rally.
+      # comment. Kept for structural/layout parity with rova.
       {
         id         = 6
         title      = "DB pool: in use vs waiting"

@@ -18,7 +18,7 @@
 --     enough while every surface was 1:1 and kept its key on the domain row
 --     (`employees.photo_storage_key` and friends), which is why those surfaces are
 --     deliberately NOT migrated here — their key column IS the relationship.
---     Polymorphic on (entity_type, entity_id) following rally's `work.attachments`;
+--     Polymorphic on (entity_type, entity_id) following rova's `work.attachments`;
 --     `entity_id` carries no FK because it cannot point at two tables, and that is
 --     the standing cost of the shape. `file_id` cascades.
 --

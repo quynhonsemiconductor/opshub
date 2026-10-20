@@ -120,7 +120,7 @@ migration needs reverting.
 **Ownership transfer.** The master role still owns every object. Until ownership moves to
 `opshub_migrate`, `ALTER DEFAULT PRIVILEGES … FOR ROLE opshub_migrate` cannot be set from the
 migration — Postgres only allows setting another role's default privileges with ADMIN OPTION
-on it, and whether the master user holds that depends on who created the role. rally hit
+on it, and whether the master user holds that depends on who created the role. rova hit
 exactly this: the statement's success varied by environment and a
 `permission denied to change default privileges` aborted the whole migration, breaking a
 develop deploy. It also buys nothing while `opshub_migrate` is NOLOGIN and creates no objects.

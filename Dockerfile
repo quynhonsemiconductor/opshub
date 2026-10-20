@@ -62,7 +62,7 @@ FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS api
 # runs via `node dist/...`) and its BUNDLED node-tar carries a CRITICAL CVE
 # (CVE-2026-59873, tar 7.5.13 < 7.5.19) that neither `apk upgrade` nor a pnpm override
 # can patch, because it is npm's own vendored copy rather than a dependency of ours.
-# Same treatment as rally.
+# Same treatment as rova.
 RUN apk upgrade --no-cache \
     && apk add --no-cache tini \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
@@ -96,7 +96,7 @@ FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS worker
 # runs via `node dist/...`) and its BUNDLED node-tar carries a CRITICAL CVE
 # (CVE-2026-59873, tar 7.5.13 < 7.5.19) that neither `apk upgrade` nor a pnpm override
 # can patch, because it is npm's own vendored copy rather than a dependency of ours.
-# Same treatment as rally.
+# Same treatment as rova.
 RUN apk upgrade --no-cache \
     && apk add --no-cache tini \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
@@ -121,7 +121,7 @@ FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS migrator
 # runs via `node dist/...`) and its BUNDLED node-tar carries a CRITICAL CVE
 # (CVE-2026-59873, tar 7.5.13 < 7.5.19) that neither `apk upgrade` nor a pnpm override
 # can patch, because it is npm's own vendored copy rather than a dependency of ours.
-# Same treatment as rally.
+# Same treatment as rova.
 RUN apk upgrade --no-cache \
     && apk add --no-cache tini \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \

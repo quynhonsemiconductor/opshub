@@ -19,7 +19,7 @@ opshub/
 └── Dockerfile               # multi-target: api, worker, migrator
 ```
 
-Workspace model, develop, build, and deploy conventions mirror [`rally`](https://github.com/quynhonsemiconductor/rally): NestJS backend is the pnpm root, `apps/web` is a workspace member; deploy is push-based to ECS via `qnsc-ci`.
+Workspace model, develop, build, and deploy conventions mirror [`rova`](https://github.com/quynhonsemiconductor/rova): NestJS backend is the pnpm root, `apps/web` is a workspace member; deploy is push-based to ECS via `qnsc-ci`.
 
 ## Local stack
 

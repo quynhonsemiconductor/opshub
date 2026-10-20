@@ -21,8 +21,8 @@
  * force every page to lift them back out. It also means the reset-on-search rule lives in one
  * testable hook rather than in a component tree.
  *
- * NOT A COPY OF RALLY'S `ListPageScaffold`, deliberately. That one paginates CLIENT-side over a
- * fully-loaded array and owns row selection for bulk actions, because Rally's endpoints return
+ * NOT A COPY OF ROVA'S `ListPageScaffold`, deliberately. That one paginates CLIENT-side over a
+ * fully-loaded array and owns row selection for bulk actions, because Rova's endpoints return
  * whole collections. Every OpsHub list endpoint pages server-side and none has a bulk operation
  * yet, so importing that design would mean a pager that lies about page 1 of 1 and a selection
  * gutter with nothing to do.

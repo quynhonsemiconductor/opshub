@@ -63,7 +63,7 @@ export default defineConfig({
      * requests and tear down NOTHING, so without this a developer's database grows on every
      * pass — and the leftovers then make list assertions count-dependent, or collide with
      * the seed's own fixed ids under `onConflictDoNothing`, which reports nothing and leaves
-     * the fixture silently absent. Adopted from rally, which hit both.
+     * the fixture silently absent. Adopted from rova, which hit both.
      */
     globalSetup: ['./test/e2e/support/global-setup.ts'],
     testTimeout: 30_000,
@@ -79,7 +79,7 @@ export default defineConfig({
      * shared stateful backend cannot be driven in parallel without per-spec isolation,
      * which this suite does not have.
      *
-     * Adopted from rally, where both failure modes were diagnosed the hard way.
+     * Adopted from rova, where both failure modes were diagnosed the hard way.
      */
     fileParallelism: false,
   },
