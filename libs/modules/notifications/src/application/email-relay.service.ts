@@ -13,7 +13,7 @@ import { Cron } from '@nestjs/schedule';
 import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
 import { DB_NOW, dbDelay, InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
-import { AbstractOutboxRelay } from '@platform';
+import { AbstractOutboxRelay, EMAIL_WAKE } from '@platform';
 import type { Claimed, OutboxLeaseTable } from '@platform';
 import { getProcessRole } from '@platform/config/process-role';
 import { EmailService } from '@platform/email';
@@ -61,7 +61,7 @@ export class EmailRelayService
   }
 
   override get wakeKind(): string {
-    return 'email';
+    return EMAIL_WAKE;
   }
 
   @Cron('*/5 * * * * *', { name: 'email-relay' })

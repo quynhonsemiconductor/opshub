@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import { type DrizzleDB, type DbExecutor } from '../database/drizzle.provider';
 import { emailOutbox } from '../../../../db/schema';
 import { type EmailTemplateName, type EmailTemplateVars } from './templates';
-import { notifyOutbox } from '../outbox/outbox-wake';
+import { EMAIL_WAKE, notifyOutbox } from '../outbox/outbox-wake';
 
 /**
  * EmailSchedulerService — enqueue an email into email_outbox inside the
@@ -69,6 +69,6 @@ export class EmailSchedulerService {
       });
 
     // The wake hint, in the caller's transaction: delivered at commit. Polling stays the source of truth.
-    await notifyOutbox(tx, 'email');
+    await notifyOutbox(tx, EMAIL_WAKE);
   }
 }
