@@ -1,7 +1,7 @@
 /**
  * Auth bootstrap — runs once on app start, and again on every page refresh.
  *
- * Restores the session from the same-origin `__Secure-opshub.session_token` cookie by calling the
+ * Restores the session from the same-origin opshub.session_token cookie (`__Host-` in production) by calling the
  * cookie-authenticated `GET /v1/auth/me`. There are no in-browser tokens: the shared
  * guard resolves the session server-side and refreshes the underlying access token
  * itself. Must be awaited before the router guard reads `isAuthenticated()`.
