@@ -41,7 +41,8 @@ Only the dimensions differ, and they differ because the products do.
 
 **Convergence intent:** our evaluator is the more general one. If rova ever needs
 to *subtract* a permission at project scope — the additive-only limitation in
-`RALLY_HARDENING_PLAN.md` R3 — the answer is for rova to adopt our shape, not to
+`RALLY_HARDENING_PLAN.md` (a historical document filename from rova's repo, kept
+under its original name) R3 — the answer is for rova to adopt our shape, not to
 invent a third.
 
 ## Allowed: how domain events reach their read model
