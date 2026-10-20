@@ -27,6 +27,26 @@ describe('registerPreloadErrorReload', () => {
     expect(win.store.get('opshub-vite-preload-reloaded')).toBe('1');
   });
 
+  it('stands down entirely when storage throws (no loop, no listener)', () => {
+    const win = fakeWindow();
+    win.sessionStorage.getItem = () => {
+      throw new DOMException('Access is denied', 'SecurityError');
+    };
+    registerPreloadErrorReload(win as unknown as Window);
+    win.fire();
+    expect(win.location.reload).not.toHaveBeenCalled();
+  });
+
+  it('does not reload when the flag cannot be written', () => {
+    const win = fakeWindow();
+    win.sessionStorage.setItem = () => {
+      throw new DOMException('Access is denied', 'SecurityError');
+    };
+    registerPreloadErrorReload(win as unknown as Window);
+    win.fire();
+    expect(win.location.reload).not.toHaveBeenCalled();
+  });
+
   it('does not reload again while the session flag survives a reload', () => {
     const first = fakeWindow();
     registerPreloadErrorReload(first as unknown as Window);
