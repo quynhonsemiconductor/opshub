@@ -2079,8 +2079,7 @@ locals {
   # Note what is still NOT here: 2000, 3000, 1500. Those are the round numbers an
   # operator reaches for, and every one of them selects nothing.
   http_duration_buckets_ms = [
-    0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000,
-    15000, 30000, 45000, 60000,
+    0, 250, 1000, 2500, 5000, 10000, 60000, 180000,
   ]
 
   runbook_base_url = "https://github.com/quynhonsemiconductor/opshub/blob/main/docs/runbooks/alerts"
