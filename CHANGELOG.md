@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.1...v0.4.2) (2026-10-21)
+
+
+### 🐛 Bug Fixes
+
+* **infra:** allow the RDS instance and uploads bucket destroys ([#462](https://github.com/quynhonsemiconductor/opshub/issues/462)) ([491ec0b](https://github.com/quynhonsemiconductor/opshub/commit/491ec0b556f7c088fd5d4338a858fa1ffe92e09f))
+
 ## [0.4.1](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.0...v0.4.1) (2026-10-21)
 
 
