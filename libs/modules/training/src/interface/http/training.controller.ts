@@ -413,7 +413,7 @@ export class TrainingController {
 
   // ── Certificates ─────────────────────────────────────────────────────────────
   //
-  // The endpoint shape is rally's: presign, confirm, list, download, delete. The mechanics live in
+  // The endpoint shape is rova's: presign, confirm, list, download, delete. The mechanics live in
   // `EntityAttachmentsService`; these routes prove the record exists and decide who may act.
 
   @Get('records/:id/certificates')

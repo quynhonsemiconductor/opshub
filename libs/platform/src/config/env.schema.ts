@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getProcessRole, type ProcessRole } from './process-role';
+import { PRE_AUTH_IP_BUCKET } from '../rate-limit/rate-limit.constants';
 
 const booleanish = (defaultValue: boolean) =>
   z
@@ -32,10 +33,16 @@ const baseShape = {
    * `NODE_ENV=production`, so this is a test-environment accommodation and not a control with a dial on
    * it. Lowering it is always allowed.
    */
+  /**
+   * The pre-auth ceiling per client address (the first bucket every request passes through). The default is the
+   * shipped `PRE_AUTH_IP_BUCKET` limit. CI's e2e suites drive every request from one loopback address, so they
+   * raise it; `NODE_ENV=production` refuses a value above the default, so it is not a dial in a deployed environment.
+   */
+  RATE_LIMIT_IP_LIMIT: z.coerce.number().int().positive().default(PRE_AUTH_IP_BUCKET.limit),
   RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(200),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
-  CORS_ORIGINS: z.string().default('http://localhost:5173'),
+  CORS_ORIGINS: z.string().default('http://localhost:5174'),
 
   // ── Database ───────────────────────────────────────────────────────────────
   // Supply EITHER a complete DATABASE_URL (local dev, CI) OR the discrete parts
@@ -49,6 +56,10 @@ const baseShape = {
   DATABASE_USER: z.string().optional(),
   DATABASE_PASSWORD: z.string().optional(),
   DATABASE_SSLMODE: z.string().default('require'),
+  // Path to the CA bundle database certificates must chain to (RDS global bundle in the
+  // image today, the CNPG ca.crt on-prem). REQUIRED in production: without it the
+  // process refuses to connect (see db/pg-ssl.ts) instead of encrypting unverified.
+  DATABASE_SSL_CA: emptyToUndefined(z.string().optional()),
   DATABASE_POOL_MIN: z.coerce.number().int().positive().default(2),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(20),
 
@@ -154,7 +165,11 @@ const baseShape = {
    * `dev` logs to the console and sends nothing, which is the default so that a fresh checkout needs no
    * mail setup at all.
    */
-  EMAIL_PROVIDER: z.enum(['dev', 'graph', 'resend', 'ses']).default('dev'),
+  EMAIL_PROVIDER: z.enum(['dev', 'graph', 'resend', 'ses', 'smtp']).default('dev'),
+  /** SMTP relay host for EMAIL_PROVIDER=smtp: Mailpit (`localhost` on the host, `mailpit` in a container). Development only. */
+  MAIL_SMTP_HOST: emptyToUndefined(z.string().min(1).optional()),
+  /** SMTP relay port for EMAIL_PROVIDER=smtp: Mailpit's SMTP port (1025 in the container). */
+  MAIL_SMTP_PORT: emptyToUndefined(z.coerce.number().int().min(1).max(65535).optional()),
   /**
    * The shared mailbox mail goes out as (`noreply-opshub@qnsc.vn`). Required for `graph`. Not a secret.
    * Graph sends as this mailbox and no other; the display name is the mailbox's own, so `MAIL_FROM_NAME`
@@ -193,7 +208,7 @@ const baseShape = {
 
   // ── Frontend ───────────────────────────────────────────────────────────────
   /** Public base URL used to build links inside notification emails. */
-  APP_URL: z.string().url().default('http://localhost:5173'),
+  APP_URL: z.string().url().default('http://localhost:5174'),
 };
 
 /** What every role's schema shares. */
@@ -208,6 +223,17 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
     // A RATE LIMIT TESTS CAN RAISE IS NOT A CONTROL. The knob exists for CI; production keeps the
     // shipped ceiling, and this refusal is what makes that a rule rather than a comment. Deliberately
     // placed above the early return below, for the reason that comment gives.
+    if (env.NODE_ENV === 'production' && env.RATE_LIMIT_IP_LIMIT > PRE_AUTH_IP_BUCKET.limit) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RATE_LIMIT_IP_LIMIT'],
+        message:
+          'RATE_LIMIT_IP_LIMIT cannot exceed ' +
+          PRE_AUTH_IP_BUCKET.limit +
+          ' when NODE_ENV=production: the per-address bucket is a protective ' +
+          'control, and an environment that raises it stops describing production. Lowering it is allowed.',
+      });
+    }
     if (env.NODE_ENV === 'production' && env.RATE_LIMIT_DEFAULT_LIMIT > 200) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -237,6 +263,22 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
           '(noreply-opshub@qnsc.vn), and the Exchange role assignment names exactly that mailbox.',
       });
     }
+    if (env.EMAIL_PROVIDER === 'smtp' && env.NODE_ENV === 'production') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['EMAIL_PROVIDER'],
+        message:
+          'EMAIL_PROVIDER=smtp is for development only (Mailpit): an unauthenticated relay must never send in production. Use graph.',
+      });
+    }
+    if (env.EMAIL_PROVIDER === 'smtp' && (!env.MAIL_SMTP_HOST || !env.MAIL_SMTP_PORT)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['MAIL_SMTP_HOST'],
+        message:
+          'MAIL_SMTP_HOST and MAIL_SMTP_PORT are required when EMAIL_PROVIDER is "smtp" (Mailpit: localhost and 1110 on the host, mailpit and 1025 in a container).',
+      });
+    }
     if (env.EMAIL_PROVIDER !== 'dev' && env.EMAIL_PROVIDER !== 'graph' && !env.MAIL_FROM_EMAIL) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -251,7 +293,7 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
     // BEFORE the database early-return below, and that placement is the point. This
     // superRefine returns as soon as a complete DATABASE_URL is present, so anything
     // written after that line is dead in exactly the configuration developers and CI run.
-    // (rally's equivalent storage-pair check sits after its return and is inert there.)
+    // (rova's equivalent storage-pair check sits after its return and is inert there.)
     //
     // Half a credential pair is a misconfiguration, not a partial feature. With only one
     // half set, the S3Client silently omits `credentials` and falls back to the task
@@ -384,7 +426,7 @@ const refineApiAuth = (
         path: [key],
         message:
           key === 'EDGE_CLIENT_IP_SECRET'
-            ? "EDGE_CLIENT_IP_SECRET is required when NODE_ENV=production: every browser request reaches the API through the Pages Function, which signs the visitor address with it. Without it the API sees one shared Cloudflare address and the AUTH_LOGIN bucket is the whole company's."
+            ? "EDGE_CLIENT_IP_SECRET is required when NODE_ENV=production: every browser request reaches the API through the Pages Function, which signs the visitor address with it. Without it the API sees one shared Cloudflare address and the per-address rate-limit bucket is the whole company's."
             : `${key} is required when NODE_ENV=production: staff sign in with Microsoft Entra.`,
       });
     }
@@ -438,7 +480,7 @@ export const ApiEnvSchema = z
     /**
      * The key the Cloudflare Pages Function signs the visitor's address with (`@quynhonsemiconductor/platform-http/edge`),
      * and `clientIp()` verifies. Behind a Pages Function the API's `cf-connecting-ip` is a Cloudflare address shared
-     * by every visitor, so without a verifiable address one `AUTH_LOGIN` bucket (5 attempts per 15 minutes) would be
+     * by every visitor, so without a verifiable address one per-address rate-limit bucket (`PRE_AUTH_IP_BUCKET`) would be
      * the whole company's. The SAME value as the Pages project's secret of that name; at least 32 characters.
      * Optional so development and CI (no Pages Function in front) boot, where `clientIp()` treats an absent secret as
      * "no signed address, use cf-connecting-ip"; REQUIRED in production (`refineApiAuth`), where an empty value stops

@@ -6,6 +6,7 @@
 name: Backend · CI
 
 on:
+  merge_group:
   push:
     branches: [main]
   pull_request:
@@ -89,7 +90,7 @@ jobs:
       run: ${{ steps.paths.outputs.run }}
     steps:
       - id: paths
-        uses: quynhonsemiconductor/ci/actions/changed-paths@v1
+        uses: quynhonsemiconductor/ci/actions/changed-paths@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           ignore: |
             **/*.md
@@ -116,7 +117,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -142,7 +143,7 @@ jobs:
 
       - name: Typecheck (including tests)
         # `tsconfig.build.json` excludes `test` and `**/*spec.ts`, so the step above cannot
-        # see a type error in a test file. Rally hit exactly this gap (incident #262): a
+        # see a type error in a test file. Rova hit exactly this gap (incident #262): a
         # wrong service-call signature reached main behind a green check because the spec
         # mocked the call, so it still passed at runtime with the wrong signature. `tsconfig.json`
         # is a superset, hence both steps rather than a replacement — the first one stays as
@@ -150,6 +151,86 @@ jobs:
         run: pnpm typecheck
 
   # ─────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1b. DB TLS proof: verify-full against a real Postgres with a self-signed CA
+  # ─────────────────────────────────────────────────────────────────────────
+  # Proves the db/pg-ssl.ts decision end to end: with DATABASE_SSL_CA the driver
+  # verifies chain AND hostname (a self-signed CA with SAN localhost stands in for
+  # the RDS bundle / CNPG ca.crt), and a CA the server does not chain to is refused.
+  # The fail-closed-in-production case needs no server: it is db/pg-ssl.spec.ts.
+  db-tls:
+    name: DB TLS verify-full
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PG_TLS_URL: postgresql://postgres:postgres@127.0.0.1:15432/tls_test?sslmode=require
+      PG_TLS_CA_FILE: ${{ github.workspace }}/certs/ca.crt
+      PG_TLS_ROGUE_CA_FILE: ${{ github.workspace }}/certs/rogue.crt
+      # Second server (15433) presents a certificate whose SAN has NO IP entry, so
+      # connecting to 127.0.0.1 exercises the hostname check: right CA, wrong name.
+      PG_TLS_WRONG_HOST_URL: postgresql://postgres:postgres@127.0.0.1:15433/tls_test?sslmode=require
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Generate a self-signed CA, a rogue CA, and a server certificate (SAN localhost)
+        run: |
+          mkdir certs
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/ca.key -out certs/ca.crt -days 2 \
+            -subj "/CN=db-tls-test-ca" -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign" -addext "subjectKeyIdentifier=hash"
+          openssl req -x509 -newkey rsa:2048 -nodes -keyout certs/rogue.key -out certs/rogue.crt -days 2 \
+            -subj "/CN=rogue-ca" -addext "basicConstraints=critical,CA:TRUE"
+          openssl req -newkey rsa:2048 -nodes -keyout certs/server.key -out certs/server.csr -subj "/CN=localhost"
+          printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nauthorityKeyIdentifier=keyid,issuer\nsubjectKeyIdentifier=hash\n' > certs/server.ext
+          openssl x509 -req -in certs/server.csr -CA certs/ca.crt -CAkey certs/ca.key \
+            -CAcreateserial -out certs/server.crt -days 2 -extfile certs/server.ext
+          openssl req -newkey rsa:2048 -nodes -keyout certs/noip.key -out certs/noip.csr -subj "/CN=no-ip-san"
+          printf 'subjectAltName=DNS:unrelated-host.internal\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nauthorityKeyIdentifier=keyid,issuer\nsubjectKeyIdentifier=hash\n' > certs/noip.ext
+          openssl x509 -req -in certs/noip.csr -CA certs/ca.crt -CAkey certs/ca.key \
+            -CAcreateserial -out certs/noip.crt -days 2 -extfile certs/noip.ext
+
+      - name: Start Postgres 18.6 with TLS
+        run: |
+          docker run -d --name pg-tls \
+            -v "$PWD/certs:/certs" \
+            -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=tls_test \
+            -p 127.0.0.1:15432:5432 \
+            postgres:18.6 bash -c "chown 999:999 /certs/server.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/certs/server.crt -c ssl_key_file=/certs/server.key"
+          n=0
+          until docker exec pg-tls pg_isready -U postgres >/dev/null 2>&1; do
+            n=$((n + 1)); [ "$n" -gt 30 ] && echo "postgres never became ready" && exit 1
+            sleep 1
+          done
+          docker run -d --name pg-wrongname \
+            -v "$PWD/certs:/certs" \
+            -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=tls_test \
+            -p 127.0.0.1:15433:5432 \
+            postgres:18.6 bash -c "chown 999:999 /certs/noip.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/certs/noip.crt -c ssl_key_file=/certs/noip.key"
+          n=0
+          until docker exec pg-wrongname pg_isready -U postgres >/dev/null 2>&1; do
+            n=$((n + 1)); [ "$n" -gt 30 ] && echo "wrongname postgres never became ready" && exit 1
+            sleep 1
+          done
+
+      - name: The right CA connects with verify-full
+        run: pnpm vitest run db/pg-ssl.integration.spec.ts
+
+      - name: A CA the server does not chain to is refused
+        run: pnpm vitest run db/pg-ssl.integration.spec.ts
+        env:
+          PG_TLS_WRONG_CA_BUNDLE: '1'
+
   # 2. Unit + e2e tests (needs Postgres)
   # ─────────────────────────────────────────────────────────────────────────
   test:
@@ -161,7 +242,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:18.6
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -189,27 +270,12 @@ jobs:
       # one the client must send, that `Content-Disposition` ends up as STORED object metadata, and
       # that confirm rejects a size or checksum that does not match. Every one of those is invisible
       # to a stubbed StorageService — the stub would agree with whatever the code did.
-      localstack:
-        # Pinned to the SAME major as docker-compose.dev.yml. They diverged once — CI on 3 while
-        # local ran 4 — and a presigned PUT that succeeded locally answered 400 in CI, which reads
-        # as a product bug rather than an emulator difference.
-        image: localstack/localstack:4
-        env:
-          SERVICES: s3
-          DEBUG: '0'
-        ports: ['4566:4566']
-        options: >-
-          --health-cmd "curl -sf http://localhost:4566/_localstack/health || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -243,7 +309,7 @@ jobs:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
           BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
-          CORS_ORIGINS: http://localhost:5173
+          CORS_ORIGINS: http://localhost:5174
           VALKEY_URL: redis://localhost:6379
           COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
           CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
@@ -288,26 +354,21 @@ jobs:
       # The bucket has to exist before the app presigns into it: a presigned PUT against a missing
       # bucket succeeds at signing and fails at upload, which surfaces as a confirm-time
       # FILE_NOT_UPLOADED and reads like a product bug.
-      - name: Create the S3 bucket in LocalStack
+      # Garage is the same node the dev stack runs (docker-compose.dev.yml), started by compose. The one-shot init creates the
+      # e2e bucket and proves its CORS; `run --rm` returns the init's exit code, so a broken bucket fails this step.
+      - name: Start Garage and create its buckets
         run: |
-          for _ in $(seq 1 30); do
-            if curl -sf http://localhost:4566/_localstack/health > /dev/null; then break; fi
-            sleep 2
-          done
-          aws --endpoint-url http://localhost:4566 s3 mb s3://opshub-files-test
-        env:
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
-          AWS_DEFAULT_REGION: us-east-1
+          docker compose -f docker-compose.dev.yml up -d --wait garage
+          docker compose -f docker-compose.dev.yml run --rm garage-init
 
       - name: E2E tests
         run: pnpm test:e2e
         env:
           S3_FILES_BUCKET: opshub-files-test
-          STORAGE_ENDPOINT: http://localhost:4566
+          STORAGE_ENDPOINT: http://localhost:4610
           STORAGE_FORCE_PATH_STYLE: 'true'
-          STORAGE_ACCESS_KEY_ID: test
-          STORAGE_SECRET_ACCESS_KEY: test
+          STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
+          STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
           AWS_REGION: us-east-1
           NODE_ENV: test
           # The APP connects as the restricted role, the MIGRATOR as the owner — the same
@@ -319,7 +380,7 @@ jobs:
           # identity 8's passwordless sign-in, which the harness' login() uses. Loads only with NODE_ENV test or
           # development, and the env schema refuses it in production.
           IDENTITY_TEST_LOGIN: enabled
-          CORS_ORIGINS: http://localhost:5173
+          CORS_ORIGINS: http://localhost:5174
           VALKEY_URL: redis://localhost:6379
           COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
           CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
@@ -365,7 +426,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:18.6
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -405,7 +466,7 @@ jobs:
             echo "No backward-incompatible DDL detected."
           fi
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -470,7 +531,7 @@ jobs:
       # CRITICAL blocks this job, hence `Backend CI required`; HIGH is reported. This used to be its own job in the security
       # workflow that rebuilt the same image from scratch.
       - name: Container CVE scan (Trivy)
-        uses: quynhonsemiconductor/ci/actions/scan-image@v1
+        uses: quynhonsemiconductor/ci/actions/scan-image@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           image-ref: opshub-api:scan
 
@@ -508,7 +569,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6-alpine
+        image: postgres:18.6
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -527,7 +588,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -560,7 +621,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_openapi?sslmode=disable
           BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
-          CORS_ORIGINS: http://localhost:5173
+          CORS_ORIGINS: http://localhost:5174
           VALKEY_URL: redis://localhost:6379
           COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
           CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
@@ -573,7 +634,7 @@ jobs:
       # that must still be checked. Web CI builds and runs the same API, so it has the same spec.
 
       - name: Upload OpenAPI spec artifact
-        uses: quynhonsemiconductor/ci/actions/publish-openapi-spec@v1
+        uses: quynhonsemiconductor/ci/actions/publish-openapi-spec@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           spec-path: openapi.json
           artifact-name: openapi-spec-${{ github.sha }}
@@ -590,13 +651,13 @@ jobs:
       # (warning, naming it), or FAILS. See its README in quynhonsemiconductor/ci.
       - name: Fetch the base spec
         if: github.event_name == 'pull_request'
-        uses: quynhonsemiconductor/ci/actions/fetch-openapi-base-spec@v1
+        uses: quynhonsemiconductor/ci/actions/fetch-openapi-base-spec@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           workflow: backend-ci.yml
 
       - name: Check for breaking API changes (PR only)
         if: github.event_name == 'pull_request'
-        uses: quynhonsemiconductor/ci/actions/validate-openapi-contract@v1
+        uses: quynhonsemiconductor/ci/actions/validate-openapi-contract@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           current-spec-path: openapi.json
           base-spec-path: base-spec/openapi.json
@@ -629,12 +690,12 @@ jobs:
       #    empty, this branch runs, and the gate fails: it cannot turn "could not decide" into a pass.
       - name: Every job must have succeeded
         if: ${{ needs.changes.outputs.run == 'true' }}
-        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@v1
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           results: ${{ join(needs.*.result, ',') }}
 
       - name: Nothing here to test (every changed file is ignorable)
         if: ${{ needs.changes.outputs.run != 'true' }}
-        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@v1
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           results: ${{ needs.changes.result }}

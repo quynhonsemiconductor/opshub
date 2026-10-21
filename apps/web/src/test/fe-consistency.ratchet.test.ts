@@ -10,22 +10,22 @@ import { describe, expect, it } from 'vitest';
  * shared primitives. A rising count means new code re-hand-rolled something the design
  * system already owns: fix the code, not the baseline.
  *
- * Ported from rally, and its docblock carries the lesson that shaped this file. Four of
- * rally's six baselines had drifted well ABOVE the real count, so 39 new violations could
+ * Ported from rova, and its docblock carries the lesson that shaped this file. Four of
+ * rova's six baselines had drifted well ABOVE the real count, so 39 new violations could
  * have landed green — "a ratchet with slack in it is not a ratchet; it is a comment". Every
  * number below was therefore measured by forcing it to -1 and reading the count the failure
  * reports, never by grepping alongside, because an approximate grep sets the bar in the
  * wrong place.
  *
- * TWO OF RALLY'S SIX CHECKS ARE DELIBERATELY ABSENT, because opshub has nowhere for those
+ * TWO OF ROVA'S SIX CHECKS ARE DELIBERATELY ABSENT, because opshub has nowhere for those
  * violations to go and a ratchet pointing at a destination that does not exist is worse than
  * none — it implies a migration nobody can perform:
  *
- *  - raw Tailwind font sizes (`text-sm`, `text-lg`, …). rally routes type through a
+ *  - raw Tailwind font sizes (`text-sm`, `text-lg`, …). rova routes type through a
  *    `text-ui-*` scale in its `@theme`. opshub's globals.css defines no such scale, and
  *    there are 692 occurrences — freezing that would pin a number with no migration path.
  *    Add the scale first, then add the check.
- *  - hardcoded JSX copy. rally's proxy for un-internationalised text assumes a `t()` to wire
+ *  - hardcoded JSX copy. rova's proxy for un-internationalised text assumes a `t()` to wire
  *    it through. opshub has no i18n layer at all.
  */
 
@@ -70,7 +70,7 @@ const MAX_INLINE_STYLE = 4;
 const MAX_ARBITRARY_TEXT = 0;
 // Largest single source file, counted as `split('\n').length` — ONE MORE than `wc -l`, which
 // is worth stating because setting this from `wc -l` output puts it one below the real count
-// and the ratchet fails on the file it was measured from. rally's docblock flags the same trap.
+// and the ratchet fails on the file it was measured from. rova's docblock flags the same trap.
 // pages/people/people-page.tsx. Pages are composition; a file this size is doing more than
 // composing. The generated API client is excluded — it is 7575 lines and not hand-written.
 //

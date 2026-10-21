@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { MS_PER_DAY } from '@shared-kernel';
 import { and, eq, gte, lte, sql, isNotNull } from 'drizzle-orm';
 import { InjectDrizzle } from '@platform';
 import type { DrizzleDB } from '@platform';
@@ -38,9 +39,32 @@ function asNumber(value: unknown): number {
   return typeof value === 'number' ? value : Number(value ?? 0);
 }
 
+/** 30 days in milliseconds */
+const THIRTY_DAYS_MS = 30 * MS_PER_DAY;
+
 @Injectable()
 export class ReportsService {
   constructor(@InjectDrizzle() private readonly db: DrizzleDB) {}
+
+  /**
+   * The reporting window for a request. The rows are stamped by the DATABASE's now() (the createdAt, submittedAt and
+   * detectedAt defaults), so the default bounds come from that same clock, read once per request: `to` is the
+   * database's now() and `from` is thirty days before it. Bounds the caller supplies are used as given. Every persisted
+   * timestamp in these windows is a database default (the Time rule, .github#29), so there is one clock to compare with.
+   *
+   * Mixing clocks breaks this. A default taken from the application host can run behind the database, and then the newest
+   * rows sort past `to` and drop out of their own report.
+   */
+  async resolveRange(from?: string, to?: string): Promise<{ from: Date; to: Date }> {
+    const toDate = to ? new Date(to) : await this.databaseNow();
+    const fromDate = from ? new Date(from) : new Date(toDate.getTime() - THIRTY_DAYS_MS);
+    return { from: fromDate, to: toDate };
+  }
+
+  private async databaseNow(): Promise<Date> {
+    const result = await this.db.execute<{ now: Date }>(sql`SELECT now() AS now`);
+    return new Date(result.rows[0].now);
+  }
 
   // ─── Requests ──────────────────────────────────────────────────────────────
 

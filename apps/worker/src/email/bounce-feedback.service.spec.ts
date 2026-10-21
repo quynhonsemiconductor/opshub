@@ -41,13 +41,13 @@ const sns = (event: Record<string, unknown>): string =>
 
 const bounceEvent = (messageId: string): Record<string, unknown> => ({
   eventType: 'Bounce',
-  mail: { messageId, destination: ['namnh@qnsc.vn'] },
+  mail: { messageId, destination: ['alice@example.test'] },
   bounce: { bounceType: 'Permanent', diagnosticCode: '550 5.4.1 recipient rejected' },
 });
 
 describe('BounceFeedbackService.applyEvent', () => {
   it('marks a sent row bounced with the diagnostic in lastError', async () => {
-    const { db, calls } = makeDb([{ id: 'row-1', to: 'namnh@qnsc.vn' }]);
+    const { db, calls } = makeDb([{ id: 'row-1', to: 'alice@example.test' }]);
     const service = new BounceFeedbackService(db, makeConfig());
 
     await service.applyEvent(sns(bounceEvent('mid-1')));

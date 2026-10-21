@@ -197,7 +197,6 @@ export class DeviceSyncService {
       softwareVersion: device.osVersion ? device.osVersion.slice(0, VERSION_MAX) : null,
       severity,
       source: sourceKey,
-      detectedAt: new Date(),
     });
     return 1;
   }

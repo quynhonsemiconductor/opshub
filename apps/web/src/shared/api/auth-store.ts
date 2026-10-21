@@ -27,7 +27,7 @@ interface AuthState {
  * Session state for the cookie flow (identity 8).
  *
  * There is NO token here, and that is the point. Authentication rides an opaque,
- * httpOnly `__Secure-opshub.session_token` cookie the browser cannot read, so the SPA holds
+ * httpOnly opshub.session_token cookie (`__Host-` in production) the browser cannot read, so the SPA holds
  * nothing an XSS payload could exfiltrate and nothing it could accidentally log. This
  * store keeps only the identity the server reported, for rendering.
  *

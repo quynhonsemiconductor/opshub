@@ -28,7 +28,7 @@ on:
     # SERVICE is never moved onto the revision Terraform registers — this pipeline
     # owns that. With infra ignored here, an infra-only merge registered a new task
     # definition that nothing ever rolled onto, and the change silently did not
-    # take effect. Rally hit exactly that: its develop ran against a DELETED cache
+    # take effect. Rova hit exactly that: its develop ran against a DELETED cache
     # endpoint (`valkey: down` on /v1/readyz) after a cache migration, because the
     # apply succeeded, the new definition was correct, and no deploy ran.
     #
@@ -46,7 +46,7 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'   # semver only — no -rc suffix
 
-  # Manual re-run, matching rally. Needed because a deploy can fail for reasons that have
+  # Manual re-run, matching rova. Needed because a deploy can fail for reasons that have
   # nothing to do with the commit — an expired token, a throttled ECS API, a registry
   # hiccup — and without it the only way to retry is an empty commit, which rewrites
   # history to work around an infrastructure problem.
@@ -125,7 +125,7 @@ jobs:
         # awaited run, live in the shared action — see `quynhonsemiconductor/ci`. This was
         # hand-written here, with `gh run watch --exit-status`, which reports a 403 the same
         # way it reports a failed run: rova lost both deploys on 2026-09-13 to exactly that.
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           workflow: infra-apply.yml
           label: Infrastructure · Apply
@@ -157,7 +157,7 @@ jobs:
   # action's own failure message states ("The commit must be merged to main and deployed to
   # develop before tagging a release").
   #
-  # With no gate the two runs race. This is PORTED FROM RALLY, where prod lost that race
+  # With no gate the two runs race. This is PORTED FROM ROVA, where prod lost that race
   # on v0.7.13 (2026-08-31): a release merge fires both runs on the same commit, the tag
   # run cleared this gate in 3 seconds while the main run sat here for 15m16s waiting on
   # Backend · CI, and prod then exhausted the promote step's poll budget waiting for an
@@ -184,7 +184,7 @@ jobs:
     name: Wait for Backend · CI
     runs-on: ubuntu-latest
     # 45, not 30: the tag branch now awaits the develop deploy, whose own slowest input is
-    # a Docker build that a lockfile change forces to rebuild from scratch. Rally measured
+    # a Docker build that a lockfile change forces to rebuild from scratch. Rova measured
     # 24m24s for that run on the release this fix comes from.
     timeout-minutes: 45
     permissions:
@@ -193,7 +193,7 @@ jobs:
     steps:
       - name: Wait for Backend · CI on this commit
         if: github.ref_type != 'tag'
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           workflow: backend-ci.yml
           # `main` and not the tag ref: Backend · CI only runs on main.
@@ -208,7 +208,7 @@ jobs:
       # precondition. See the block comment above this job for the race it closes.
       - name: Wait for the develop deploy of this commit
         if: github.ref_type == 'tag'
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           workflow: backend-deploy.yml
           # `main` is what excludes THIS run: the develop deploy's headBranch is `main` while
@@ -240,7 +240,7 @@ jobs:
       id-token: write
       attestations: write
       packages: read # build-push-ecr pulls private @quynhonsemiconductor/* from GitHub Packages
-    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@v1
+    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
     with:
       product: opshub
       has_worker: true
@@ -290,12 +290,12 @@ jobs:
       SLACK_DEPLOY_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
 
   # ───────────────────────────────────────────────────────────────────────────
-  # Grafana deploy annotation — ported from rally.
+  # Grafana deploy annotation — ported from rova.
   #
   # WHY THIS IS NOT COSMETIC. opshub's Grafana alert rules fire on symptoms that a
   # deploy is one of the likeliest causes of, and without a deploy marker on the
   # dashboard there is nothing on screen that distinguishes "the service regressed"
-  # from "a task was replaced 40 seconds ago". rally's `http-p99-latency` page on
+  # from "a task was replaced 40 seconds ago". rova's `http-p99-latency` page on
   # 2026-08-31 was exactly that: the slow request was a cold start after a task
   # replacement, and establishing it took reading workflow job timestamps by hand
   # because the latency panel carried no deploy markers to line the spike up against.

@@ -10,7 +10,7 @@ allowBuilds:
 
 # Overrides live HERE, not in package.json's "pnpm.overrides": pnpm 11 no longer
 # reads that field and ignores it silently, so an advisory pinned there is not
-# pinned at all. Mirrors rally.
+# pinned at all. Mirrors rova.
 overrides:
   # Kept from before: esbuild's dev-server request vulnerability.
   "esbuild@<0.25.0": ">=0.25.0"
@@ -98,7 +98,7 @@ overrides:
   # which 8.x DELETED — so a single `<8.9.0: >=8.9.0` floor drags jsdom onto 8.9.0 and
   # every jsdom-environment suite dies at worker startup with MODULE_NOT_FOUND before a
   # single test runs. Backend suites (node environment) are unaffected, which is exactly
-  # how that passes locally and fails in CI on the web tests. rally#380 paid for this
+  # how that passes locally and fails in CI on the web tests. rova#380 paid for this
   # lesson; opshub copies the shape, not the debugging.
   #
   # Keep each consumer inside the major it declares:

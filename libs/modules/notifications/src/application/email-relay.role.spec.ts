@@ -3,19 +3,13 @@ import { resetProcessRoleForTests, setProcessRole } from '@platform/config/proce
 import { EmailRelayService } from './email-relay.service';
 
 /**
- * ONLY THE WORKER SENDS. The API writes outbox rows and publishes the wake signal; it holds no mail credential. Before, the API subscribed to its
- * own wake signal and ran a relay pass too, which with a provider that needs a credential would try to send with none.
+ * ONLY THE WORKER SENDS. The API writes outbox rows and notifies; it holds no mail credential. A relay pass in the API
+ * would try to send with none.
  */
 function relay() {
-  const unsubscribe = vi.fn(() => Promise.resolve());
-  const subscribeEmailRelayWake = vi.fn(() => Promise.resolve(unsubscribe));
   const assertReady = vi.fn();
-  const service = new EmailRelayService(
-    {} as never,
-    { assertReady } as never,
-    { subscribeEmailRelayWake } as never,
-  );
-  return { service, subscribeEmailRelayWake, assertReady, unsubscribe };
+  const service = new EmailRelayService({} as never, { assertReady } as never);
+  return { service, assertReady };
 }
 
 describe('EmailRelayService per process role', () => {
@@ -24,31 +18,27 @@ describe('EmailRelayService per process role', () => {
     setProcessRole('api'); // test/setup.ts's default
   });
 
-  it('the worker checks its transport and listens for the wake signal', async () => {
+  it('the worker checks its transport at start', () => {
     setProcessRole('worker');
-    const { service, subscribeEmailRelayWake, assertReady } = relay();
-    await service.onModuleInit();
+    const { service, assertReady } = relay();
+    service.onModuleInit();
     expect(assertReady).toHaveBeenCalledOnce();
-    expect(subscribeEmailRelayWake).toHaveBeenCalledOnce();
   });
 
-  it('a transport that cannot work stops the worker at start, before it listens', async () => {
+  it('a transport that cannot work stops the worker at start', () => {
     setProcessRole('worker');
-    const { service, subscribeEmailRelayWake, assertReady } = relay();
+    const { service, assertReady } = relay();
     assertReady.mockImplementation(() => {
       throw new Error('AZURE_CLIENT_ID is required for MAIL_TRANSPORT=graph');
     });
-    await expect(service.onModuleInit()).rejects.toThrow(/AZURE_CLIENT_ID/);
-    expect(subscribeEmailRelayWake).not.toHaveBeenCalled();
+    expect(() => service.onModuleInit()).toThrow(/AZURE_CLIENT_ID/);
   });
 
-  it('the API neither listens nor checks: it never sends', async () => {
+  it('the API does not check its transport: it never sends', () => {
     setProcessRole('api');
-    const { service, subscribeEmailRelayWake, assertReady } = relay();
-    await service.onModuleInit();
-    expect(subscribeEmailRelayWake).not.toHaveBeenCalled();
+    const { service, assertReady } = relay();
+    service.onModuleInit();
     expect(assertReady).not.toHaveBeenCalled();
-    await expect(service.onModuleDestroy()).resolves.toBeUndefined();
   });
 
   it('relay() does nothing in the API even if something calls it (it must not claim a row it cannot send)', async () => {
@@ -62,11 +52,7 @@ describe('EmailRelayService per process role', () => {
         },
       },
     );
-    const service = new EmailRelayService(
-      db as never,
-      { assertReady: vi.fn() } as never,
-      {} as never,
-    );
+    const service = new EmailRelayService(db as never, { assertReady: vi.fn() } as never);
     await expect(service.relay()).resolves.toBeUndefined();
   });
 });

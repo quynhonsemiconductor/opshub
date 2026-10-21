@@ -21,10 +21,9 @@
  *   - A FAILED REQUEST STAYS RETRYABLE. A refused create must not cache its own refusal, or one bad
  *     minute becomes 24 hours of the same bad answer under that key.
  *
- * PER-IDENTITY SCOPING IS NOT TESTED HERE, deliberately. Keys are client-generated, so two callers can
- * pick the same uuid and must not share a namespace — but the cache key is not observable through HTTP,
- * and the only end-to-end version of the assertion I could write ("a second identity's request does not
- * 500") proved nothing about scoping. It is asserted in the unit spec, where the key is an argument.
+ * PER-IDENTITY SCOPING. Keys are client-generated, so two callers can pick the same uuid and must not share a
+ * namespace. The cache key is not observable through HTTP, so the last test asserts the outcome instead: two users,
+ * one key, two answers. The unit spec pins the rule itself (no principal on an authenticated request means no cache).
  *
  * REFERENCES ARE UNIQUE PER RUN — `uq_asset_tag` is global and the database is shared with the other
  * suites, so a fixed tag makes a spec that passes once.
@@ -166,5 +165,37 @@ describe('idempotent retries', () => {
 
     expect(retried.status, JSON.stringify(retried.body)).toBe(201);
     expect(await countByTag(tag)).toBe(1);
+  });
+
+  it('gives two users the same Idempotency-Key their own responses, and a retry its own', async () => {
+    /*
+     * PER-USER SCOPE, end to end. Keys are client-generated, so two users can send the same uuid for different
+     * work. Both requests below carry the same key and the same body, so the fingerprint matches and only the
+     * caller tells them apart. A caller whose principal is missing must never fall back to its address (one bucket per
+     * NAT), so this pins the outcome: each user gets their own record.
+     */
+    const bob = await login(app, FIXTURE.NO_PERMISSIONS);
+    const key = randomUUID();
+    const body = {
+      accessType: 'vpn',
+      target: `e2e-idem-scope-${RUN}-${++seq}`,
+      justification: 'Idempotency scope e2e: two users, one key.',
+      durationHours: 8,
+    };
+
+    const adminFirst = await apiRequest(app, admin, 'POST', '/access-requests', body, { 'idempotency-key': key });
+    expect(adminFirst.status, JSON.stringify(adminFirst.body)).toBe(201);
+
+    const bobFirst = await apiRequest(app, bob, 'POST', '/access-requests', body, { 'idempotency-key': key });
+    expect(bobFirst.status, JSON.stringify(bobFirst.body)).toBe(201);
+    expect(bobFirst.headers?.['x-idempotent-replayed']).toBeUndefined();
+
+    const adminRetry = await apiRequest(app, admin, 'POST', '/access-requests', body, { 'idempotency-key': key });
+
+    const bobRecord = unwrap<{ id: string; requesterId: string }>(bobFirst.body);
+    expect(bobRecord.requesterId).toBe(bob.userId);
+    expect(bobRecord.id).not.toBe(unwrap<{ id: string }>(adminFirst.body).id);
+    expect(adminRetry.headers?.['x-idempotent-replayed']).toBe('true');
+    expect(unwrap<{ id: string }>(adminRetry.body).id).toBe(unwrap<{ id: string }>(adminFirst.body).id);
   });
 });

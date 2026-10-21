@@ -36,9 +36,10 @@ export interface StaffSignIn {
  * The product's half of a Microsoft sign-in, run by identity's `hooks.onStaffSignIn` on EVERY sign-in, after
  * the identity user exists and before its session is returned. A throw refuses the sign-in (no session).
  *
- * THE ACCESS MODEL (owner decision; "Assignment required" is OFF on the Entra app because the whole company
- * uses OpsHub):
- *   - anyone in the company tenant with a `qnsc.vn` address signs in and is provisioned as `employee`;
+ * THE ACCESS MODEL (owner decision, 2026-10-18; "Assignment required" is ON on the Entra app). Entra admits only
+ * the members of the dynamic group `opshub-users` (every enabled member of the company tenant), which is assigned to
+ * the app with the App Role `employee`. Entra refuses everyone else before this hook runs:
+ *   - a member with a `qnsc.vn` address signs in and is provisioned as `employee`;
  *   - elevated roles come ONLY from Entra App Role assignments, reconciled on every sign-in;
  *   - guests, other tenants, other domains and offboarded employees are refused.
  * identity enforces the tenant, the domain and the guest rule BEFORE this hook; the hook repeats the domain and

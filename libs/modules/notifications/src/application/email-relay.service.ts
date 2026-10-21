@@ -5,22 +5,20 @@
  * transaction management, and retry/fail logic.
  *
  * Adaptive polling:
- *   EmailSchedulerService.schedule() publishes an email:relay:wake signal to
- *   Redis immediately after writing to email_outbox.  onModuleInit() subscribes
- *   and calls super.relay() — delivery latency drops from ≤5s to ~ms.
+ *   EmailSchedulerService.schedule() sends a NOTIFY in the same transaction as the insert. OutboxWakeService
+ *   (worker only) calls relay() on it, so delivery does not wait for the 5s cron. The cron is the fallback.
  */
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, asc, eq, lt, lte } from 'drizzle-orm';
-import { InjectDrizzle, Span } from '@platform';
+import { and, asc, eq, lt, lte, type SQL } from 'drizzle-orm';
+import { DB_NOW, dbDelay, InjectDrizzle, Span } from '@platform';
 import type { DrizzleDB, DrizzleTx } from '@platform';
-import { AbstractOutboxRelay } from '@platform';
+import { AbstractOutboxRelay, EMAIL_WAKE } from '@platform';
 import type { Claimed, OutboxLeaseTable } from '@platform';
 import { getProcessRole } from '@platform/config/process-role';
 import { EmailService } from '@platform/email';
 import { EMAIL_SEND_TIMEOUT_MS } from '@platform/email';
 import type { EmailTemplateName, EmailTemplateVars } from '@platform/email';
-import { NotificationPubSubService } from '@platform/notifications';
 import { emailOutbox } from '../../../../../db/schema';
 
 /** Database round trips and scheduling slack on top of the send itself. */
@@ -38,19 +36,16 @@ type EmailOutboxRow = {
 @Injectable()
 export class EmailRelayService
   extends AbstractOutboxRelay<EmailOutboxRow, string | null>
-  implements OnModuleInit, OnModuleDestroy
+  implements OnModuleInit
 {
-  private unsubscribeRelayWake?: () => Promise<void>;
-
   constructor(
     @InjectDrizzle() db: DrizzleDB,
     private readonly emailService: EmailService,
-    private readonly pubSub: NotificationPubSubService,
   ) {
     super(db);
   }
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     /*
      * ONLY THE WORKER SENDS. The API writes outbox rows and publishes the wake signal; it holds no mail credential (its schema refuses the
      * Graph variables, and its task has no SES grant), so a relay pass in the API would try to send with none. Without this the API
@@ -63,15 +58,10 @@ export class EmailRelayService
     // Fail the deploy, not the first invitation, if the configured transport cannot work (a missing Graph variable).
     this.emailService.assertReady();
     this.logger.log('Email relay started — polling email_outbox every 5s');
-    this.unsubscribeRelayWake = await this.pubSub.subscribeEmailRelayWake(() => {
-      this.relay().catch((err: unknown) =>
-        this.logger.error({ err }, 'Email relay triggered by wake signal failed'),
-      );
-    });
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.unsubscribeRelayWake?.();
+  override get wakeKind(): string {
+    return EMAIL_WAKE;
   }
 
   @Cron('*/5 * * * * *', { name: 'email-relay' })
@@ -107,7 +97,7 @@ export class EmailRelayService
     return EMAIL_SEND_TIMEOUT_MS + EMAIL_LEASE_MARGIN_MS;
   }
 
-  protected async selectDue(tx: DrizzleTx, limit: number, now: Date): Promise<EmailOutboxRow[]> {
+  protected async selectDue(tx: DrizzleTx, limit: number, now: SQL): Promise<EmailOutboxRow[]> {
     return tx
       .select({
         id: emailOutbox.id,
@@ -152,7 +142,7 @@ export class EmailRelayService
     // risks a `sent` row that can never be bounce-matched.
     await tx
       .update(emailOutbox)
-      .set({ status: 'sent', sentAt: new Date(), messageId })
+      .set({ status: 'sent', sentAt: DB_NOW, messageId })
       .where(eq(emailOutbox.id, row.id));
   }
 
@@ -161,13 +151,13 @@ export class EmailRelayService
     row: Claimed<EmailOutboxRow>,
     newStatus: 'pending' | 'failed',
     lastError: string,
-    nextAttemptAt: Date,
+    delayMs: number,
   ): Promise<void> {
     await tx
       .update(emailOutbox)
       // scheduledAt IS the retry gate — selectDue selects on `scheduledAt <= now()`, so leaving it alone
       // made every retry immediate and burned all five attempts inside ~25 seconds.
-      .set({ status: newStatus, lastError, scheduledAt: nextAttemptAt })
+      .set({ status: newStatus, lastError, scheduledAt: dbDelay(delayMs) })
       .where(eq(emailOutbox.id, row.id));
   }
 }

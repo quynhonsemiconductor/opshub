@@ -18,7 +18,7 @@
 -- The other three outboxes stay, along with the shared AbstractOutboxRelay, its backoff and
 -- metrics, and the outboxDeadLetter alarm. This removes one unconsumed leg, not the pattern.
 --
--- Why remove rather than leave it: rally carried the same shape — an outbox publishing into a
+-- Why remove rather than leave it: rova carried the same shape — an outbox publishing into a
 -- topic whose only subscriber was misconfigured — and it dropped 100% of its domain events in
 -- every deployed environment for months while looking healthy, because nothing exercised the
 -- middle. An unread queue is not an option kept open, it is a liability that reads as

@@ -174,7 +174,7 @@ describe('audit entries are atomic with the change they record', () => {
 
   it('keeps the baseline tight enough to measure', () => {
     // A baseline that drifts above the real count stops measuring anything — the same
-    // failure rally's coverage floors had when they sat 11 points under real coverage.
+    // failure rova's coverage floors had when they sat 11 points under real coverage.
     const total = auditWriters().reduce(
       (n, { source }) => n + source.split('void this.audit.record(').length - 1,
       0,

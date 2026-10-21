@@ -305,6 +305,22 @@ describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
     if (!result.success) return;
     expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(50);
   });
+
+  it('REFUSES to raise the pre-auth address ceiling in production, and says why', () => {
+    const result = EnvSchema.safeParse(
+      env({ NODE_ENV: 'production', RATE_LIMIT_IP_LIMIT: '100000' }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.message).toMatch(/RATE_LIMIT_IP_LIMIT cannot exceed 1000/);
+  });
+
+  it('lets a test environment raise the pre-auth ceiling', () => {
+    const result = EnvSchema.safeParse(env({ NODE_ENV: 'test', RATE_LIMIT_IP_LIMIT: '100000' }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.RATE_LIMIT_IP_LIMIT).toBe(100000);
+  });
 });
 
 describe('EnvSchema — WEBHOOK_DELIVERY_MAX_AGE_HOURS', () => {
@@ -619,5 +635,37 @@ describe('EnvSchema: EMAIL_PROVIDER=graph (Microsoft 365 mail)', () => {
 
   it('the worker without graph mail is unchanged: no credential asked for', () => {
     expect(WorkerEnvSchema.safeParse(workerEnv()).success).toBe(true);
+  });
+});
+
+describe('EnvSchema — EMAIL_PROVIDER=smtp (Mailpit, development only)', () => {
+  const smtp = {
+    EMAIL_PROVIDER: 'smtp',
+    MAIL_SMTP_HOST: 'localhost',
+    MAIL_SMTP_PORT: '1110',
+    MAIL_FROM_EMAIL: 'noreply@qnsc.vn',
+  };
+
+  it('needs the relay host and port, and a sender', () => {
+    const missing = EnvSchema.safeParse(
+      env({ EMAIL_PROVIDER: 'smtp', MAIL_FROM_EMAIL: 'noreply@qnsc.vn' }),
+    );
+    expect(missing.success).toBe(false);
+    expect(
+      !missing.success && missing.error.issues.some((i) => i.path[0] === 'MAIL_SMTP_HOST'),
+    ).toBe(true);
+    expect(EnvSchema.safeParse(env(smtp)).success).toBe(true);
+  });
+
+  it('refuses the relay in production, whatever else is set', () => {
+    const result = EnvSchema.safeParse(env({ ...smtp, NODE_ENV: 'production' }));
+    expect(result.success).toBe(false);
+    expect(
+      !result.success && result.error.issues.some((i) => i.message.includes('development only')),
+    ).toBe(true);
+  });
+
+  it('rejects a port that is not a port', () => {
+    expect(EnvSchema.safeParse(env({ ...smtp, MAIL_SMTP_PORT: '70000' })).success).toBe(false);
   });
 });

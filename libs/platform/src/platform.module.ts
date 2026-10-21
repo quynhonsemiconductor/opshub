@@ -22,11 +22,13 @@ import { DevEmailProvider } from './email/providers/dev.provider';
 import { ResendEmailProvider } from './email/providers/resend.provider';
 import { SesEmailProvider } from './email/providers/ses.provider';
 import { GraphEmailProvider } from './email/providers/graph.provider';
+import { SmtpEmailProvider } from './email/providers/smtp.provider';
 import { EmailService } from './email/email.service';
 import { EmailSchedulerService } from './email/email-scheduler.service';
 import { EmailDeliveryService } from './email/email-delivery.service';
 import { NotificationSchedulerService } from './notifications/notification-scheduler.service';
 import { NotificationPubSubService } from './notifications/notification-pubsub.service';
+import { OutboxWakeService } from './outbox/outbox-wake.service';
 import { DelegationService } from './authz/delegation.service';
 import { WebhookEnqueueService } from './webhooks/webhook-enqueue.service';
 import { StorageService } from './storage/storage.service';
@@ -73,6 +75,8 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
     RequestEngine,
     HttpLoggingInterceptor,
     ResilienceService,
+    // Worker only (see OutboxWakeService): the API holds no LISTEN connection.
+    OutboxWakeService,
     {
       provide: EMAIL_PROVIDER,
       inject: [AppConfigService, WorkerConfigService],
@@ -90,6 +94,15 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
             clientId: worker.get('GRAPH_CLIENT_ID'),
             certificate: worker.get('GRAPH_CLIENT_CERTIFICATE'),
             federatedTokenFile: worker.get('GRAPH_FEDERATED_TOKEN_FILE'),
+            nodeEnv: config.get('NODE_ENV'),
+          });
+        }
+        if (provider === 'smtp') {
+          // Development only (Mailpit). Built lazily, like graph: the worker's relay calls `assertReady()` at start.
+          return new SmtpEmailProvider({
+            host: config.get('MAIL_SMTP_HOST') ?? '',
+            port: config.get('MAIL_SMTP_PORT') ?? 1025,
+            from: config.get('MAIL_FROM_EMAIL') ?? '',
             nodeEnv: config.get('NODE_ENV'),
           });
         }

@@ -36,7 +36,7 @@ function MicrosoftMark() {
  * The SPA never sees a token. `POST /api/auth/sign-in/social` (identity 8, Better Auth) starts the
  * Authorization-Code + PKCE flow SERVER-side and returns the Microsoft authorize URL; the browser is then
  * handed to Microsoft, and comes back to `/api/auth/callback/microsoft`, which creates the session and
- * sets the opaque `__Secure-opshub.session_token` cookie before redirecting to `callbackURL`.
+ * sets the opaque opshub.session_token cookie (`__Host-` in production, `__Secure-` elsewhere) before redirecting to `callbackURL`.
  *
  * `/api/auth/*` is same-origin with the SPA like `/v1/*`: the Vite proxy locally, a Cloudflare Pages
  * Function deployed (apps/web/functions/api/auth/[[path]].ts). Same-origin is a requirement, not a

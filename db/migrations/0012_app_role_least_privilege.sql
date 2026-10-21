@@ -104,7 +104,7 @@ BEGIN
     -- The equivalent `... FOR ROLE opshub_migrate ...` pair belongs to the CUTOVER
     -- migration, not here. Postgres only lets you set another role's default
     -- privileges if you hold ADMIN OPTION on it, and whether the master user does
-    -- depends on who created opshub_migrate — the creator gets it implicitly. rally
+    -- depends on who created opshub_migrate — the creator gets it implicitly. rova
     -- learned this the hard way: the statement's success varied by environment and
     -- a "permission denied to change default privileges" aborted the whole
     -- migration, breaking the develop deploy.
