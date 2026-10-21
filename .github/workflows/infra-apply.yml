@@ -6,8 +6,11 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Infrastructure
 # ─────────────────────────────────────────────────────────────────────────────
 # Infra apply, gated the same way as the app deploys (backend-deploy.yml):
 #   push to main       → apply _shared + develop  (auto)
-#   push a v*.*.* tag  → apply _shared + prod      (prod also gated by the
-#                        "production" GitHub Environment's required reviewer)
+#   (prod is GONE: the AWS opshub production stack was destroyed 2026-10-21 —
+#    owner decision; opshub has no prod in the on-prem plan. The apply-prod job
+#    and the v*.*.* tag trigger were removed with it, so nothing can recreate
+#    the stack from this repo. Final state: opshub/prod/terraform.tfstate empty,
+#    snapshot opshub-prod-db-final-2026-10-21 retained.)
 #
 # Prod infra can NOT be applied by a normal merge to main — it only happens on
 # a deliberate semver tag, so an accidental push can never touch production.
@@ -26,8 +29,6 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Infrastructure
 on:
   push:
     branches: [main]
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
     paths:
       - "infra/live/**"
       # modules/** matters too: `module "stack"` is a LOCAL path module
@@ -43,10 +44,13 @@ on:
         description: "Let this run delete or replace DNS / identity resources (destructive-guard). Off by default; on a push the label `allow-dns-destroy` on the merged PR does the same."
         type: boolean
         default: false
+      destroy_prod:
+        description: "TEMPORARY (until the teardown lands): run destroy-prod — plan the prune of opshub/prod and apply it. Requires the production Environment reviewer. Read infra/live/prod/main.tf FIRST: the owner runbook (snapshot, deletion protection, bucket check) must be done by hand before this."
+        type: boolean
+        default: false
 
-# Serialize by ENVIRONMENT, matching backend-deploy.yml and web-deploy.yml: all
-# prod (tag) applies share one group, all develop (branch) applies share another,
-# and the two run in PARALLEL.
+# Serialize by ENVIRONMENT, matching backend-deploy.yml and web-deploy.yml:
+# develop (branch) applies share one group.
 #
 # This was briefly one constant group for the whole repo, to stop a release's
 # near-simultaneous main push and vX.Y.Z tag running apply-shared against the same
@@ -64,7 +68,7 @@ on:
 #
 # Never cancel a running apply.
 concurrency:
-  group: infra-apply-${{ github.repository }}-${{ github.ref_type == 'tag' && 'prod' || 'develop' }}
+  group: infra-apply-${{ github.repository }}-develop
   cancel-in-progress: false
 
 permissions:
@@ -95,7 +99,7 @@ jobs:
     # A CONSTANT group here (not keyed on ref) keeps that serialised while leaving
     # the per-environment applies free to run in parallel. This job holds the lock
     # only while it is actually applying: the production approval gate is on
-    # apply-prod, a separate job, so a release waiting for a reviewer no longer
+    # a separate job, so a release waiting for a reviewer no longer
     # blocks develop.
     concurrency:
       group: infra-apply-shared-${{ github.repository }}
@@ -157,8 +161,10 @@ jobs:
   # Develop — only on a branch push to main (NOT on tag pushes).
   # ───────────────────────────────────────────────────────────────────────────
   apply-develop:
+    # Branch pushes only — and a dispatch that asks for the prod destroy runs
+    # ONLY that.
+    if: ${{ github.ref_type == 'branch' && !(github.event_name == 'workflow_dispatch' && inputs.destroy_prod) }}
     needs: apply-shared
-    if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
     environment: develop   # no approval gate
     permissions:
@@ -278,19 +284,23 @@ jobs:
             echo "::warning title=infra-id publish::One or more develop infra-ID vars were not auto-published — the deploy reads these, so verify they match Terraform outputs to avoid drift."
           fi
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # Production — only on a v*.*.* tag push, AND requires manual approval via the
-  # "production" GitHub Environment (configure a required reviewer there).
-  # ───────────────────────────────────────────────────────────────────────────
-  apply-prod:
-    needs: apply-shared
-    if: github.ref_type == 'tag'
+  # ── TEMPORARY — DELETE AFTER THE OPSHUB PROD TEARDOWN LANDS ─────────────────
+  # The only remaining prod action. workflow_dispatch ONLY (the tag trigger and
+  # apply-prod job are gone), behind the same `production` Environment reviewer,
+  # running the same guard chain: plan → plan-guard → destructive-guard →
+  # apply THAT plan. infra/live/prod is an empty configuration, so the plan is
+  # a full-state prune; every gated destroy must be declared in the stack's
+  # `.allow-data-destroy` or plan-guard refuses. Prereqs (by hand, in order):
+  # final RDS snapshot, --no-deletion-protection, uploads bucket verified
+  # empty — see infra/live/prod/main.tf.
+  destroy-prod:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.destroy_prod }}
     runs-on: ubuntu-latest
     environment: production
     permissions:
       contents: read
       id-token: write
-      pull-requests: read # destructive-guard reads the labels of the PR being merged
+      pull-requests: read # destructive-guard reads the labels of the merged PR
     timeout-minutes: 45
 
     steps:
@@ -308,54 +318,19 @@ jobs:
         working-directory: infra/live/prod
         run: tofu init -input=false
 
-      - name: tofu validate
-        working-directory: infra/live/prod
-        run: tofu validate
-
-      # Plan, then apply THAT PLAN. A bare `tofu apply -auto-approve` plans again and applies the result without any
-      # check reading it: on 2026-10-09 a provider lock bump turned nine DNS/edge resources into "replace"
-      # (zone_id -> null) and that is what was applied. Here the plan is printed by this step and saved to `tfplan`,
-      # and the next step applies that file, so what the log shows is what runs, and a guard can read the same file.
-      #
-      # Variables are given HERE only. A saved plan carries its own variable values: OpenTofu 1.9 (this workflow's
-      # version) ignores a TF_VAR_* in the environment at apply time, and later versions refuse a different one
-      # ("Mismatch between input and plan variable value"). Either way the apply step below deliberately has no
-      # `env`. `tfplan` holds those values (sensitive ones included): it stays on this runner, never uploaded.
       - name: tofu plan (saved as tfplan)
         working-directory: infra/live/prod
         run: tofu plan -input=false -out=tfplan
         env:
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # Org-level secret, same one rova already maps. Without this,
-          # grafana_alerting_auth stays empty and module.alerts/grafana_slo/
-          # grafana_dashboard all count-gate to zero — apply "succeeds" but creates
-          # no Grafana resources at all, silently.
           TF_VAR_grafana_alerting_auth: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
-          # Pin production to the exact release tag that triggered this apply (e.g.
-          # v1.4.2), so an infra apply can never move production onto a different image
-          # than the release it belongs to.
-          #
-          # This read `vars.PINNED_IMAGE_TAG`, a variable a human had to remember to
-          # update — and which does not exist on this repo, so the apply would have
-          # failed on a missing required variable. github.ref_name is the tag itself and
-          # cannot go stale.
-          TF_VAR_image_tag:            ${{ github.ref_name }}
 
-      # TASK 0.3 / §17b: refuse a prod plan that destroys or replaces a database, secret, parameter group or target
-      # group unless the stack's .allow-data-destroy names that address with a reason. It reads the saved plan, so it
-      # judges exactly what the next step applies.
       - name: plan-guard (tfplan)
         uses: quynhonsemiconductor/ci/actions/plan-guard@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           plan-file: tfplan
           working-directory: infra/live/prod
 
-      # Refuse a saved plan that DELETES or REPLACES a DNS, edge, mail-identity, certificate or key resource (the
-      # 2026-10-09 outage) unless this run is allowed to: the PR being merged carries the label `allow-dns-destroy`
-      # (ON TAG RUNS THE LOOKUP RESOLVES TO THE RELEASE PR, so a destructive prod change needs the label on the
-      # release PR), or a manual dispatch passed `allow_destructive`. It judges `tfplan` through `tofu show -json`
-      # (piped, never written out): byte for byte the plan the next step applies. See
-      # docs/runbooks/infra-destructive-guard.md.
       - name: destructive-guard (tfplan)
         uses: quynhonsemiconductor/ci/actions/destructive-guard@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
@@ -366,55 +341,3 @@ jobs:
       - name: tofu apply (the saved plan)
         working-directory: infra/live/prod
         run: tofu apply -input=false tfplan
-
-      # Mint a short-lived installation token from the qnsc-automation GitHub App so we
-      # never need a long-lived user PAT. Requires the app to have
-      # "Variables: read and write" on this repo. Falls back to no token (publish step
-      # skipped) when the app isn't configured.
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
-        id: app-token
-        if: ${{ vars.QNSC_AUTOMATION_APP_ID != '' }}
-        continue-on-error: true
-        with:
-          app-id: ${{ vars.QNSC_AUTOMATION_APP_ID }}
-          private-key: ${{ secrets.QNSC_AUTOMATION_PRIVATE_KEY }}
-
-      # The production half of the output sync, which this workflow simply did not have:
-      # develop published its infra IDs and production never did, so backend-deploy.yml
-      # would read whatever a human had typed into the production environment — and
-      # today that environment holds no variables at all.
-      #
-      # NOTE: `production` is a PROTECTED environment (required reviewers), and a GitHub
-      # App installation token cannot write variables to a protected environment (403
-      # "Resource not accessible by integration"). When that happens each variable is
-      # named in a ::warning:: to reconcile by hand — never a silent green — but the
-      # apply is not blocked. The prod infra IDs are deterministic and stable, so they
-      # persist between applies; a human reconciles them on the rare rebuild that
-      # changes one.
-      - name: Publish infra IDs to production environment variables
-        if: ${{ steps.app-token.outputs.token != '' }}
-        working-directory: infra/live/prod
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          missed=0
-          set_var() {
-            if gh variable set "$1" --env production --repo "$REPO" --body "$2"; then
-              echo "  set $1"
-            else
-              echo "::warning title=infra-id publish::could not set '$1' on the production environment (a protected env rejects App-token writes) — reconcile manually: gh variable set $1 --env production --repo $REPO --body '$2'"
-              missed=1
-            fi
-          }
-          set_var ECS_CLUSTER           "$(tofu output -raw ecs_cluster_name)"
-          set_var ECS_API_SERVICE       "$(tofu output -raw ecs_api_service)"
-          set_var ECS_WORKER_SERVICE    "$(tofu output -raw ecs_worker_service)"
-          set_var ECS_MIGRATOR_TASK_DEF "$(tofu output -raw ecs_migrator_task_def)"
-          set_var ECS_MIGRATOR_SUBNET   "$(tofu output -json private_subnet_ids | jq -r 'join(",")')"
-          set_var ECS_MIGRATOR_SG       "$(tofu output -raw sg_app_id)"
-          set_var PAGES_PROJECT         "$(tofu output -raw web_pages_project)"
-          if [[ $missed -ne 0 ]]; then
-            echo "::warning title=infra-id publish::One or more production infra-ID vars were not auto-published — the deploy reads these, so verify they match Terraform outputs to avoid drift."
-          fi
