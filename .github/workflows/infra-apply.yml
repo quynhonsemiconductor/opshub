@@ -161,10 +161,10 @@ jobs:
   # Develop — only on a branch push to main (NOT on tag pushes).
   # ───────────────────────────────────────────────────────────────────────────
   apply-develop:
-    # A dispatch that asks for the prod destroy runs ONLY that.
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.destroy_prod) }}
+    # Branch pushes only — and a dispatch that asks for the prod destroy runs
+    # ONLY that.
+    if: ${{ github.ref_type == 'branch' && !(github.event_name == 'workflow_dispatch' && inputs.destroy_prod) }}
     needs: apply-shared
-    if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
     environment: develop   # no approval gate
     permissions:
