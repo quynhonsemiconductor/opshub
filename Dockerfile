@@ -70,6 +70,8 @@ FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS api
 RUN apk upgrade --no-cache \
     && apk add --no-cache tini \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+    && rm -rf /usr/local/lib/node_modules/corepack /usr/local/bin/corepack \
+    && rm -rf /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v* \
     && rm -rf /var/cache/apk/*
 ENV NODE_ENV=production
 # The RDS global CA bundle (public certificates only) for DATABASE_SSL_CA. The
@@ -113,6 +115,8 @@ FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS worker
 RUN apk upgrade --no-cache \
     && apk add --no-cache tini \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+    && rm -rf /usr/local/lib/node_modules/corepack /usr/local/bin/corepack \
+    && rm -rf /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v* \
     && rm -rf /var/cache/apk/*
 ENV NODE_ENV=production
 # The RDS global CA bundle (public certificates only) for DATABASE_SSL_CA. The
@@ -147,6 +151,8 @@ FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS migrator
 RUN apk upgrade --no-cache \
     && apk add --no-cache tini \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+    && rm -rf /usr/local/lib/node_modules/corepack /usr/local/bin/corepack \
+    && rm -rf /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v* \
     && rm -rf /var/cache/apk/*
 ENV NODE_ENV=production
 # The RDS global CA bundle (public certificates only) for DATABASE_SSL_CA. The
