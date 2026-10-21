@@ -39,7 +39,6 @@ on:
       - 'Dockerfile'
       - 'nest-cli.json'
       - 'tsconfig.migrator.json'
-      - 'v[0-9]+.[0-9]+.[0-9]+'   # semver only — no -rc suffix
 
 concurrency:
   # Serialize by ENVIRONMENT. develop only now — the prod path is gone.
