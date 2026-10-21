@@ -48,6 +48,8 @@ const READ_BY_SHARED_PACKAGES = new Set([
   'OTEL_ENABLED',
   'OTEL_EXPORTER_OTLP_ENDPOINT',
   'OTEL_SERVICE_NAMESPACE',
+  // Read by scripts/localstack/01-bootstrap.sh (the aws CLI through LocalStack). That script is not TypeScript, so this scan never sees it.
+  'AWS_ENDPOINT_URL',
   // The bootstrap's own default for the service name, read when no `serviceNameEnvVar` overrides it —
   // which is the api's case.
   'OTEL_SERVICE_NAME',

@@ -16,7 +16,6 @@ import { DelegationExpiryCron } from './cron/delegation-expiry.cron';
 import { ContractExpiryCron } from './cron/contract-expiry.cron';
 import { StorageCleanupCron } from './cron/storage-cleanup.cron';
 import { ReviewDueCron } from './cron/review-due.cron';
-import { BounceFeedbackService } from './email/bounce-feedback.service';
 import { WorkerHeartbeatService } from './heartbeat/worker-heartbeat.service';
 
 @Module({
@@ -34,7 +33,6 @@ import { WorkerHeartbeatService } from './heartbeat/worker-heartbeat.service';
     IsmsModule,
   ],
   providers: [
-    BounceFeedbackService,
     // Writes the beat `make check` reads (apps/worker/src/heartbeat). It proves the worker is alive and connected to the cache.
     WorkerHeartbeatService,
     RequestExpiryCron,

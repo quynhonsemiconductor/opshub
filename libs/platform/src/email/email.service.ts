@@ -18,16 +18,6 @@ import { renderEmailTemplate, type EmailTemplateName, type EmailTemplateVars } f
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  /**
-   * `undefined` when no sender is configured, never a string containing "undefined".
-   *
-   * `MAIL_FROM_EMAIL` lost its default, because defaulting it made a misconfigured production send
-   * from a domain it may not own. Interpolating the absent value would produce
-   * `OpsHub <undefined>` — a syntactically valid header that fails at the recipient, which is the
-   * same silent failure by a shorter route. The env schema refuses to boot a non-dev provider without
-   * one, so this is only reachable under `dev`, where the provider logs and has nothing to send from.
-   */
-  private readonly from: string | undefined;
   /** Deployment-wide reply-to, from `MAIL_REPLY_TO`. Overridden per call by `opts.replyTo`. */
   private readonly replyTo: string | undefined;
 
@@ -35,9 +25,6 @@ export class EmailService {
     @Inject(EMAIL_PROVIDER) private readonly provider: IEmailProvider,
     config: AppConfigService,
   ) {
-    const name = config.get('MAIL_FROM_NAME');
-    const email = config.get('MAIL_FROM_EMAIL');
-    this.from = email ? `${name} <${email}>` : undefined;
     /*
      * `MAIL_REPLY_TO` WAS DECLARED AND READ BY NOTHING.
      *
@@ -76,7 +63,6 @@ export class EmailService {
           this.provider.send(
             {
               to,
-              from: this.from,
               replyTo: opts?.replyTo ?? this.replyTo,
               subject: rendered.subject,
               html: rendered.html,

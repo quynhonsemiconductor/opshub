@@ -29,7 +29,6 @@ const CONFIG: GraphMailConfig = {
 
 const PAYLOAD = {
   to: 'someone@qnsc.vn',
-  from: '"OpsHub" <opshub-noreply@qnsc.vn>',
   subject: 'Approve the request',
   html: '<p>Hello &amp; welcome</p><p>Second</p>',
   text: 'Hello & welcome',

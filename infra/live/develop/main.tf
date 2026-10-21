@@ -119,15 +119,7 @@ module "stack" {
   graph_client_certificate_set = true
   graph_client_id              = "328bac47-4848-42b5-9464-bb4ba7b0cb56"
 
-  // qnsc.vn is a verified SES domain identity in this account (rova already sends from
-  // it). A distinct local-part from rova's own noreply@qnsc.vn keeps bounce/reply
-  // routing distinguishable per product, though the domain-level identity would permit
-  // either. SES_CONFIGURATION_SET is NOT set here — it's derived automatically from the
-  // real aws_sesv2_configuration_set.email_feedback resource this module now creates.
-  // (SES stays defined, and its removal is tracked in opshub#405; develop now sends through Graph, which needs no SES sender, so mail_from_email is
-  // empty and the SES send grants are not created.)
-  email_provider  = "graph"
-  mail_from_email = ""
+  email_provider = "graph"
 
   // Cost-leaning: short retention, immediate secret deletion so a destroy+redeploy
   // cycle does not trip "secret scheduled for deletion".

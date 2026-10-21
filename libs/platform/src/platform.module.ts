@@ -19,8 +19,6 @@ import { ExclusiveJob } from '@quynhonsemiconductor/platform-runtime';
 import { ActorScope } from './auth/actor-scope.service';
 import { RouteAuthzAudit } from './auth/route-authz-audit';
 import { DevEmailProvider } from './email/providers/dev.provider';
-import { ResendEmailProvider } from './email/providers/resend.provider';
-import { SesEmailProvider } from './email/providers/ses.provider';
 import { GraphEmailProvider } from './email/providers/graph.provider';
 import { SmtpEmailProvider } from './email/providers/smtp.provider';
 import { EmailService } from './email/email.service';
@@ -105,24 +103,6 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
             from: config.get('MAIL_FROM_EMAIL') ?? '',
             nodeEnv: config.get('NODE_ENV'),
           });
-        }
-        if (provider === 'ses') {
-          /*
-           * NO KEY TO CHECK, which is the point of choosing SES: the credential is the task role, so
-           * there is nothing to forget in a secret store. What CAN be forgotten is the `ses:SendEmail`
-           * grant on that role — and that failure surfaces as `AccessDenied` on every send while the
-           * service reports healthy, so it is called out in the provider's own docblock rather than
-           * guessed at here. `MAIL_FROM_EMAIL` is already refused at boot for any non-dev provider.
-           */
-          return new SesEmailProvider(
-            config.get('AWS_REGION'),
-            config.get('SES_CONFIGURATION_SET'),
-          );
-        }
-        if (provider === 'resend') {
-          const apiKey = config.get('RESEND_API_KEY');
-          if (!apiKey) throw new Error('RESEND_API_KEY is required when EMAIL_PROVIDER=resend');
-          return new ResendEmailProvider(apiKey);
         }
         return new DevEmailProvider();
       },

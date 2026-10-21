@@ -307,7 +307,6 @@ describe('.env.example holds no real secret and no foreign sender', () => {
     'EDGE_CLIENT_IP_SECRET_PREVIOUS',
     'GRAPH_CLIENT_ID',
     'GRAPH_CLIENT_CERTIFICATE',
-    'RESEND_API_KEY',
   ])('%s is left empty: a developer supplies their own', (key) => {
     expect(env[key]).toBe('');
   });
@@ -316,6 +315,9 @@ describe('.env.example holds no real secret and no foreign sender', () => {
     expect(env['EMAIL_PROVIDER']).toBe('smtp');
     expect(env['MAIL_SMTP_HOST']).toBe('localhost');
     expect(env['MAIL_FROM_EMAIL']).toMatch(/@qnsc\.vn$/);
+    // SES and Resend are gone (opshub#410): no key of either may remain.
+    expect(env['RESEND_API_KEY']).toBeUndefined();
+    expect(env['SES_CONFIGURATION_SET']).toBeUndefined();
   });
 });
 

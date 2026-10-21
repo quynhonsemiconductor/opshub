@@ -6,19 +6,14 @@ export const EMAIL_PROVIDER = Symbol('EMAIL_PROVIDER');
  * The email relay hides a claimed row for a lease (see AbstractOutboxRelay). A send still in flight after
  * the lease lapsed is a send another relay may repeat, and a row the reaper dead-letters while it is
  * still being delivered. So the send has a hard deadline and the relay's lease is derived from it
- * (`EmailRelayService.leaseMsFor`), with a margin. SES also CANCELS the request at the deadline
- * (`abortSignal`); the Resend SDK has no cancel, so there the wait is bounded and the provider's
- * idempotency key (the outbox row id) makes a late arrival harmless.
+ * (`EmailRelayService.leaseMsFor`), with a margin. Graph CANCELS the request at the deadline (`abortSignal`).
  */
 export const EMAIL_SEND_TIMEOUT_MS = 30_000;
 
 /**
  * What a provider hands back at acceptance. `messageId` is the transport's id for the
- * send — SES echoes it in every asynchronous bounce/complaint event, which makes it the
- * only exact match key between a verdict and the outbox row that earned it. NULL for
- * providers without an id (dev). ACCEPTED is not DELIVERED: SES answers 200 before the
- * receiving mail server has said anything, so the relay stores this id and the feedback
- * loop writes the verdict that may arrive minutes later.
+ * send. NULL for providers without an id (dev). ACCEPTED is not DELIVERED: the relay stores
+ * this id at acceptance, and a later verdict (if one is ever read) is matched on it.
  */
 export interface EmailSendResult {
   messageId: string | null;
@@ -28,7 +23,6 @@ export type EmailCategory = 'transactional' | 'notification' | 'marketing';
 
 export interface EmailPayload {
   to: string;
-  from?: string;
   replyTo?: string;
   subject: string;
   html: string;
@@ -41,7 +35,7 @@ export interface EmailPayload {
 export interface EmailSendOptions {
   /**
    * Aborted when the caller's deadline (EMAIL_SEND_TIMEOUT_MS) passes. A provider that can cancel (Graph) cancels the request, its in-place
-   * retries and any wait; one that cannot (the Resend SDK) ignores it, and the caller's deadline still rejects its wait.
+   * retries and any wait.
    */
   signal?: AbortSignal;
 }
