@@ -1,7 +1,7 @@
 # =============================================================================
 # Release Please — auto-creates a "chore(release): vX.Y.Z" PR on every
 # main push, then auto-tags when that PR is merged.
-# The tag triggers backend-deploy.yml (prod deploy with approval gate).
+# (2026-10-21: prod is gone — a tag no longer triggers any deploy.)
 #
 # Delegates to the shared reusable workflow in ci so release logic stays
 # DRY across products. QNSC_AUTOMATION_APP_ID (org var) is read automatically;

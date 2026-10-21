@@ -19,7 +19,6 @@ name: Deploy Reaper
 
 on:
   push:
-    tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'   # same trigger as the deploy workflows
 
 concurrency:

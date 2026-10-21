@@ -1,27 +1,45 @@
-// opshub · production
+// opshub · production — DESTROYED (owner decision, 2026-10-21)
 //
-// Thin by design: the stack lives in ../../modules/stack, so this environment can only
-// differ from develop in the values below. Production takes the durable settings —
-// on-demand capacity, deletion protection, 90-day retention, a real secret recovery
-// window.
+// opshub never served production traffic (no prod ever ran; the environment was
+// provisioned, idled and weekly-stopped), and the on-prem plan gives opshub no
+// prod at all. This file once composed the full stack via ../../modules/stack;
+// it is now deliberately EMPTY: the next apply-prod run plans the removal of
+// every resource in `opshub/prod/terraform.tfstate` and applies it, through the
+// SAME gates as any prod change — the `production` Environment reviewer,
+// plan-guard, destructive-guard and `.allow-data-destroy` (this directory).
 //
-// APPLIED. `opshub/prod/terraform.tfstate` exists (verified 2026-09-12 against the state
-// bucket; the RDS instance `opshub-prod` is `available` with 30-day retention and deletion
-// protection, and the `opshub-prod` ECS cluster and alarm topic exist).
+// Owner runbook, IN ORDER, before that apply:
+//   1. Final manual RDS snapshot + wait for it to be available:
+//        export AWS_PROFILE=qnsc-admin AWS_REGION=ap-southeast-1 AWS_PAGER=""
+//        aws rds create-db-snapshot \
+//          --db-instance-identifier opshub-prod-db \
+//          --db-snapshot-identifier opshub-prod-db-final-2026-10-21 \
+//          --profile qnsc-admin
+//        aws rds wait db-snapshot-completed \
+//          --db-instance-identifier opshub-prod-db \
+//          --db-snapshot-identifier opshub-prod-db-final-2026-10-21 \
+//          --profile qnsc-admin
+//   2. Remove deletion protection (a protected instance refuses the destroy):
+//        aws rds modify-db-instance --db-instance-identifier opshub-prod-db \
+//          --no-deletion-protection --apply-immediately --profile qnsc-admin
+//   3. Check the uploads bucket is empty (`force_destroy` was never set):
+//        aws s3 ls s3://<bucket from `tofu state list` / outputs> --profile qnsc-admin
+//      If objects exist, the owner decides where they go BEFORE applying.
+//   4. Push the teardown tag and approve the `production` environment. The run
+//      prints every destroy; the SNS topic `opshub-prod-alarms`, SES set, SQS,
+//      CloudWatch alarms, secrets (30-day recovery window), the Pages project,
+//      DNS records and the tunnel go with it.
 //
-// This comment previously read "NOT YET APPLIED. There is no opshub/prod/terraform.tfstate"
-// and was stale — it misled an infrastructure audit into treating opshub production as a
-// greenfield target for state-affecting refactors. The go-live checklist on the `rds` block
-// below is therefore a HARDENING pass on a live environment, not part of a first apply:
-// changing instance class or enabling Multi-AZ now replaces or modifies a running database.
-terraform {
-  required_version = ">= 1.9"
-  required_providers {
-    aws        = { source = "hashicorp/aws", version = "~> 5.0" }
-    cloudflare = { source = "cloudflare/cloudflare", version = "~> 4.0" }
-    grafana    = { source = "grafana/grafana", version = "~> 3.0" }
-  }
+// The empty state file `opshub/prod/terraform.tfstate` stays in the bucket until
+// the AWS wind-down (the platform plan's §15.3) deletes it with the rest.
+// `develop` and `_shared` are UNTOUCHED — they run opshub dev on-prem after the
+// move.
+//
+// The known drift on this stack — the never-read `jwt-private` and
+// `graph-client-secret` secrets and the ALB target group the tunnel cutover
+// orphaned — is moot here: destroy does not consult drift.
 
+terraform {
   backend "s3" {
     bucket         = "qnsc-tofu-state"
     key            = "opshub/prod/terraform.tfstate"
@@ -31,276 +49,5 @@ terraform {
   }
 }
 
-provider "aws" {
-  region = "ap-southeast-1"
-  default_tags {
-    tags = {
-      Project     = "opshub"
-      Environment = "production"
-      ManagedBy   = "opentofu"
-    }
-  }
-}
-
-// Route 53 publishes health-check metrics ONLY to us-east-1, so the ingress alarm has to
-// be created there even though every other resource is in ap-southeast-1. Same credentials,
-// different region — this is not a second account.
-provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
-  default_tags {
-    tags = {
-      Project     = "opshub"
-      Environment = "prod"
-      ManagedBy   = "opentofu"
-    }
-  }
-}
-
-provider "cloudflare" {
-  api_token = var.cloudflare_api_token != "" ? var.cloudflare_api_token : null
-}
-
-// Configured UNCONDITIONALLY, like the cloudflare provider above — providers can't
-// be conditional — but touches nothing at all while grafana_alerting_auth is empty:
-// module.alerts (inside module.stack) is count-gated to zero in that state. See
-// modules/stack/variables.tf's grafana_alerting_auth for the full reasoning.
-provider "grafana" {
-  url  = var.grafana_alerting_url
-  auth = var.grafana_alerting_auth
-}
-
-locals {
-  region = "ap-southeast-1"
-}
-
-// ── The stack ─────────────────────────────────────────────────────────────────
-module "stack" {
-  source = "../../modules/stack"
-
-  // Required by the stack module: it declares `aws.us_east_1` as a configuration alias for
-  // the Route 53 ingress alarm. Listing `aws` too is not optional — supplying a providers
-  // map replaces inheritance rather than adding to it.
-  providers = {
-    aws           = aws
-    aws.us_east_1 = aws.us_east_1
-  }
-
-  product = "opshub"
-  env     = "production"
-  // Resources are named `opshub-prod`, not `opshub-production`: renaming them later
-  // would force replacement of the cluster, the RDS instance and every log group.
-  env_slug = "prod"
-  region   = local.region
-
-  app_domain = "opshub.qnsc.vn"
-  api_domain = "opshub-api.qnsc.vn"
-  web_record = "opshub"
-  api_record = "opshub-api"
-
-  shared_state_key  = "opshub/shared/terraform.tfstate"
-  runtime_state_key = "platform/runtime-prod/terraform.tfstate"
-
-  // The tag that triggered the apply, never a floating `latest` — infra-apply.yml
-  // passes github.ref_name, so an infra apply can never quietly move production onto
-  // a different image than the release it belongs to.
-  image_tag = var.image_tag
-
-  // Mail through Microsoft 365 (Graph): STAGED, NOT SWITCHED ON. email_provider stays as it is until the owner has done
-  // docs/runbooks/mail-graph.md for this environment (it needs the Graph worker app below, which does not exist yet); the cut-over is then a
-  // PR setting email_provider = "graph", graph_client_id and graph_client_certificate_set = true.
-  // A non-prod environment never sends from the prod mailbox: develop has its own.
-  mail_graph_sender = "noreply-opshub@qnsc.vn"
-
-  entra_tenant_id = var.entra_tenant_id
-  entra_client_id = var.entra_client_id
-
-  // 90 days is the SOC 2 minimum; the recovery window keeps a mistaken destroy
-  // recoverable.
-  log_retention_days           = 90
-  secrets_recovery_window_days = 30
-
-  // Production on the same secrets bundle as develop (opshub/develop/app) and rova's two environments: Secrets
-  // Manager bills per SECRET, and one JSON object read per key by ECS holds all of them for one container's fee.
-  // See infra/modules/stack/variables.tf's `secrets_bundle_name` for the staging and
-  // docs/runbooks/secrets-bundle-migration.md for the owner's commands.
-  //
-  // Production has NEVER run a task (the 8 standalone secrets opshub/production/* were never accessed), so unlike
-  // develop there is no running service to cut over and nothing to roll back to but the standalone containers.
-  // The bundle `opshub/production/app` is created by this apply and must be POPULATED BEFORE the first deploy of a
-  // tag whose task definitions reference it: ECS resolves every `<arn>:<key>::` before a container starts, and a
-  // missing or empty key stops the task (the deploy preflight proves the container is non-empty, not that every key
-  // is in it - qnsc-infra issue #191).
-  //
-  // Keys the task definitions READ today: cookie-secret, csrf-secret, better-auth-secret, entra-client-secret,
-  // edge-client-ip-secret and observability-token (the collector sidecar). The bundle also declares db-app-password
-  // and db-worker-password: production has db_least_privilege off, so nothing reads them until that cutover, but
-  // they belong in the bundle now (RDS opshub-prod already uses those roles' passwords) rather than in a second
-  // migration. edge-client-ip-secret-previous exists only DURING a rotation (edge_client_ip_secret_previous_set).
-  secrets_bundle_name = "app"
-  secrets_use_bundle  = true
-
-  // The standalone secrets are RETAINED for now (develop's step 3, not its step 5): references point at the bundle,
-  // and nothing is destroyed until the bundle is proven (D.2, D.3 and a one-off task that reaches RUNNING, in
-  // docs/runbooks/secrets-bundle-migration.md; production serves nothing, so there is no "healthy deploy" to wait
-  // for). A follow-up then removes this line (section E) and the NEXT tag's apply schedules the eight standalone
-  // containers for deletion with the 30-day window. Nothing is deleted by hand. Without the line `create_standalone`
-  // defaults to `!use_bundle` = false and THIS apply would schedule all of them for deletion before anything has
-  // read the bundle.
-  secrets_create_standalone = true
-
-  // OFF, including here. Nothing in this product reads the ECS/ContainerInsights
-  // namespace: the autoscaling targets read AWS/ECS, which is free and published
-  // whether Container Insights is on or off, and application telemetry goes to OTLP.
-  // Raise it to "enhanced" temporarily during an incident that needs per-container
-  // drilldown, then put it back.
-  container_insights = "disabled"
-
-  // PRE-LAUNCH sizing. Multi-AZ with Enhanced Monitoring is the right production
-  // posture, and it is what this becomes at go-live — but Multi-AZ doubles the
-  // instance rate AND bills the mirrored volume, so paying for it before the first
-  // user buys durability for an empty database.
-  //
-  // GO-LIVE CHECKLIST — flip these together, before the first real user:
-  //     instance_class      = "db.t4g.small"  # 2 GB rather than 1 GB
-  //     multi_az            = true            # an AZ failure becomes a failover,
-  //                                           # not an outage plus a restore
-  //     monitoring_interval = 60              # per-process and per-device visibility
-  //
-  // 30 GB, not 100: `max_allocated_storage_gb` already autoscales, and RDS gp3 gives
-  // the same 3,000 baseline IOPS at every size under 400 GB, so over-allocating buys
-  // nothing. Treat any increase as PERMANENT — RDS refuses to shrink a volume and a
-  // snapshot restore cannot land smaller, so coming back down needs the instance
-  // replaced.
-  // ── Ingress: no ALB exists any more ─────────────────────────────────────────
-  // The shared ALBs in qnsc-infra/live/runtime-{dev,prod} were DELETED once both products moved to Cloudflare
-  // Tunnels, so `https_listener_arn` is null and there is nothing to attach to: with this OFF the plan creates
-  // `module.api.aws_lb_listener_rule.this[0]` with no `listener_arn` and the apply FAILS, and production would have
-  // no ingress at all. Same as develop (see ../develop/main.tf), where it is enabled: module.tunnel (the shared
-  // cf-tunnel module) creates the tunnel, its connector token and its
-  // routing rule, the api task gets the cloudflared sidecar, and the api hostname is a proxied CNAME to the tunnel.
-  // No ALB listener rule, no target group.
-  //
-  // What it gives up, and what covers it: ALB access logs and per-target-group alarms. `monitor_target_health` stays
-  // false below, and the Route 53 ingress probe (`monitor_ingress`) arms itself once the floors are above 0, so an
-  // ingress outage becomes visible at go-live in the same change that raises them.
-  tunnel_enabled = true
-
-  // ── Graviton ────────────────────────────────────────────────────────────────
-  // ARM64 bills ~20% less per vCPU-hour and GB-hour than X86_64 for identical sizing,
-  // with no capability difference. rova has run this since its own build moved; opshub
-  // was still on the module's X86_64 default, which is drift rather than a decision — it
-  // is not recorded in docs/DIVERGENCE.md, and nothing about opshub's workload argues for
-  // x86.
-  //
-  // THIS LINE ALONE IS NOT ENOUGH, and getting it half-done fails at TASK START rather
-  // than at apply: the images must be built for linux/arm64 too. That is
-  // `build_runner: ubuntu-24.04-arm` + `image_platforms: linux/arm64` in
-  // .github/workflows/backend-deploy.yml, and they land in the SAME COMMIT as this. The
-  // `wait-for-infra` gate is what makes one commit safe — it holds the deploy until this
-  // apply finishes, so the ARM64 task definition exists before the deploy that builds
-  // arm64 images rolls onto it. Both halves in one commit, or neither.
-  //
-  // Every sidecar was checked for an arm64 build with `docker manifest inspect` (see the
-  // stack variable's description for the three images and the result). Re-check on a
-  // sidecar image bump.
-  cpu_architecture = "ARM64"
-
-  // ── Provisioned but idle, until go-live ─────────────────────────────────────
-  // Weekly, comfortably inside the window that matters: AWS FORCE-STARTS a stopped RDS
-  // instance after SEVEN DAYS, so without a recurring re-stop the saving silently
-  // evaporates and nothing reports it.
-  //
-  // REMOVE THIS AT GO-LIVE, in the same change that restores min_count and re-enables the
-  // cache. A schedule that stops production every Sunday is precisely wrong once there
-  // are users.
-  idle_schedule = "cron(0 1 ? * SUN *)"
-
-  rds = {
-    instance_class           = "db.t4g.micro"
-    allocated_storage_gb     = 30
-    max_allocated_storage_gb = 500
-    multi_az                 = false
-    deletion_protection      = true
-    backup_retention_days    = 30
-    monitoring_interval      = 0
-  }
-
-  // On-demand, not Spot: an interruption here is user-visible. Tighter autoscale
-  // targets than develop, so it scales out earlier.
-  // Floors at 0 and autoscaling off while production is idle. RESTORE BOTH AT GO-LIVE,
-  // in the same change that removes `idle_schedule` and re-enables the cache — they are
-  // one decision, and applying them separately produces an environment that is either
-  // paying for nothing or serving nothing.
-  api = {
-    cpu                = 1024
-    memory             = 2048
-    min_count          = 0
-    max_count          = 6
-    use_spot           = false
-    cpu_target_pct     = 60
-    memory_target_pct  = 70
-    enable_autoscaling = false
-  }
-
-  worker = {
-    cpu                = 512
-    memory             = 1024
-    min_count          = 0
-    max_count          = 4
-    use_spot           = false
-    enable_autoscaling = false
-  }
-
-  // ElastiCache cannot be stopped, only deleted, so the node is the one component of an
-  // idled environment that keeps billing (~$12/mo). The `check` block in the stack module
-  // enforces that this requires min_count = 0 on both services: a task without a
-  // reachable cache does NOT fail loudly — VALKEY_URL is optional and both the token
-  // denylist and the rate limiter fail open — so "no cache, tasks running" would degrade
-  // two security controls silently. RE-ENABLE AT GO-LIVE.
-  cache = {
-    enabled = false
-  }
-
-  // `force_destroy` stays false and no extra CORS origin is allowed: production
-  // uploads are never auto-deleted, and only the SPA's own origin may PUT.
-  uploads = {}
-
-  cloudflare_account_id = var.cloudflare_account_id
-
-  // This environment owns its public DNS (API and web CNAMEs, Pages custom domain). An explicit
-  // switch, never inferred from the zone id; the zone id itself is validated in the stack module.
-  dns_enabled = true
-
-  // Dormant until otlp_endpoint is set — see develop. Production would want a probability
-  // BELOW 1 for cost once a backend exists; be aware that head sampling drops most ERROR
-  // traces too, so keeping all errors needs tail sampling at a gateway that sees whole traces.
-  observability = {
-    otlp_endpoint        = var.otlp_endpoint
-    sampling_probability = 1.0
-  }
-
-  // Production gets the dashboard: it is what you open after an alarm pages you.
-  create_dashboard = true
-
-  // Cannot be satisfied while the api is tunnelled — there is no target group. This is a REAL
-  // gap in production, not just plumbing: with no ALB, nothing on the AWS side observes
-  // ingress. ECS reports the task RUNNING whether or not cloudflared holds edge connections,
-  // and the sidecar is distroless so an ECS healthCheck cannot probe it. Replace it from
-  // OUTSIDE AWS — a Cloudflare health check or a synthetic probe on the public hostname —
-  // before production depends on the tunnel.
-  monitor_target_health = false
-
-  alarm_emails = var.alarm_emails
-
-  grafana_alerting_auth = var.grafana_alerting_auth
-  grafana_alerting = {
-    url                           = var.grafana_alerting_url
-    prometheus_datasource_name    = var.grafana_alerting_prometheus_datasource_name
-    logs_datasource_name          = var.grafana_logs_datasource_name
-    alerts_folder_uid             = var.grafana_alerting_folder_uid
-    dashboards_folder_uid         = var.grafana_dashboards_folder_uid
-    product_dashboards_folder_uid = var.grafana_opshub_dashboards_folder_uid
-    slos_folder_uid               = var.grafana_slos_folder_uid
-  }
-}
+# Intentionally no providers and no resources: an empty configuration against
+# this backend is a full-state prune.
