@@ -1,24 +1,23 @@
-# Teardown 2026-10-21: opshub production is destroyed on the owner's decision
-# (never ran, no prod in the on-prem plan). Final RDS snapshot taken first
-# (opshub-prod-final-2026-10-21, plus tofu's own opshub-prod-final); secrets
+# Teardown 2026-10-21/22: opshub production is destroyed on the owner's decision
+# (never ran, no prod in the on-prem plan). Final RDS snapshot
+# opshub-prod-final-2026-10-21 (plus tofu's own opshub-prod-final); secrets
 # carry a 30-day recovery window. This file must be REMOVED once the destroy
 # apply has landed.
 #
-# HOW TO CORRECT THIS LIST (the addresses below are DERIVED from the pinned
-# module sources — secrets-v2.1.1, rds-v2.3.0, app-bucket-v1.0.1 — not read
-# from state, which needs AWS credentials): if plan-guard REFUSES an address,
-# the run log prints the exact `REFUSED  delete  <address>` line — copy that
-# line in here with a reason and re-run destroy-prod. Or pre-flight it
-# yourself:
-#   cd infra/live/prod && tofu init -input=false && tofu plan -out=tfplan \
-#     && tofu show -json tfplan | jq -r '.resource_changes[] |
-#          select(.change.actions | index("delete")) | .address'
-# and paste the gated ones (aws_db_instance, aws_db_parameter_group,
-# aws_secretsmanager_secret, aws_s3_bucket) in here.
-module.stack.module.rds.aws_db_instance.this -- production RDS, never served; final snapshot opshub-prod-final-2026-10-21 verified available
-module.stack.module.rds.aws_db_parameter_group.this -- parameter group dies with the instance; no other cluster uses it
-module.stack.module.secrets.aws_secretsmanager_secret.bundle -- app secret bundle; values never populated for a first deploy
-module.stack.module.secrets.aws_secretsmanager_secret.app -- legacy standalone secret; never read by any production task
-module.stack.aws_secretsmanager_secret.graph_client_certificate -- placeholder, never populated (drift; moot on destroy)
-module.stack.aws_secretsmanager_secret.tunnel_token -- tunnel token; the tunnel and its DNS go with the stack
-module.stack.module.app_bucket.aws_s3_bucket.this -- uploads bucket, versioned, verified empty via list-object-versions; force_destroy was never set
+# The 12 addresses below are EXACT: copied from the plan-guard REFUSED output of
+# destroy-prod run 39644910958 (v0.4.0, 2026-10-21 — nothing was destroyed).
+# The two firelens config buckets need no entry: firelens-agent-v0.2.2 defaults
+# force_destroy_config_bucket = true (the config is regenerated every apply),
+# so their destroys succeed even with objects present.
+module.stack.module.api.aws_lb_target_group.this[0] -- orphaned by the tunnel cutover: no ALB listener exists to attach it to (drift, moot on destroy)
+module.stack.module.firelens_agent_api.module.config_bucket[0].aws_s3_bucket.this -- firelens config bucket; force_destroy_config_bucket defaults true, contents regenerate every apply
+module.stack.module.firelens_agent_worker.module.config_bucket[0].aws_s3_bucket.this -- firelens config bucket; force_destroy_config_bucket defaults true, contents regenerate every apply
+module.stack.module.rds.aws_db_parameter_group.this[0] -- parameter group dies with the instance; no other cluster uses it
+module.stack.module.secrets.aws_secretsmanager_secret.app["cookie-secret"] -- production secret, never read by any running task
+module.stack.module.secrets.aws_secretsmanager_secret.app["csrf-secret"] -- production secret, never read by any running task
+module.stack.module.secrets.aws_secretsmanager_secret.app["db-app-password"] -- production secret, never read by any running task
+module.stack.module.secrets.aws_secretsmanager_secret.app["db-worker-password"] -- production secret, never read by any running task
+module.stack.module.secrets.aws_secretsmanager_secret.app["entra-client-secret"] -- production secret, never read by any running task
+module.stack.module.secrets.aws_secretsmanager_secret.app["graph-client-secret"] -- production secret, never read by any running task
+module.stack.module.secrets.aws_secretsmanager_secret.app["jwt-private"] -- production secret, never read by any running task
+module.stack.module.secrets.aws_secretsmanager_secret.app["observability-token"] -- production secret, never read by any running task

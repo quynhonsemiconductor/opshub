@@ -6,11 +6,12 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Infrastructure
 # ─────────────────────────────────────────────────────────────────────────────
 # Infra apply, gated the same way as the app deploys (backend-deploy.yml):
 #   push to main       → apply _shared + develop  (auto)
-#   (prod is GONE: the AWS opshub production stack was destroyed 2026-10-21 —
+#   (prod is GOING AWAY: the AWS opshub production stack teardown was approved
+#    2026-10-21 —
 #    owner decision; opshub has no prod in the on-prem plan. The apply-prod job
 #    and the v*.*.* tag trigger were removed with it, so nothing can recreate
 #    the stack from this repo. Final state: opshub/prod/terraform.tfstate empty,
-#    snapshot opshub-prod-db-final-2026-10-21 retained.)
+#    final snapshot opshub-prod-final-2026-10-21 retained.)
 #
 # Prod infra can NOT be applied by a normal merge to main — it only happens on
 # a deliberate semver tag, so an accidental push can never touch production.

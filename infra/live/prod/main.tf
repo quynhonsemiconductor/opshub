@@ -1,4 +1,4 @@
-// opshub · production — DESTROYED (owner decision, 2026-10-21)
+// opshub · production — TEARDOWN APPROVED (owner decision, 2026-10-21); not yet applied
 //
 // opshub never served production traffic (no prod ever ran; the environment was
 // provisioned, idled and weekly-stopped), and the on-prem plan gives opshub no
