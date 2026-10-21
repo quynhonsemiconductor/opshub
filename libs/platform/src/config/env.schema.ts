@@ -56,6 +56,10 @@ const baseShape = {
   DATABASE_USER: z.string().optional(),
   DATABASE_PASSWORD: z.string().optional(),
   DATABASE_SSLMODE: z.string().default('require'),
+  // Path to the CA bundle database certificates must chain to (RDS global bundle in the
+  // image today, the CNPG ca.crt on-prem). REQUIRED in production: without it the
+  // process refuses to connect (see db/pg-ssl.ts) instead of encrypting unverified.
+  DATABASE_SSL_CA: emptyToUndefined(z.string().optional()),
   DATABASE_POOL_MIN: z.coerce.number().int().positive().default(2),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(20),
 
@@ -272,7 +276,7 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
     // BEFORE the database early-return below, and that placement is the point. This
     // superRefine returns as soon as a complete DATABASE_URL is present, so anything
     // written after that line is dead in exactly the configuration developers and CI run.
-    // (rally's equivalent storage-pair check sits after its return and is inert there.)
+    // (rova's equivalent storage-pair check sits after its return and is inert there.)
     //
     // Half a credential pair is a misconfiguration, not a partial feature. With only one
     // half set, the S3Client silently omits `credentials` and falls back to the task

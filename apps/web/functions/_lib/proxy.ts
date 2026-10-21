@@ -2,7 +2,7 @@
  * Same-origin reverse proxy used by the Cloudflare Pages Functions that front the opshub SPA. It forwards
  * `/v1/*` and identity 8's `/api/auth/*` (sign-in, the Microsoft callback, sign-out) from the SPA origin
  * (`opshub-dev.qnsc.vn`) to the API origin (`opshub-api-dev.qnsc.vn`), so the browser sees a single origin.
- * That is what lets the API set its `__Secure-opshub.session_token` cookie on the host the SPA uses and drop
+ * That is what lets the API set its `__Host-` (production) / `__Secure-` opshub.session_token cookie on the host the SPA uses and drop
  * CORS entirely.
  *
  * The forwarding itself is `@quynhonsemiconductor/platform-http/edge`'s `forwardToOrigin`, shared by every

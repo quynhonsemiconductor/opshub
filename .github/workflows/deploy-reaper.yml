@@ -6,7 +6,7 @@
 #
 # Why this exists: a parked run holds its deploy concurrency lock
 # (`cancel-in-progress: false`, so prod migrations never race). Nothing releases
-# that lock, so ONE unapproved release blocks every later one — in rally two
+# that lock, so ONE unapproved release blocks every later one — in rova two
 # unapproved tags left a third queued for 24h with zero jobs and no signal, which
 # reads as "the deploy is stuck" rather than "someone must click approve".
 #
@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   reap:
-    uses: quynhonsemiconductor/ci/.github/workflows/deploy-reaper.yml@v1
+    uses: quynhonsemiconductor/ci/.github/workflows/deploy-reaper.yml@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
     # A called workflow can only REDUCE the caller's token scope, so `actions:
     # write` must be granted here or the reusable cannot cancel anything.
     permissions:

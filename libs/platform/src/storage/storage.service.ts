@@ -157,14 +157,14 @@ export class StorageService {
            * lands with no disposition at all — verified against LocalStack, where `head-object`
            * reported `ContentType` and no `ContentDisposition` until this list grew.
            *
-           * This is where opshub deviates from rally, deliberately. Rally applies the disposition as
+           * This is where opshub deviates from rova, deliberately. Rova applies the disposition as
            * a RESPONSE OVERRIDE on its presigned GET, which works because it serves private objects
            * through that GET. `resolveUrl` here prefers `CDN_FILES_BASE_URL` whenever one is
            * configured, and a plain CDN read carries no response overrides — so the override alone
            * would silently not apply on the path production uses. Stored metadata travels with the
            * object however it is fetched.
            *
-           * `x-amz-*` headers cannot be added this way: rally documented that the presigner ignores
+           * `x-amz-*` headers cannot be added this way: rova documented that the presigner ignores
            * them, the client then sends a header the signature does not cover, and S3 answers 403
            * with no CORS headers — which the browser surfaces as an opaque "Failed to fetch".
            */

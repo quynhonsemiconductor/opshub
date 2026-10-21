@@ -14,7 +14,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import path from 'path';
 import { seed, seedRbacCatalog } from './seed';
-import { pgOptions } from './pg-ssl';
+import { pgOptions, tlsFromEnv } from './pg-ssl';
 import { resolveDatabaseUrl, resolveMigrationUrl } from './database-url';
 import { log } from './script-log';
 
@@ -30,7 +30,7 @@ try {
   process.exit(1);
 }
 
-const pool = new Pool({ ...pgOptions(url), max: 1 });
+const pool = new Pool({ ...pgOptions(url, tlsFromEnv()), max: 1 });
 const db = drizzle(pool);
 
 async function run() {
@@ -72,7 +72,7 @@ async function run() {
      *
      * Deployed migrator tasks run with `NODE_ENV=production` and nothing else does —
      * CI's ephemeral Postgres and a developer's machine do not — so the floor cannot
-     * block a legitimate local or CI seed. Ported from rally, whose develop database
+     * block a legitimate local or CI seed. Ported from rova, whose develop database
      * really did carry a fixture project for a while.
      */
     if (process.env['SEED_ON_DEPLOY'] === 'true') {

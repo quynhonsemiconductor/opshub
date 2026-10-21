@@ -447,7 +447,7 @@ export class TrainingService {
   // ── Certificates ─────────────────────────────────────────────────────────────
   //
   // Mechanics live in `EntityAttachmentsService`; what stays here is proving the record exists and
-  // naming the surface. That is the split rally settled on, and the reason a new upload surface is a
+  // naming the surface. That is the split rova settled on, and the reason a new upload surface is a
   // policy descriptor rather than another copy of presign/confirm.
 
   private ref(recordId: string): AttachmentRef {

@@ -31,7 +31,7 @@ export interface EntityAttachment {
 /**
  * Attachment mechanics for any entity that can own several files.
  *
- * MECHANICS HERE, AUTHORIZATION IN THE OWNING MODULE — rally's split, and the reason it exists:
+ * MECHANICS HERE, AUTHORIZATION IN THE OWNING MODULE — rova's split, and the reason it exists:
  * the key layout, the quota, presign, confirm and unlink are identical for every surface, while
  * "may this actor attach to this thing?" depends on the owning context's permission model. So this
  * service never resolves a permission from an entity type and never loads a training record. Its

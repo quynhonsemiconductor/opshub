@@ -8,12 +8,12 @@ import { AUTH_STATES, SEAT_EMAILS } from './support/fixtures';
  *
  * HOW, AND WHY NOT THROUGH THE UI: OpsHub's login page is a single Entra SSO button — there is
  * no passwordless form for a browser to fill, because the product has exactly one directory.
- * rally renders a dev-login form behind a Vite flag and drives it; adding one here would be a
+ * rova renders a dev-login form behind a Vite flag and drives it; adding one here would be a
  * production UI change made for a test.
  *
  * So this posts to `/api/auth/test-login` (identity 8; it loads only with IDENTITY_TEST_LOGIN=enabled and
  * NODE_ENV `development`/`test`) through Playwright's request context. The API replies with
- * `Set-Cookie: __Secure-opshub.session_token`, and because the request
+ * `Set-Cookie: opshub.session_token` (`__Host-` in production), and because the request
  * goes to the Vite origin the cookie is stored for `localhost:5174` — exactly as a real login
  * leaves it. Nothing is forged: no cookie is hand-assembled and no token is injected into the
  * page, which is what makes this a real session rather than a lookalike.
