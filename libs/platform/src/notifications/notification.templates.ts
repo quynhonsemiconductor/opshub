@@ -42,6 +42,7 @@ export const NOTIFICATION_TEMPLATE_NAMES = [
   'request.delegation_created',
   'request.step_ready',
   'request.submitted',
+  'request.no_approver',
   'request.approved',
   'request.rejected',
 ] as const;
@@ -119,6 +120,15 @@ export interface NotificationTemplateVars {
     requestType: string;
     requestId: string;
     requesterEmail: string;
+  };
+  /**
+   * Sent to administrators when a request needs a decision and nobody but its requester could be
+   * asked for one. The request is still open; this says why nothing else happened.
+   */
+  'request.no_approver': {
+    requestType: string;
+    requestId: string;
+    requiredPermission: string;
   };
   'request.approved': {
     requestType: string;
@@ -215,6 +225,12 @@ const templates: {
     return {
       title: `New ${v.requestType} request awaiting review`,
       body: `${v.requesterEmail} submitted a ${v.requestType} request (${v.requestId}) that requires your approval.`,
+    };
+  },
+  'request.no_approver'(v) {
+    return {
+      title: `${v.requestType} request has no approver`,
+      body: `Request ${v.requestId} is waiting for a "${v.requiredPermission}" decision, but no one other than its requester holds that permission, so no approver was notified.`,
     };
   },
   'request.approved'(v) {
