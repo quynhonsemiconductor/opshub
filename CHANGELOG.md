@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.0...v0.4.1) (2026-10-21)
+
+
+### 🐛 Bug Fixes
+
+* **infra:** allow the exact 12 gated destroys the plan-guard refused ([#460](https://github.com/quynhonsemiconductor/opshub/issues/460)) ([ae76377](https://github.com/quynhonsemiconductor/opshub/commit/ae7637759a0ff57c747e3b61369a24196068a61a))
+
 ## [0.4.0](https://github.com/quynhonsemiconductor/opshub/compare/v0.3.1...v0.4.0) (2026-10-21)
 
 
