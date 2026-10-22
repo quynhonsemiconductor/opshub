@@ -54,7 +54,7 @@ pnpm dev:web            # SPA    → http://localhost:5174   (proxies /v1 and /a
 
 Check it: `curl -s localhost:3001/readyz` answers `{"status":"ok", …, "checks":{"database":"up","cache":"up"}}` (the API's own probe), and `curl -s localhost:5174/v1/healthz` answers `ok` **through the SPA's proxy**, which is what proves Vite and the API agree on the port.
 
-One `.env` serves both processes. Some variables belong to one of them only, and each process **refuses to start** with the other's set (a worker holding the session secret could forge a cookie). `pnpm start:dev:worker` blanks the API-only ones (`BETTER_AUTH_SECRET`, `IDENTITY_TEST_LOGIN`, `ENTRA_CLIENT_SECRET`, `EDGE_CLIENT_IP_SECRET[_PREVIOUS]`) and `pnpm start:dev` blanks the worker-only `GRAPH_*`, so you never edit the file to switch between them. `.env.example` marks every variable `[both]`, `[API]` or `[WORKER]`.
+One `.env` serves both processes. Some variables belong to one of them only, and each process **refuses to start** with the other's set (a worker holding the session secret could forge a cookie). `pnpm start:dev:worker` blanks the API-only ones (`BETTER_AUTH_SECRET`, `IDENTITY_TEST_LOGIN`, `ENTRA_CLIENT_SECRET`, `EDGE_CLIENT_IP_SECRET[_PREVIOUS]`) and `pnpm start:dev` blanks the worker-only `GRAPH_*`, so you never edit the file to switch between them. `.env.example` marks every variable `[both]`, `[API]` or `[WORKER]`. The Vite dev server reads the same file for the SPA's `VITE_*` flags (the `[web]` section in `.env.example`).
 
 ### Sign in
 
