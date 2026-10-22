@@ -6,11 +6,13 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Infrastructure
 # ─────────────────────────────────────────────────────────────────────────────
 # Infra apply, gated the same way as the app deploys (backend-deploy.yml):
 #   push to main       → apply _shared + develop  (auto)
-#   (prod is GOING AWAY: the AWS opshub production stack teardown was approved
-#    2026-10-21 —
-#    owner decision; opshub has no prod in the on-prem plan. The apply-prod job
-#    and the v*.*.* tag trigger were removed with it, so nothing can recreate
-#    the stack from this repo. Final state: opshub/prod/terraform.tfstate empty,
+#   (prod is GONE — destroyed 2026-10-22, destroy run 39677842432 on v0.4.2:
+#    "0 added, 0 changed, 81 destroyed". opshub has no prod in the on-prem plan.
+#    Snapshots kept: opshub-prod-final-2026-10-21 and opshub-prod-final. The
+#    empty opshub/prod/terraform.tfstate is removed at the AWS wind-down, not
+#    before — it is the audit record of what that run applied.
+#    The apply-prod job and the v*.*.* tag trigger were removed, so nothing can
+#    recreate the stack from this repo.
 #    final snapshot opshub-prod-final-2026-10-21 retained.)
 #
 # Prod infra can NOT be applied by a normal merge to main — it only happens on
@@ -43,10 +45,6 @@ on:
     inputs:
       allow_destructive:
         description: "Let this run delete or replace DNS / identity resources (destructive-guard). Off by default; on a push the label `allow-dns-destroy` on the merged PR does the same."
-        type: boolean
-        default: false
-      destroy_prod:
-        description: "TEMPORARY (until the teardown lands): run destroy-prod — plan the prune of opshub/prod and apply it. Requires the production Environment reviewer. Read infra/live/prod/main.tf FIRST: the owner runbook (snapshot, deletion protection, bucket check) must be done by hand before this."
         type: boolean
         default: false
 
@@ -162,9 +160,8 @@ jobs:
   # Develop — only on a branch push to main (NOT on tag pushes).
   # ───────────────────────────────────────────────────────────────────────────
   apply-develop:
-    # Branch pushes only — and a dispatch that asks for the prod destroy runs
-    # ONLY that.
-    if: ${{ github.ref_type == 'branch' && !(github.event_name == 'workflow_dispatch' && inputs.destroy_prod) }}
+    # Branch pushes to main only.
+    if: github.ref_type == 'branch'
     needs: apply-shared
     runs-on: ubuntu-latest
     environment: develop   # no approval gate
@@ -284,61 +281,3 @@ jobs:
           if [[ $missed -ne 0 ]]; then
             echo "::warning title=infra-id publish::One or more develop infra-ID vars were not auto-published — the deploy reads these, so verify they match Terraform outputs to avoid drift."
           fi
-
-  # ── TEMPORARY — DELETE AFTER THE OPSHUB PROD TEARDOWN LANDS ─────────────────
-  # The only remaining prod action. workflow_dispatch ONLY (the tag trigger and
-  # apply-prod job are gone), behind the same `production` Environment reviewer,
-  # running the same guard chain: plan → plan-guard → destructive-guard →
-  # apply THAT plan. infra/live/prod is an empty configuration, so the plan is
-  # a full-state prune; every gated destroy must be declared in the stack's
-  # `.allow-data-destroy` or plan-guard refuses. Prereqs (by hand, in order):
-  # final RDS snapshot, --no-deletion-protection, uploads bucket verified
-  # empty — see infra/live/prod/main.tf.
-  destroy-prod:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.destroy_prod }}
-    runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      contents: read
-      id-token: write
-      pull-requests: read # destructive-guard reads the labels of the merged PR
-    timeout-minutes: 45
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
-        with:
-          role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/opshub-github-infra-apply
-          aws-region: ${{ env.AWS_REGION }}
-          tofu-version: ${{ env.TOFU_VERSION }}
-
-      - name: tofu init
-        working-directory: infra/live/prod
-        run: tofu init -input=false
-
-      - name: tofu plan (saved as tfplan)
-        working-directory: infra/live/prod
-        run: tofu plan -input=false -out=tfplan
-        env:
-          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          TF_VAR_grafana_alerting_auth: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
-
-      - name: plan-guard (tfplan)
-        uses: quynhonsemiconductor/ci/actions/plan-guard@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
-        with:
-          plan-file: tfplan
-          working-directory: infra/live/prod
-
-      - name: destructive-guard (tfplan)
-        uses: quynhonsemiconductor/ci/actions/destructive-guard@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
-        with:
-          working-directory: infra/live/prod
-          plan-file: tfplan
-          dispatch-allow: ${{ inputs.allow_destructive }}
-
-      - name: tofu apply (the saved plan)
-        working-directory: infra/live/prod
-        run: tofu apply -input=false tfplan
