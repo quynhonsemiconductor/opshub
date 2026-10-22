@@ -310,3 +310,13 @@ are new). After the follow-up's apply (section E): restore within the 30-day win
 IAM cannot scope below a secret, so a bundle is granted whole: the execution role that reads one key can read all of
 them. Accepted because the api execution role already reads the whole set. Keep a value out of the bundle if it needs
 its own resource policy or rotation (the Graph certificate stays standalone for that reason).
+
+---
+
+## 2026-10-22: the production half of this runbook is HISTORY
+
+opshub production was destroyed (run 39677842432 on v0.4.2 — it never served
+traffic, and the on-prem plan gives opshub no prod). Everything above that
+targets `infra/live/prod` is kept for the record only; the secrets bundle that
+mattered now lives in `kv-qnsc-dev` after the move. The DEVELOP steps (D.2/D.3,
+standalone-secret cleanup) still describe reality.
