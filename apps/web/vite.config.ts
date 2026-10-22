@@ -22,7 +22,15 @@ const securityHeadersPlugin: Plugin = {
   },
 };
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode, command }) => ({
+  // One root `.env` serves every process, the dev server included: `envDir` points Vite's own
+  // VITE_* loading at the repo root (the same file `loadEnv` above already reads). Two safety
+  // halves: Vite exposes only `VITE_`-prefixed keys to the browser, so the API's secrets in that
+  // file never reach it; and the root file is read in DEV SERVE ONLY — `vite build` (any mode)
+  // keeps the default envDir (apps/web), so a laptop's root flags cannot bake into a deployed
+  // bundle. See the `[web]` section of .env.example for the flags the dev server picks up.
+  envDir:
+    command === 'serve' && mode === 'development' ? path.resolve(__dirname, '../..') : undefined,
   plugins: [react(), tailwindcss(), securityHeadersPlugin],
   server: {
     host: '0.0.0.0',

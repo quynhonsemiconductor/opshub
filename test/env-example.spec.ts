@@ -161,9 +161,23 @@ describe('.env.example boots the API and the worker from one file', () => {
       'DATABASE_WORKER_PASSWORD',
       'SHUTDOWN_TIMEOUT_MS',
       'SHUTDOWN_ENDPOINT_DELAY_MS',
+      // [web] The SPA reads its feature gates from import.meta.env, sourced from this file
+      // (apps/web/src/shared/config/features.ts is the code that knows them).
+      ...[...read('apps/web/src/shared/config/features.ts').matchAll(/VITE_FEATURE_[A-Z_]+/g)].map(
+        (m) => m[0],
+      ),
     ]);
     const unknown = namedKeys(example).filter((k) => !schemaKeys.has(k) && !readElsewhere.has(k));
     expect(unknown).toEqual([]);
+    // And the reverse: every feature the SPA knows is documented in .env.example (commented or
+    // active) — a removed gate line would leave the flag silently undocumented.
+    const named = new Set(namedKeys(example));
+    const undocumented = [
+      ...read('apps/web/src/shared/config/features.ts').matchAll(/VITE_FEATURE_[A-Z_]+/g),
+    ]
+      .map((m) => m[0])
+      .filter((k) => !named.has(k));
+    expect(undocumented, 'feature gates missing from .env.example').toEqual([]);
   });
 });
 
