@@ -22,8 +22,6 @@
       "@shared-kernel/*": ["./libs/shared-kernel/src/*"],
       "@platform": ["./libs/platform/src/index"],
       "@platform/*": ["./libs/platform/src/*"],
-      "@contracts": ["./libs/contracts/src/index"],
-      "@contracts/*": ["./libs/contracts/src/*"],
       "@modules/identity": ["./libs/modules/identity/src/index"],
       "@modules/identity/*": ["./libs/modules/identity/src/*"],
       "@modules/assets": ["./libs/modules/assets/src/index"],
