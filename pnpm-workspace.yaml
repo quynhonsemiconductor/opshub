@@ -82,7 +82,7 @@ overrides:
   # Bumped to 5.12.5 for GHSA-4mh8-r7rc-xpvc (fixed 5.12.5). This key also rewrites the
   # root's exact "fastify" pin, so the floor here — not package.json — is what decides the
   # resolved version: the lockfile sat on 5.12.3 while package.json said 5.12.4.
-  "fastify@5": ">=5.12.5 <6.0.0"
+  "fastify@5": ">=5.12.7 <6.0.0"
   # GHSA-4mjr-xmp4-gh2g / GHSA-x5fp-wj9c-mxmx — qs DoS via attacker-controlled isBuffer,
   # fixed 6.16.0. Scope to the 6.x line (the 3.x `qs` in the tree is an unrelated package).
   "qs@6": ">=6.16.0"
