@@ -1224,6 +1224,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/workforce/wio-calendar': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Who works from home, for one month
+     * @description Returns everyone the calendar accounts for and the work-from-home marks in the month. A day with no mark is a day in the office.
+     */
+    get: operations['WioCalendarController_getMonth'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/wio-calendar/{date}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mark a day as work-from-home, or back to the office, for the current user
+     * @description Idempotent. Refused for a day that has already passed and for a weekend.
+     */
+    put: operations['WioCalendarController_setDay'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/requests': {
     parameters: {
       query?: never;
@@ -5721,6 +5761,43 @@ export interface components {
       name: string;
       region?: string;
     };
+    WioPersonDto: {
+      id: string;
+      name: string;
+      department: string | null;
+    };
+    WioMarkDto: {
+      employeeId: string;
+      date: string;
+    };
+    WioPtoDto: {
+      /**
+       * @description `full_day` for a whole day; `morning` or `afternoon` when only part of the day is leave.
+       * @enum {string}
+       */
+      portion: 'full_day' | 'morning' | 'afternoon';
+      employeeId: string;
+      date: string;
+    };
+    WioMonthResponseDto: {
+      month: string;
+      /** @description Everyone the calendar accounts for — a day's office list is these people minus that day's marks. */
+      people: components['schemas']['WioPersonDto'][];
+      /** @description Only the work-from-home days. Absence is the default, so a day with no mark means in the office. */
+      wfh: components['schemas']['WioMarkDto'][];
+      /**
+       * @description Approved leave on working days, any type. The TYPE and the reason are deliberately absent: the calendar
+       *     says someone is away, never why (sick and parental leave are nobody else's business).
+       */
+      pto: components['schemas']['WioPtoDto'][];
+    };
+    SetWioDayDto: {
+      wfh: boolean;
+    };
+    WioDayResponseDto: {
+      date: string;
+      wfh: boolean;
+    };
     RequestApprovalResponseDto: {
       id: string;
       requestId: string;
@@ -8038,6 +8115,7 @@ export interface operations {
           | 'leave_document'
           | 'leave_entitlement'
           | 'holiday'
+          | 'wfh_day'
           | 'document'
           | 'document_version'
           | 'position'
@@ -11609,6 +11687,87 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  WioCalendarController_getMonth: {
+    parameters: {
+      query: {
+        month: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WioMonthResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  WioCalendarController_setDay: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        date: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetWioDayDto'];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WioDayResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
         headers: {
           [name: string]: unknown;
         };

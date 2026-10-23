@@ -288,6 +288,13 @@
       "when": 1792775574922,
       "tag": "0040_door_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792861974922,
+      "tag": "0041_wfh_days",
+      "breakpoints": true
     }
   ]
 }
