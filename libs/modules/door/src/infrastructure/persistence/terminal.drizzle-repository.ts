@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
+<<<<<<< HEAD
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+=======
+import { and, asc, eq, gte, isNull, sql } from 'drizzle-orm';
+>>>>>>> 0d963cd (feat(door): terminal routes — token guard, allow-list ETag, event ingestion, jobs)
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { terminals } from '../../../../../../db/schema';
 import type { ITerminalRepository } from '../../domain/ports/terminal.repository';
@@ -65,5 +69,21 @@ export class TerminalDrizzleRepository implements ITerminalRepository {
       .from(terminals)
       .where(isNull(terminals.revokedAt));
     return row?.count ?? 0;
+  }
+
+  async countActiveSeenSince(since: Date): Promise<number> {
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(terminals)
+      .where(and(isNull(terminals.revokedAt), gte(terminals.lastSeenAt, since)));
+    return row?.count ?? 0;
+  }
+
+  async addDropped(id: string, count: number, tx?: DbExecutor): Promise<void> {
+    if (count <= 0) return;
+    await (tx ?? this.db)
+      .update(terminals)
+      .set({ droppedEvents: sql`${terminals.droppedEvents} + ${count}` })
+      .where(eq(terminals.id, id));
   }
 }

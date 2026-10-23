@@ -7,6 +7,10 @@ import { CARD_REPOSITORY } from './domain/ports/card.repository';
 import { TerminalDrizzleRepository } from './infrastructure/persistence/terminal.drizzle-repository';
 import { CardDrizzleRepository } from './infrastructure/persistence/card.drizzle-repository';
 import { DoorController } from './interface/http/door.controller';
+import { DoorTerminalController } from './interface/http/door-terminal.controller';
+import { TerminalAuthGuard } from './interface/http/terminal-auth.guard';
+import { DoorTerminalHealthCron } from './application/door-terminal-health.cron';
+import { DoorEventCleanupService } from './application/door-event-cleanup.service';
 
 /**
  * The door: terminals, cards, and (in the terminal-routes PR) the `/v1/door/terminal/*` routes the
@@ -15,9 +19,14 @@ import { DoorController } from './interface/http/door.controller';
  */
 @Module({
   imports: [AuditModule, EmployeesModule],
-  controllers: [DoorController],
+  controllers: [DoorController, DoorTerminalController],
   providers: [
     DoorService,
+    TerminalAuthGuard,
+    // Scheduled classes, but the SCHEDULE only exists where ScheduleModule does — the worker. The
+    // API compiles both and never fires either.
+    DoorTerminalHealthCron,
+    DoorEventCleanupService,
     { provide: TERMINAL_REPOSITORY, useClass: TerminalDrizzleRepository },
     { provide: CARD_REPOSITORY, useClass: CardDrizzleRepository },
   ],
