@@ -72,8 +72,12 @@ function renderTab() {
   );
 }
 
-const day = (name: string) => screen.findByRole('button', { name: new RegExp(`^${name}:`) });
-const box = (name: string) => screen.findByRole('checkbox', { name: new RegExp(`WFH on ${name}`) });
+// Matched with functions, not `new RegExp(name)`: a pattern built from a variable is what Semgrep flags as a
+// ReDoS risk, and a plain string comparison says the same thing without one.
+const day = (name: string) =>
+  screen.findByRole('button', { name: (accessible) => accessible.startsWith(`${name}:`) });
+const box = (name: string) =>
+  screen.findByRole('checkbox', { name: (accessible) => accessible === `WFH on ${name}` });
 
 describe('WIO calendar', () => {
   it('counts a day as in the office for everyone nobody marked, and WFH for those who did', async () => {
