@@ -62,6 +62,16 @@ export function normaliseUid(raw: string): string {
 
 const UID_SHAPE = /^[0-9A-F]{8}([0-9A-F]{6}){0,2}$/;
 
+/** One event as the TERMINAL sends it (snake_case wire names, validated per event). */
+export interface IngestEvent {
+  seq: number;
+  reader: string;
+  uid: unknown;
+  result: string;
+  device_ts: unknown;
+  time_synced: unknown;
+}
+
 export function assertUid(uid: string): string {
   if (!UID_SHAPE.test(uid)) {
     throw new ValidationException(
@@ -311,6 +321,105 @@ export class DoorService {
     const since = new Date(Date.now() - 24 * 3600 * 1000);
     return this.cards.listUnknownCardGroups(since, limit);
   }
+
+  // ── Terminal side (the ESP32; the routes live in the terminal controller) ──
+
+  /**
+   * The allow-list, COMPUTED AT REQUEST TIME (ADR §2.4). The response shape is the contract:
+   * `valid_from` is sent only while it is in the future (else null) — the terminal enforces the
+   * window offline, so a temporary card expires even when opshub is unreachable.
+   */
+  async allowList(): Promise<
+    { uid: string; valid_from: string | null; valid_until: string | null }[]
+  > {
+    const rows = await this.cards.listAllowList();
+    const now = Date.now();
+    // WIRE NAMES: the contract is snake_case (ADR §2.4) — the firmware never sees camelCase.
+    return rows.map((r) => ({
+      uid: r.uid,
+      valid_from: r.validFrom.getTime() > now ? r.validFrom.toISOString() : null,
+      valid_until: r.validUntil ? r.validUntil.toISOString() : null,
+    }));
+  }
+
+  /**
+   * Ingest one event batch (ADR §2.4). Per-event validation — a batch of 100 with one bad event
+   * acks 99 of them; the bad seq goes into `rejected` and the terminal deletes through it, so one
+   * malformed row can never block the queue. `card_id` is resolved BY EVENT TIME: the card whose
+   * uid matches and whose window covered the swipe, so a buffered event uploaded after a UID was
+   * reissued is credited to the person who held the card when they swiped.
+   *
+   * NOT wrapped in one transaction on purpose: the upsert is idempotent (`ON CONFLICT DO NOTHING`
+   * on the event key), so a partial application retried by the terminal is harmless — and a
+   * terminal should not wait on a long lock because a stranger's batch shares its poll cycle.
+   */
+  async ingestEvents(
+    terminalId: string,
+    input: { stream: string; dropped: number; events: IngestEvent[] },
+  ): Promise<{ ackedThrough: number; rejected: number[] }> {
+    const now = new Date();
+    const rejected: number[] = [];
+    const valid: NonNullable<Parameters<ICardRepository['insertEvents']>[1]> = [];
+    let ackedThrough = 0;
+
+    for (const event of input.events) {
+      // The ack covers everything the batch carried, valid or not (ADR §2.4: the terminal deletes
+      // through `acked_through`, so the queue never blocks).
+      if (event.seq > ackedThrough) ackedThrough = event.seq;
+
+      const uid = normaliseUid(typeof event.uid === 'string' ? event.uid : '');
+      const deviceTs = parseIso(event.device_ts);
+      if (
+        !Number.isInteger(event.seq) ||
+        event.seq <= 0 ||
+        (event.reader !== 'in' && event.reader !== 'out') ||
+        !UID_SHAPE.test(uid) ||
+        (event.result !== 'allow' && event.result !== 'deny') ||
+        !deviceTs
+      ) {
+        rejected.push(event.seq);
+        continue;
+      }
+      valid.push({
+        stream: input.stream,
+        seq: event.seq,
+        reader: event.reader,
+        uid,
+        result: event.result,
+        cardId: null, // resolved below, by event time
+        deviceTs,
+        timeSynced: event.time_synced === true,
+      });
+    }
+
+    // Resolve card_id for every valid event: one candidate query for the whole batch, then a
+    // window match per event at t = device_ts (synced) or received_at (not).
+    if (valid.length > 0) {
+      const candidates = await this.cards.findActiveByUids([...new Set(valid.map((v) => v.uid))]);
+      for (const row of valid) {
+        const t = row.timeSynced ? row.deviceTs.getTime() : now.getTime();
+        const match = candidates.find(
+          (c) => c.uid === row.uid && c.validFrom.getTime() <= t && t < cardEnd(c),
+        );
+        if (match) row.cardId = match.id;
+      }
+      await this.cards.insertEvents(terminalId, valid);
+    }
+
+    await this.terminals.addDropped(terminalId, input.dropped);
+    return { ackedThrough, rejected };
+  }
+}
+
+/** `coalesce(revoked_at, valid_until, 'infinity')` — the open end of a card's validity, in JS. */
+function cardEnd(card: { validUntil: Date | null }): number {
+  return card.validUntil ? card.validUntil.getTime() : Number.POSITIVE_INFINITY;
+}
+
+function parseIso(value: unknown): Date | null {
+  if (typeof value !== 'string') return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /** True when `err` is Postgres 23505 on the named constraint (Drizzle surfaces both fields). */

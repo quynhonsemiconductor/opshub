@@ -134,6 +134,20 @@ const baseShape = {
   /** Audit log retention in days (SOC 2 baseline: 730 = 2 years). */
   AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(730),
 
+  // ── Door attendance terminal ───────────────────────────────────────────────
+  /**
+   * Attendance event retention in days (ADR ATTENDANCE-DEVICE §2.7: personal data kept no longer
+   * than needed). 24 months by default. Unknown-card events purge at a fixed 30 days (not
+   * configurable: visitors' bank cards are not records we keep).
+   */
+  DOOR_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().default(730),
+  /**
+   * Healthchecks.io ping URL for the door-terminal check. Optional, DEFAULT OFF: unset, the
+   * monitoring job is a no-op. Set it and the worker pings only while EVERY active terminal was
+   * seen within the last 10 minutes — Healthchecks alerts on the ping that never arrives.
+   */
+  DOOR_TERMINAL_HEALTHCHECK_URL: z.string().url().optional(),
+
   // ── AI assistant (optional) ────────────────────────────────────────────────
   // When ANTHROPIC_API_KEY is unset the AI module reports itself disabled
   // (AiService.isEnabled()) and the /ai endpoints return 503.
