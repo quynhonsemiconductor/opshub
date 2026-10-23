@@ -281,6 +281,13 @@
       "when": 1792333434744,
       "tag": "0039_identity_account_provider_index",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792775574922,
+      "tag": "0040_door_schema",
+      "breakpoints": true
     }
   ]
 }
