@@ -440,11 +440,27 @@ jobs:
         run: |
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-playwright-retries >/dev/null
           echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-playwright-retries >/dev/null
-          # Both attempts bounded: 2×240 s + 15 s sleep ≈ 8.3 min < the step's 9 min.
-          timeout 240 pnpm --filter opshub-web exec playwright install-deps chromium || {
+          echo 'DPkg::Lock::Timeout "120";' | sudo tee -a /etc/apt/apt.conf.d/99-playwright-retries >/dev/null
+          # Both attempts bounded: 2×(240+10) s + 15 s sleep + recovery ≈ 8.7 min < the step's 9 min.
+          timeout --kill-after=10 --signal=TERM 240 pnpm --filter opshub-web exec playwright install-deps chromium || {
             echo "::warning::install-deps attempt 1 failed or timed out (slow apt mirror) — retrying once"
+            echo '--- dpkg lock holders after attempt 1:'
+            echo '--- last apt Acquire lines (which mirror was slow):'
+            sudo tail -n 40 /var/log/apt/term.log || true
+            sudo fuser -v /var/lib/dpkg/lock-frontend || true
+            # NON-FATAL (opshub PR run: an unguarded dpkg exit 2 aborted the step under
+            # bash -e before the retry ever ran). Finish or unwind whatever the killed
+            # attempt left half-configured; the lock timeout above covers a holder that
+            # is still alive and exits soon.
+            sudo dpkg --configure -a || echo "::warning::dpkg --configure -a failed — continuing to the retry"
             sleep 15
-            timeout 240 pnpm --filter opshub-web exec playwright install-deps chromium
+            timeout --kill-after=10 --signal=TERM 240 pnpm --filter opshub-web exec playwright install-deps chromium || {
+              echo '--- dpkg lock holders after attempt 2:'
+              echo '--- last apt Acquire lines:'
+              sudo tail -n 40 /var/log/apt/term.log || true
+              sudo fuser -v /var/lib/dpkg/lock-frontend || true
+              exit 1
+            }
           }
 
       - name: Run browser E2E
