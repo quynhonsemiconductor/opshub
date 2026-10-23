@@ -20,6 +20,7 @@ import { ControlsPage } from '@/pages/controls/controls-page';
 import { IncidentsPage } from '@/pages/incidents/incidents-page';
 import { InformationAssetsPage } from '@/pages/information-assets/information-assets-page';
 import { VendorsPage } from '@/pages/vendors/vendors-page';
+import { DoorPage } from '@/pages/door/door-page';
 import { NonconformancesPage } from '@/pages/quality/nonconformances-page';
 import { CapasPage } from '@/pages/quality/capas-page';
 import { AuditsPage } from '@/pages/quality/audits-page';
@@ -242,6 +243,12 @@ const catalogRoute = createRoute({
   component: CatalogPage,
 });
 
+const doorRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/door',
+  component: DoorPage,
+});
+
 const securityPostureRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/security-posture',
@@ -280,6 +287,7 @@ const routeTree = rootRoute.addChildren([
     profileRoute,
     finopsRoute,
     catalogRoute,
+    doorRoute,
     securityPostureRoute,
   ]),
 ]);

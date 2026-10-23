@@ -295,6 +295,16 @@ export const ErrorCodes = {
    * execute. The second is told to wait rather than being served a half-finished answer.
    */
   IDEMPOTENCY_IN_FLIGHT: 'IDEMPOTENCY_IN_FLIGHT',
+
+  // Door attendance terminal
+  DOOR_TERMINAL_NOT_FOUND: 'DOOR_TERMINAL_NOT_FOUND',
+  /** The terminal was revoked: no new token can be issued for it. Provision a replacement. */
+  DOOR_TERMINAL_REVOKED: 'DOOR_TERMINAL_REVOKED',
+  DOOR_CARD_NOT_FOUND: 'DOOR_CARD_NOT_FOUND',
+  /** An active card with this UID already exists (unique per active UID; revoke it first). */
+  DOOR_CARD_DUPLICATE: 'DOOR_CARD_DUPLICATE',
+  /** Not uppercase hex of a 4/7/10-byte UID. */
+  DOOR_CARD_UID_INVALID: 'DOOR_CARD_UID_INVALID',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

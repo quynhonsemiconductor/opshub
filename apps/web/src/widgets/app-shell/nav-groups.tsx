@@ -27,6 +27,7 @@ import {
   BellRing,
   DollarSign,
   Package,
+  DoorOpen,
 } from 'lucide-react';
 
 /**
@@ -104,6 +105,8 @@ export const navGroups: NavGroup[] = [
       // the mismatch is latent only because no seeded role holds one without the other, and
       // `license.service.ts` names the finance-shaped role that would break it.
       { to: '/finops', label: 'FinOps', icon: DollarSign, cap: 'license.read' },
+      // Door attendance: HR manages cards, IT manages terminals — one page, per-action gated.
+      { to: '/door', label: 'Door', icon: DoorOpen, cap: 'door.read' },
       {
         to: '/security-posture',
         label: 'Security Posture',
