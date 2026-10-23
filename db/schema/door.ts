@@ -2,24 +2,23 @@
  * door schema — the RFID door/attendance terminal (ADR: platform/adr/ATTENDANCE-DEVICE.md).
  *
  * Three tables: the registered TERMINALS (ESP32 controllers), the CARDS (owned by employees), and
- * the EVENTS the terminals upload. There is deliberately no cross-schema foreign key — `employee_id`
- * is validated with `assertExist` like every other reference into `identity`
- * (test/employee-reference.ratchet.spec.ts). `card_id → door.cards` is within this schema, but the
- * reference is still soft (plain uuid column): an event's `card_id` is resolved at insert time by
- * event time and must survive the card's later deletion of its active window (revocation never
- * deletes), so the column stays a plain uuid.
+ * the EVENTS the terminals upload. `events.terminal_id` and `events.card_id` are real foreign keys
+ * WITHIN this schema (ON DELETE RESTRICT — an event never dangles, and a terminal/card with events
+ * cannot be silently deleted). `cards.employee_id` stays a soft reference into `identity`: no
+ * foreign key across schemas, validated with `assertExist` like every other identity reference
+ * (test/employee-reference.ratchet.spec.ts).
  */
 import {
+  bigint,
+  boolean,
   check,
   index,
   integer,
   pgSchema,
+  timestamp,
+  uniqueIndex,
   uuid,
   varchar,
-  timestamp,
-  bigint,
-  boolean,
-  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { doorCardStatusEnum, doorEventResultEnum, doorReaderEnum } from './enums';
@@ -57,19 +56,32 @@ export const cards = doorSchema.table(
     validFrom: timestamp('valid_from', { withTimezone: true }).notNull().defaultNow(),
     /** Null = no expiry (permanent card). */
     validUntil: timestamp('valid_until', { withTimezone: true }),
-    /** Set by revoke and mark-lost. */
+    /** Set by revoke and mark-lost; the CHECK makes status and revoked_at two views of one fact. */
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     uidShape: check('ck_card_uid_shape', sql`${t.uid} ~ '^[0-9A-F]{8}([0-9A-F]{6}){0,2}$'`),
+    // The window must be non-empty, and status/revoked_at must AGREE: an active card is exactly a
+    // card with no revoked_at. Two views of one fact will drift otherwise.
+    windowShape: check(
+      'ck_card_window',
+      sql`${t.validUntil} IS NULL OR ${t.validUntil} > ${t.validFrom}`,
+    ),
+    statusMatchesRevocation: check(
+      'ck_card_status_revoked_at',
+      sql`(${t.status} = 'active') = (${t.revokedAt} IS NULL)`,
+    ),
     // A UID can be REISSUED after revocation (lost card replaced): uniqueness holds per active card
     // only. Allowing exactly one active card per UID is what makes the terminal's allow-list and the
     // event-time card resolution unambiguous.
     oneActivePerUid: uniqueIndex('uq_door_card_active_uid')
       .on(t.uid)
       .where(sql`status = 'active'`),
+    // The event-time card resolution looks candidates up by UID (PR for the terminal API); the
+    // active-UID unique index above does not serve a uid-only scan.
+    uidIdx: index('ix_door_card_uid').on(t.uid),
     employeeIdx: index('ix_door_card_employee').on(t.employeeId),
   }),
 );
@@ -78,9 +90,10 @@ export const events = doorSchema.table(
   'events',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    /** door.terminals.id — same schema, still a plain uuid: events outlive nothing, but the
-     * identity-drizzle convention keeps every reference soft unless Drizzle declares it. */
-    terminalId: uuid('terminal_id').notNull(),
+    /** The terminal that reported the event — a real FK; a terminal with events cannot vanish. */
+    terminalId: uuid('terminal_id')
+      .notNull()
+      .references(() => terminals.id, { onDelete: 'restrict' }),
     /** UUID the terminal generates per boot-strapped identity (new board, reflash, NVS erase). */
     stream: uuid('stream').notNull(),
     /** Monotonic within the stream. bigint: a decade of one door never nears int4 range... but a
@@ -91,11 +104,12 @@ export const events = doorSchema.table(
     uid: varchar('uid', { length: 20 }).notNull(),
     result: doorEventResultEnum('result').notNull(),
     /**
-     * The card active AT THE EVENT, resolved at insert by event time (uid + validity window), not
-     * "the card active now". Null = no card owned that UID when the person swiped. Never FK'd: a
-     * historical event must survive any later card row change.
+     * The card the swipe is credited to, resolved at insert BY EVENT TIME (uid + validity window),
+     * not "the card active now" — so a buffered event uploaded after a UID was reissued lands on
+     * the holder's page. RESTRICT, not CASCADE: revocation updates the card row, it never deletes
+     * it, so a credited event always has its card.
      */
-    cardId: uuid('card_id'),
+    cardId: uuid('card_id').references(() => cards.id, { onDelete: 'restrict' }),
     deviceTs: timestamp('device_ts', { withTimezone: true }).notNull(),
     /** True when the terminal had a clock (NTP or a Date-header fallback) at capture. */
     timeSynced: boolean('time_synced').notNull().default(false),
@@ -106,9 +120,11 @@ export const events = doorSchema.table(
     // The event key: a terminal whose NVS was wiped starts a NEW stream, so a reset counter can
     // never collide with its own old events (they would be silently discarded as duplicates).
     oneEventPerStreamSeq: uniqueIndex('uq_door_event_stream_seq').on(t.terminalId, t.stream, t.seq),
-    // The two read paths: "unknown cards (last 24 h)" and the retention purge.
+    // "Unknown cards (last 24 h)": recent card-less events.
     unknownCardsIdx: index('ix_door_event_unknown_recent')
       .on(t.receivedAt)
       .where(sql`card_id IS NULL`),
+    // The 24-month retention purge scans by receive date alone (door-event-cleanup).
+    receivedIdx: index('ix_door_event_received').on(t.receivedAt),
   }),
 );
