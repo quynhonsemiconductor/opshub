@@ -403,21 +403,49 @@ jobs:
           version=$(node -p "require('./apps/web/node_modules/@playwright/test/package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: ms-playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
 
-      # The deps flag stays on a cache hit: the cache carries the BROWSER, while --with-deps installs the
-      # OS libraries it links against, which live outside that path. Playwright skips the download when
-      # the browser is already present, so a hit costs only the apt step.
+      # The cache carries the BROWSER; the OS libraries it links against live outside that
+      # path and are installed separately below, EVERY run. Splitting the two means the big
+      # Chromium download happens only on a cache miss (a Playwright upgrade), and that
+      # download — the one step that ever hung — is retried once before the step fails.
       #
       # The step timeout is the important half. Without it a hung download eats the job budget and the
       # failure is reported as a cancellation of the whole job; with it the step fails in eight minutes
       # naming itself, and a re-run becomes a decision rather than a guess.
-      - name: Install Playwright browser
+      - name: Install Playwright browser (on cache miss, retried once)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 8
-        run: pnpm --filter opshub-web exec playwright install --with-deps chromium
+        run: |
+          # Both attempts are bounded on their own: two unbounded attempts share the step
+          # timeout, so a hang in the FIRST one would eat the budget and the retry would
+          # never run. 2×180 s + 15 s sleep ≈ 6.3 min < the step's 8 min.
+          timeout 180 pnpm --filter opshub-web exec playwright install chromium || {
+            echo "::warning::Playwright download failed once — retrying (CDN flake)"
+            sleep 15
+            timeout 180 pnpm --filter opshub-web exec playwright install chromium
+          }
+
+      # THE APT SIDE IS THE REAL FLAKE, not the CDN: rova run 39782464249 spent 8 min 30 s
+      # fetching 25.9 MB from azure.archive.ubuntu.com while Chromium itself took ~9 s, and
+      # opshub run 39887434827 stalled on fonts from the same mirror. So the deps install is
+      # bounded per attempt (timeout 240), apt retries and times out transfers on its own,
+      # and the whole step gets a second attempt before it fails.
+      - name: Install Playwright OS dependencies (bounded, retried)
+        timeout-minutes: 9
+        run: |
+          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-playwright-retries >/dev/null
+          echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-playwright-retries >/dev/null
+          # Both attempts bounded: 2×240 s + 15 s sleep ≈ 8.3 min < the step's 9 min.
+          timeout 240 pnpm --filter opshub-web exec playwright install-deps chromium || {
+            echo "::warning::install-deps attempt 1 failed or timed out (slow apt mirror) — retrying once"
+            sleep 15
+            timeout 240 pnpm --filter opshub-web exec playwright install-deps chromium
+          }
 
       - name: Run browser E2E
         run: pnpm --filter opshub-web exec playwright test --reporter=line
