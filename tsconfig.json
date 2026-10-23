@@ -68,6 +68,8 @@
       "@modules/graph/*": ["./libs/modules/graph/src/*"],
       "@modules/security-posture": ["./libs/modules/security-posture/src/index"],
       "@modules/security-posture/*": ["./libs/modules/security-posture/src/*"],
+      "@modules/door": ["./libs/modules/door/src/index"],
+      "@modules/door/*": ["./libs/modules/door/src/*"],
       "@platform/email": ["./libs/platform/src/email/index"],
       "@platform/notifications": ["./libs/platform/src/notifications/index"],
       "@db": ["./db/index"],

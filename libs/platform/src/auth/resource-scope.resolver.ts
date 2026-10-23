@@ -5,6 +5,7 @@ import { NotFoundException } from '../errors/exceptions';
 import { employees } from '../../../../db/schema/identity';
 import { assets } from '../../../../db/schema/assets';
 import { timesheets, leaveRequests, overtimeEntries } from '../../../../db/schema/workforce';
+import { cards as doorCards, terminals as doorTerminals } from '../../../../db/schema/door';
 import type { ResourceAttrs, ScopedResource } from './authz.types';
 
 /**
@@ -39,7 +40,39 @@ export class ResourceScopeResolver {
         return this.leaveRequest(id);
       case 'overtime':
         return this.overtime(id);
+      case 'door_card':
+        return this.doorCard(id);
+      case 'door_terminal':
+        return this.doorTerminal(id);
     }
+  }
+
+  /**
+   * A card's owner is the employee it belongs to — so a `self`-scoped grant, should one ever be
+   * issued, would let a person act on their own card. No role bundle grants a scoped door code
+   * today; the case exists so the descriptor is honest about who the row belongs to.
+   */
+  private async doorCard(id: string): Promise<ResourceAttrs> {
+    const [row] = await this.db
+      .select({ employeeId: doorCards.employeeId })
+      .from(doorCards)
+      .where(eq(doorCards.id, id))
+      .limit(1);
+
+    if (!row) throw new NotFoundException('DOOR_CARD_NOT_FOUND', 'Card not found');
+    return { ownerId: row.employeeId };
+  }
+
+  /** A terminal belongs to nobody: no scope attributes, like unassigned stock. */
+  private async doorTerminal(id: string): Promise<ResourceAttrs> {
+    const [row] = await this.db
+      .select({ id: doorTerminals.id })
+      .from(doorTerminals)
+      .where(eq(doorTerminals.id, id))
+      .limit(1);
+
+    if (!row) throw new NotFoundException('DOOR_TERMINAL_NOT_FOUND', 'Terminal not found');
+    return {};
   }
 
   /**
