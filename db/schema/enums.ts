@@ -6,6 +6,11 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 // ── Identity ─────────────────────────────────────────────────────────────────
 export const employeeStatusEnum = pgEnum('employee_status', ['active', 'on_leave', 'offboarded']);
 
+// ── Door attendance terminal ─────────────────────────────────────────────────
+export const doorCardStatusEnum = pgEnum('door_card_status', ['active', 'revoked', 'lost']);
+export const doorReaderEnum = pgEnum('door_reader', ['in', 'out']);
+export const doorEventResultEnum = pgEnum('door_event_result', ['allow', 'deny']);
+
 // ── Authorization (RBAC scopes) ──────────────────────────────────────────────
 export const scopeTypeEnum = pgEnum('scope_type', ['global', 'self', 'team', 'dept', 'region']);
 
