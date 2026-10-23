@@ -281,6 +281,13 @@
       "when": 1792333434744,
       "tag": "0039_identity_account_provider_index",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792567000000,
+      "tag": "0040_wfh_days",
+      "breakpoints": true
     }
   ]
 }
