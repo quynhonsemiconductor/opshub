@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.3](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.2...v0.4.3) (2026-10-23)
+
+
+### ✨ Features
+
+* **ci:** publish images to ghcr on merge (on-prem delivery path) ([#476](https://github.com/quynhonsemiconductor/opshub/issues/476)) ([4983092](https://github.com/quynhonsemiconductor/opshub/commit/4983092957ce8b5a218ec79cb44b926a46b67f5c))
+
+
+### 🐛 Bug Fixes
+
+* **ci:** recover dpkg state between install-deps attempts ([#477](https://github.com/quynhonsemiconductor/opshub/issues/477)) ([e5430b1](https://github.com/quynhonsemiconductor/opshub/commit/e5430b1f549f3ac5a743e9f0391c030bff62f144))
+* **deps:** bump vitest to 4.1.12 for two @vitest/mocker advisories ([#466](https://github.com/quynhonsemiconductor/opshub/issues/466)) ([bfe070c](https://github.com/quynhonsemiconductor/opshub/commit/bfe070c45653c87b6683c87f0b5eda20103616e6))
+* **deps:** fastify 5.12.7 for GHSA-389g-gv7q-r4x8 ([#471](https://github.com/quynhonsemiconductor/opshub/issues/471)) ([855fc16](https://github.com/quynhonsemiconductor/opshub/commit/855fc1696a55f13f0b5e771deaaedae05fa7bf82))
+
 ## [0.4.2](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.1...v0.4.2) (2026-10-21)
 
 
