@@ -51,12 +51,15 @@ export const FIXTURE_TABLES = [
   // `identity.user` and `identity.account` are deliberately NOT here: the users ARE the fixture set.
   'identity.session',
   'identity.verification',
+  // door — what the door suites create on every run (events especially: every terminal-sim run)
+  'door.events',
+  'door.cards',
+  'door.terminals',
   // workforce — what the isolation suite creates on every run
   'workforce.timesheets',
   'workforce.leave_requests',
   'workforce.overtime_entries',
   'workforce.shift_logs',
-  'workforce.attendance_logs',
   /**
    * The leave CALENDAR and ALLOWANCES, not just the requests.
    *
