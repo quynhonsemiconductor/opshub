@@ -134,9 +134,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # Playwright's documented container setting: the image user is root and
-      # without HOME some tooling misbehaves (@swc/core ERR_SWC_NATIVE_CACHE).
-      HOME: /root
       # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -255,6 +252,11 @@ jobs:
     # step left to be flaky.
     container:
       image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+    # The image's default shell is dash, which has no pipefail — steps here use
+    # `set -euo pipefail`, so pin bash (like the idf container jobs do).
+    defaults:
+      run:
+        shell: bash
 
     services:
       postgres:
@@ -279,6 +281,9 @@ jobs:
 
 
     env:
+      # Playwright's documented container setting: the image user is root and
+      # without HOME some tooling misbehaves (@swc/core ERR_SWC_NATIVE_CACHE).
+      HOME: /root
       # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Shared by migrate/seed and the API process. Connects as the owner rather than the
