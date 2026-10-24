@@ -14,6 +14,16 @@ allowBuilds:
 overrides:
   # Kept from before: esbuild's dev-server request vulnerability.
   "esbuild@<0.25.0": ">=0.25.0"
+  # GHSA-85x2-q946-cp5h / GHSA-8c8m-p3m8-cjg8 / GHSA-m943-m63m-w62w — nodemailer 10.1.2
+  # (shared-token/IMAP URL handling, CVSS 6.5), fixed 10.1.4 on the 10.x line. In-major: the
+  # only consumer is platform-mail's smtp transport, which declares >=6.9.
+  "nodemailer": "10.1.4"
+  # GHSA-333x-w4r6-6crp + three companions — fast-uri 4.1.5 (protocol confusion / percent
+  # encoding, up to CVSS 6.1), fixed 4.2.3 on the 4.x line. In-major: reached via fastify's
+  # @fastify/ajv-compiler, which declares the 4.x range itself.
+  # GHSA-xjj6-f33q-929c + two companions — undici 8.10.2 (redirect cross-origin data leak,
+  # CVSS 7.5), fixed 8.12.2 on the 8.x line. Same per-major span rule as the undici pins in
+  # rova's file: each consumer stays inside the major it declares.
   # GHSA-rgw5-rvv9-x895 — brace-expansion, vulnerable <5.0.9, fixed 5.0.9. It
   # explicitly BYPASSES the CVE-2026-14257 mitigation, which is what the previous pin
   # here (5.0.8, GHSA-mh99-v99m-4gvg) was for — so 5.0.8 is no longer merely an older
@@ -71,7 +81,7 @@ overrides:
   # binds the resolved version, matching the reasoning above.
   # Bumped from >=4.1.3: GHSA-hrr3-gc8f-f4qj and GHSA-jvvf-x445-j334 are fixed at 4.1.5 on
   # the 4.x line. Capped below 5.0.0 so the floor can never drag the tree onto a new major.
-  "fast-uri": ">=4.1.5 <5.0.0"
+  "fast-uri": ">=4.2.3 <5.0.0"  # RAISED 4.1.5 for GHSA-333x/74x6/wjr9/xhq7 (percent-encoding, up to CVSS 6.1), fixed 4.2.3
   # GHSA-73wf-gq98-2v4g / GHSA-c83g-rgw3-j3cx — browserslist crash / prototype write via
   # untrusted browserslist-stats, CVSS 7.5, fixed 4.28.7. Transitive via the web build
   # toolchain; the tree is on 4.x so a floor forces no major jump.
@@ -114,7 +124,7 @@ overrides:
   # `undici@8` match any request inside that major, and each target is capped below the
   # next one, so the jsdom constraint above still holds.
   "undici@7": ">=7.29.1 <8.0.0"
-  "undici@8": ">=8.10.2 <9.0.0"
+  "undici@8": ">=8.12.2 <9.0.0"  # RAISED 8.10.2 for GHSA-xjj6-f33q-929c + two (redirect cross-origin leak, CVSS 7.5), fixed 8.12.2
   # GHSA-f596-whhp-79r4 / GHSA-m9gg-hp2v-232j — @grpc/grpc-js, fixed 1.14.5 (1.13.6 on
   # the older line). Transitive via the OTel gRPC exporters, @nestjs/terminus and
   # dockerode; all request 1.x, so a floor capped below 2.0.0 forces no major jump.
