@@ -18,10 +18,12 @@ import {
   CurrentUser,
   RateLimit,
   RequirePermission,
+  SkipIdempotency,
 } from '@platform';
 import type { JwtPayload, PagedResult } from '@platform';
 import { DoorService } from '../../application/door.service';
-import type { DoorTerminal, DoorCard, UnknownCardEvent } from '../../domain/door.types';
+import type { DoorTerminal, DoorCard, UpdateCardInput } from '../../domain/door.types';
+import type { UnknownCardGroup } from '../../domain/ports/card.repository';
 import {
   CreateTerminalDto,
   CreateCardDto,
@@ -30,7 +32,7 @@ import {
   DoorTerminalResponseDto,
   DoorTerminalTokenResponseDto,
   DoorCardResponseDto,
-  UnknownCardEventResponseDto,
+  UnknownCardGroupResponseDto,
 } from './dto/door.dto';
 
 function toTerminalDto(t: DoorTerminal): DoorTerminalResponseDto {
@@ -63,14 +65,12 @@ function toCardDto(c: DoorCard & { employeeName?: string | null }): DoorCardResp
   };
 }
 
-function toUnknownEventDto(e: UnknownCardEvent): UnknownCardEventResponseDto {
+function toUnknownGroupDto(e: UnknownCardGroup): UnknownCardGroupResponseDto {
   return {
-    id: e.id,
-    terminalId: e.terminalId,
     uid: e.uid,
-    result: e.result,
-    deviceTs: e.deviceTs.toISOString(),
-    receivedAt: e.receivedAt.toISOString(),
+    reader: e.reader,
+    count: e.count,
+    lastSeenAt: e.lastSeenAt.toISOString(),
   };
 }
 
@@ -95,6 +95,9 @@ export class DoorController {
   }
 
   @Post('terminals')
+  // The response IS the credential: an Idempotency-Key here would cache it in Valkey for 24 h and
+  // hand it to any retry (SA review B10).
+  @SkipIdempotency()
   @RequirePermission('door.manage')
   @RateLimit('STRICT')
   @ApiOperation({
@@ -115,6 +118,9 @@ export class DoorController {
 
   @Post('terminals/:id/token')
   @HttpCode(HttpStatus.OK)
+  // The response IS the new credential: an Idempotency-Key here would cache it in Valkey for 24 h
+  // and hand it to any retry (SA review B10).
+  @SkipIdempotency()
   @RequirePermission('door.manage', { resource: 'door_terminal', from: 'param', field: 'id' })
   @RateLimit('STRICT')
   @ApiOperation({
@@ -194,20 +200,17 @@ export class DoorController {
     @Body() dto: UpdateCardDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<DoorCardResponseDto> {
-    const card = await this.door.updateCard(
-      id,
-      {
-        ...dto,
-        validFrom: dto.validFrom ? new Date(dto.validFrom) : undefined,
-        validUntil:
-          dto.validUntil !== undefined
-            ? dto.validUntil
-              ? new Date(dto.validUntil)
-              : null
-            : undefined,
-      },
-      { sub: user.sub, email: user.email },
-    );
+    // ONLY the fields the caller sent are patched (SA review B1): spreading the DTO put a
+    // `validUntil: undefined` KEY in the object, the service's `'validUntil' in input` read that
+    // as "clear the window", and a label-only PATCH silently revoked every temporary card.
+    const patch: UpdateCardInput = {};
+    if (dto.label !== undefined) patch.label = dto.label;
+    if (dto.status !== undefined) patch.status = dto.status;
+    if (dto.validFrom !== undefined) patch.validFrom = new Date(dto.validFrom);
+    if (dto.validUntil !== undefined) {
+      patch.validUntil = dto.validUntil === null ? null : new Date(dto.validUntil);
+    }
+    const card = await this.door.updateCard(id, patch, { sub: user.sub, email: user.email });
     return toCardDto({ ...card, employeeName: null });
   }
 
@@ -217,9 +220,9 @@ export class DoorController {
   @ApiOperation({
     summary: 'UIDs the readers saw in the last 24 h that belonged to nobody — the enrolment list',
   })
-  @ApiOkResponse({ type: [UnknownCardEventResponseDto] })
+  @ApiOkResponse({ type: [UnknownCardGroupResponseDto] })
   @ApiCommonErrors(401, 403)
-  async unknownCards(): Promise<UnknownCardEventResponseDto[]> {
-    return (await this.door.unknownCards()).map(toUnknownEventDto);
+  async unknownCards(): Promise<UnknownCardGroupResponseDto[]> {
+    return (await this.door.unknownCards()).map(toUnknownGroupDto);
   }
 }

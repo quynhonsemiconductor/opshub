@@ -7953,13 +7953,13 @@ export interface components {
       validFrom?: string;
       validUntil?: string | null;
     };
-    UnknownCardEventResponseDto: {
-      id: string;
-      terminalId: string;
+    UnknownCardGroupResponseDto: {
       uid: string;
-      result: string;
-      deviceTs: string;
-      receivedAt: string;
+      /** @description Reader of the most recent unknown swipe on this UID. */
+      reader: string;
+      /** @description How many times the readers saw it in the window. */
+      count: number;
+      lastSeenAt: string;
     };
   };
   responses: never;
@@ -23707,7 +23707,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['UnknownCardEventResponseDto'][];
+          'application/json': components['schemas']['UnknownCardGroupResponseDto'][];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */

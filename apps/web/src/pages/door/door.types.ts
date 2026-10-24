@@ -6,6 +6,6 @@ import type { components } from '@/shared/api/types';
  */
 export type DoorTerminal = components['schemas']['DoorTerminalResponseDto'];
 export type DoorCard = components['schemas']['DoorCardResponseDto'];
-export type UnknownCardEvent = components['schemas']['UnknownCardEventResponseDto'];
+export type UnknownCardGroup = components['schemas']['UnknownCardGroupResponseDto'];
 
 export const CARD_STATUS_FILTERS = ['active', 'revoked', 'lost'] as const;

@@ -31,9 +31,9 @@ const mockCards = {
   findActiveByUid: vi.fn(),
   update: vi.fn(),
   list: vi.fn(),
-  listUnknownEvents: vi.fn(),
+  listUnknownCardGroups: vi.fn(),
 };
-const mockEmployees = { assertExist: vi.fn() };
+const mockEmployees = { assertExist: vi.fn(), getById: vi.fn() };
 const mockAudit = createFakeAudit();
 
 const TX = { tx: true };
@@ -199,7 +199,17 @@ describe('DoorService.revokeTerminal()', () => {
 });
 
 describe('DoorService.addCard()', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEmployees.getById.mockResolvedValue({
+      id: CARD.employeeId,
+      displayName: 'Jane',
+      status: 'active',
+    });
+    mockDb.transaction.mockImplementation((fn: (tx: unknown) => Promise<unknown>) =>
+      fn({ tx: true }),
+    );
+  });
 
   it('normalises the UID before the duplicate check and the insert', async () => {
     mockEmployees.assertExist.mockResolvedValue(undefined);
@@ -227,6 +237,47 @@ describe('DoorService.addCard()', () => {
       makeService().addCard({ employeeId: CARD.employeeId, uid: '04A1B2C3' }, ACTOR),
     ).rejects.toThrow(ConflictException);
     expect(mockCards.create).not.toHaveBeenCalled();
+  });
+
+  it('maps a concurrent enrol (23505 on the active-UID index) to the conflict it is', async () => {
+    mockEmployees.getById.mockResolvedValue({
+      id: CARD.employeeId,
+      displayName: 'Jane',
+      status: 'active',
+    });
+    mockCards.findActiveByUid.mockResolvedValue(null);
+    const pgError = Object.assign(new Error('duplicate key'), {
+      code: '23505',
+      constraint: 'uq_door_card_active_uid',
+    });
+    mockDb.transaction.mockImplementation(() => Promise.reject(pgError));
+
+    await expect(
+      makeService().addCard({ employeeId: CARD.employeeId, uid: '04A1B2C3' }, ACTOR),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('refuses a card for an offboarded employee; on_leave stays allowed', async () => {
+    mockEmployees.getById.mockResolvedValue({
+      id: CARD.employeeId,
+      displayName: 'Jane',
+      status: 'offboarded',
+    });
+    await expect(
+      makeService().addCard({ employeeId: CARD.employeeId, uid: '04A1B2C3' }, ACTOR),
+    ).rejects.toThrow(/offboarded/);
+    expect(mockCards.create).not.toHaveBeenCalled();
+
+    mockEmployees.getById.mockResolvedValue({
+      id: CARD.employeeId,
+      displayName: 'Jane',
+      status: 'on_leave',
+    });
+    mockCards.findActiveByUid.mockResolvedValue(null);
+    mockCards.create.mockResolvedValue(CARD);
+    mockDb.transaction.mockImplementation((fn: (tx: unknown) => Promise<unknown>) => fn({}));
+    await makeService().addCard({ employeeId: CARD.employeeId, uid: '04A1B2C3' }, ACTOR);
+    expect(mockCards.create).toHaveBeenCalled();
   });
 
   it('validates the employee exists (assertExist, not a FK)', async () => {
@@ -304,9 +355,9 @@ describe('DoorService.unknownCards()', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('looks back exactly 24 hours', async () => {
-    mockCards.listUnknownEvents.mockResolvedValue([]);
+    mockCards.listUnknownCardGroups.mockResolvedValue([]);
     await makeService().unknownCards();
-    const [since] = mockCards.listUnknownEvents.mock.calls[0] as [Date, number];
+    const [since] = mockCards.listUnknownCardGroups.mock.calls[0] as [Date, number];
     const hours = (Date.now() - since.getTime()) / 3600_000;
     expect(hours).toBeGreaterThanOrEqual(23.9);
     expect(hours).toBeLessThanOrEqual(24.1);

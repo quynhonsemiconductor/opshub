@@ -14,6 +14,7 @@ export { Badge, type BadgeTone } from './badge';
 export { Button, FOCUS_RING, type ButtonProps } from './button';
 export { Card, CardContent, CardHeader, CardTitle } from './card';
 export { ConfirmDialog } from './confirm-dialog';
+export { CopyButton } from './copy-button';
 export { DateRangePicker, type DateRange, type DateRangePickerProps } from './date-range-picker';
 export { DataTable, type DataTableColumn, type DataTableProps } from './data-table';
 export { DescriptionList, type DescriptionItem } from './description-list';

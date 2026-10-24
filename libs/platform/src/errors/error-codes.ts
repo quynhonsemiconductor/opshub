@@ -305,6 +305,12 @@ export const ErrorCodes = {
   DOOR_CARD_DUPLICATE: 'DOOR_CARD_DUPLICATE',
   /** Not uppercase hex of a 4/7/10-byte UID. */
   DOOR_CARD_UID_INVALID: 'DOOR_CARD_UID_INVALID',
+  /** valid_until <= valid_from: the card could never open anything. */
+  DOOR_CARD_WINDOW_INVALID: 'DOOR_CARD_WINDOW_INVALID',
+  /** The card is revoked or lost: reissue a new one instead of editing this. */
+  DOOR_CARD_CLOSED: 'DOOR_CARD_CLOSED',
+  /** The card's employee is offboarded; offboarding already removed their access. */
+  DOOR_CARD_EMPLOYEE_OFFBOARDED: 'DOOR_CARD_EMPLOYEE_OFFBOARDED',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

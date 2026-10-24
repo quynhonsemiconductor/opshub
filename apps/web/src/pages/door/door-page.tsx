@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { DoorOpen, Plus, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiErrorMessage } from '@/shared/api/errors';
@@ -25,11 +24,12 @@ import { formatDate, formatDateTime, orDash } from '@/shared/lib/format';
 import {
   AddCardModal,
   AssignUnknownCardModal,
+  CardEditModal,
   RegisterTerminalModal,
   RegenerateTokenModal,
 } from './door-modals';
 import { CARD_STATUS_FILTERS } from './door.types';
-import type { DoorCard, DoorTerminal, UnknownCardEvent } from './door.types';
+import type { DoorCard, DoorTerminal, UnknownCardGroup } from './door.types';
 import { useCards, useTerminals, useUnknownCards, useDoorWrites } from './use-door';
 
 /**
@@ -51,7 +51,6 @@ function terminalStatus(t: DoorTerminal): 'active' | 'revoked' {
 }
 
 export function DoorPage() {
-  const qc = useQueryClient();
   const list = useListState();
   const { can } = usePermissions();
   const canManage = can('door.manage');
@@ -60,7 +59,9 @@ export function DoorPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [registering, setRegistering] = useState(false);
   const [addingCard, setAddingCard] = useState(false);
-  const [assigning, setAssigning] = useState<UnknownCardEvent | null>(null);
+  const [assigning, setAssigning] = useState<UnknownCardGroup | null>(null);
+  const [editing, setEditing] = useState<DoorCard | null>(null);
+  const [revokingCard, setRevokingCard] = useState<DoorCard | null>(null);
   const [rotating, setRotating] = useState<DoorTerminal | null>(null);
   const [revoking, setRevoking] = useState<DoorTerminal | null>(null);
   const [lostConfirming, setLostConfirming] = useState<DoorCard | null>(null);
@@ -69,14 +70,12 @@ export function DoorPage() {
   const cards = useCards(statusFilter, list.limit, list.offset);
   const unknown = useUnknownCards();
   const { revokeTerminal, updateCard } = useDoorWrites();
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['door'] });
 
   async function markLost() {
     if (!lostConfirming) return;
     try {
       await updateCard(lostConfirming.id, { status: 'lost' });
       toast.success('Card marked lost');
-      invalidate();
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Failed to mark the card lost.'));
     } finally {
@@ -176,6 +175,10 @@ export function DoorPage() {
       cell: (c) =>
         canManage && c.status === 'active' ? (
           <RowActions>
+            <RowAction onClick={() => setEditing(c)}>Edit</RowAction>
+            <RowAction tone="danger" onClick={() => setRevokingCard(c)}>
+              Revoke
+            </RowAction>
             <RowAction tone="danger" onClick={() => setLostConfirming(c)}>
               Mark lost
             </RowAction>
@@ -184,14 +187,21 @@ export function DoorPage() {
     },
   ];
 
-  const unknownColumns: DataTableColumn<UnknownCardEvent>[] = [
+  const unknownColumns: DataTableColumn<UnknownCardGroup>[] = [
     {
       key: 'uid',
       header: 'UID',
       cell: (e) => <span className="font-mono text-xs text-fg">{e.uid}</span>,
     },
-    { key: 'result', header: 'Result', cell: (e) => humanizeStatus(e.result), hideOnMobile: true },
-    { key: 'deviceTs', header: 'Seen at', cell: (e) => formatDateTime(e.deviceTs) },
+    { key: 'reader', header: 'Reader', cell: (e) => humanizeStatus(e.reader), hideOnMobile: true },
+    {
+      key: 'count',
+      header: 'Swipes',
+      align: 'right',
+      cell: (e) => <span className="tabular-nums">{e.count}</span>,
+      hideOnMobile: true,
+    },
+    { key: 'lastSeenAt', header: 'Last seen', cell: (e) => formatDateTime(e.lastSeenAt) },
     {
       key: 'actions',
       header: '',
@@ -298,6 +308,25 @@ export function DoorPage() {
         description="The terminal can no longer authenticate. The door keeps opening from its cached allow-list."
         confirmLabel="Revoke"
       />
+      <ConfirmDialog
+        open={revokingCard !== null}
+        onCancel={() => setRevokingCard(null)}
+        onConfirm={async () => {
+          if (!revokingCard) return;
+          try {
+            await updateCard(revokingCard.id, { status: 'revoked' });
+            toast.success('Card revoked');
+          } catch (err) {
+            toast.error(apiErrorMessage(err, 'Failed to revoke the card.'));
+          } finally {
+            setRevokingCard(null);
+          }
+        }}
+        title={`Revoke card ${revokingCard?.uid ?? ''}?`}
+        description="It leaves the allow-list at the terminal's next sync. The UID can be reissued afterwards."
+        confirmLabel="Revoke"
+      />
+      <CardEditModal key={editing?.id ?? 'none'} card={editing} onClose={() => setEditing(null)} />
       <ConfirmDialog
         open={lostConfirming !== null}
         onCancel={() => setLostConfirming(null)}

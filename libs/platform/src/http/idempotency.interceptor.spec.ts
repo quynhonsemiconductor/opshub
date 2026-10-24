@@ -17,6 +17,8 @@
  */
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Reflector } from '@nestjs/core';
+import { IDEMPOTENCY_SKIP_KEY } from './idempotency.interceptor';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
 
 // The principal the interceptor reads: the request context, set by the guard that authenticated. Not `req.user`.
@@ -75,6 +77,10 @@ function makeContext(
     ctx: {
       getType: () => 'http',
       switchToHttp: () => ({ getRequest: () => req, getResponse: () => ({ header }) }),
+      // The route-level opt-out (SkipIdempotency) reads metadata off these; the default context
+      // carries none.
+      getHandler: () => ({}),
+      getClass: () => ({}),
     } as never,
     header,
   };
@@ -87,11 +93,29 @@ const handler = (value: unknown = HANDLED) => ({ handle: vi.fn(() => of(value)) 
 async function fingerprintOf(over: Parameters<typeof makeContext>[0] = {}): Promise<string> {
   const cache = makeCache();
   const { ctx } = makeContext({ key: 'k', ...over });
-  await firstValueFrom(new IdempotencyInterceptor(cache as never).intercept(ctx, handler()));
+  await firstValueFrom(
+    new IdempotencyInterceptor(cache as never, new Reflector()).intercept(ctx, handler()),
+  );
   return (cache.setJson.mock.calls[0][1] as Stored).fingerprint;
 }
 
 describe('IdempotencyInterceptor', () => {
+  it('stays out of a route marked SkipIdempotency, whatever key it carries (a secret response is not replayable)', async () => {
+    const cache = makeCache();
+    const next = handler();
+    // A handler decorated with SkipIdempotency(): SetMetadata writes the flag the Reflector reads.
+    const handlerFn = (): unknown => ({});
+    Reflect.defineMetadata(IDEMPOTENCY_SKIP_KEY, true, handlerFn);
+    const { ctx } = makeContext({ key: 'k' });
+    (ctx as { getHandler: () => unknown }).getHandler = () => handlerFn;
+    await firstValueFrom(
+      new IdempotencyInterceptor(cache as never, new Reflector()).intercept(ctx, next),
+    );
+    expect(next.handle).toHaveBeenCalled();
+    expect(cache.getJson).not.toHaveBeenCalled();
+    expect(cache.setJson).not.toHaveBeenCalled();
+  });
+
   let cache: ReturnType<typeof makeCache>;
 
   beforeEach(() => {
@@ -103,7 +127,9 @@ describe('IdempotencyInterceptor', () => {
       const { ctx } = makeContext({ method, key: 'k' });
       const next = handler();
 
-      await firstValueFrom(new IdempotencyInterceptor(cache as never).intercept(ctx, next));
+      await firstValueFrom(
+        new IdempotencyInterceptor(cache as never, new Reflector()).intercept(ctx, next),
+      );
 
       expect(next.handle).toHaveBeenCalledOnce();
       // Not even a lookup: GET and DELETE are idempotent by definition, so a key adds nothing.
@@ -114,7 +140,9 @@ describe('IdempotencyInterceptor', () => {
       const { ctx } = makeContext();
       const next = handler();
 
-      await firstValueFrom(new IdempotencyInterceptor(cache as never).intercept(ctx, next));
+      await firstValueFrom(
+        new IdempotencyInterceptor(cache as never, new Reflector()).intercept(ctx, next),
+      );
 
       expect(next.handle).toHaveBeenCalledOnce();
       expect(cache.acquireLock).not.toHaveBeenCalled();
@@ -127,7 +155,9 @@ describe('IdempotencyInterceptor', () => {
       const { ctx } = makeContext({ key: 'k' });
       const next = handler();
 
-      await firstValueFrom(new IdempotencyInterceptor(down as never).intercept(ctx, next));
+      await firstValueFrom(
+        new IdempotencyInterceptor(down as never, new Reflector()).intercept(ctx, next),
+      );
 
       expect(next.handle).toHaveBeenCalledOnce();
     });
@@ -139,7 +169,7 @@ describe('IdempotencyInterceptor', () => {
       const next = handler();
 
       const result = await firstValueFrom(
-        new IdempotencyInterceptor(cache as never).intercept(ctx, next),
+        new IdempotencyInterceptor(cache as never, new Reflector()).intercept(ctx, next),
       );
 
       expect(result).toEqual(HANDLED);
@@ -154,7 +184,9 @@ describe('IdempotencyInterceptor', () => {
     it('releases the lock so the next request is not told "in flight"', async () => {
       const { ctx } = makeContext({ key: 'k' });
 
-      await firstValueFrom(new IdempotencyInterceptor(cache as never).intercept(ctx, handler()));
+      await firstValueFrom(
+        new IdempotencyInterceptor(cache as never, new Reflector()).intercept(ctx, handler()),
+      );
 
       expect(cache.releaseLock).toHaveBeenCalledWith('idem:emp-1:k:lock');
     });
@@ -168,7 +200,7 @@ describe('IdempotencyInterceptor', () => {
       const next = handler();
 
       const result = await firstValueFrom(
-        new IdempotencyInterceptor(replaying as never).intercept(ctx, next),
+        new IdempotencyInterceptor(replaying as never, new Reflector()).intercept(ctx, next),
       );
 
       expect(result).toEqual(HANDLED);
@@ -190,7 +222,9 @@ describe('IdempotencyInterceptor', () => {
       const next = handler();
 
       await expect(
-        firstValueFrom(new IdempotencyInterceptor(replaying as never).intercept(ctx, next)),
+        firstValueFrom(
+          new IdempotencyInterceptor(replaying as never, new Reflector()).intercept(ctx, next),
+        ),
       ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED', httpStatus: 422 });
       expect(next.handle).not.toHaveBeenCalled();
     });
@@ -222,7 +256,9 @@ describe('IdempotencyInterceptor', () => {
       const next = handler();
 
       await expect(
-        firstValueFrom(new IdempotencyInterceptor(busy as never).intercept(ctx, next)),
+        firstValueFrom(
+          new IdempotencyInterceptor(busy as never, new Reflector()).intercept(ctx, next),
+        ),
       ).rejects.toMatchObject({ code: 'IDEMPOTENCY_IN_FLIGHT', httpStatus: 409 });
       expect(next.handle).not.toHaveBeenCalled();
     });
@@ -234,7 +270,9 @@ describe('IdempotencyInterceptor', () => {
       const failing = { handle: vi.fn(() => throwError(() => new Error('boom'))) };
 
       await expect(
-        firstValueFrom(new IdempotencyInterceptor(cache as never).intercept(ctx, failing)),
+        firstValueFrom(
+          new IdempotencyInterceptor(cache as never, new Reflector()).intercept(ctx, failing),
+        ),
       ).rejects.toThrow('boom');
 
       // Caching a failure would turn one bad minute into 24 hours of the same bad answer.
@@ -246,7 +284,9 @@ describe('IdempotencyInterceptor', () => {
       const failing = { handle: vi.fn(() => throwError(() => new Error('boom'))) };
 
       await expect(
-        firstValueFrom(new IdempotencyInterceptor(cache as never).intercept(ctx, failing)),
+        firstValueFrom(
+          new IdempotencyInterceptor(cache as never, new Reflector()).intercept(ctx, failing),
+        ),
       ).rejects.toThrow('boom');
 
       expect(cache.releaseLock).toHaveBeenCalledWith('idem:emp-1:k:lock');
@@ -255,7 +295,7 @@ describe('IdempotencyInterceptor', () => {
 
   it('scopes an UNauthenticated caller by clientIp(): the signed/cf address, never a header the caller sets', async () => {
     const cache = makeCache();
-    const interceptor = new IdempotencyInterceptor(cache as never);
+    const interceptor = new IdempotencyInterceptor(cache as never, new Reflector());
     const { ctx } = makeContext({
       key: 'k-1',
       user: null,
@@ -276,7 +316,9 @@ describe('IdempotencyInterceptor', () => {
     const next = handler();
     const { ctx } = makeContext({ key: 'k-2', user: { sub: 'emp-1' }, principal: null });
 
-    await firstValueFrom(new IdempotencyInterceptor(cache as never).intercept(ctx, next));
+    await firstValueFrom(
+      new IdempotencyInterceptor(cache as never, new Reflector()).intercept(ctx, next),
+    );
 
     expect(next.handle).toHaveBeenCalledTimes(1);
     expect(cache.getJson).not.toHaveBeenCalled();
@@ -296,7 +338,7 @@ describe('IdempotencyInterceptor', () => {
       acquireLock: vi.fn().mockResolvedValue(true),
       releaseLock: vi.fn().mockResolvedValue(undefined),
     };
-    const interceptor = new IdempotencyInterceptor(cache as never);
+    const interceptor = new IdempotencyInterceptor(cache as never, new Reflector());
 
     const alice = handler({ id: 'alice-asset' });
     const bob = handler({ id: 'bob-asset' });
