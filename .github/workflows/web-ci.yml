@@ -379,6 +379,9 @@ jobs:
           STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
           # Quoted on purpose: an unquoted all-zero scalar is read by YAML as the integer 0, and Garage then gets "0".
           STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+          # The e2e suite uploads to THIS bucket (S3_FILES_BUCKET below). Without it Garage answers the
+          # browser's preflight without CORS headers and every upload test times out.
+          BUCKETS: opshub-files-ci
         run: |
           set -euo pipefail
           # Pinned release binary (x86_64 musl, from garagehq.deuxfleurs.fr),
