@@ -16,9 +16,3 @@ the finding. Reached only through @swc/cli -> @xhmikosr/bin-wrapper -> downloade
 cacheable-request, a devDependency that downloads the swc binary; nothing here runs a shared \
 HTTP cache that serves other users. Revisit by the expiry: drop this entry if a fixed release \
 ships or the advisory is withdrawn."""
-
-[[IgnoredVulns]]
-id = "GHSA-xcx6-jx8p-x3h5"
-ignoreUntil = 2026-11-21
-reason = """\
-@azure/msal-node 5.2.5 (auth-code flow may disclose parameters to an attacker-controlled endpoint, CVSS 7.5, fixed 7.1.0). The fix is TWO majors above what the only consumer holds: @azure/identity 4.14 declares msal-node ^6.0.0, and no 5.x of @azure/identity exists yet, so an override would run msal-node 7 against an adapter built and tested for 6. opshub reaches msal ONLY through @azure/identity's CLIENT-CREDENTIALS path (Graph token acquisition); the vulnerable AUTHORIZATION-CODE flow is browser SSO and is not exercised anywhere in this service. Revisit by the expiry: when @azure/identity ships a 5.x line depending on msal-node >=7.1.0, bump it here; if that has not happened by the expiry, re-verify the flow claim and renew with fresh evidence."""

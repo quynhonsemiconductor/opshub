@@ -14,6 +14,12 @@ allowBuilds:
 overrides:
   # Kept from before: esbuild's dev-server request vulnerability.
   "esbuild@<0.25.0": ">=0.25.0"
+  # GHSA-xcx6-jx8p-x3h5 — msal-node <7.1.0 (auth-code flow parameter disclosure, CVSS 7.5).
+  # SCOPED to @azure/identity on purpose: msal 7 is TWO majors above the ^6 @azure/identity
+  # 4.14 declares, so a global pin would also capture any future consumer that asks for 6.
+  # rova#793 carries the same override; the app runs only the client-credentials path, and
+  # the Graph/mail suites drive @azure/identity through it on every CI run.
+  "@azure/identity>@azure/msal-node": "7.1.0"
   # GHSA-85x2-q946-cp5h / GHSA-8c8m-p3m8-cjg8 / GHSA-m943-m63m-w62w — nodemailer 10.1.2
   # (shared-token/IMAP URL handling, CVSS 6.5), fixed 10.1.4 on the 10.x line. In-major: the
   # only consumer is platform-mail's smtp transport, which declares >=6.9.
@@ -165,12 +171,11 @@ minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - '@quynhonsemiconductor/*'
 patchedDependencies:
-  # zod >= 4.5 rewrites anyOf type-unions into 2020-12 style type arrays (compactTypeUnion),
-  # which nestjs-zod's OpenAPI conversion mishandles (nullable strings rendered as string
-  # arrays) and which is invalid in an OpenAPI 3.0 document. Both vendored patches are
-  # rova#793's, adopted unchanged: disable compactTypeUnion in zod's JSON-SCHEMA EMISSION
-  # (the GHSA-mrhx-c7xc-m3w5 fix is in the parse path, not here), and make nestjs-zod ask
-  # zod for OpenAPI 3.0 output. Pinned exactly: the patches name the dist files of these
-  # versions, so a floating range would silently unpatch on the next bump.
-  zod@4.6.6: patches/zod@4.6.6.patch
+  # nestjs-zod 5.5.0 calls zod's toJSONSchema WITHOUT a target, so zod 4.5+ emits 2020-12
+  # constructs (raw type lists) that are invalid in an OpenAPI 3.0 document. The vendored
+  # patch (rova#793's, unchanged) passes target: "openapi-3.0". Pinned exactly: the patch
+  # names this version's dist files, so a floating range would silently unpatch on bump.
+  # zod itself needs NO patch here: with the openapi-3.0 target zod skips compactTypeUnion's
+  # type-array rewrite on its own (the function is 3.0-excluded), which is why rova#793
+  # abandoned that second patch, and why this one alone keeps the spec byte-stable.
   nestjs-zod@5.5.0: patches/nestjs-zod@5.5.0.patch
