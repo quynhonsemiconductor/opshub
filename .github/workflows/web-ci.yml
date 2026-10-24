@@ -426,52 +426,6 @@ jobs:
         env:
           OPENAPI_SPEC: ${{ runner.temp }}/openapi.json
 
-      # ── Playwright browser ────────────────────────────────────────────────────
-      #
-      # CACHED, AND WITH ITS OWN TIMEOUT, because this step is the only part of this job that has ever
-      # failed for a reason unrelated to the code.
-      #
-      # It downloads Chromium from the Playwright CDN on every run. Measured across nineteen runs: 20-35s
-      # when the CDN is healthy, 248s / 301s / 336s when it is not, and twice it simply hung -- 1441s and
-      # 1446s -- until the job's 25-minute budget ran out. Both of those surfaced as a CANCELLED job with
-      # the tests never started, which reads exactly like a flaky suite and is nothing of the kind.
-      #
-      # The cache key is the Playwright package version, because that is what decides the browser build.
-      # Keying on a lockfile hash instead would miss the cache on every unrelated dependency change; on
-      # the version alone, a Playwright upgrade downloads once and every later run is a hit.
-      - name: Resolve the Playwright version
-        id: playwright
-        run: |
-          version=$(node -p "require('./apps/web/node_modules/@playwright/test/package.json').version")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
-
-      # The cache carries the BROWSER; the OS libraries it links against live outside that
-      # path and are installed separately below, EVERY run. Splitting the two means the big
-      # Chromium download happens only on a cache miss (a Playwright upgrade), and that
-      # download — the one step that ever hung — is retried once before the step fails.
-      #
-      # The step timeout is the important half. Without it a hung download eats the job budget and the
-      # failure is reported as a cancellation of the whole job; with it the step fails in eight minutes
-      # naming itself, and a re-run becomes a decision rather than a guess.
-      - name: Install Playwright browser (on cache miss, retried once)
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 8
-        run: |
-          # Both attempts are bounded on their own: two unbounded attempts share the step
-          # timeout, so a hang in the FIRST one would eat the budget and the retry would
-          # never run. 2×180 s + 15 s sleep ≈ 6.3 min < the step's 8 min.
-          timeout 180 pnpm --filter opshub-web exec playwright install chromium || {
-            echo "::warning::Playwright download failed once — retrying (CDN flake)"
-            sleep 15
-            timeout 180 pnpm --filter opshub-web exec playwright install chromium
-          }
-
       - name: Run browser E2E
         run: pnpm --filter opshub-web exec playwright test --reporter=line
 

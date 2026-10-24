@@ -1,16 +1,17 @@
-// One-shot setup of the local Garage node for CI: layout, the fixed local-dev key, the CI bucket,
-// its grant, lifecycle and CORS. Port of scripts/garage/init.sh for the Playwright container job,
-// which has no aws-cli and must not pip-install one (PEP 668) — the S3 calls run on
-// @aws-sdk/client-s3, already a dependency, and the admin calls on global fetch (node 18+).
+// One-shot setup of the local Garage node for CI and the compose dev stack: layout, the fixed
+// local-dev key, the buckets, their grant, lifecycle and CORS. The SINGLE implementation —
+// docker-compose.dev.yml (garage-init) and the CI container job both run this file. The S3 calls
+// run on @aws-sdk/client-s3 (a root dependency) and the admin calls on global fetch (node 18+).
 // Idempotent: every step checks before it changes anything. Exits non-zero on any failure.
 //
-// Endpoints are LOCALHOST: Garage runs as a background process inside the same job container
-// (the static musl release binary, started with docker/garage/garage.toml). No hostnames, no keys
-// beyond the fixed local-dev ones that docker-compose.dev.yml also carries in plain text.
+// Endpoints default to LOCALHOST (the CI job starts Garage as a background process in the same
+// container); the compose garage-init service overrides them with Garage's service DNS names.
+// No hostnames beyond that, no keys beyond the fixed local-dev ones that docker-compose.dev.yml
+// also carries in plain text.
 import { S3Client, PutBucketCorsCommand, PutBucketLifecycleConfigurationCommand } from '@aws-sdk/client-s3';
 
-const ADMIN = 'http://localhost:3903';
-const S3 = 'http://localhost:3900';
+const ADMIN = process.env.GARAGE_ADMIN_URL ?? 'http://localhost:3903';
+const S3 = process.env.GARAGE_S3_URL ?? 'http://localhost:3900';
 const BUCKETS = process.env.BUCKETS ?? 'opshub-files-dev opshub-files-test';
 const ORIGINS = (process.env.WEB_ORIGINS ?? 'http://localhost:5174,http://127.0.0.1:5174').split(',');
 const ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID;
