@@ -56,6 +56,7 @@ export const FIXTURE_TABLES = [
   'workforce.leave_requests',
   'workforce.overtime_entries',
   'workforce.shift_logs',
+  'workforce.wfh_days',
   'workforce.attendance_logs',
   /**
    * The leave CALENDAR and ALLOWANCES, not just the requests.

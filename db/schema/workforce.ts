@@ -232,3 +232,28 @@ export const leavePolicies = workforceSchema.table('leave_policies', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * One row per (employee, day) on which the employee works from home.
+ *
+ * ABSENCE IS THE DEFAULT, NOT A STATUS. A day with no row is a day in the office; there is no
+ * `wio` value to store, so "everyone is in the office until they say otherwise" needs no seeding,
+ * no backfill when somebody joins, and no job that has to keep the future filled in. Setting a day
+ * back to the office deletes its row.
+ *
+ * `(employee_id, work_date)` is unique so a double click, or two tabs, cannot mark the same day twice.
+ */
+export const wfhDays = workforceSchema.table(
+  'wfh_days',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    employeeId: uuid('employee_id').notNull(),
+    workDate: date('work_date').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    employeeDateIdx: uniqueIndex('uq_wfh_employee_date').on(t.employeeId, t.workDate),
+    // The calendar reads a whole month for everyone: the date is the leading filter, not the employee.
+    dateIdx: index('ix_wfh_date').on(t.workDate),
+  }),
+);

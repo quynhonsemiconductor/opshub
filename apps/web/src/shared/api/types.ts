@@ -155,6 +155,7 @@ export const AUDIT_RESOURCE_TYPES = [
   'vendor',
   'webhook_delivery',
   'webhook_subscription',
+  'wfh_day',
 ] as const satisfies readonly AuditResourceType[];
 
 /** Compile-time exhaustiveness: a catalogue value absent from the list above fails here. */
