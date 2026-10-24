@@ -9,22 +9,20 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { queryBoolean } from '@platform/http/query-boolean';
 
 /**
- * Pins the OpenAPI output shape under zod 4.6.6 with the two vendored patches (rova#793,
- * adopted for opshub on the zod bump PR).
+ * Pins the OpenAPI output shape under zod 4.6.6 with the vendored nestjs-zod patch
+ * (`patches/nestjs-zod@5.5.0.patch`, rova#793's, adopted for opshub on the zod bump PR).
  *
- * zod >= 4.5 changed OpenAPI-relevant emission in two ways:
- *   1. `compactTypeUnion` rewrites `anyOf: [{type: "a"}, {type: "b"}]` into 2020-12 style
- *      `type: ["a","b"]` lists, which nestjs-zod 5.5.0's OpenAPI 3.0 conversion mishandles —
- *      nullable string fields rendered as STRING ARRAYS, and (what actually surfaced first,
- *      opshub's `codegen:check`) every `queryBoolean()` query parameter drifted from
- *      `boolean | string` to `boolean[]`.
- *   2. nullable fields carried raw type lists that are invalid in an OpenAPI 3.0 document.
+ * zod 4.6.6's JSON Schema emission changed in ways nestjs-zod 5.5.0 mishandles WITHOUT the
+ * patch: every `queryBoolean()` query parameter drifted `boolean | string` -> `boolean[]`
+ * (what opshub's `codegen:check` surfaced first), and nullable fields carried raw 2020-12
+ * type lists that are invalid in an OpenAPI 3.0 document.
  *
- * The fix is the vendored pair `patches/zod@4.6.6.patch` (disable compactTypeUnion in zod's
- * JSON-SCHEMA EMISSION — the GHSA-mrhx-c7xc-m3w5 fix is in the parse path, not here) and
- * `patches/nestjs-zod@5.5.0.patch` (call zod's `toJSONSchema` with `target: "openapi-3.0"`).
- * These specs boot real Swagger documents and fail if either regression returns. They do NOT
- * weaken GHSA-mrhx-c7xc-m3w5 — that is in zod's validation path, not its JSON Schema emitter.
+ * The patch makes nestjs-zod call zod's `toJSONSchema` with `target: "openapi-3.0"`, which
+ * is the whole fix: with that target zod itself skips compactTypeUnion's type-array rewrite
+ * (the rewrite is 3.0-excluded), so zod needs NO patch of its own — rova#793's zod patch was
+ * abandoned for exactly that reason. These specs boot real Swagger documents and fail if
+ * either regression returns. They do NOT weaken GHSA-mrhx-c7xc-m3w5 — that is in zod's
+ * validation path, not its JSON Schema emitter.
  */
 
 // ── 1. queryBoolean renders as anyOf [boolean, string], never boolean[] ─────

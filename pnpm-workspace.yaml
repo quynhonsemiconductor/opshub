@@ -15,10 +15,15 @@ overrides:
   # Kept from before: esbuild's dev-server request vulnerability.
   "esbuild@<0.25.0": ">=0.25.0"
   # GHSA-xcx6-jx8p-x3h5 — msal-node <7.1.0 (auth-code flow parameter disclosure, CVSS 7.5).
-  # SCOPED to @azure/identity on purpose: msal 7 is TWO majors above the ^6 @azure/identity
-  # 4.14 declares, so a global pin would also capture any future consumer that asks for 6.
-  # rova#793 carries the same override; the app runs only the client-credentials path, and
-  # the Graph/mail suites drive @azure/identity through it on every CI run.
+  # SCOPED to @azure/identity: identity 4.13.1 declares msal ^5.1.0, so this is a two-major
+  # jump FORCED under identity 4.13.1 — outside what identity declares, and no identity
+  # release declaring msal >=7.1.0 exists yet (4.14 declares ^6). Accepted because msal's
+  # 6.0.0 and 7.0.0 breaking changes are BOTH on the acquireTokenInteractive /
+  # browser-loopback path (responseMode/form_post/ILoopbackClient), which nothing here uses:
+  # opshub drives only ClientCertificateCredential and WorkloadIdentityCredential
+  # (libs/modules/graph/src/graph-credential.ts), whose client-credentials surface is
+  # unchanged across 5->6->7 (msal changelog 6.0.0/7.0.0). Full suite green on msal 7.1.0.
+  # When @azure/identity ships a release declaring msal >=7.1.0, DROP this override.
   "@azure/identity>@azure/msal-node": "7.1.0"
   # GHSA-85x2-q946-cp5h / GHSA-8c8m-p3m8-cjg8 / GHSA-m943-m63m-w62w — nodemailer 10.1.2
   # (shared-token/IMAP URL handling, CVSS 6.5), fixed 10.1.4 on the 10.x line. In-major: the
