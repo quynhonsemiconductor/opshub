@@ -19,4 +19,8 @@ export interface ITerminalRepository {
   revoke(id: string, revokedAt: Date, tx?: unknown): Promise<DoorTerminal | null>;
   list(): Promise<DoorTerminal[]>;
   countActive(): Promise<number>;
+  /** Active terminals whose last_seen_at is at/after `since` — the Healthchecks job's whole question. */
+  countActiveSeenSince(since: Date): Promise<number>;
+  /** Adds a terminal-reported drop count to the running total. */
+  addDropped(id: string, count: number, tx?: unknown): Promise<void>;
 }
