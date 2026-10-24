@@ -112,7 +112,7 @@ jobs:
             **/*.test.ts
             **/*.test.tsx
       - id: paths
-        uses: quynhonsemiconductor/ci/actions/changed-paths@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        uses: quynhonsemiconductor/ci/actions/changed-paths@1fcb7f019a6c5482d30b2ece6caa416965c32bbe # ci#245 force-run; bump to the release tag on merge
         with:
           ignore: |
             **/*.md
@@ -243,6 +243,14 @@ jobs:
     if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Official Playwright image, version LOCKED to @playwright/test in
+    # apps/web (1.62.1 — a skew fails loudly: the bundled browsers must match
+    # the driver). Pinned by digest; the repo's renovate.json extends the
+    # docker manager to this file, so Renovate bumps tag AND digest together
+    # when @playwright/test moves. The image ships the browsers and OS
+    # libraries — the apt install-deps step is deleted, not moved.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
 
     services:
       postgres:
@@ -274,15 +282,37 @@ jobs:
       # upload paths reached main: a missing CSRF header, a CORS allow-list that refused a header the
       # presign signs, and a replacement lookup by key through a by-id finder. None of them are
       # visible without a bucket to PUT to.
+      #
+      # Same node docker-compose.dev.yml runs (same config file), reached by the service label
+      # instead of localhost — job containers cannot use localhost for services. The one-shot
+      # garage-init becomes a regular step: the playwright image has python3+pip, so the init
+      # script's only external need (aws-cli) is installed there (see the garage step below).
+      garage:
+        image: dxflrs/garage:v1.3.1
+        volumes:
+          - ./docker/garage/garage.toml:/etc/garage.toml:ro
+        options: >-
+          --health-cmd "/garage status"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+      # OBJECT STORAGE, because without it this job could not see uploads at all.
+      #
+      # `StorageService` stubs every presign when `S3_FILES_BUCKET` is unset, so the upload specs
+      # answered 500 here while passing locally — and that blind spot is exactly how THREE dead
+      # upload paths reached main: a missing CSRF header, a CORS allow-list that refused a header the
+      # presign signs, and a replacement lookup by key through a by-id finder. None of them are
+      # visible without a bucket to PUT to.
     env:
       # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Shared by migrate/seed and the API process. Connects as the owner rather than the
       # restricted role: Backend · CI already proves the least-privilege grants are complete,
       # and repeating that here would only add a second way for this job to fail.
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
-      DATABASE_MIGRATION_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
-      VALKEY_URL: redis://localhost:6379
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/opshub_test?sslmode=disable
+      DATABASE_MIGRATION_URL: postgresql://postgres:postgres@postgres:5432/opshub_test?sslmode=disable
+      VALKEY_URL: redis://redis:6379
       # The identity 8 session cache lives in Valkey and the cookie is verified against this secret. The
       # cache degrades to Postgres, but a run without it would exercise a path production does not.
       BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
@@ -317,7 +347,7 @@ jobs:
       # require — virtual-host style resolves a bucket subdomain that does not exist here.
       AWS_REGION: ap-southeast-1
       S3_FILES_BUCKET: opshub-files-ci
-      STORAGE_ENDPOINT: http://localhost:4610
+      STORAGE_ENDPOINT: http://garage:3900  # the service label, not localhost: job container
       STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
       STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
       STORAGE_FORCE_PATH_STYLE: 'true'
@@ -352,10 +382,16 @@ jobs:
       # opaque `net::ERR_FAILED`. scripts/garage/init.sh writes those rules and proves a preflight for
       # each origin; the origin is the Vite dev server Playwright starts (WEB_DEV_PORT, 5174). `run --rm`
       # returns the init's exit code, so a broken bucket fails this step.
-      - name: Start Garage and create the CI bucket
+      - name: Create the CI bucket (garage-init, in-container)
+        env:
+          GARAGE_ADMIN_TOKEN: local-dev-garage-admin-token-not-a-secret
+          STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
+          # Quoted on purpose: an unquoted all-zero scalar is read by YAML as the integer 0, and Garage then gets "0".
+          STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+          BUCKETS: opshub-files-ci
         run: |
-          docker compose -f docker-compose.dev.yml up -d --wait garage
-          docker compose -f docker-compose.dev.yml run --rm -e BUCKETS=opshub-files-ci garage-init
+          pip3 install --quiet awscli
+          bash scripts/garage/init.sh
 
       - name: Build API
         run: pnpm build:api
@@ -428,39 +464,6 @@ jobs:
             echo "::warning::Playwright download failed once — retrying (CDN flake)"
             sleep 15
             timeout 180 pnpm --filter opshub-web exec playwright install chromium
-          }
-
-      # THE APT SIDE IS THE REAL FLAKE, not the CDN: rova run 39782464249 spent 8 min 30 s
-      # fetching 25.9 MB from azure.archive.ubuntu.com while Chromium itself took ~9 s, and
-      # opshub run 39887434827 stalled on fonts from the same mirror. So the deps install is
-      # bounded per attempt (timeout 240), apt retries and times out transfers on its own,
-      # and the whole step gets a second attempt before it fails.
-      - name: Install Playwright OS dependencies (bounded, retried)
-        timeout-minutes: 9
-        run: |
-          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/99-playwright-retries >/dev/null
-          echo 'Acquire::http::Timeout "20";' | sudo tee -a /etc/apt/apt.conf.d/99-playwright-retries >/dev/null
-          echo 'DPkg::Lock::Timeout "120";' | sudo tee -a /etc/apt/apt.conf.d/99-playwright-retries >/dev/null
-          # Both attempts bounded: 2×(240+10) s + 15 s sleep + recovery ≈ 8.7 min < the step's 9 min.
-          timeout --kill-after=10 --signal=TERM 240 pnpm --filter opshub-web exec playwright install-deps chromium || {
-            echo "::warning::install-deps attempt 1 failed or timed out (slow apt mirror) — retrying once"
-            echo '--- dpkg lock holders after attempt 1:'
-            echo '--- last apt Acquire lines (which mirror was slow):'
-            sudo tail -n 40 /var/log/apt/term.log || true
-            sudo fuser -v /var/lib/dpkg/lock-frontend || true
-            # NON-FATAL (opshub PR run: an unguarded dpkg exit 2 aborted the step under
-            # bash -e before the retry ever ran). Finish or unwind whatever the killed
-            # attempt left half-configured; the lock timeout above covers a holder that
-            # is still alive and exits soon.
-            sudo dpkg --configure -a || echo "::warning::dpkg --configure -a failed — continuing to the retry"
-            sleep 15
-            timeout --kill-after=10 --signal=TERM 240 pnpm --filter opshub-web exec playwright install-deps chromium || {
-              echo '--- dpkg lock holders after attempt 2:'
-              echo '--- last apt Acquire lines:'
-              sudo tail -n 40 /var/log/apt/term.log || true
-              sudo fuser -v /var/lib/dpkg/lock-frontend || true
-              exit 1
-            }
           }
 
       - name: Run browser E2E
@@ -657,3 +660,12 @@ jobs:
         uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           results: ${{ needs.changes.result }}
+          # Dependency files always run CI: a resolution change can pull
+          # different code even when every other path is ignorable.
+          force-run: |
+            package.json
+            **/package.json
+            pnpm-lock.yaml
+            **/pnpm-lock.yaml
+            pnpm-workspace.yaml
+            **/pnpm-workspace.yaml
