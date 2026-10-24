@@ -42,7 +42,9 @@ export class DoorTerminalHealthCron {
 
       const active = await this.terminals.countActive();
       const seen = await this.terminals.countActiveSeenSince(new Date(Date.now() - SEEN_WITHIN_MS));
-      const allSeen = active === seen;
+      // Zero active terminals also stays silent: with nothing watching the door, "all well" is a
+      // guess, and a dead-man's switch must not sing on a guess.
+      const allSeen = active > 0 && active === seen;
       if (!allSeen) {
         // Log loudly but DO NOT ping: the ping's absence is the alert.
         this.logger.warn(

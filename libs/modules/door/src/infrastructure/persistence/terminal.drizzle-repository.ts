@@ -1,9 +1,5 @@
 import { Injectable } from '@nestjs/common';
-<<<<<<< HEAD
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-=======
 import { and, asc, eq, gte, isNull, sql } from 'drizzle-orm';
->>>>>>> 0d963cd (feat(door): terminal routes — token guard, allow-list ETag, event ingestion, jobs)
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { terminals } from '../../../../../../db/schema';
 import type { ITerminalRepository } from '../../domain/ports/terminal.repository';

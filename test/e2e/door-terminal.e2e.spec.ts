@@ -11,6 +11,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { DRIZZLE, type DrizzleDB } from '@platform';
 import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 import { randomUUID } from 'node:crypto';
 
@@ -46,6 +48,7 @@ const readEventsResponse = (): EventsResponseFixture =>
 
 let app: NestFastifyApplication;
 let admin: Session;
+let db: DrizzleDB;
 
 /** Minted once: token shown once, then used by every terminal-side call. */
 let token: string;
@@ -67,6 +70,7 @@ const bearer = () => ({ authorization: `Bearer ${token}` });
 
 beforeAll(async () => {
   app = await createTestApp();
+  db = app.get<DrizzleDB>(DRIZZLE);
   admin = await login(app, FIXTURE.ADMIN);
 
   const created = await app.inject({
@@ -315,14 +319,26 @@ describe('door terminal contract v1', () => {
     });
     expect(during.statusCode).toBe(200);
 
-    const unknown = await app.inject({
-      method: 'GET',
-      url: '/v1/door/unknown-cards',
-      headers: authHeaders(admin),
+    // THE CREDIT, seen in the store: seq 901's card_id is the card, seq 900's is null (the
+    // window was not open at its device_ts). seq 900 also shows the terminal's unknown-card list
+    // would have carried it at enrolment time — the admin-module e2e pins that path.
+    const rows = await db.execute<{ seq: number; card_id: string | null }>(
+      sql`SELECT seq, card_id FROM "door"."events" WHERE terminal_id = ${terminalId} AND seq IN (900, 901)`,
+    );
+    const bySeq = new Map(rows.rows.map((r) => [Number(r.seq), r.card_id]));
+    expect(bySeq.get(900)).toBeNull();
+    expect(bySeq.get(901)).toBeTruthy();
+  });
+
+  it('refuses an oversized terminal payload with 413 before parsing (480/S5)', async () => {
+    const big = 'x'.repeat(80 * 1024);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/door/terminal/events',
+      headers: { ...bearer(), 'content-type': 'application/json' },
+      payload: { stream, dropped: 0, events: [{ seq: 1, pad: big }] },
     });
-    const body = JSON.parse(unknown.body) as { uid: string }[];
-    // seq 900 resolved to no card (window not open yet) → it IS an unknown-card event.
-    expect(body.some((e) => e.uid === uidTiming)).toBe(true);
+    expect(res.statusCode).toBe(413);
   });
 
   it('accumulates a terminal-reported drop count', async () => {

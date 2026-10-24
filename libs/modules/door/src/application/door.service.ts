@@ -363,63 +363,104 @@ export class DoorService {
     let ackedThrough = 0;
 
     for (const event of input.events) {
-      // The ack covers everything the batch carried, valid or not (ADR §2.4: the terminal deletes
-      // through `acked_through`, so the queue never blocks).
-      if (event.seq > ackedThrough) ackedThrough = event.seq;
+      // Per-EVENT validation, and every branch ends here — one bad event must never 500 the
+      // batch, or the queue would jam on it forever (SA review 480/S1).
+      const seq =
+        typeof event?.['seq'] === 'number' && Number.isSafeInteger(event['seq'])
+          ? event['seq']
+          : null;
 
-      const uid = normaliseUid(typeof event.uid === 'string' ? event.uid : '');
-      const deviceTs = parseIso(event.device_ts);
-      if (
-        !Number.isInteger(event.seq) ||
-        event.seq <= 0 ||
-        (event.reader !== 'in' && event.reader !== 'out') ||
-        !UID_SHAPE.test(uid) ||
-        (event.result !== 'allow' && event.result !== 'deny') ||
-        !deviceTs
-      ) {
-        rejected.push(event.seq);
+      const uid = normaliseUid(typeof event?.['uid'] === 'string' ? event['uid'] : '');
+      const deviceTs = parseDeviceTs(event?.['device_ts']);
+      const reader = event?.['reader'];
+      const result = event?.['result'];
+      const ok =
+        seq !== null &&
+        seq > 0 &&
+        (reader === 'in' || reader === 'out') &&
+        UID_SHAPE.test(uid) &&
+        (result === 'allow' || result === 'deny') &&
+        deviceTs !== null;
+
+      if (!ok) {
+        // The ack covers everything the batch CARRIED with a sane seq (the terminal deletes
+        // through `acked_through`, so the queue never blocks); un-nameable events are rejected
+        // without an ack number to point at. A NUMBER seq — even an unsafe one — is reportable.
+        if (seq !== null && seq > ackedThrough) ackedThrough = seq;
+        if (typeof event?.['seq'] === 'number') rejected.push(event['seq']);
         continue;
       }
+
+      if (seq > ackedThrough) ackedThrough = seq;
       valid.push({
         stream: input.stream,
-        seq: event.seq,
-        reader: event.reader,
+        seq,
+        reader,
         uid,
-        result: event.result,
+        result,
         cardId: null, // resolved below, by event time
         deviceTs,
-        timeSynced: event.time_synced === true,
+        timeSynced: event?.['time_synced'] === true,
       });
     }
 
     // Resolve card_id for every valid event: one candidate query for the whole batch, then a
-    // window match per event at t = device_ts (synced) or received_at (not).
+    // WINDOW match per event at t = device_ts (synced) or received_at (not). Candidates are
+    // ANY-status cards by uid (480/B1): a swipe before a revocation credits the card, so real
+    // attendance never decays into "unknown" (and thence into the 30-day purge). On overlap — a
+    // UID reissued while the old card was still valid — the LATEST validFrom at or before t wins.
     if (valid.length > 0) {
-      const candidates = await this.cards.findActiveByUids([...new Set(valid.map((v) => v.uid))]);
+      const candidates = await this.cards.findCardCandidatesByUids([
+        ...new Set(valid.map((v) => v.uid)),
+      ]);
       for (const row of valid) {
         const t = row.timeSynced ? row.deviceTs.getTime() : now.getTime();
-        const match = candidates.find(
-          (c) => c.uid === row.uid && c.validFrom.getTime() <= t && t < cardEnd(c),
-        );
-        if (match) row.cardId = match.id;
+        const covering = candidates
+          .filter((c) => c.uid === row.uid && c.validFrom.getTime() <= t && t < cardEnd(c))
+          .sort((a, b) => b.validFrom.getTime() - a.validFrom.getTime());
+        if (covering[0]) row.cardId = covering[0].id;
       }
-      await this.cards.insertEvents(terminalId, valid);
+      const inserted = await this.cards.insertEvents(terminalId, valid);
+
+      // Best-effort (480/S3): `dropped` is counted on the batch that actually INSERTED rows, so a
+      // resent batch (which inserts nothing) does not double the terminal's count. A batch that
+      // inserts only SOME rows (a partially-duplicated resend) can still over-count — the number
+      // is a gauge, not a ledger, and the ADR says so.
+      if (inserted > 0) {
+        await this.terminals.addDropped(terminalId, input.dropped);
+      }
+    } else if (input.dropped > 0) {
+      // All-rejected batches never reach the insert; their drops are still reported once (the
+      // terminal will not resend them — they were rejected).
+      await this.terminals.addDropped(terminalId, input.dropped);
     }
 
-    await this.terminals.addDropped(terminalId, input.dropped);
     return { ackedThrough, rejected };
   }
 }
 
-/** `coalesce(revoked_at, valid_until, 'infinity')` — the open end of a card's validity, in JS. */
-function cardEnd(card: { validUntil: Date | null }): number {
+/**
+ * `coalesce(revoked_at, valid_until, 'infinity')` — the open end of a card's validity, in JS.
+ * revocation closes a card's window even though `valid_until` never moved.
+ */
+function cardEnd(card: { revokedAt: Date | null; validUntil: Date | null }): number {
+  if (card.revokedAt) return card.revokedAt.getTime();
   return card.validUntil ? card.validUntil.getTime() : Number.POSITIVE_INFINITY;
 }
 
-function parseIso(value: unknown): Date | null {
+/**
+ * STRICT device timestamp (SA review 480/S1): ISO-8601 UTC ending in `Z`, between 2020-01-01 and
+ * tomorrow — a wrong-but-parseable date ("2001-01-01", epoch millis as a number-as-string) is a
+ * rejected event, not silently-rewritten history.
+ */
+function parseDeviceTs(value: unknown): Date | null {
   if (typeof value !== 'string') return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(value)) return null;
   const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
+  if (Number.isNaN(d.getTime())) return null;
+  const LOW = Date.UTC(2020, 0, 1);
+  const HIGH = Date.now() + 24 * 3600_000;
+  return d.getTime() >= LOW && d.getTime() <= HIGH ? d : null;
 }
 
 /** True when `err` is Postgres 23505 on the named constraint (Drizzle surfaces both fields). */

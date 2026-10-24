@@ -79,6 +79,24 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
   // arrival time for exactly the requests worth investigating.
   registerRequestTiming(fastify);
 
+  // The door-terminal listener sits behind a BYPASS Access app on the dev host (ADR §2.2), so its
+  // only pre-auth gate besides the token is size. A batch is ≤ 100 events × ~200 bytes; 64 KB is
+  // an order of magnitude above honest traffic and far below anything worth streaming into the
+  // JSON parser (SA review 480/S5).
+  const DOOR_TERMINAL_BODY_LIMIT = 64 * 1024;
+  fastify.addHook('onRequest', function doorTerminalBodyLimit(req, reply, done) {
+    if (req.url.startsWith('/v1/door/terminal/')) {
+      const len = Number(req.headers['content-length'] ?? 0);
+      if (len > DOOR_TERMINAL_BODY_LIMIT) {
+        void reply
+          .code(413)
+          .send({ statusCode: 413, code: 'PAYLOAD_TOO_LARGE', message: 'Event batch too large' });
+        return;
+      }
+    }
+    done();
+  });
+
   fastify.addHook('onRequest', function csrfGate(req, reply, done) {
     if (!requiresCsrfProtection(req)) return done();
     fastify.csrfProtection(req, reply, done);

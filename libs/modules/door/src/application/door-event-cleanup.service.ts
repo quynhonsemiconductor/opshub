@@ -11,6 +11,17 @@ const LOCK_TTL_MS = 23 * MS_PER_HOUR;
 /** Unknown-card events: 30 days, FIXED (ADR §2.7). Visitors' bank cards are not records we keep. */
 export const UNKNOWN_CARD_RETENTION_DAYS = 30;
 
+/** The purge's two clocks, as one pure function a spec can read without a database. */
+export function retentionCutoffs(
+  attendanceRetentionDays: number,
+  now: number,
+): { unknownCutoff: Date; attendanceCutoff: Date } {
+  return {
+    unknownCutoff: new Date(now - UNKNOWN_CARD_RETENTION_DAYS * MS_PER_DAY),
+    attendanceCutoff: new Date(now - attendanceRetentionDays * MS_PER_DAY),
+  };
+}
+
 /**
  * Nightly retention purge for door events (Law 91/2025/QH15 via ADR ATTENDANCE-DEVICE §2.7).
  *
@@ -38,15 +49,13 @@ export class DoorEventCleanupService {
   @Cron(CronExpression.EVERY_DAY_AT_3AM, { name: 'door-event-cleanup' })
   async purgeExpiredEvents(): Promise<void> {
     await this.exclusive.run('door-event-cleanup', LOCK_TTL_MS, async () => {
-      const now = Date.now();
+      const { unknownCutoff, attendanceCutoff } = retentionCutoffs(this.retentionDays, Date.now());
 
-      const unknownCutoff = new Date(now - UNKNOWN_CARD_RETENTION_DAYS * MS_PER_DAY);
       const unknownRows = await this.db
         .delete(events)
         .where(and(isNull(events.cardId), lt(events.receivedAt, unknownCutoff)))
         .returning({ id: events.id });
 
-      const attendanceCutoff = new Date(now - this.retentionDays * MS_PER_DAY);
       const attendanceRows = await this.db
         .delete(events)
         .where(lt(events.receivedAt, attendanceCutoff))

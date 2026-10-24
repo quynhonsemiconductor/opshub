@@ -62,8 +62,15 @@ export class TerminalAuthGuard implements CanActivate {
     }
     const terminalId = token.slice(0, dot);
     const secret = token.slice(dot + 1);
+    // Shape FIRST: a non-uuid id cannot name a terminal, so it is a 401 without a lookup — and a
+    // uuid-looking id for a terminal that does not exist is indistinguishable from it.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(terminalId)) {
+      throw new UnauthorizedException('UNAUTHORIZED', 'Invalid terminal token');
+    }
 
-    const terminal = await this.terminals.findById(terminalId).catch(() => null);
+    // NO swallowed repository errors (SA review 480/S4): a database outage must surface as a 5xx,
+    // never as a tidy 401 that reads as "bad token" — the terminal would re-provision for nothing.
+    const terminal = await this.terminals.findById(terminalId);
     if (!terminal || terminal.revokedAt) {
       throw new UnauthorizedException('UNAUTHORIZED', 'Invalid terminal token');
     }
