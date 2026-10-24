@@ -73,6 +73,15 @@ export const AUDIT_ACTION = {
   LICENSE_SEAT_ASSIGNED: 'license.seat_assigned',
   LICENSE_SEAT_REVOKED: 'license.seat_revoked',
 
+  // ── Door attendance terminal ──
+  DOOR_TERMINAL_CREATED: 'door_terminal.created',
+  DOOR_TERMINAL_TOKEN_REGENERATED: 'door_terminal.token_regenerated',
+  DOOR_TERMINAL_REVOKED: 'door_terminal.revoked',
+  DOOR_CARD_CREATED: 'door_card.created',
+  DOOR_CARD_UPDATED: 'door_card.updated',
+  DOOR_CARD_REVOKED: 'door_card.revoked',
+  DOOR_CARD_MARKED_LOST: 'door_card.marked_lost',
+
   // ── Service catalog ──
   CATALOG_ITEM_CREATED: 'catalog_item.created',
   CATALOG_ITEM_UPDATED: 'catalog_item.updated',
@@ -363,6 +372,8 @@ export const AUDIT_RESOURCE = {
   OVERTIME_ENTRY: 'overtime_entry',
   WEBHOOK_SUBSCRIPTION: 'webhook_subscription',
   WEBHOOK_DELIVERY: 'webhook_delivery',
+  DOOR_TERMINAL: 'door_terminal',
+  DOOR_CARD: 'door_card',
   // Emitted by `@quynhonsemiconductor/identity` — see the actions section above.
   SESSION: 'session',
   USER: 'user',

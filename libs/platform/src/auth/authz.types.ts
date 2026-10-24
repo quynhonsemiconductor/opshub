@@ -41,7 +41,8 @@ export type ScopeSource = 'param' | 'query' | 'body';
  * Resource kinds whose owning attributes the guard can resolve by LOADING the row,
  * for routes where the request carries the resource's own id and nothing else.
  */
-export type ScopedResource = 'employee' | 'asset' | 'timesheet' | 'leave_request' | 'overtime';
+export type ScopedResource =
+  'employee' | 'asset' | 'timesheet' | 'leave_request' | 'overtime' | 'door_card' | 'door_terminal';
 
 /**
  * How a route tells the guard which resource it is acting on — DECLARATIVELY, so
