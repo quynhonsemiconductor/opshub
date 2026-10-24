@@ -20,11 +20,14 @@ import {
 } from '@modules/audit';
 import { EmployeeService } from '@modules/identity';
 import { TERMINAL_REPOSITORY, type ITerminalRepository } from '../domain/ports/terminal.repository';
-import { CARD_REPOSITORY, type ICardRepository } from '../domain/ports/card.repository';
+import {
+  CARD_REPOSITORY,
+  type ICardRepository,
+  type UnknownCardGroup,
+} from '../domain/ports/card.repository';
 import type {
   DoorTerminal,
   DoorCard,
-  UnknownCardEvent,
   CreateTerminalInput,
   CreateCardInput,
   UpdateCardInput,
@@ -72,7 +75,7 @@ export function assertUid(uid: string): string {
 export function assertWindow(validFrom: Date, validUntil: Date | null | undefined): void {
   if (validUntil && validUntil <= validFrom) {
     throw new ValidationException(
-      ErrorCodes.DOOR_CARD_UID_INVALID,
+      ErrorCodes.DOOR_CARD_WINDOW_INVALID,
       'Card validity window is empty: valid_until must be after valid_from',
     );
   }
@@ -187,6 +190,15 @@ export class DoorService {
   async addCard(input: CreateCardInput, actor: Actor): Promise<DoorCard> {
     const uid = assertUid(normaliseUid(input.uid));
     await this.employees.assertExist(input.employeeId);
+    // Offboarded people hold no door access by definition (the computed allow-list drops them);
+    // enrolling a card for one is an HR mistake we can catch at the desk. on_leave stays allowed.
+    const employee = await this.employees.getById(input.employeeId);
+    if (employee.status === 'offboarded') {
+      throw new ValidationException(
+        ErrorCodes.DOOR_CARD_EMPLOYEE_OFFBOARDED,
+        `${employee.displayName} is offboarded — cards can only be enrolled for active or on-leave employees`,
+      );
+    }
     const existing = await this.cards.findActiveByUid(uid);
     if (existing) {
       throw new ConflictException(
@@ -195,13 +207,25 @@ export class DoorService {
       );
     }
     assertWindow(input.validFrom ?? new Date(), input.validUntil);
-    return this.db.transaction(async (tx) => {
-      const card = await this.cards.create({ ...input, uid }, tx);
-      await this.cardTrail.record(AUDIT_ACTION.DOOR_CARD_CREATED, card.id, actor, tx, {
-        after: { uid, employeeId: input.employeeId, label: input.label ?? null },
+    try {
+      return await this.db.transaction(async (tx) => {
+        const card = await this.cards.create({ ...input, uid }, tx);
+        await this.cardTrail.record(AUDIT_ACTION.DOOR_CARD_CREATED, card.id, actor, tx, {
+          after: { uid, employeeId: input.employeeId, label: input.label ?? null },
+        });
+        return card;
       });
-      return card;
-    });
+    } catch (err) {
+      // The service's pre-check narrows the window; the partial unique index still decides. A
+      // concurrent enrol of the same UID is the conflict it looks like, not a 500.
+      if (isUniqueViolation(err, 'uq_door_card_active_uid')) {
+        throw new ConflictException(
+          ErrorCodes.DOOR_CARD_DUPLICATE,
+          `An active card with UID ${uid} already exists — revoke it before reissuing`,
+        );
+      }
+      throw err;
+    }
   }
 
   async updateCard(id: string, input: UpdateCardInput, actor: Actor): Promise<DoorCard> {
@@ -211,7 +235,7 @@ export class DoorService {
       (input.status || input.validFrom !== undefined || input.validUntil !== undefined)
     ) {
       throw new ConflictException(
-        ErrorCodes.DOOR_CARD_DUPLICATE,
+        ErrorCodes.DOOR_CARD_CLOSED,
         'Card is revoked or lost — reissue a new card instead of editing this one',
       );
     }
@@ -223,7 +247,7 @@ export class DoorService {
       const patch: Parameters<ICardRepository['update']>[1] = {};
       if (input.label !== undefined) patch.label = input.label;
       if (input.validFrom !== undefined) patch.validFrom = input.validFrom;
-      if ('validUntil' in input) patch.validUntil = validUntil;
+      if (input.validUntil !== undefined) patch.validUntil = input.validUntil;
       if (input.status) {
         patch.status = input.status;
         // Both closing statuses stamp revoked_at (ADR §2.5); `lost` is a revoke with a reason.
@@ -279,9 +303,18 @@ export class DoorService {
     };
   }
 
-  /** Enrolment: UIDs the readers saw in the last 24 h that belonged to nobody at the time (ADR §2.5). */
-  async unknownCards(limit = 200): Promise<UnknownCardEvent[]> {
+  /**
+   * Enrolment list: UIDs the readers saw in the last 24 h that belonged to nobody at the time
+   * (ADR §2.5), grouped per UID, dropping UIDs that have since been enrolled — those are done.
+   */
+  async unknownCards(limit = 200): Promise<UnknownCardGroup[]> {
     const since = new Date(Date.now() - 24 * 3600 * 1000);
-    return this.cards.listUnknownEvents(since, limit);
+    return this.cards.listUnknownCardGroups(since, limit);
   }
+}
+
+/** True when `err` is Postgres 23505 on the named constraint (Drizzle surfaces both fields). */
+function isUniqueViolation(err: unknown, constraint: string): boolean {
+  const e = err as { code?: string; constraint?: string };
+  return e?.code === '23505' && e?.constraint === constraint;
 }

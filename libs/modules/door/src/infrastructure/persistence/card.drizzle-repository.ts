@@ -3,13 +3,8 @@ import { and, asc, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { newId } from '@shared-kernel';
 import { cards, events } from '../../../../../../db/schema';
-import type { ICardRepository } from '../../domain/ports/card.repository';
-import type {
-  DoorCard,
-  UnknownCardEvent,
-  CreateCardInput,
-  ListCardsFilters,
-} from '../../domain/door.types';
+import type { ICardRepository, UnknownCardGroup } from '../../domain/ports/card.repository';
+import type { DoorCard, CreateCardInput, ListCardsFilters } from '../../domain/door.types';
 
 @Injectable()
 export class CardDrizzleRepository implements ICardRepository {
@@ -81,23 +76,32 @@ export class CardDrizzleRepository implements ICardRepository {
     return { rows, total: count?.count ?? 0 };
   }
 
-  async listUnknownEvents(since: Date, limit: number): Promise<UnknownCardEvent[]> {
-    return (
-      this.db
-        .select({
-          id: events.id,
-          terminalId: events.terminalId,
-          uid: events.uid,
-          result: events.result,
-          deviceTs: events.deviceTs,
-          receivedAt: events.receivedAt,
-        })
-        .from(events)
-        // The ONE definition of unknown (ADR §2.5): no card owned this UID at event time, which the
-        // insert-time resolution already decided — the column says so.
-        .where(and(isNull(events.cardId), gt(events.receivedAt, since)))
-        .orderBy(desc(events.receivedAt), desc(events.id))
-        .limit(limit)
-    );
+  async listUnknownCardGroups(since: Date, limit: number): Promise<UnknownCardGroup[]> {
+    const rows = await this.db
+      .select({
+        uid: events.uid,
+        count: sql<number>`count(*)::int`,
+        lastSeenAt: sql<Date>`max(${events.receivedAt})`,
+        reader: sql<string>`(array_agg(${events.reader} ORDER BY ${events.receivedAt} DESC))[1]`,
+        active: sql<number>`bool_or(EXISTS (
+          SELECT 1 FROM "door"."cards" c WHERE c.uid = ${events.uid} AND c.status = 'active'
+        ))`,
+      })
+      .from(events)
+      // The ONE definition of unknown (ADR §2.5): no card owned the UID at event time, which the
+      // insert-time resolution decided — the column says so. The NOT-EXISTS then drops UIDs that
+      // have SINCE been enrolled: those are done, not pending HR work.
+      .where(and(isNull(events.cardId), gt(events.receivedAt, since)))
+      .groupBy(events.uid)
+      .orderBy(desc(sql`max(${events.receivedAt})`), asc(events.uid))
+      .limit(limit);
+    return rows
+      .filter((r) => !r.active)
+      .map((r) => ({
+        uid: r.uid,
+        count: r.count,
+        lastSeenAt: new Date(r.lastSeenAt),
+        reader: r.reader as 'in' | 'out',
+      }));
   }
 }

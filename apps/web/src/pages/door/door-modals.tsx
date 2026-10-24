@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Button, Input, FormField, Modal } from '@/shared/ui';
+import { Button, CopyButton, Input, FormField, Modal } from '@/shared/ui';
 import { apiErrorMessage } from '@/shared/api/errors';
+import { activeEmployeeOptions } from '@/shared/api/picker-sources';
+import { EntityPicker } from '@/shared/ui';
 import { useDoorWrites } from './use-door';
-import type { DoorTerminal, UnknownCardEvent } from './door.types';
+import type { DoorCard, DoorTerminal, UnknownCardGroup } from './door.types';
 
 /**
  * Register-terminal modal. The token is shown ONCE, in this dialog, with a copy button — the API
@@ -66,9 +68,12 @@ export function RegisterTerminalModal(props: { open: boolean; onClose: () => voi
           <p className="text-sm text-fg">
             Copy it now — opshub stores only its hash, so this is the last time it is ever shown.
           </p>
-          <code className="block overflow-x-auto rounded bg-surface-raised p-3 font-mono text-xs break-all text-fg">
-            {token}
-          </code>
+          <div className="flex items-start gap-2">
+            <code className="block flex-1 overflow-x-auto rounded bg-surface-raised p-3 font-mono text-xs break-all text-fg">
+              {token}
+            </code>
+            <CopyButton text={token} label="Copy token" />
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -100,10 +105,22 @@ export function RegisterTerminalModal(props: { open: boolean; onClose: () => voi
 export function AddCardModal(props: { open: boolean; onClose: () => void; presetUid?: string }) {
   const { createCard } = useDoorWrites();
   const [employeeId, setEmployeeId] = useState('');
+  // Initialised FROM PROPS on mount — the caller keys this modal on the unknown-card UID (see
+  // AssignUnknownCardModal), so a new row remounts with that row's UID (SA review B2: a preset
+  // baked into the always-mounted modal's initial state never updated).
   const [uid, setUid] = useState(props.presetUid ?? '');
   const [label, setLabel] = useState('');
+  const [validFrom, setValidFrom] = useState('');
   const [validUntil, setValidUntil] = useState('');
   const [busy, setBusy] = useState(false);
+
+  function reset() {
+    setEmployeeId('');
+    setUid('');
+    setLabel('');
+    setValidFrom('');
+    setValidUntil('');
+  }
 
   async function submit() {
     setBusy(true);
@@ -112,14 +129,12 @@ export function AddCardModal(props: { open: boolean; onClose: () => void; preset
         employeeId,
         uid,
         label: label.trim() || null,
+        validFrom: validFrom ? new Date(validFrom).toISOString() : undefined,
         validUntil: validUntil ? new Date(validUntil).toISOString() : null,
       });
       toast.success('Card enrolled');
+      reset();
       props.onClose();
-      setEmployeeId('');
-      setUid('');
-      setLabel('');
-      setValidUntil('');
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Failed to enrol the card.'));
     } finally {
@@ -135,7 +150,13 @@ export function AddCardModal(props: { open: boolean; onClose: () => void; preset
       description="The employee must exist in the directory; paste the UID exactly as the reader shows it."
       footer={
         <>
-          <Button variant="ghost" onClick={props.onClose}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              reset();
+              props.onClose();
+            }}
+          >
             Cancel
           </Button>
           <Button onClick={submit} disabled={busy || !employeeId || !uid.trim()}>
@@ -145,12 +166,14 @@ export function AddCardModal(props: { open: boolean; onClose: () => void; preset
       }
     >
       <div className="space-y-3">
-        <FormField label="Employee ID" htmlFor="card-employee">
-          <Input
+        <FormField label="Employee" htmlFor="card-employee">
+          {/* BY NAME, not by UUID (the EntityPicker docblock says why a UUID box never worked). */}
+          <EntityPicker
             id="card-employee"
+            queryKey="active-employees"
             value={employeeId}
-            onChange={(e) => setEmployeeId(e.target.value)}
-            placeholder="Employee UUID from the People page"
+            onChange={(v) => setEmployeeId(v)}
+            fetchOptions={activeEmployeeOptions}
           />
         </FormField>
         <FormField label="Card UID" htmlFor="card-uid">
@@ -169,6 +192,14 @@ export function AddCardModal(props: { open: boolean; onClose: () => void; preset
             maxLength={200}
           />
         </FormField>
+        <FormField label="Valid from (optional)" htmlFor="card-valid-from">
+          <Input
+            id="card-valid-from"
+            type="datetime-local"
+            value={validFrom}
+            onChange={(e) => setValidFrom(e.target.value)}
+          />
+        </FormField>
         <FormField label="Valid until (optional)" htmlFor="card-valid-until">
           <Input
             id="card-valid-until"
@@ -182,13 +213,17 @@ export function AddCardModal(props: { open: boolean; onClose: () => void; preset
   );
 }
 
-/** Enrol-from-reader: a UID the terminal saw and nobody owns, assigned to an employee. */
+/**
+ * Enrol-from-reader: a UID the terminal saw and nobody owns, assigned to an employee. KEYED on the
+ * event: switching rows remounts the form with the new UID instead of a stale one (SA review B2).
+ */
 export function AssignUnknownCardModal(props: {
-  event: UnknownCardEvent | null;
+  event: UnknownCardGroup | null;
   onClose: () => void;
 }) {
   return (
     <AddCardModal
+      key={props.event?.uid ?? 'adhoc'}
       open={props.event !== null}
       onClose={props.onClose}
       presetUid={props.event?.uid}
@@ -251,10 +286,80 @@ export function RegenerateTokenModal(props: {
       }
     >
       {token ? (
-        <code className="block overflow-x-auto rounded bg-surface-raised p-3 font-mono text-xs break-all text-fg">
-          {token}
-        </code>
+        <div className="flex items-start gap-2">
+          <code className="block flex-1 overflow-x-auto rounded bg-surface-raised p-3 font-mono text-xs break-all text-fg">
+            {token}
+          </code>
+          <CopyButton text={token} label="Copy token" />
+        </div>
       ) : null}
+    </Modal>
+  );
+}
+
+/** Edit a live card: its label and (temporary) window. Status changes are separate actions. */
+export function CardEditModal(props: { card: DoorCard | null; onClose: () => void }) {
+  const { updateCard } = useDoorWrites();
+  // Initialised from the row on mount; the caller keys this modal on the card id, so editing a
+  // different card remounts the form.
+  const [label, setLabel] = useState(props.card?.label ?? null);
+  const [validUntil, setValidUntil] = useState(props.card?.validUntil?.slice(0, 16) ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const card = props.card;
+
+  async function submit() {
+    if (!card) return;
+    setBusy(true);
+    try {
+      // ONLY the fields the form edits — never a blanket PATCH (see the controller note in B1).
+      await updateCard(card.id, {
+        label: label ?? null,
+        validUntil: validUntil ? new Date(validUntil).toISOString() : null,
+      });
+      toast.success('Card updated');
+      props.onClose();
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to update the card.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={card !== null}
+      onClose={props.onClose}
+      title={`Edit card ${card?.uid ?? ''}`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={props.onClose}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? 'Saving…' : 'Save'}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <FormField label="Label" htmlFor="edit-card-label">
+          <Input
+            id="edit-card-label"
+            value={label ?? ''}
+            onChange={(e) => setLabel(e.target.value)}
+            maxLength={200}
+          />
+        </FormField>
+        <FormField label="Valid until (empty = permanent)" htmlFor="edit-card-valid-until">
+          <Input
+            id="edit-card-valid-until"
+            type="datetime-local"
+            value={validUntil}
+            onChange={(e) => setValidUntil(e.target.value)}
+          />
+        </FormField>
+      </div>
     </Modal>
   );
 }

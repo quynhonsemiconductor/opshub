@@ -8,13 +8,20 @@ import { doorCardStatusEnum } from '@db/schema/enums';
  * (uppercase hex, no separators) is the SERVICE's job — normalising in the schema would let a
  * caller think `04:a1-b2c3` is a distinct identity from `04A1B2C3`.
  */
+/**
+ * VALIDATED AFTER STRIPPING SEPARATORS (SA review B3): a 10-byte UID written with separators is 29
+ * characters, and a raw `.max(20)` would refuse it before the service ever normalised. What comes
+ * OUT of the schema is already storage shape — the service's normalise stays as the idempotent
+ * backstop for direct callers.
+ */
 export const CardUidSchema = z
   .string()
-  .min(8)
-  .max(20)
-  .regex(/^([0-9a-fA-F][\s:.-]?){8}(([0-9a-fA-F][\s:.-]?){6}){0,2}$/, {
-    message: 'Not a 4/7/10-byte UID (hex, optional separators)',
-  });
+  .transform((v) => v.replace(/[\s:.-]/g, '').toUpperCase())
+  .pipe(
+    z
+      .string()
+      .regex(/^[0-9A-F]{8}([0-9A-F]{6}){0,2}$/, 'Not a 4/7/10-byte UID (hex, optional separators)'),
+  );
 
 export const CreateTerminalSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -84,11 +91,11 @@ export class DoorCardResponseDto {
   updatedAt!: string;
 }
 
-export class UnknownCardEventResponseDto {
-  id!: string;
-  terminalId!: string;
+export class UnknownCardGroupResponseDto {
   uid!: string;
-  result!: string;
-  deviceTs!: string;
-  receivedAt!: string;
+  /** Reader of the most recent unknown swipe on this UID. */
+  reader!: string;
+  /** How many times the readers saw it in the window. */
+  count!: number;
+  lastSeenAt!: string;
 }

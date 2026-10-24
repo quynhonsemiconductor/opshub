@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { terminals } from '../../../../../../db/schema';
 import type { ITerminalRepository } from '../../domain/ports/terminal.repository';
@@ -38,7 +38,8 @@ export class TerminalDrizzleRepository implements ITerminalRepository {
     const [row] = await (tx ?? this.db)
       .update(terminals)
       .set({ tokenHash, updatedAt: new Date() })
-      .where(eq(terminals.id, id))
+      // Conditional on revoked_at IS NULL: a revoke racing the rotation wins.
+      .where(and(eq(terminals.id, id), isNull(terminals.revokedAt)))
       .returning();
     return row ?? null;
   }
@@ -47,7 +48,8 @@ export class TerminalDrizzleRepository implements ITerminalRepository {
     const [row] = await (tx ?? this.db)
       .update(terminals)
       .set({ revokedAt, updatedAt: new Date() })
-      .where(eq(terminals.id, id))
+      // Conditional: a concurrent revoke makes this a no-op, never a backdated second stamp.
+      .where(and(eq(terminals.id, id), isNull(terminals.revokedAt)))
       .returning();
     return row ?? null;
   }

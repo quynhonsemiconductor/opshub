@@ -1,4 +1,12 @@
-import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common';
+import {
+  CallHandler,
+  ExecutionContext,
+  Injectable,
+  Logger,
+  NestInterceptor,
+  SetMetadata,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Observable, from } from 'rxjs';
@@ -23,6 +31,13 @@ const IN_FLIGHT_TTL_MS = 90_000;
 
 /** GET and DELETE are idempotent by definition; there is nothing for a key to add. */
 const IDEMPOTENT_METHODS = new Set(['POST', 'PUT', 'PATCH']);
+
+/**
+ * Routes whose response must NEVER be stored under an Idempotency-Key — a retry would replay a
+ * SECRET (opshub's door-terminal token routes). The interceptor checks this before anything else.
+ */
+export const IDEMPOTENCY_SKIP_KEY = 'idempotencySkip';
+export const SkipIdempotency = () => SetMetadata(IDEMPOTENCY_SKIP_KEY, true);
 
 /** The header a client sends, and the one it reads back to learn the response was a replay. */
 export const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
@@ -86,7 +101,10 @@ function warnOnceNoPrincipal(logger: Logger): void {
 export class IdempotencyInterceptor implements NestInterceptor {
   private readonly logger = new Logger(IdempotencyInterceptor.name);
 
-  constructor(private readonly cache: CacheService) {}
+  constructor(
+    private readonly cache: CacheService,
+    private readonly reflector: Reflector,
+  ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
@@ -95,6 +113,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const res = context.switchToHttp().getResponse<FastifyReply>();
 
     if (!IDEMPOTENT_METHODS.has(req.method.toUpperCase())) return next.handle();
+
+    // Route-level opt-out FIRST: a secret-bearing response must not be replayable, whatever the
+    // caller sends.
+    const skip = this.reflector.getAllAndOverride<boolean>(IDEMPOTENCY_SKIP_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (skip) return next.handle();
 
     const key = req.headers[IDEMPOTENCY_KEY_HEADER] as string | undefined;
     if (!key || !this.cache.isAvailable) return next.handle();
