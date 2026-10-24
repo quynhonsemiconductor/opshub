@@ -11,7 +11,6 @@ import { S3Client, PutBucketCorsCommand, PutBucketLifecycleConfigurationCommand 
 
 const ADMIN = 'http://localhost:3903';
 const S3 = 'http://localhost:3900';
-const AUTH = `Authorization: Bearer ${process.env.GARAGE_ADMIN_TOKEN}`;
 const BUCKETS = process.env.BUCKETS ?? 'opshub-files-dev opshub-files-test';
 const ORIGINS = (process.env.WEB_ORIGINS ?? 'http://localhost:5174,http://127.0.0.1:5174').split(',');
 const ACCESS_KEY_ID = process.env.STORAGE_ACCESS_KEY_ID;
@@ -20,7 +19,8 @@ const SECRET = process.env.STORAGE_SECRET_ACCESS_KEY;
 const api = async (path, init = {}) => {
   const res = await fetch(ADMIN + path, {
     ...init,
-    headers: { Authorization: process.env.GARAGE_ADMIN_TOKEN, 'content-type': 'application/json', ...init.headers },
+    // "Bearer " is required: the bare token gets 403 Forbidden ("Invalid authorization token").
+    headers: { Authorization: `Bearer ${process.env.GARAGE_ADMIN_TOKEN}`, 'content-type': 'application/json', ...init.headers },
   });
   if (!res.ok) throw new Error(`Garage admin ${path} -> ${res.status}: ${await res.text()}`);
   return res.status === 204 ? null : res.json();
@@ -44,7 +44,7 @@ if (layout.version === 0) {
   console.log('[garage-init]   layout applied');
 }
 
-if ((await fetch(`${ADMIN}/v1/key?id=${ACCESS_KEY_ID}`, { headers: { Authorization: process.env.GARAGE_ADMIN_TOKEN } })).status !== 200) {
+if ((await fetch(`${ADMIN}/v1/key?id=${ACCESS_KEY_ID}`, { headers: { Authorization: `Bearer ${process.env.GARAGE_ADMIN_TOKEN}` } })).status !== 200) {
   await api('/v1/key/import', {
     method: 'POST',
     body: JSON.stringify({ name: 'local-dev', accessKeyId: ACCESS_KEY_ID, secretAccessKey: SECRET }),
