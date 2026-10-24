@@ -115,11 +115,13 @@ export default defineConfig({
       // measured 46.02 and the 3-point limit refused 43.
       // Raised again 2026-10-13 after the health controller (untested boilerplate) went to platform-runtime and the
       // shutdown / readiness / pool specs landed: lines 46.34 / statements 46.24 / branches 37.06 / functions 31.75.
+      // Raised 2026-10-24 by the door terminal work (guard, allow-list, ingestion specs): CI measured
+      // lines 49.35 / statements 49.18 / branches 40.40 / functions 33+; floors ~0.5 under.
       thresholds: {
-        lines: 46,
-        functions: 32,
-        branches: 37,
-        statements: 46,
+        lines: 49,
+        functions: 33,
+        branches: 40,
+        statements: 49,
       },
     },
   },
