@@ -58,7 +58,7 @@ const compose = read('docker-compose.dev.yml');
 const composeDoc = parseYaml(compose, { merge: true }) as {
   services: Record<string, { ports?: unknown[]; environment?: Record<string, string> }>;
 };
-const storageInit = read('scripts/garage/init.sh');
+const storageInit = read('scripts/garage/init.mjs');
 const garageInit = composeDoc.services['garage-init']?.environment ?? {};
 const vite = read('apps/web/vite.config.ts');
 
@@ -261,8 +261,8 @@ describe('.env.example agrees with the dev tooling', () => {
     expect(buckets, 'the e2e suite bucket is not created by garage-init').toContain(
       'opshub-files-test',
     );
-    expect(storageInit).toContain('for bucket in $BUCKETS');
-    expect(storageInit).toContain('Access-Control-Request-Method: PUT');
+    expect(storageInit).toContain('BUCKETS.split');
+    expect(storageInit).toContain("'Access-Control-Request-Method': 'PUT'");
   });
 
   it('sends uploads to Garage with its fixed local key, never to the real AWS S3', () => {
