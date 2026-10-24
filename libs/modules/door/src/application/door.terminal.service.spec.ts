@@ -27,12 +27,10 @@ const mockCards = {
   findActiveByUid: vi.fn(),
   update: vi.fn(),
   list: vi.fn(),
-  listUnknownEvents: vi.fn(),
+  listUnknownCardGroups: vi.fn(),
   listAllowList: vi.fn(),
-  findActiveByUids: vi.fn(),
+  findCardCandidatesByUids: vi.fn(),
   insertEvents: vi.fn(),
-  deleteUnknownOlderThan: vi.fn(),
-  deleteEventsOlderThan: vi.fn(),
 };
 const mockEmployees = { assertExist: vi.fn() };
 const mockAudit = createFakeAudit();
@@ -93,8 +91,8 @@ describe('DoorService.ingestEvents()', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCards.findActiveByUids.mockResolvedValue([CARD]);
-    mockCards.insertEvents.mockResolvedValue(undefined);
+    mockCards.findCardCandidatesByUids.mockResolvedValue([CARD]);
+    mockCards.insertEvents.mockResolvedValue(1);
     mockTerminals.addDropped.mockResolvedValue(undefined);
   });
 
@@ -143,7 +141,7 @@ describe('DoorService.ingestEvents()', () => {
 
   it('resolves card_id BY EVENT TIME: before valid_from nothing is credited', async () => {
     // The card starts in an hour; the synced swipe happened now.
-    mockCards.findActiveByUids.mockResolvedValue([
+    mockCards.findCardCandidatesByUids.mockResolvedValue([
       { ...CARD, validFrom: new Date(Date.now() + HOUR) },
     ]);
     const r = await makeService().ingestEvents('term-1', {
@@ -159,7 +157,7 @@ describe('DoorService.ingestEvents()', () => {
   it('unsynced events resolve against the RECEIVE time, not the claimed device time', async () => {
     // Card was valid two hours ago and is gone now; the terminal had no clock, so the event claims
     // an old device_ts but time_synced=false — resolution must use received_at (now) → no credit.
-    mockCards.findActiveByUids.mockResolvedValue([
+    mockCards.findCardCandidatesByUids.mockResolvedValue([
       { ...CARD, validUntil: new Date(Date.now() - HOUR) },
     ]);
     await makeService().ingestEvents('term-1', {
@@ -177,13 +175,90 @@ describe('DoorService.ingestEvents()', () => {
     expect(row.cardId).toBeNull();
   });
 
-  it('passes the terminal-reported drop count through to the running total', async () => {
+  it('counts the reported drops ONCE — only on the batch that inserted rows', async () => {
+    mockCards.insertEvents.mockResolvedValue(1);
     await makeService().ingestEvents('term-1', {
       stream: STREAM,
       dropped: 12,
       events: [event({ seq: 1 })],
     });
     expect(mockTerminals.addDropped).toHaveBeenCalledWith('term-1', 12);
+
+    // The resend inserts NOTHING (all conflicts) — its `dropped` must not count again (480/S3).
+    vi.clearAllMocks();
+    mockCards.findCardCandidatesByUids.mockResolvedValue([{ ...CARD }]);
+    mockCards.insertEvents.mockResolvedValue(0);
+    await makeService().ingestEvents('term-1', {
+      stream: STREAM,
+      dropped: 12,
+      events: [event({ seq: 1 })],
+    });
+    expect(mockTerminals.addDropped).not.toHaveBeenCalled();
+  });
+
+  it('rejects UNSAFE seqs, non-Z dates and non-object events individually (480/S1, S2)', async () => {
+    const r = await makeService().ingestEvents('term-1', {
+      stream: STREAM,
+      dropped: 0,
+      events: [
+        event({ seq: 1.5 }), // not a safe integer
+        event({ seq: Number.MAX_SAFE_INTEGER + 1 }),
+        event({ seq: 2, device_ts: '2026-10-23T08:01:02+03:00' }), // parsed, but not a Z stamp
+        event({ seq: 3, device_ts: '2001-01-01T00:00:00Z' }), // outside the bounds
+        null as never, // a null item is ONE rejected event, not a 422 for the batch
+        'garbage' as never,
+        {
+          seq: 4,
+          reader: 'in',
+          uid: '04A1B2C3',
+          result: 'allow',
+          device_ts: new Date().toISOString(),
+          time_synced: true,
+        },
+      ],
+    });
+    expect(r.ackedThrough).toBe(4); // safe-integer seqs only, always an integer
+    expect(r.rejected).toEqual([1.5, Number.MAX_SAFE_INTEGER + 1, 2, 3]);
+    expect(mockCards.insertEvents).toHaveBeenCalledWith('term-1', [
+      expect.objectContaining({ seq: 4 }),
+    ]);
+  });
+
+  it('credits a swipe that happened BEFORE a revocation (480/B1: candidates ignore status)', async () => {
+    // Card valid from two hours ago, revoked (not expired) one hour ago; valid_until never moved.
+    mockCards.findCardCandidatesByUids.mockResolvedValue([
+      {
+        id: CARD.id,
+        uid: CARD.uid,
+        validFrom: new Date(Date.now() - 2 * HOUR),
+        validUntil: null,
+        revokedAt: new Date(Date.now() - HOUR),
+      },
+    ]);
+    // Synced swipe taken 90 minutes ago: inside the window (before the revocation).
+    await makeService().ingestEvents('term-1', {
+      stream: STREAM,
+      dropped: 0,
+      events: [
+        event({
+          seq: 10,
+          device_ts: new Date(Date.now() - 90 * 60_000).toISOString(),
+          time_synced: true,
+        }),
+      ],
+    });
+    const [credited] = mockCards.insertEvents.mock.calls[0][1] as { cardId: string | null }[];
+    expect(credited.cardId).toBe(CARD.id);
+
+    // A swipe NOW (after the revocation) resolves to nobody — buffered upload, wrong holder page.
+    await makeService().ingestEvents('term-1', {
+      stream: STREAM,
+      dropped: 0,
+      events: [event({ seq: 11, time_synced: true })],
+    });
+    const calls = mockCards.insertEvents.mock.calls;
+    const [late] = calls[calls.length - 1][1] as { cardId: string | null }[];
+    expect(late.cardId).toBeNull();
   });
 
   it('normalises the UID before candidate lookup', async () => {
@@ -192,6 +267,6 @@ describe('DoorService.ingestEvents()', () => {
       dropped: 0,
       events: [event({ seq: 1, uid: '04:a1-b2c3' })],
     });
-    expect(mockCards.findActiveByUids).toHaveBeenCalledWith(['04A1B2C3']);
+    expect(mockCards.findCardCandidatesByUids).toHaveBeenCalledWith(['04A1B2C3']);
   });
 });

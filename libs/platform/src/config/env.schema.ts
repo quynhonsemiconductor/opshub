@@ -140,7 +140,11 @@ const baseShape = {
    * than needed). 24 months by default. Unknown-card events purge at a fixed 30 days (not
    * configurable: visitors' bank cards are not records we keep).
    */
-  DOOR_EVENT_RETENTION_DAYS: z.coerce.number().int().positive().default(730),
+  DOOR_EVENT_RETENTION_DAYS: z.coerce
+    .number()
+    .int()
+    .min(30) // never shorter than the unknown-card window's own clock (480 nit)
+    .default(730),
   /**
    * Healthchecks.io ping URL for the door-terminal check. Optional, DEFAULT OFF: unset, the
    * monitoring job is a no-op. Set it and the worker pings only while EVERY active terminal was

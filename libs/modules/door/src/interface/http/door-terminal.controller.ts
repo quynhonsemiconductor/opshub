@@ -67,8 +67,9 @@ export class DoorTerminalController {
     reply.header('ETag', etag);
     reply.header('Cache-Control', 'no-store');
     if (ifNoneMatch && matches(ifNoneMatch, etag)) {
+      // 304 MUST carry no body — a body on a 304 is a spec violation some caches punish.
       reply.code(304);
-      return null;
+      return;
     }
     return JSON.parse(body);
   }
