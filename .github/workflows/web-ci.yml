@@ -112,7 +112,7 @@ jobs:
             **/*.test.ts
             **/*.test.tsx
       - id: paths
-        uses: quynhonsemiconductor/ci/actions/changed-paths@1fcb7f019a6c5482d30b2ece6caa416965c32bbe # ci#245 force-run; bump to the release tag on merge
+        uses: quynhonsemiconductor/ci/actions/changed-paths@dcdd8dc937aa9d199a4e75e0e187eb52ca520836 # v1.23.1
         with:
           ignore: |
             **/*.md
@@ -134,6 +134,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
+      # Playwright's documented container setting: the image user is root and
+      # without HOME some tooling misbehaves (@swc/core ERR_SWC_NATIVE_CACHE).
+      HOME: /root
       # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -245,10 +248,11 @@ jobs:
     timeout-minutes: 25
     # Official Playwright image, version LOCKED to @playwright/test in
     # apps/web (1.62.1 — a skew fails loudly: the bundled browsers must match
-    # the driver). Pinned by digest; the repo's renovate.json extends the
-    # docker manager to this file, so Renovate bumps tag AND digest together
-    # when @playwright/test moves. The image ships the browsers and OS
-    # libraries — the apt install-deps step is deleted, not moved.
+    # the driver). The digest is bumped by the same Renovate PR that bumps
+    # @playwright/test (packageRules: playwright group in renovate.json).
+    # The image ships the browsers and OS libraries — the apt install-deps
+    # step (and its #477 hardening) is deleted, not moved: there is no apt
+    # step left to be flaky.
     container:
       image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
 
@@ -259,7 +263,6 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: opshub_test
-        ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -268,42 +271,13 @@ jobs:
 
       redis:
         image: valkey/valkey:8.1.10-alpine
-        ports: ['6379:6379']
         options: >-
           --health-cmd "valkey-cli ping"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
 
-      # OBJECT STORAGE, because without it this job could not see uploads at all.
-      #
-      # `StorageService` stubs every presign when `S3_FILES_BUCKET` is unset, so the upload specs
-      # answered 500 here while passing locally — and that blind spot is exactly how THREE dead
-      # upload paths reached main: a missing CSRF header, a CORS allow-list that refused a header the
-      # presign signs, and a replacement lookup by key through a by-id finder. None of them are
-      # visible without a bucket to PUT to.
-      #
-      # Same node docker-compose.dev.yml runs (same config file), reached by the service label
-      # instead of localhost — job containers cannot use localhost for services. The one-shot
-      # garage-init becomes a regular step: the playwright image has python3+pip, so the init
-      # script's only external need (aws-cli) is installed there (see the garage step below).
-      garage:
-        image: dxflrs/garage:v1.3.1
-        volumes:
-          - ./docker/garage/garage.toml:/etc/garage.toml:ro
-        options: >-
-          --health-cmd "/garage status"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
 
-      # OBJECT STORAGE, because without it this job could not see uploads at all.
-      #
-      # `StorageService` stubs every presign when `S3_FILES_BUCKET` is unset, so the upload specs
-      # answered 500 here while passing locally — and that blind spot is exactly how THREE dead
-      # upload paths reached main: a missing CSRF header, a CORS allow-list that refused a header the
-      # presign signs, and a replacement lookup by key through a by-id finder. None of them are
-      # visible without a bucket to PUT to.
     env:
       # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -341,13 +315,14 @@ jobs:
       RATE_LIMIT_IP_LIMIT: '100000'
       LOG_LEVEL: warn
       OTEL_ENABLED: 'false'
-      # Object storage points at Garage, the node docker-compose.dev.yml runs. `STORAGE_ENDPOINT` and not `AWS_ENDPOINT_URL`:
-      # StorageService selects its backend separately, because in production the bucket may live in
-      # Cloudflare R2 under different credentials. Path-style addressing, which Garage and R2 both
-      # require — virtual-host style resolves a bucket subdomain that does not exist here.
+      # Object storage points at the Garage started in THIS job (same binary + config as the local
+      # stack). `STORAGE_ENDPOINT` and not `AWS_ENDPOINT_URL`: StorageService selects its backend
+      # separately, because in production the bucket may live in Cloudflare R2 under different
+      # credentials. Path-style addressing, which Garage and R2 both require — virtual-host style
+      # resolves a bucket subdomain that does not exist here. Localhost: same container as the API.
       AWS_REGION: ap-southeast-1
       S3_FILES_BUCKET: opshub-files-ci
-      STORAGE_ENDPOINT: http://garage:3900  # the service label, not localhost: job container
+      STORAGE_ENDPOINT: http://localhost:3900
       STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
       STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
       STORAGE_FORCE_PATH_STYLE: 'true'
@@ -356,6 +331,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # The container runs as root over a uid-1001 workspace; without this git
+      # treats the repo as dubious and `git diff` falls into no-index mode.
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
@@ -379,19 +359,37 @@ jobs:
       # The bucket AND its CORS rules. The rules are not optional decoration: the browser PUTs
       # straight to the presigned URL, and `presignUpload` signs `content-disposition` as well as
       # `content-type`, so a preflight that allows only Content-Type refuses every upload with an
-      # opaque `net::ERR_FAILED`. scripts/garage/init.sh writes those rules and proves a preflight for
-      # each origin; the origin is the Vite dev server Playwright starts (WEB_DEV_PORT, 5174). `run --rm`
-      # returns the init's exit code, so a broken bucket fails this step.
-      - name: Create the CI bucket (garage-init, in-container)
+      # opaque `net::ERR_FAILED`. scripts/garage/init.mjs writes those rules and proves a preflight
+      # for each origin; the origin is the Vite dev server Playwright starts (WEB_DEV_PORT, 5174).
+      # OBJECT STORAGE, because without it this job could not see uploads at all: `StorageService` stubs
+      # every presign when `S3_FILES_BUCKET` is unset, and that blind spot is exactly how THREE dead upload
+      # paths reached main. Garage runs from the static musl release binary INSIDE the job container (a
+      # service cannot mount the repo's garage.toml — services start before checkout), with the same
+      # docker/garage/garage.toml the local stack uses; endpoints are localhost. The bucket/CORS/lifecycle
+      # setup is a small node script on @aws-sdk/client-s3 (already a dependency) — no pip, no awscli.
+      - name: Start Garage and create the CI bucket
+        timeout-minutes: 5
         env:
           GARAGE_ADMIN_TOKEN: local-dev-garage-admin-token-not-a-secret
           STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
           # Quoted on purpose: an unquoted all-zero scalar is read by YAML as the integer 0, and Garage then gets "0".
           STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
-          BUCKETS: opshub-files-ci
         run: |
-          pip3 install --quiet awscli
-          bash scripts/garage/init.sh
+          set -euo pipefail
+          # Pinned release binary (x86_64 musl, from garagehq.deuxfleurs.fr),
+          # verified by sha256 (computed from that URL 2026-10-24).
+          curl -sfL -o /tmp/garage \
+            https://garagehq.deuxfleurs.fr/_releases/v1.3.1/x86_64-unknown-linux-musl/garage
+          echo "0441419f7c0b372d37e533a80e08367023d30fa56a56d1db3f8a2aff27e24c92  /tmp/garage" | sha256sum -c -
+          chmod +x /tmp/garage
+          /tmp/garage -c docker/garage/garage.toml server > /tmp/garage.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf -H "Authorization: Bearer $GARAGE_ADMIN_TOKEN" http://localhost:3903/v1/status >/dev/null && break
+            sleep 1
+          done
+          curl -sf -H "Authorization: Bearer $GARAGE_ADMIN_TOKEN" http://localhost:3903/v1/status >/dev/null || {
+            echo "::error::Garage did not come up"; tail -20 /tmp/garage.log; exit 1; }
+          node scripts/garage/init.mjs
 
       - name: Build API
         run: pnpm build:api
@@ -660,12 +658,3 @@ jobs:
         uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           results: ${{ needs.changes.result }}
-          # Dependency files always run CI: a resolution change can pull
-          # different code even when every other path is ignorable.
-          force-run: |
-            package.json
-            **/package.json
-            pnpm-lock.yaml
-            **/pnpm-lock.yaml
-            pnpm-workspace.yaml
-            **/pnpm-workspace.yaml
