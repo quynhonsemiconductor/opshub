@@ -154,3 +154,13 @@ overrides:
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - '@quynhonsemiconductor/*'
+patchedDependencies:
+  # zod >= 4.5 rewrites anyOf type-unions into 2020-12 style type arrays (compactTypeUnion),
+  # which nestjs-zod's OpenAPI conversion mishandles (nullable strings rendered as string
+  # arrays) and which is invalid in an OpenAPI 3.0 document. Both vendored patches are
+  # rova#793's, adopted unchanged: disable compactTypeUnion in zod's JSON-SCHEMA EMISSION
+  # (the GHSA-mrhx-c7xc-m3w5 fix is in the parse path, not here), and make nestjs-zod ask
+  # zod for OpenAPI 3.0 output. Pinned exactly: the patches name the dist files of these
+  # versions, so a floating range would silently unpatch on the next bump.
+  zod@4.6.6: patches/zod@4.6.6.patch
+  nestjs-zod@5.5.0: patches/nestjs-zod@5.5.0.patch
