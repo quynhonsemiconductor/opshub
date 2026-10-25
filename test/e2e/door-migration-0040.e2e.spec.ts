@@ -54,19 +54,15 @@ async function runSelfCheckingDrop(table: string): Promise<void> {
 }
 
 describe('migration 0040 self-checking orphan drop', () => {
-  const SCRATCH = 'door_test.orphan_scratch';
+  // `public` only: the CI test DB user cannot CREATE SCHEMA (migrations own the schemas),
+  // and the DO block only needs a scratch table to mirror the orphan's shape.
+  const SCRATCH = 'public.door_orphan_scratch';
 
   beforeEach(async () => {
     await db.execute(sql`DROP TABLE IF EXISTS ${sql.raw(SCRATCH)}`);
-    // The parent schema exists from the applied migration; create the scratch schema only if absent.
-    await db.execute(sql`CREATE SCHEMA IF NOT EXISTS door_test`);
     await db.execute(
       sql`CREATE TABLE ${sql.raw(SCRATCH)} (id uuid primary key default gen_random_uuid())`,
     );
-  });
-
-  afterAll(async () => {
-    await db.execute(sql`DROP SCHEMA IF EXISTS door_test CASCADE`);
   });
 
   it('drops an EMPTY orphan table silently', async () => {
