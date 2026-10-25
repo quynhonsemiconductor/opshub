@@ -108,7 +108,7 @@ configuration only. If both are set, **federated wins**.
 3. Put `graph-worker.pem` (key + certificate; raw or base64) in the Secrets Manager secret
    `graph-client-certificate`; delete the local files.
 4. Set `graph_client_id` (the app's client id — public) and `graph_client_certificate_set = true`. The
-   stack injects `GRAPH_CLIENT_ID` and `GRAPH_CLIENT_CERTIFICATE` into the **worker task only**.
+   stack injects `GRAPH_CLIENT_ID` into the **worker task only**; the certificate reaches it as the worker-only file at `AZURE_CLIENT_CERTIFICATE_PATH` (ONPREM-PLAN §7.3).
 5. Rotate before expiry: add the new certificate, update the secret, redeploy the worker, remove the old
    certificate.
 
@@ -125,7 +125,7 @@ Add a **federated credential** to the same app (OpenTofu, `azuread_application_f
 Mount a projected ServiceAccount token with that audience into the worker pod and set
 `GRAPH_FEDERATED_TOKEN_FILE` to its path (Azure Workload Identity's webhook uses
 `/var/run/secrets/azure/tokens/azure-identity-token`). Then remove the certificate and unset
-`GRAPH_CLIENT_CERTIFICATE`. The API pod gets neither the token mount nor the variable.
+`AZURE_CLIENT_CERTIFICATE_PATH`. The API pod gets neither the token mount nor the variable.
 
 ## Configuration
 
@@ -133,7 +133,7 @@ Mount a projected ServiceAccount token with that audience into the worker pod an
 | ---------------------------- | ------- | ----------------------------------------------------- |
 | `ENTRA_TENANT_ID`            | worker  | The directory (shared with sign-in)                   |
 | `GRAPH_CLIENT_ID`            | worker  | **The on/off switch.** Unset = Graph off              |
-| `GRAPH_CLIENT_CERTIFICATE`   | worker  | PEM, key + certificate (ECS)                          |
+| `AZURE_CLIENT_CERTIFICATE_PATH` | worker | Path of the worker-only combined PEM (key first, then certificate) |
 | `GRAPH_FEDERATED_TOKEN_FILE` | worker  | Projected token path (k3s); wins over the certificate |
 
 ## Off
@@ -240,7 +240,7 @@ the variable and never its value.
 | Variable                                                                    | API                  | Worker               |
 | --------------------------------------------------------------------------- | -------------------- | -------------------- |
 | `ENTRA_CLIENT_SECRET` (sign-in)                                             | holds it             | **refuses to start** |
-| `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_CERTIFICATE`, `GRAPH_FEDERATED_TOKEN_FILE` | **refuses to start** | holds them           |
+| `GRAPH_CLIENT_ID`, `AZURE_CLIENT_CERTIFICATE_PATH`, `GRAPH_FEDERATED_TOKEN_FILE` | **refuses to start** | holds them           |
 
 The types follow: `ApiConfigService.get('GRAPH_CLIENT_ID')` and `WorkerConfigService.get('ENTRA_CLIENT_SECRET')`
 do not compile. In Terraform the sign-in secret is injected into the API alone (`api_secrets`), and the

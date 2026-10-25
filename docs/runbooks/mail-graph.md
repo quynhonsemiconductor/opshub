@@ -198,7 +198,7 @@ PASS  DENIED  as noreply-rova@qnsc.vn: forbidden HTTP 403 (request-id ...)
    ```bash
    aws ecs run-task --cluster <cluster> --task-definition <worker-task-definition> --launch-type FARGATE \
      --network-configuration "awsvpcConfiguration={subnets=[<private-subnet-ids>],securityGroups=[<worker-sg>],assignPublicIp=DISABLED}" \
-     --overrides '{"containerOverrides":[{"name":"<worker-container>","command":["sh","-c","MAIL_TRANSPORT=graph AZURE_TENANT_ID=$ENTRA_TENANT_ID AZURE_CLIENT_ID=$GRAPH_CLIENT_ID AZURE_CLIENT_CERTIFICATE=$GRAPH_CLIENT_CERTIFICATE MAIL_SMOKE_TO=<you>@qnsc.vn node node_modules/@quynhonsemiconductor/platform-mail/dist/smoke/cli.js"]}]}'
+     --overrides '{"containerOverrides":[{"name":"<worker-container>","command":["sh","-c","MAIL_TRANSPORT=graph AZURE_TENANT_ID=$ENTRA_TENANT_ID AZURE_CLIENT_ID=$GRAPH_CLIENT_ID MAIL_SMOKE_TO=<you>@qnsc.vn node node_modules/@quynhonsemiconductor/platform-mail/dist/smoke/cli.js"]}]}'
    ```
 
    Read the task's log: `platform-mail-smoke: OK transport=graph id=...`. Exit 4 is `forbidden` (the role assignment or scope is wrong).

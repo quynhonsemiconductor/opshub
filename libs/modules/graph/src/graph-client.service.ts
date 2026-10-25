@@ -38,7 +38,7 @@ export class GraphClientService {
     return {
       tenantId: this.config.get('ENTRA_TENANT_ID'),
       clientId: this.config.get('GRAPH_CLIENT_ID'),
-      certificatePem: this.config.get('GRAPH_CLIENT_CERTIFICATE'),
+      certificatePath: this.config.get('AZURE_CLIENT_CERTIFICATE_PATH'),
       federatedTokenFile: this.config.get('GRAPH_FEDERATED_TOKEN_FILE'),
     };
   }

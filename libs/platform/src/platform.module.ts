@@ -90,7 +90,7 @@ import { EntityAttachmentsService } from './storage/entity-attachments.service';
             sender: config.get('MAIL_GRAPH_SENDER') ?? '',
             tenantId: worker.get('ENTRA_TENANT_ID'),
             clientId: worker.get('GRAPH_CLIENT_ID'),
-            certificate: worker.get('GRAPH_CLIENT_CERTIFICATE'),
+            certificatePath: worker.get('AZURE_CLIENT_CERTIFICATE_PATH'),
             federatedTokenFile: worker.get('GRAPH_FEDERATED_TOKEN_FILE'),
             nodeEnv: config.get('NODE_ENV'),
           });

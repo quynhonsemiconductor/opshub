@@ -132,7 +132,7 @@ describe('.env.example boots the API and the worker from one file', () => {
       ].sort(),
     );
     expect(blankedBy(scripts['start:dev'] ?? '').sort()).toEqual(
-      ['GRAPH_CLIENT_CERTIFICATE', 'GRAPH_CLIENT_ID', 'GRAPH_FEDERATED_TOKEN_FILE'].sort(),
+      ['AZURE_CLIENT_CERTIFICATE_PATH', 'GRAPH_CLIENT_ID', 'GRAPH_FEDERATED_TOKEN_FILE'].sort(),
     );
   });
 
@@ -320,7 +320,7 @@ describe('.env.example holds no real secret and no foreign sender', () => {
     'EDGE_CLIENT_IP_SECRET',
     'EDGE_CLIENT_IP_SECRET_PREVIOUS',
     'GRAPH_CLIENT_ID',
-    'GRAPH_CLIENT_CERTIFICATE',
+    'AZURE_CLIENT_CERTIFICATE_PATH',
   ])('%s is left empty: a developer supplies their own', (key) => {
     expect(env[key]).toBe('');
   });
