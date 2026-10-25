@@ -10,7 +10,7 @@ name: opshub
 
 services:
   postgres:
-    image: postgres:18.6
+    image: postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
     environment:
       POSTGRES_USER: opshub
       POSTGRES_PASSWORD: opshub
@@ -29,7 +29,7 @@ services:
       retries: 5
 
   valkey:
-    image: valkey/valkey:8.1.10-alpine
+    image: valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
     ports:
       - '127.0.0.1:${VALKEY_HOST_PORT:-6310}:6379'
     healthcheck:
@@ -41,7 +41,7 @@ services:
   # Mailpit catches the mail the API sends with EMAIL_PROVIDER=smtp. Nothing leaves the machine: SMTP accepts any message and the
   # web UI (and its API, which the check command reads) shows it. Pinned to a full version. Development only.
   mailpit:
-    image: axllent/mailpit:v1.31.4
+    image: axllent/mailpit:v1.31.4@sha256:b68349e3a014b90c5610bfb26b2ae36f3892d7b8cf25ee140c6c71c98d2fcf48
     ports:
       # MAIL_SMTP_PORT in .env must carry the SMTP port; the UI and API are on the UI port.
       - '127.0.0.1:${MAILPIT_SMTP_HOST_PORT:-1110}:1025'
@@ -56,7 +56,7 @@ services:
   # Garage is the local stand-in for the R2 bucket: one node, named volumes, so uploads survive `docker compose restart`
   # (LocalStack's community edition does not keep data across a restart). Pinned to a full version. Development only.
   garage:
-    image: dxflrs/garage:v1.3.1
+    image: dxflrs/garage:v1.3.1@sha256:58e68794286868230708803e50495bfe7d1d1c7b696e0c2dee99b03c524fc960
     ports:
       # STORAGE_ENDPOINT in .env must carry the same port.
       - '127.0.0.1:${STORAGE_HOST_PORT:-4610}:3900'
@@ -80,7 +80,7 @@ services:
   # implementation to drift). The repo's node_modules must exist first (`pnpm install`): the S3
   # calls import @aws-sdk/client-s3 from it — the bare node image ships no packages of its own.
   garage-init:
-    image: node:24-alpine
+    image: node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53
     working_dir: /repo
     entrypoint: ['node', 'scripts/garage/init.mjs']
     depends_on:
