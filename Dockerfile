@@ -139,7 +139,11 @@ RUN addgroup --system --gid 1001 nodejs \
     && adduser  --system --uid 1001 nestjs \
     && chown -R nestjs:nodejs /app
 USER nestjs
-ENTRYPOINT ["/sbin/tini", "--"]
+# ECS bridge: materialize the injected GRAPH_CLIENT_CERTIFICATE secret value as
+# the file AZURE_CLIENT_CERTIFICATE_PATH and unset it (worker only; see the
+# script header).
+COPY docker/graph-cert-bridge.sh /app/docker/graph-cert-bridge.sh
+ENTRYPOINT ["/sbin/tini", "--", "/bin/sh", "/app/docker/graph-cert-bridge.sh"]
 CMD ["node", "dist/apps/worker/apps/worker/src/main.js"]
 
 # ── migrator (one-shot Drizzle migration runner) ─────────────────────────────
