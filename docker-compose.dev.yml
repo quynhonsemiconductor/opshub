@@ -98,7 +98,10 @@ services:
       BUCKETS: opshub-files-dev opshub-files-test
       WEB_ORIGINS: http://localhost:${WEB_DEV_PORT:-5174},http://127.0.0.1:${WEB_DEV_PORT:-5174}
     volumes:
-      - .:/repo:ro
+      # ONLY the script and the node_modules it imports from — never the whole repo:
+      # a full mount would expose .env to the container.
+      - ./scripts/garage:/repo/scripts/garage:ro
+      - ./node_modules:/repo/node_modules:ro
     restart: 'no'
 
   otel:

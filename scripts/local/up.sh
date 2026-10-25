@@ -9,6 +9,11 @@ port=$(grep -E '^PORT=' .env | cut -d= -f2)
 port=${port:-3001}
 
 mkdir -p .local
+
+# The node_modules MUST exist before the compose up: the garage-init one-shot imports
+# @aws-sdk/client-s3 from the repo's node_modules inside its container.
+pnpm install --frozen-lockfile
+
 docker compose -f docker-compose.dev.yml up -d --wait --wait-timeout 240
 
 # garage-init is a one-shot: its exit status is the proof the bucket and its CORS are in place.
@@ -19,7 +24,6 @@ if [ "$code" != 0 ]; then
   exit 1
 fi
 
-pnpm install --frozen-lockfile
 pnpm db:migrate
 
 start() {

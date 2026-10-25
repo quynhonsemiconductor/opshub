@@ -32,7 +32,8 @@ for (let i = 0; ; i++) {
     await api('/v1/status');
     break;
   } catch {
-    if (i >= 30) { console.error('[garage-init] node did not answer'); process.exit(1); }
+    // 120 s, like init.sh's wait: first boot lays out the store, and slow runners need the budget.
+    if (i >= 120) { console.error('[garage-init] node did not answer'); process.exit(1); }
     await new Promise((r) => setTimeout(r, 1000));
   }
 }

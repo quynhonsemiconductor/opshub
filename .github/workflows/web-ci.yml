@@ -385,8 +385,9 @@ jobs:
         run: |
           set -euo pipefail
           # Pinned release binary (x86_64 musl, from garagehq.deuxfleurs.fr),
-          # verified by sha256 (computed from that URL 2026-10-24).
-          curl -sfL -o /tmp/garage \
+          # verified by sha256 (computed from that URL 2026-10-24). Retry: the
+          # download is the one network step here that has flaked.
+          curl -sfL --retry 3 --retry-all-errors --max-time 120 -o /tmp/garage \
             https://garagehq.deuxfleurs.fr/_releases/v1.3.1/x86_64-unknown-linux-musl/garage
           echo "0441419f7c0b372d37e533a80e08367023d30fa56a56d1db3f8a2aff27e24c92  /tmp/garage" | sha256sum -c -
           chmod +x /tmp/garage
