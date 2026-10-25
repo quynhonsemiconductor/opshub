@@ -3,6 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { newId } from '@shared-kernel';
 import { webhookSubscriptions, webhookDeliveries } from '../../../../db/schema';
 import type { DbExecutor } from '../database/drizzle.provider';
+import { notifyOutbox, WEBHOOK_WAKE } from '../outbox/outbox-wake';
 
 /**
  * WebhookEnqueueService — used inside DB transactions to fan domain events out
@@ -20,11 +21,7 @@ export class WebhookEnqueueService {
    *
    * Silently no-ops if no subscriptions match.
    */
-  async fanout(
-    tx: DbExecutor,
-    eventType: string,
-    payload: Record<string, unknown>,
-  ): Promise<void> {
+  async fanout(tx: DbExecutor, eventType: string, payload: Record<string, unknown>): Promise<void> {
     // PostgreSQL array containment: events @> ARRAY[eventType]::text[]
     const subs = await tx
       .select({ id: webhookSubscriptions.id })
@@ -38,7 +35,7 @@ export class WebhookEnqueueService {
 
     if (subs.length === 0) return;
 
-    const now = new Date();
+    // next_attempt_at is left to the database default: now() is the one clock for the relay's due check (the Time rule).
     await tx.insert(webhookDeliveries).values(
       subs.map((s) => ({
         id: newId(),
@@ -47,8 +44,8 @@ export class WebhookEnqueueService {
         payload,
         status: 'pending' as const,
         attempts: 0,
-        nextAttemptAt: now,
       })),
     );
+    await notifyOutbox(tx, WEBHOOK_WAKE);
   }
 }

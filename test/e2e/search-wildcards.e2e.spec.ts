@@ -16,7 +16,7 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 let admin: Session;
@@ -50,7 +50,7 @@ beforeAll(async () => {
     const created = await app.inject({
       method: 'POST',
       url: '/v1/assets',
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload,
     });
     expect(created.statusCode, created.body).toBeLessThan(300);
@@ -67,7 +67,7 @@ async function search(term?: string): Promise<{ total: number; tags: string[] }>
   const res = await app.inject({
     method: 'GET',
     url: `/v1/assets?limit=50${query}`,
-    headers: bearer(admin),
+    headers: authHeaders(admin),
   });
   expect(res.statusCode, res.body).toBe(200);
   // `pageInfo.total`, not a top-level `total` — that is the envelope `buildPageResult` produces.

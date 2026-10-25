@@ -133,18 +133,20 @@ export async function csrfHeaders(request: APIRequestContext): Promise<Record<st
  * Some flows can only be advanced by a different person: a performance review reaches its reviewer only
  * when the SUBJECT submits a self-assessment, and the API keys that on the caller's own id.
  *
- * VIA THE BFF LOGIN, NOT `/v1/auth/dev-login`. The latter carries the `AUTH_LOGIN` tier — FIVE attempts
- * per fifteen minutes, keyed on the IP — which a suite cannot spend on bookkeeping: it failed exactly that
- * way, `RATE_LIMITED` on a helper the test was not testing. `/v1/bff/dev-login` sits on the default tier,
- * and brute-force protection on a passwordless dev route that 404s in production is protecting nothing.
+ * VIA IDENTITY'S `/api/auth/test-login`: passwordless, loaded only with `IDENTITY_TEST_LOGIN=enabled` and
+ * NODE_ENV `development`/`test`, and absent (404) everywhere else. It is not behind the API's rate-limit tiers,
+ * which a suite cannot spend on bookkeeping.
  *
  * A FRESH CONTEXT, so the new session cookie cannot overwrite the one every other call in the spec uses.
  * Dispose it when done.
  */
 export async function contextAs(email: string): Promise<APIRequestContext> {
-  const context = await request.newContext({ baseURL: 'http://localhost:5173' });
-  const res = await context.post('/v1/bff/dev-login', { data: { email } });
-  expect(res.ok(), `bff dev-login failed for ${email}: ${res.status()} ${await res.text()}`).toBe(
+  const context = await request.newContext({ baseURL: 'http://localhost:5174' });
+  const res = await context.post('/api/auth/test-login', {
+    data: { email },
+    headers: { origin: 'http://localhost:5174' },
+  });
+  expect(res.ok(), `test-login failed for ${email}: ${res.status()} ${await res.text()}`).toBe(
     true,
   );
   return context;

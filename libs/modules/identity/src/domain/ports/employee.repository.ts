@@ -28,10 +28,6 @@ export interface IEmployeeRepository {
   findExistingIds(ids: string[]): Promise<string[]>;
   findByEmail(email: string): Promise<Employee | null>;
   findByEntraOid(oid: string): Promise<Employee | null>;
-  upsertByEntraOid(
-    oid: string,
-    input: Partial<CreateEmployeeInput> & { email: string; displayName: string },
-  ): Promise<Employee>;
   list(
     filters: EmployeeFilters,
     limit: number,

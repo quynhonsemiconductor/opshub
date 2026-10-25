@@ -5,10 +5,11 @@ import {
   createParamDecorator,
   ExecutionContext,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
-import { JwtAuthGuard } from './jwt.guard';
+import { ApiCookieAuth, ApiResponse } from '@nestjs/swagger';
+import { Public as IdentityPublic } from '@quynhonsemiconductor/identity/nest';
+import { SessionAuthGuard } from './session-principal.guard';
 import { PolicyGuard } from './policy.guard';
-import type { JwtPayload } from './jwt.strategy';
+import type { JwtPayload } from './principal';
 import type { PolicyScope } from './authz.types';
 import type { Permission } from '@shared-kernel';
 
@@ -49,12 +50,18 @@ export interface PermissionRequirement {
   scope?: PolicyScope;
 }
 
-/** Mark a route as unauthenticated (skip JwtAuthGuard). */
-export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
+/**
+ * Mark a route as unauthenticated.
+ *
+ * Sets BOTH keys: opshub's own (read by {@link SessionAuthGuard}, the rate limiter and the route audit) and
+ * identity's, which its global `SessionGuard` reads. Setting only ours would answer 401 on the health probes
+ * before our guard is ever reached.
+ */
+export const Public = () => applyDecorators(SetMetadata(IS_PUBLIC_KEY, true), IdentityPublic());
 
 /**
  * Extract the authenticated principal from the request.
- * Only use on routes protected by @Auth() or JwtAuthGuard.
+ * Only use on routes protected by @Auth() or SessionAuthGuard.
  */
 export const CurrentUser = createParamDecorator((_: unknown, ctx: ExecutionContext): JwtPayload => {
   return ctx.switchToHttp().getRequest<{ user: JwtPayload }>().user;
@@ -92,7 +99,7 @@ export const ApiCommonErrors = (...codes: HttpErrorCode[]) =>
  * stayed effective until the token rotated, and it sat beside the DB-resolved
  * permission path as a second, disagreeing source of truth. Both are gone.
  */
-export const Auth = () => applyDecorators(UseGuards(JwtAuthGuard), ApiBearerAuth('access-token'));
+export const Auth = () => applyDecorators(UseGuards(SessionAuthGuard), ApiCookieAuth('session'));
 
 /**
  * Require a fine-grained permission (`module.action`), enforced by the PolicyGuard
@@ -119,9 +126,9 @@ export const Auth = () => applyDecorators(UseGuards(JwtAuthGuard), ApiBearerAuth
  */
 export const RequirePermission = (permission: Permission, scope?: PolicyScope) =>
   applyDecorators(
-    UseGuards(JwtAuthGuard, PolicyGuard),
+    UseGuards(SessionAuthGuard, PolicyGuard),
     SetMetadata(PERMISSION_KEY, { permission, scope } satisfies PermissionRequirement),
-    ApiBearerAuth('access-token'),
+    ApiCookieAuth('session'),
   );
 
 /**
@@ -141,9 +148,9 @@ export const RequirePermission = (permission: Permission, scope?: PolicyScope) =
  */
 export const SelfScoped = (reason: string) =>
   applyDecorators(
-    UseGuards(JwtAuthGuard, PolicyGuard),
+    UseGuards(SessionAuthGuard, PolicyGuard),
     SetMetadata(AUTHZ_MODE_KEY, { mode: 'self-scoped', reason } satisfies AuthzMode),
-    ApiBearerAuth('access-token'),
+    ApiCookieAuth('session'),
   );
 
 /**
@@ -165,9 +172,9 @@ export const SelfScoped = (reason: string) =>
  */
 export const AuthorizedInService = (reason: string, pinnedBy: string) =>
   applyDecorators(
-    UseGuards(JwtAuthGuard, PolicyGuard),
+    UseGuards(SessionAuthGuard, PolicyGuard),
     SetMetadata(AUTHZ_MODE_KEY, { mode: 'in-service', reason, pinnedBy } satisfies AuthzMode),
-    ApiBearerAuth('access-token'),
+    ApiCookieAuth('session'),
   );
 
 /**
@@ -184,9 +191,9 @@ export const AuthorizedInService = (reason: string, pinnedBy: string) =>
  */
 export const SharedRead = (reason: string) =>
   applyDecorators(
-    UseGuards(JwtAuthGuard, PolicyGuard),
+    UseGuards(SessionAuthGuard, PolicyGuard),
     SetMetadata(AUTHZ_MODE_KEY, { mode: 'shared-read', reason } satisfies AuthzMode),
-    ApiBearerAuth('access-token'),
+    ApiCookieAuth('session'),
   );
 
 /**
@@ -205,7 +212,7 @@ export const SharedRead = (reason: string) =>
  */
 export const AuthzGap = (reason: string) =>
   applyDecorators(
-    UseGuards(JwtAuthGuard, PolicyGuard),
+    UseGuards(SessionAuthGuard, PolicyGuard),
     SetMetadata(AUTHZ_MODE_KEY, { mode: 'gap', reason } satisfies AuthzMode),
-    ApiBearerAuth('access-token'),
+    ApiCookieAuth('session'),
   );

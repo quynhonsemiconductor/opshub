@@ -16,7 +16,7 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 /** Files the leave and logs the overtime — `@SelfScoped`, so no permission needed. */
@@ -39,7 +39,7 @@ async function post(
   url: string,
   payload: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const res = await app.inject({ method: 'POST', url, headers: bearer(who), payload });
+  const res = await app.inject({ method: 'POST', url, headers: authHeaders(who), payload });
   expect(res.statusCode, `${url} → ${res.body}`).toBeLessThan(300);
   return JSON.parse(res.body) as Record<string, unknown>;
 }
@@ -53,7 +53,7 @@ async function auditEntries(
     method: 'GET',
     url: `/v1/audit-logs?resourceType=${resourceType}&resourceId=${resourceId}&limit=50`,
     // The reviewer holds `workforce.approve` but not `audit.read`; the admin reads the log.
-    headers: bearer(await login(app, FIXTURE.ADMIN)),
+    headers: authHeaders(await login(app, FIXTURE.ADMIN)),
   });
   expect(res.statusCode, res.body).toBe(200);
   return (

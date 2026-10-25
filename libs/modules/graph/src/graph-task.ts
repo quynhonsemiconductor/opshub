@@ -107,3 +107,13 @@ export function graphLeaseMs(kind: string): number {
   const calls = (GRAPH_TASK_MAX_CALLS as Record<string, number | undefined>)[kind] ?? 3;
   return calls * GRAPH_CALL_TIMEOUT_MS + LEASE_MARGIN_MS;
 }
+
+/**
+ * The two graph relays each wake on their own NOTIFY kind (see outbox-wake.ts). An account task wakes the account relay;
+ * every other task wakes the scan relay. Both enqueue and relay name the kind from here, so they cannot drift apart.
+ */
+export const GRAPH_WAKE = { ACCOUNT: 'graph-account', SCAN: 'graph-scan' } as const;
+
+export function graphWakeKind(kind: GraphTask['kind']): string {
+  return kind === GRAPH_TASK.ACCOUNT_RECONCILE ? GRAPH_WAKE.ACCOUNT : GRAPH_WAKE.SCAN;
+}

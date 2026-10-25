@@ -9,12 +9,13 @@
 # actions-security (zizmor) replaces Code Scanning Default Setup's
 # `Analyze (actions)` as the GitHub Actions workflow security gate — Default
 # Setup autobuild is unreliable on bot-authored PRs and on repos with a lone
-# script in a language the repo isn't otherwise built in (see rally's
+# script in a language the repo isn't otherwise built in (see rova's
 # tools/*.py false-red). Blocking — the initial rollout ran clean, no findings.
 # =============================================================================
 name: Security · Scan
 
 on:
+  merge_group:
   push:
     branches: [main]
   pull_request:
@@ -32,8 +33,22 @@ on:
     - cron: "0 4 * * 1" # weekly Monday 04:00 UTC — catch new CVEs between pushes
 
 concurrency:
-  group: security-${{ github.ref }}
-  cancel-in-progress: true
+  # A PUSH TO MAIN IS NEVER CANCELLED, and that takes a group of its own per commit. The group used to be
+  # `security-${{ github.ref }}` with cancel-in-progress, so two commits landing on main close together shared
+  # `security-refs/heads/main` and the second CANCELLED the first's scan: that commit was left with no scan on record,
+  # and the weekly scheduled run (also `refs/heads/main`) could cancel, or be cancelled by, a push.
+  #
+  # `cancel-in-progress: false` alone would NOT have fixed it: GitHub keeps ONE pending run per group and cancels
+  # every other pending one. Only a distinct group per commit keeps them all.
+  #
+  #   pull_request -> one group per PR, cancel in progress (a newer push to the PR supersedes the older run:
+  #                   unchanged behaviour; refs/pull/N/merge was already per PR)
+  #   push (main)  -> one group per COMMIT, never cancelled
+  #   anything else (schedule, dispatch) -> its own run id, so it can neither cancel nor be cancelled by a push
+  #
+  # `pr-title.yml` deliberately has its own group and is unaffected.
+  group: security-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || (github.event_name == 'push' && format('main-{0}', github.sha) || format('{0}-{1}', github.event_name, github.run_id)) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -46,10 +61,16 @@ permissions:
 
 jobs:
   security:
-    uses: quynhonsemiconductor/ci/.github/workflows/security.yml@v1
+    uses: quynhonsemiconductor/ci/.github/workflows/security.yml@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
     with:
       product: opshub
-      image_target: api
+      # Gitleaks + osv-scanner + Semgrep as ONE job; the required check is now
+      # `security / Security scans (Gitleaks, osv-scanner, Semgrep)`.
+      combine: true
+      # Trivy runs in `Backend CI`'s Docker build job, on the image that job already builds, instead of building it again here.
+      # EXCEPT on the weekly schedule: Backend CI never runs on a schedule, so without this a new CVE in an unchanged image would
+      # go unseen until the next code change. The scheduled run builds and scans the image itself, as before.
+      scan_container: ${{ github.event_name == 'schedule' }}
       # Semgrep runs report-only for now: findings are in shared infra/config
       # (workflow action tags, dependabot/pnpm/npm supply-chain hardening, pg-ssl
       # TLS, editor sanitisation) and are being addressed org-wide separately.
@@ -62,6 +83,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: quynhonsemiconductor/ci/.github/workflows/actions-security.yml@v1
+    uses: quynhonsemiconductor/ci/.github/workflows/actions-security.yml@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
     with:
       blocking: true
+      combine: true # actionlint + zizmor as ONE job; the required check is now `actions-security / Workflow security (actionlint, zizmor)`

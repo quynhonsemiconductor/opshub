@@ -292,7 +292,27 @@ export function DateRangePicker({
   const cells = view ? monthCells(view) : [];
 
   return (
-    <div ref={rootRef} className={cn('relative', className)}>
+    <div
+      ref={rootRef}
+      className={cn('relative', className)}
+      onBlur={(event) => {
+        /*
+         * Focus LEAVING the picker for another control closes the calendar. It used to close only on a pointer
+         * press outside, and the panel sits in the normal flow: so tabbing or clicking from the dates to the next
+         * field left it open, and the press that finally closed it moved everything below up. A button under
+         * the pointer (the form's "Request") had shifted by the time the mouse came up, and the click landed on
+         * nothing: the first click on "Request" did nothing at all. Closing as soon as focus moves on means the
+         * layout is settled before the next press. A null `relatedTarget` (focus going nowhere, or a click on
+         * something that cannot take focus) is left to the pointer handler, because treating it as "left" would
+         * also close the calendar on a click inside its own grid in browsers that do not focus buttons on click.
+         */
+        const next = event.relatedTarget;
+        if (open && next instanceof Node && !rootRef.current?.contains(next)) {
+          setOpen(false);
+          setAnchor(null);
+        }
+      }}
+    >
       <div className="flex items-center gap-1.5">
         <div className="relative flex-1">
           <CalendarDays

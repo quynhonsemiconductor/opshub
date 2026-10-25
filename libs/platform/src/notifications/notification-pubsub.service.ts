@@ -4,15 +4,13 @@
  * Used in two roles:
  *
  *   API process:
- *     - Publishes  `relay:wake`      after notification schedule() — wakes relay immediately.
- *     - Publishes  `email:relay:wake` after email schedule() — wakes email relay immediately.
  *     - Subscribes `user:{id}`       per SSE connection — pushes events to the browser.
  *
  *   Relay (same process in opshub single-process mode):
- *     - Subscribes `relay:wake`       → calls NotificationRelayService.relay() immediately
- *                                       instead of waiting for the 5s cron tick.
  *     - Publishes  `user:{id}`        after a notification is written to in_app_notifications
  *                                       → SSE controller pushes it to the browser in real time.
+ *
+ *   Outbox wake-ups are NOT here: the relays' early runs come from PostgreSQL NOTIFY (outbox-wake.ts).
  *
  * Why a dedicated subscriber connection?
  *   ioredis subscriber mode (after SUBSCRIBE) cannot run regular Redis commands
@@ -20,11 +18,10 @@
  *   cache and rate-limit. This service creates a second, subscriber-only ioredis
  *   connection that is never used for anything else.
  *
- * When REDIS_URL is not set: all publish/subscribe operations silently no-op.
- * The schedulers still write to the DB outbox; delivery is via cron polling only.
+ * When VALKEY_URL is not set: all publish/subscribe operations silently no-op. Outbox delivery is unaffected: it runs on
+ * cron polling and the database's NOTIFY.
  *
  * Channel naming:
- *   `${REDIS_KEY_PREFIX}notifications:relay:wake`
  *   `${REDIS_KEY_PREFIX}notifications:user:{recipientId}`
  *   The prefix isolates staging / production environments sharing the same Redis node.
  *   NOTE: ioredis does NOT apply keyPrefix to pub/sub channels automatically — we
@@ -65,9 +62,9 @@ export class NotificationPubSubService implements OnModuleInit, OnModuleDestroy 
   ) {}
 
   onModuleInit(): void {
-    const url = this.config.get('REDIS_URL');
+    const url = this.config.get('VALKEY_URL');
     if (!url) {
-      this.logger.warn('REDIS_URL not set — notification pub/sub disabled (cron-only delivery)');
+      this.logger.warn('VALKEY_URL not set — notification pub/sub disabled (cron-only delivery)');
       return;
     }
 
@@ -95,16 +92,6 @@ export class NotificationPubSubService implements OnModuleInit, OnModuleDestroy 
 
   // ── Channel helpers ───────────────────────────────────────────────────────
 
-  /** Channel the relay subscribes to when it should check notification_outbox immediately. */
-  relayWakeChannel(): string {
-    return this.ns('relay:wake');
-  }
-
-  /** Channel the relay subscribes to when it should check email_outbox immediately. */
-  emailRelayWakeChannel(): string {
-    return this.ns('email:relay:wake');
-  }
-
   /** Channel the API subscribes to per-user for pushing real-time SSE events. */
   userChannel(recipientId: string): string {
     return this.ns(`user:${recipientId}`);
@@ -116,22 +103,6 @@ export class NotificationPubSubService implements OnModuleInit, OnModuleDestroy 
   }
 
   // ── Publisher (uses CacheService command connection) ──────────────────────
-
-  /**
-   * Published by NotificationSchedulerService after writing to notification_outbox.
-   * Wakes the relay so delivery latency is near-zero instead of ≤5s.
-   */
-  async wakeRelay(): Promise<void> {
-    await this.cache.redis?.publish(this.relayWakeChannel(), '');
-  }
-
-  /**
-   * Published by EmailSchedulerService after writing to email_outbox.
-   * Mirrors wakeRelay() for consistent near-zero email delivery latency.
-   */
-  async wakeEmailRelay(): Promise<void> {
-    await this.cache.redis?.publish(this.emailRelayWakeChannel(), '');
-  }
 
   /**
    * Published by NotificationRelayService after a notification is written to
@@ -150,7 +121,7 @@ export class NotificationPubSubService implements OnModuleInit, OnModuleDestroy 
    * Redis SUBSCRIBE.  Returns an async unsubscribe function; call it on cleanup
    * (SSE disconnect, module destroy) to free resources and UNSUBSCRIBE from Redis.
    *
-   * No-ops silently if pub/sub is disabled (REDIS_URL not set).
+   * No-ops silently if pub/sub is disabled (VALKEY_URL not set).
    */
   async subscribe(
     channel: string,
@@ -178,16 +149,6 @@ export class NotificationPubSubService implements OnModuleInit, OnModuleDestroy 
         this.logger.debug({ channel }, 'Unsubscribed from Redis channel');
       }
     };
-  }
-
-  /** Subscribe to relay wake signals.  Returns unsubscribe fn. */
-  subscribeRelayWake(handler: () => void): Promise<() => Promise<void>> {
-    return this.subscribe(this.relayWakeChannel(), handler);
-  }
-
-  /** Subscribe to email relay wake signals.  Returns unsubscribe fn. */
-  subscribeEmailRelayWake(handler: () => void): Promise<() => Promise<void>> {
-    return this.subscribe(this.emailRelayWakeChannel(), handler);
   }
 
   /** Subscribe to a specific user's notification events.  Returns unsubscribe fn. */

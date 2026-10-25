@@ -1,6 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { generateKeyPairSync, createPublicKey } from 'node:crypto';
-import type { ApiConfigService, WorkerConfigService } from './app-config.service';
+import { describe, it, expect, vi } from 'vitest';
+import type { ApiConfigService, AppConfigService, WorkerConfigService } from './app-config.service';
 import {
   ApiEnvSchema,
   ApiEnvSchema as EnvSchema,
@@ -9,89 +8,95 @@ import {
 } from './env.schema';
 import { resetProcessRoleForTests, setProcessRole } from './process-role';
 
-const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-const publicPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
-
 /** Minimum that satisfies the rest of the schema, so each block tests one thing. */
 function env(overrides: Record<string, string | undefined> = {}) {
   return {
     DATABASE_URL: 'postgres://u:p@localhost:5432/opshub',
-    JWT_PRIVATE_KEY: privatePem,
+    BETTER_AUTH_SECRET: 'b'.repeat(32),
     COOKIE_SECRET: 'y'.repeat(32),
     CSRF_SECRET: 'z'.repeat(32),
     ...overrides,
   };
 }
 
-describe('EnvSchema — JWT key pair', () => {
-  // The point of the derivation: a mismatched pair is the one failure a key pair cannot
-  // otherwise have (signing succeeds, every verification rejects) and nothing upstream
-  // can detect it, because both halves are individually valid.
-  it('derives JWT_PUBLIC_KEY from JWT_PRIVATE_KEY when it is not supplied', () => {
-    const result = EnvSchema.safeParse(env());
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.data.JWT_PUBLIC_KEY).toBe(publicPem);
+/** The same, as the WORKER sees it: it has no sign-in secret (its schema refuses one). */
+function workerEnv(overrides: Record<string, string | undefined> = {}) {
+  const base: Record<string, string | undefined> = env();
+  delete base['BETTER_AUTH_SECRET'];
+  return { ...base, ...overrides };
+}
+
+describe('EnvSchema — identity 8 sign-in', () => {
+  const production = {
+    NODE_ENV: 'production',
+    APP_URL: 'https://opshub.example.test',
+    ENTRA_TENANT_ID: '11111111-1111-4111-8111-111111111111',
+    ENTRA_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
+    ENTRA_CLIENT_SECRET: 'client-secret',
+    EDGE_CLIENT_IP_SECRET: 'e'.repeat(40),
+  };
+
+  it('requires BETTER_AUTH_SECRET, 32+ characters', () => {
+    expect(EnvSchema.safeParse(env({ BETTER_AUTH_SECRET: undefined })).success).toBe(false);
+    expect(EnvSchema.safeParse(env({ BETTER_AUTH_SECRET: 'short' })).success).toBe(false);
+    expect(EnvSchema.safeParse(env()).success).toBe(true);
   });
 
-  it('derives a key that actually matches the private half', () => {
-    const result = EnvSchema.safeParse(env());
-    if (!result.success) throw new Error('expected parse to succeed');
-    const fromPrivate = createPublicKey(result.data.JWT_PRIVATE_KEY)
-      .export({ type: 'spki', format: 'pem' })
-      .toString();
-    expect(result.data.JWT_PUBLIC_KEY).toBe(fromPrivate);
-  });
-
-  it('honours an explicitly supplied JWT_PUBLIC_KEY', () => {
-    const result = EnvSchema.safeParse(env({ JWT_PUBLIC_KEY: publicPem }));
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.data.JWT_PUBLIC_KEY).toBe(publicPem);
-  });
-
-  it('accepts a base64-encoded private key and still derives from it', () => {
+  it('the v7 variables are gone: setting them is harmless but they are not in the parsed config', () => {
     const result = EnvSchema.safeParse(
-      env({ JWT_PRIVATE_KEY: Buffer.from(privatePem).toString('base64') }),
+      env({
+        JWT_PRIVATE_KEY: 'x',
+        BFF_SESSION_TTL_SECONDS: '10',
+        ENTRA_REDIRECT_URI: 'https://x.test',
+      }),
     );
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.data.JWT_PUBLIC_KEY).toBe(publicPem);
+    if (!result.success) throw new Error('expected parse to succeed');
+    expect(Object.keys(result.data)).not.toEqual(
+      expect.arrayContaining(['JWT_PRIVATE_KEY', 'BFF_SESSION_TTL_SECONDS', 'ENTRA_REDIRECT_URI']),
+    );
   });
 
-  // A public key pasted into the private slot is well-formed PEM, so it passes the
-  // field-level refine and would otherwise fail much later, at the first sign().
-  it('fails naming JWT_PRIVATE_KEY when a public key is supplied as the private one', () => {
-    const result = EnvSchema.safeParse(env({ JWT_PRIVATE_KEY: publicPem }));
+  it('development and CI may leave Entra unset (test-login signs in)', () => {
+    expect(EnvSchema.safeParse(env()).success).toBe(true);
+    expect(
+      EnvSchema.safeParse(env({ NODE_ENV: 'test', IDENTITY_TEST_LOGIN: 'enabled' })).success,
+    ).toBe(true);
+  });
+
+  it('production accepts a complete configuration', () => {
+    expect(EnvSchema.safeParse(env(production)).success).toBe(true);
+  });
+
+  it.each(['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET', 'EDGE_CLIENT_IP_SECRET'])(
+    'production refuses a boot without %s, naming it (an empty string counts as unset)',
+    (key) => {
+      for (const value of [undefined, '']) {
+        const result = EnvSchema.safeParse(env({ ...production, [key]: value }));
+        expect(result.success).toBe(false);
+        if (result.success) return;
+        expect(result.error.issues.some((i) => i.path.includes(key))).toBe(true);
+      }
+    },
+  );
+
+  it('production refuses IDENTITY_TEST_LOGIN (a passwordless sign-in), before identity itself would', () => {
+    const result = EnvSchema.safeParse(env({ ...production, IDENTITY_TEST_LOGIN: 'enabled' }));
     expect(result.success).toBe(false);
     if (result.success) return;
-    const issue = result.error.issues.find((i) => i.path.includes('JWT_PRIVATE_KEY'));
-    expect(issue?.message).toMatch(/not a PRIVATE key/);
+    expect(result.error.issues.some((i) => i.path.includes('IDENTITY_TEST_LOGIN'))).toBe(true);
   });
 
-  // ES256 is P-256 specifically. Another curve signs fine and every verifier rejects
-  // the result, which presents as a broken deploy with no obvious cause.
-  it('rejects an EC key on the wrong curve', () => {
-    const p384 = generateKeyPairSync('ec', { namedCurve: 'secp384r1' })
-      .privateKey.export({ type: 'pkcs8', format: 'pem' })
-      .toString();
-    const result = EnvSchema.safeParse(env({ JWT_PRIVATE_KEY: p384 }));
+  it('production refuses a non-https APP_URL: it is the origin Entra redirects to and that owns the cookie', () => {
+    const result = EnvSchema.safeParse(
+      env({ ...production, APP_URL: 'http://opshub.example.test' }),
+    );
     expect(result.success).toBe(false);
     if (result.success) return;
-    const issue = result.error.issues.find((i) => i.path.includes('JWT_PRIVATE_KEY'));
-    expect(issue?.message).toMatch(/must be an EC P-256 key for ES256/);
+    expect(result.error.issues.some((i) => i.path.includes('APP_URL'))).toBe(true);
   });
 
-  it('rejects an RSA key', () => {
-    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 })
-      .privateKey.export({ type: 'pkcs8', format: 'pem' })
-      .toString();
-    expect(EnvSchema.safeParse(env({ JWT_PRIVATE_KEY: rsa })).success).toBe(false);
-  });
-
-  it('still rejects a JWT_PRIVATE_KEY that is not PEM at all', () => {
-    expect(EnvSchema.safeParse(env({ JWT_PRIVATE_KEY: 'not-a-key' })).success).toBe(false);
+  it('IDENTITY_TEST_LOGIN accepts only "enabled"', () => {
+    expect(EnvSchema.safeParse(env({ IDENTITY_TEST_LOGIN: 'yes' })).success).toBe(false);
   });
 });
 
@@ -151,29 +156,48 @@ describe('EnvSchema — database credentials', () => {
   });
 });
 
-describe('EnvSchema — cache URL alias', () => {
-  // Infra injects VALKEY_URL; every caller reads REDIS_URL. Kept here because the
-  // normalisation now shares a transform with the JWT derivation, so a change to one
-  // can silently drop the other.
-  it('resolves VALKEY_URL into REDIS_URL', () => {
+describe('EnvSchema — cache URL: VALKEY_URL, with REDIS_URL as a deprecated alias', () => {
+  // Every reader uses get('VALKEY_URL'). REDIS_URL survives one more release so an existing .env keeps booting; the
+  // normalisation shares a transform with other derivations, so a change to one can silently drop the other.
+  it('reads VALKEY_URL', () => {
     const result = EnvSchema.safeParse(env({ VALKEY_URL: 'rediss://cache:6379' }));
-    expect(result.success).toBe(true);
-    if (!result.success) return;
-    expect(result.data.REDIS_URL).toBe('rediss://cache:6379');
-  });
-
-  it('leaves an explicit REDIS_URL alone when no alias is set', () => {
-    const result = EnvSchema.safeParse(env({ REDIS_URL: 'redis://localhost:6379' }));
     if (!result.success) throw new Error('expected parse to succeed');
-    expect(result.data.REDIS_URL).toBe('redis://localhost:6379');
+    expect(result.data.VALKEY_URL).toBe('rediss://cache:6379');
   });
 
-  it('prefers the infra alias over an explicit REDIS_URL', () => {
+  it('folds the deprecated REDIS_URL into VALKEY_URL when it is the only one set, and says it is deprecated (once)', () => {
+    const warn = vi.spyOn(process, 'emitWarning').mockImplementation(() => undefined);
+    const result = EnvSchema.safeParse(env({ REDIS_URL: 'redis://localhost:6379' }));
+    EnvSchema.safeParse(env({ REDIS_URL: 'redis://localhost:6379' }));
+    if (!result.success) throw new Error('expected parse to succeed');
+    expect(result.data.VALKEY_URL).toBe('redis://localhost:6379');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('REDIS_URL is deprecated'),
+      expect.objectContaining({ code: 'OPSHUB_REDIS_URL' }),
+    );
+    warn.mockRestore();
+  });
+
+  it('does not warn when VALKEY_URL is set, even alongside REDIS_URL', () => {
+    const warn = vi.spyOn(process, 'emitWarning').mockImplementation(() => undefined);
+    EnvSchema.safeParse(env({ VALKEY_URL: 'rediss://cache:6379', REDIS_URL: 'redis://x:6379' }));
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('prefers VALKEY_URL over REDIS_URL when both are set', () => {
     const result = EnvSchema.safeParse(
       env({ REDIS_URL: 'redis://localhost:6379', VALKEY_URL: 'rediss://cache:6379' }),
     );
     if (!result.success) throw new Error('expected parse to succeed');
-    expect(result.data.REDIS_URL).toBe('rediss://cache:6379');
+    expect(result.data.VALKEY_URL).toBe('rediss://cache:6379');
+  });
+
+  it('leaves the cache unset when neither is set', () => {
+    const result = EnvSchema.safeParse(env());
+    if (!result.success) throw new Error('expected parse to succeed');
+    expect(result.data.VALKEY_URL).toBeUndefined();
   });
 });
 
@@ -267,36 +291,77 @@ describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
 
   it('allows LOWERING it in production, because that is not a weakening', () => {
     const result = EnvSchema.safeParse(
-      env({ NODE_ENV: 'production', RATE_LIMIT_DEFAULT_LIMIT: '50' }),
+      env({
+        NODE_ENV: 'production',
+        RATE_LIMIT_DEFAULT_LIMIT: '50',
+        APP_URL: 'https://opshub.example.test',
+        ENTRA_TENANT_ID: '11111111-1111-4111-8111-111111111111',
+        ENTRA_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
+        ENTRA_CLIENT_SECRET: 'client-secret',
+        EDGE_CLIENT_IP_SECRET: 'e'.repeat(40),
+      }),
     );
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(50);
   });
-});
 
-describe('EnvSchema — email sender', () => {
-  /*
-   * `MAIL_FROM_EMAIL` used to default to `no-reply@opshub.app`, so a deployment configured with a real
-   * provider and no sender booted happily and sent from a domain it may not own — which fails SPF and
-   * DKIM at the recipient. That is silent non-delivery, or delivery to spam, and neither shows up in
-   * our logs. The sibling repo added the same refusal after finding both of its environments in
-   * exactly that state.
-   */
-  it('refuses to boot a non-dev provider with no sender', () => {
-    const result = EnvSchema.safeParse(env({ EMAIL_PROVIDER: 'resend' }));
-
+  it('REFUSES to raise the pre-auth address ceiling in production, and says why', () => {
+    const result = EnvSchema.safeParse(
+      env({ NODE_ENV: 'production', RATE_LIMIT_IP_LIMIT: '100000' }),
+    );
     expect(result.success).toBe(false);
     if (result.success) return;
-    const issue = result.error.issues.find((i) => i.path[0] === 'MAIL_FROM_EMAIL');
-    expect(issue, 'the refusal did not name the variable at fault').toBeDefined();
-    // The message has to say what to do about it, not just that something is wrong.
-    expect(issue!.message).toContain('SPF');
+    expect(result.error.issues[0]?.message).toMatch(/RATE_LIMIT_IP_LIMIT cannot exceed 1000/);
   });
 
-  it('accepts a non-dev provider once a sender is set', () => {
+  it('lets a test environment raise the pre-auth ceiling', () => {
+    const result = EnvSchema.safeParse(env({ NODE_ENV: 'test', RATE_LIMIT_IP_LIMIT: '100000' }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.RATE_LIMIT_IP_LIMIT).toBe(100000);
+  });
+});
+
+describe('EnvSchema — WEBHOOK_DELIVERY_MAX_AGE_HOURS', () => {
+  it('defaults to 24 hours', () => {
+    const result = EnvSchema.safeParse(env());
+    expect(result.success && result.data.WEBHOOK_DELIVERY_MAX_AGE_HOURS).toBe(24);
+  });
+
+  it('takes a whole number of hours from the environment', () => {
+    const result = EnvSchema.safeParse(env({ WEBHOOK_DELIVERY_MAX_AGE_HOURS: '72' }));
+    expect(result.success && result.data.WEBHOOK_DELIVERY_MAX_AGE_HOURS).toBe(72);
+  });
+
+  it.each(['0', '-1', '1.5', 'soon'])(
+    'refuses %s: an age of zero would expire every delivery before it is sent',
+    (value) => {
+      const result = EnvSchema.safeParse(env({ WEBHOOK_DELIVERY_MAX_AGE_HOURS: value }));
+      expect(result.success).toBe(false);
+    },
+  );
+});
+
+describe('EnvSchema — email transports', () => {
+  /*
+   * Graph is the only sending transport. SES and Resend were removed, so a deployment that still names
+   * either one is refused at boot, naming EMAIL_PROVIDER, rather than starting and failing every send.
+   */
+  it.each(['ses', 'resend'])(
+    'refuses EMAIL_PROVIDER=%s: that transport no longer exists',
+    (provider) => {
+      const result = EnvSchema.safeParse(env({ EMAIL_PROVIDER: provider }));
+
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.issues.some((i) => i.path[0] === 'EMAIL_PROVIDER')).toBe(true);
+    },
+  );
+
+  it('accepts graph once its sender is set', () => {
     const result = EnvSchema.safeParse(
-      env({ EMAIL_PROVIDER: 'resend', MAIL_FROM_EMAIL: 'ops@example.test' }),
+      env({ EMAIL_PROVIDER: 'graph', MAIL_GRAPH_SENDER: 'noreply-opshub@qnsc.vn' }),
     );
     expect(result.success, JSON.stringify(result.success ? {} : result.error.issues)).toBe(true);
   });
@@ -308,14 +373,6 @@ describe('EnvSchema — email sender', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.EMAIL_PROVIDER).toBe('dev');
-    expect(result.data.MAIL_FROM_EMAIL).toBeUndefined();
-  });
-
-  it('does not invent a sender when one is absent', () => {
-    // The default is what made the misconfiguration silent, so its absence is the assertion.
-    const result = EnvSchema.safeParse(env());
-    if (!result.success) throw new Error('expected parse to succeed');
-    expect(result.data.MAIL_FROM_EMAIL).not.toBe('no-reply@opshub.app');
   });
 });
 
@@ -347,13 +404,13 @@ describe('role-specific schemas — the API and the worker hold different creden
   });
 
   it('the worker accepts the Graph variables', () => {
-    const result = WorkerEnvSchema.safeParse(env(GRAPH));
+    const result = WorkerEnvSchema.safeParse(workerEnv(GRAPH));
     expect(result.success).toBe(true);
     expect(result.data?.GRAPH_CLIENT_ID).toBe(GRAPH.GRAPH_CLIENT_ID);
   });
 
   it('the worker REFUSES TO START with ENTRA_CLIENT_SECRET set', () => {
-    const result = WorkerEnvSchema.safeParse(env({ ENTRA_CLIENT_SECRET: 'sign-in-secret' }));
+    const result = WorkerEnvSchema.safeParse(workerEnv({ ENTRA_CLIENT_SECRET: 'sign-in-secret' }));
 
     expect(result.success).toBe(false);
     expect(result.error?.issues.find((i) => i.path[0] === 'ENTRA_CLIENT_SECRET')?.message).toMatch(
@@ -361,9 +418,109 @@ describe('role-specific schemas — the API and the worker hold different creden
     );
   });
 
+  it('the worker REFUSES TO START with BETTER_AUTH_SECRET set: a worker holding it could forge a session cookie', () => {
+    const result = WorkerEnvSchema.safeParse(workerEnv({ BETTER_AUTH_SECRET: 'b'.repeat(32) }));
+
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues.find((i) => i.path[0] === 'BETTER_AUTH_SECRET');
+    expect(issue?.message).toMatch(/must not be set on the worker/);
+    expect(JSON.stringify(result.error?.issues)).not.toContain('b'.repeat(32));
+  });
+
+  it('the worker REFUSES TO START with IDENTITY_TEST_LOGIN set, and treats an empty one as unset', () => {
+    expect(WorkerEnvSchema.safeParse(workerEnv({ IDENTITY_TEST_LOGIN: 'enabled' })).success).toBe(
+      false,
+    );
+    expect(WorkerEnvSchema.safeParse(workerEnv({ IDENTITY_TEST_LOGIN: '' })).success).toBe(true);
+  });
+
+  it('the API REQUIRES BETTER_AUTH_SECRET and the worker does not need any sign-in variable', () => {
+    expect(ApiEnvSchema.safeParse(workerEnv()).success).toBe(false);
+    expect(WorkerEnvSchema.safeParse(workerEnv()).success).toBe(true);
+  });
+
+  it('the production sign-in rules belong to the API: a production worker needs no Entra secret and no https APP_URL', () => {
+    const production = workerEnv({ NODE_ENV: 'production', APP_URL: 'http://worker.internal' });
+    expect(WorkerEnvSchema.safeParse(production).success).toBe(true);
+    expect(
+      ApiEnvSchema.safeParse({ ...production, BETTER_AUTH_SECRET: 'b'.repeat(32) }).success,
+    ).toBe(false);
+  });
+
+  describe('EDGE_CLIENT_IP_SECRET (the signed client address, API only)', () => {
+    const KEY = 'k'.repeat(40);
+
+    it('is optional on the API outside production: development and CI have no Pages Function in front', () => {
+      expect(ApiEnvSchema.safeParse(env()).success).toBe(true);
+      expect(ApiEnvSchema.safeParse(env({ NODE_ENV: 'test' })).success).toBe(true);
+    });
+
+    it('is REQUIRED in production: unset or empty stops the boot, naming it and why', () => {
+      const production = {
+        NODE_ENV: 'production',
+        APP_URL: 'https://opshub.example.test',
+        ENTRA_TENANT_ID: '11111111-1111-4111-8111-111111111111',
+        ENTRA_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
+        ENTRA_CLIENT_SECRET: 'client-secret',
+      };
+      for (const value of [undefined, '']) {
+        const result = ApiEnvSchema.safeParse(env({ ...production, EDGE_CLIENT_IP_SECRET: value }));
+        expect(result.success).toBe(false);
+        const issue = result.error?.issues.find((i) => i.path[0] === 'EDGE_CLIENT_IP_SECRET');
+        expect(issue?.message).toMatch(/required when NODE_ENV=production/);
+        expect(issue?.message).toMatch(/shared Cloudflare address/);
+      }
+      expect(
+        ApiEnvSchema.safeParse(env({ ...production, EDGE_CLIENT_IP_SECRET: KEY })).success,
+      ).toBe(true);
+    });
+
+    it('the API accepts a key of 32+ characters, and an empty one counts as unset', () => {
+      expect(ApiEnvSchema.safeParse(env({ EDGE_CLIENT_IP_SECRET: KEY })).success).toBe(true);
+      expect(ApiEnvSchema.safeParse(env({ EDGE_CLIENT_IP_SECRET: '' })).success).toBe(true);
+    });
+
+    it.each(['short', ' '.repeat(40), `${'k'.repeat(31)} `])(
+      'the API refuses a key under 32 characters once trimmed (%j), without echoing it',
+      (value) => {
+        const result = ApiEnvSchema.safeParse(env({ EDGE_CLIENT_IP_SECRET: value }));
+        expect(result.success).toBe(false);
+        expect(JSON.stringify(result.error?.issues)).toMatch(/at least 32 characters/);
+      },
+    );
+
+    it('the API refuses a PREVIOUS key with no current one: a rotation half done', () => {
+      const result = ApiEnvSchema.safeParse(env({ EDGE_CLIENT_IP_SECRET_PREVIOUS: KEY }));
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.some((i) => i.path[0] === 'EDGE_CLIENT_IP_SECRET_PREVIOUS')).toBe(
+        true,
+      );
+      expect(
+        ApiEnvSchema.safeParse(
+          env({ EDGE_CLIENT_IP_SECRET: KEY, EDGE_CLIENT_IP_SECRET_PREVIOUS: 'p'.repeat(40) }),
+        ).success,
+      ).toBe(true);
+    });
+
+    it.each(['EDGE_CLIENT_IP_SECRET', 'EDGE_CLIENT_IP_SECRET_PREVIOUS'])(
+      'the worker REFUSES TO START with %s set',
+      (name) => {
+        const result = WorkerEnvSchema.safeParse(workerEnv({ [name]: KEY }));
+        expect(result.success).toBe(false);
+        expect(result.error?.issues.find((i) => i.path[0] === name)?.message).toMatch(
+          /must not be set on the worker/,
+        );
+        expect(JSON.stringify(result.error?.issues)).not.toContain(KEY);
+      },
+    );
+  });
+
   it('both roles keep the shared rules (a worker still needs a database)', () => {
-    expect(WorkerEnvSchema.safeParse({ JWT_PRIVATE_KEY: privatePem }).success).toBe(false);
-    expect(WorkerEnvSchema.safeParse(env()).success).toBe(true);
+    expect(
+      WorkerEnvSchema.safeParse({ COOKIE_SECRET: 'y'.repeat(32), CSRF_SECRET: 'z'.repeat(32) })
+        .success,
+    ).toBe(false);
+    expect(WorkerEnvSchema.safeParse(workerEnv()).success).toBe(true);
   });
 
   it('a process that has not declared its role does not get to guess one', () => {
@@ -376,8 +533,10 @@ describe('role-specific schemas — the API and the worker hold different creden
     setProcessRole('api');
     expect(RoleAwareEnvSchema.safeParse(env(GRAPH)).success).toBe(false);
     setProcessRole('worker');
-    expect(RoleAwareEnvSchema.safeParse(env(GRAPH)).success).toBe(true);
-    expect(RoleAwareEnvSchema.safeParse(env({ ENTRA_CLIENT_SECRET: 'x' })).success).toBe(false);
+    expect(RoleAwareEnvSchema.safeParse(workerEnv(GRAPH)).success).toBe(true);
+    expect(RoleAwareEnvSchema.safeParse(workerEnv({ ENTRA_CLIENT_SECRET: 'x' })).success).toBe(
+      false,
+    );
   });
 
   it('is enforced by the TYPES too: the API cannot read a Graph variable, the worker cannot read the sign-in secret', () => {
@@ -385,13 +544,117 @@ describe('role-specific schemas — the API and the worker hold different creden
     const never = () => {
       const api = {} as ApiConfigService;
       const worker = {} as WorkerConfigService;
+      const common = {} as AppConfigService;
       // @ts-expect-error GRAPH_CLIENT_ID is not an API variable
       api.get('GRAPH_CLIENT_ID');
       // @ts-expect-error ENTRA_CLIENT_SECRET is not a worker variable
       worker.get('ENTRA_CLIENT_SECRET');
+      // @ts-expect-error BETTER_AUTH_SECRET is not a worker variable
+      worker.get('BETTER_AUTH_SECRET');
+      // @ts-expect-error BETTER_AUTH_SECRET is API-only, so not on the common config either
+      common.get('BETTER_AUTH_SECRET');
+      api.get('BETTER_AUTH_SECRET');
       api.get('ENTRA_CLIENT_SECRET');
       worker.get('GRAPH_CLIENT_ID');
     };
     expect(typeof never).toBe('function');
+  });
+});
+
+describe('EnvSchema: EMAIL_PROVIDER=graph (Microsoft 365 mail)', () => {
+  const TENANT = '11111111-1111-4111-8111-111111111111';
+  const APP = '22222222-2222-4222-8222-222222222222';
+  const PEM = '-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----';
+  const graph = { EMAIL_PROVIDER: 'graph', MAIL_GRAPH_SENDER: 'noreply-opshub@qnsc.vn' };
+
+  it('needs the mailbox it sends as, in both roles, and no MAIL_FROM_EMAIL (Graph sends as the mailbox)', () => {
+    for (const parse of [
+      (e: Record<string, string | undefined>) => ApiEnvSchema.safeParse(env(e)),
+      (e: Record<string, string | undefined>) => WorkerEnvSchema.safeParse(workerEnv(e)),
+    ]) {
+      const missing = parse({ EMAIL_PROVIDER: 'graph' });
+      expect(missing.success).toBe(false);
+      expect(
+        !missing.success && missing.error.issues.some((i) => i.path[0] === 'MAIL_GRAPH_SENDER'),
+      ).toBe(true);
+    }
+    expect(ApiEnvSchema.safeParse(env(graph)).success).toBe(true);
+  });
+
+  it('refuses a sender that is not an address', () => {
+    expect(
+      ApiEnvSchema.safeParse(env({ ...graph, MAIL_GRAPH_SENDER: 'not-an-address' })).success,
+    ).toBe(false);
+  });
+
+  it('the API sends nothing, so it needs no Graph credential and is forbidden to hold one', () => {
+    expect(ApiEnvSchema.safeParse(env(graph)).success).toBe(true);
+    const withCredential = ApiEnvSchema.safeParse(env({ ...graph, GRAPH_CLIENT_ID: APP }));
+    expect(withCredential.success).toBe(false);
+  });
+
+  it('the worker needs the tenant, the Graph worker app and a credential for it', () => {
+    const complete = workerEnv({
+      ...graph,
+      ENTRA_TENANT_ID: TENANT,
+      GRAPH_CLIENT_ID: APP,
+      GRAPH_CLIENT_CERTIFICATE: PEM,
+    });
+    expect(WorkerEnvSchema.safeParse(complete).success).toBe(true);
+    for (const name of [
+      'ENTRA_TENANT_ID',
+      'GRAPH_CLIENT_ID',
+      'GRAPH_CLIENT_CERTIFICATE',
+    ] as const) {
+      const result = WorkerEnvSchema.safeParse({ ...complete, [name]: undefined });
+      expect(result.success, `${name} missing should fail`).toBe(false);
+      expect(!result.success && result.error.issues.some((i) => i.path[0] === name)).toBe(true);
+    }
+  });
+
+  it('a federated token file is a credential too, so the k3s move is adding it', () => {
+    const federated = workerEnv({
+      ...graph,
+      ENTRA_TENANT_ID: TENANT,
+      GRAPH_CLIENT_ID: APP,
+      GRAPH_FEDERATED_TOKEN_FILE: '/var/run/token',
+    });
+    expect(WorkerEnvSchema.safeParse(federated).success).toBe(true);
+  });
+
+  it('the worker without graph mail is unchanged: no credential asked for', () => {
+    expect(WorkerEnvSchema.safeParse(workerEnv()).success).toBe(true);
+  });
+});
+
+describe('EnvSchema — EMAIL_PROVIDER=smtp (Mailpit, development only)', () => {
+  const smtp = {
+    EMAIL_PROVIDER: 'smtp',
+    MAIL_SMTP_HOST: 'localhost',
+    MAIL_SMTP_PORT: '1110',
+    MAIL_FROM_EMAIL: 'noreply@qnsc.vn',
+  };
+
+  it('needs the relay host and port, and a sender', () => {
+    const missing = EnvSchema.safeParse(
+      env({ EMAIL_PROVIDER: 'smtp', MAIL_FROM_EMAIL: 'noreply@qnsc.vn' }),
+    );
+    expect(missing.success).toBe(false);
+    expect(
+      !missing.success && missing.error.issues.some((i) => i.path[0] === 'MAIL_SMTP_HOST'),
+    ).toBe(true);
+    expect(EnvSchema.safeParse(env(smtp)).success).toBe(true);
+  });
+
+  it('refuses the relay in production, whatever else is set', () => {
+    const result = EnvSchema.safeParse(env({ ...smtp, NODE_ENV: 'production' }));
+    expect(result.success).toBe(false);
+    expect(
+      !result.success && result.error.issues.some((i) => i.message.includes('development only')),
+    ).toBe(true);
+  });
+
+  it('rejects a port that is not a port', () => {
+    expect(EnvSchema.safeParse(env({ ...smtp, MAIL_SMTP_PORT: '70000' })).success).toBe(false);
   });
 });

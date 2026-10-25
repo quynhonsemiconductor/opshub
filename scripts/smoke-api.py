@@ -14,7 +14,8 @@ import urllib.error
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
-BASE = 'http://localhost:3001/v1'
+ORIGIN = 'http://localhost:3001'
+BASE = ORIGIN + '/v1'
 results = []  # (module, method, path, status, note)
 
 
@@ -25,7 +26,9 @@ def call(module, method, path, body=None, token=None, note=''):
     if data:
         req.add_header('content-type', 'application/json')
     if token:
-        req.add_header('authorization', f'Bearer {token}')
+        # a session from login(): the cookie, plus the CSRF half for anything that changes state
+        req.add_header('cookie', token['cookie'])
+        req.add_header('x-csrf-token', token['csrf'])
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             payload = r.read().decode()
@@ -46,9 +49,29 @@ def call(module, method, path, body=None, token=None, note=''):
         return 0, {}
 
 
+def _cookies(headers):
+    """name=value of every Set-Cookie header, joined for a Cookie request header."""
+    return '; '.join(c.split(';')[0] for c in headers.get_all('set-cookie') or [])
+
+
 def login(email):
-    _, b = call('auth', 'POST', '/auth/dev-login', {'email': email})
-    return b.get('accessToken')
+    """Sign in through identity 8's test login (IDENTITY_TEST_LOGIN=enabled, NODE_ENV test/development)."""
+    req = urllib.request.Request(
+        ORIGIN + '/api/auth/test-login', data=json.dumps({'email': email}).encode(), method='POST')
+    req.add_header('content-type', 'application/json')
+    req.add_header('origin', 'http://localhost:5174')  # Better Auth checks the Origin of every write
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            session = _cookies(r.headers)
+        me = urllib.request.Request(BASE + '/auth/me')
+        me.add_header('cookie', session)
+        with urllib.request.urlopen(me, timeout=20) as r:
+            csrf_cookie = _cookies(r.headers)
+            body = json.loads(r.read().decode())
+        return {'cookie': f'{session}; {csrf_cookie}', 'csrf': body['csrfToken']}
+    except Exception as e:  # noqa: BLE001
+        results.append(('auth', 'POST', '/api/auth/test-login', 0, f'{email}: {type(e).__name__}: {e}'))
+        return None
 
 
 today = date.today()

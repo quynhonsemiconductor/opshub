@@ -1,7 +1,8 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+import { Pool, type ClientConfig } from 'pg';
+import { DbPoolMetrics } from '@quynhonsemiconductor/observability';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import type { OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import * as schema from '../../../../db/schema';
 import { pgOptions } from '../../../../db/pg-ssl';
@@ -19,30 +20,43 @@ export type DrizzleTx = Parameters<Parameters<DrizzleDB['transaction']>[0]>[0];
  */
 export type DbExecutor = DrizzleDB | DrizzleTx;
 
+/**
+ * The connection settings for the app's database, shared by the pool and the outbox wake listener (which holds its own
+ * connection, outside the pool). Composed from DATABASE_* parts when no complete URL is supplied, so the deployed path
+ * reads the RDS-managed secret directly and never holds a copy of a rotating password. See db/database-url.ts.
+ */
+export function databaseClientConfig(config: AppConfigService): ClientConfig {
+  return pgOptions(
+    resolveDatabaseUrl({
+      DATABASE_URL: config.get('DATABASE_URL'),
+      DATABASE_HOST: config.get('DATABASE_HOST'),
+      DATABASE_PORT: config.get('DATABASE_PORT'),
+      DATABASE_NAME: config.get('DATABASE_NAME'),
+      DATABASE_USER: config.get('DATABASE_USER'),
+      DATABASE_PASSWORD: config.get('DATABASE_PASSWORD'),
+      DATABASE_SSLMODE: config.get('DATABASE_SSLMODE'),
+    }),
+    // TLS is decided HERE, not inside resolveDatabaseUrl: the URL builder composes
+    // connection STRING parts and has no business reading a file. Both the pool and
+    // the outbox worker's LISTEN connection get the same verify-full decision.
+    {
+      caFile: config.get('DATABASE_SSL_CA'),
+      isProduction: config.get('NODE_ENV') === 'production',
+    },
+  );
+}
+
 export const InjectDrizzle = () => Inject(DRIZZLE);
 
 @Injectable()
-export class DrizzleProvider implements OnModuleInit, OnModuleDestroy {
+export class DrizzleProvider implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(DrizzleProvider.name);
   private readonly pool: Pool;
   private readonly db: DrizzleDB;
 
   constructor(private readonly config: AppConfigService) {
     this.pool = new Pool({
-      // Composed from DATABASE_* parts when no complete URL is supplied, so the
-      // deployed path reads the RDS-managed secret directly and never holds a copy of
-      // a rotating password. See db/database-url.ts.
-      ...pgOptions(
-        resolveDatabaseUrl({
-          DATABASE_URL: config.get('DATABASE_URL'),
-          DATABASE_HOST: config.get('DATABASE_HOST'),
-          DATABASE_PORT: config.get('DATABASE_PORT'),
-          DATABASE_NAME: config.get('DATABASE_NAME'),
-          DATABASE_USER: config.get('DATABASE_USER'),
-          DATABASE_PASSWORD: config.get('DATABASE_PASSWORD'),
-          DATABASE_SSLMODE: config.get('DATABASE_SSLMODE'),
-        }),
-      ),
+      ...databaseClientConfig(config),
       /**
        * `min` DOES NOT PRE-CREATE CONNECTIONS. It is kept because it governs idle
        * REAPING, which is a real and useful effect — but not the effect the option's
@@ -73,11 +87,24 @@ export class DrizzleProvider implements OnModuleInit, OnModuleDestroy {
       connectionTimeoutMillis: 5_000,
     });
 
+    // Pool saturation (`db.pool.in_use` / `db.pool.waiting`), pulled by OpenTelemetry on each collection: the
+    // `db-pool-contention` alarm reads `db_pool_waiting`. Same reading as platform-db's own pool helper (which
+    // is not exported for a pool built here). Idempotent, and a no-op when OTel is off.
+    new DbPoolMetrics().register(() => ({
+      inUse: this.pool.totalCount - this.pool.idleCount,
+      waiting: this.pool.waitingCount,
+    }));
+
     this.db = drizzle(this.pool, { schema, logger: config.get('LOG_SQL') });
   }
 
   get instance(): DrizzleDB {
     return this.db;
+  }
+
+  /** The `pg.Pool` itself: what platform-runtime's `/readyz` pings (see `DatabaseModule`). */
+  get rawPool(): Pool {
+    return this.pool;
   }
 
   /**
@@ -117,7 +144,7 @@ export class DrizzleProvider implements OnModuleInit, OnModuleDestroy {
    * what forces the pool to create `n` distinct clients; releasing them then returns
    * them as idle, which is the state we want.
    *
-   * FAILURE IS LOGGED, NOT THROWN, and the usual reason does not apply here. Rally
+   * FAILURE IS LOGGED, NOT THROWN, and the usual reason does not apply here. Rova
    * argues that a hard throw is safe because its pipeline gates on a readiness endpoint
    * that does check the database. OpsHub does have such an endpoint — `/v1/readyz`
    * runs `SELECT 1` — but NOTHING CONSUMES IT as a gate: the ALB health-checks
@@ -160,7 +187,13 @@ export class DrizzleProvider implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
+  /**
+   * `onApplicationShutdown`, not `onModuleDestroy`. Nest runs `onModuleDestroy` -> `beforeApplicationShutdown` ->
+   * (HTTP server) -> `onApplicationShutdown`, and the relays and crons that use this pool stop in
+   * `onModuleDestroy` (`@quynhonsemiconductor/platform-runtime`'s `enableGracefulShutdown` documents the order). A
+   * pool closed in the same phase as the work that uses it is gone while a relay still has a query in flight.
+   */
+  async onApplicationShutdown(): Promise<void> {
     await this.pool.end();
   }
 }

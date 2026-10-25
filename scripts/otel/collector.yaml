@@ -20,12 +20,12 @@ processors:
     timeout: 1s
 
 exporters:
-  # Spans and metrics land in this container's log, so `docker logs opshub-otel` is the
+  # Spans and metrics land in this container's log, so `docker compose -f docker-compose.dev.yml logs otel` is the
   # whole debugging story — no UI to run, no volume to mount.
   debug:
     verbosity: detailed
   # Metrics also served in Prometheus text format, which makes them assertable:
-  # `curl -s localhost:8890/metrics | grep queue_` answers "is this instrument real?"
+  # `curl -s localhost:8410/metrics | grep queue_` answers "is this instrument real?"
   # without reading any code.
   prometheus:
     endpoint: 0.0.0.0:8889

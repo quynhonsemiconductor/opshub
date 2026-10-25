@@ -24,7 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq, sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '@platform';
 import { webhookDeliveries } from '../../db/schema';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 let db: DrizzleDB;
@@ -46,7 +46,7 @@ async function createSubscription(description: string): Promise<string> {
   const res = await app.inject({
     method: 'POST',
     url: '/v1/webhooks/subscriptions',
-    headers: bearer(admin),
+    headers: authHeaders(admin),
     payload: {
       url: 'https://example.test/hook',
       secret: 'e2e-secret-value-long-enough',
@@ -84,7 +84,7 @@ describe('webhook delivery integrity', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/webhooks/subscriptions',
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload: {
         url,
         secret: 'e2e-secret-value-long-enough',
@@ -132,7 +132,7 @@ describe('webhook delivery integrity', () => {
     const deleted = await app.inject({
       method: 'DELETE',
       url: `/v1/webhooks/subscriptions/${subscriptionId}`,
-      headers: bearer(admin),
+      headers: authHeaders(admin),
     });
     expect(deleted.statusCode, deleted.body).toBeLessThan(300);
 

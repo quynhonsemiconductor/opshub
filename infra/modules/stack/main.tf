@@ -46,8 +46,14 @@ locals {
   api_log_group    = "/ecs/${local.name}-api"
   worker_log_group = "/ecs/${local.name}-worker"
 
-  kms_key_arn        = data.terraform_remote_state.shared.outputs.kms_key_arn
-  cloudflare_zone_id = try(data.terraform_remote_state.shared.outputs.cloudflare_zone_id, "")
+  kms_key_arn = data.terraform_remote_state.shared.outputs.kms_key_arn
+
+  # The zone id is read ONLY when DNS is switched on, and then WITHOUT a fallback: if the shared stack
+  # lacks the output this fails the plan, and `terraform_data.dns_zone_id_is_valid` fails it again if the
+  # value is not a zone id. The old `try(..., "")` turned a missing/empty id into "DNS is off", and the
+  # modules below turned that into "destroy the records" (develop, 2026-10-12). Whether DNS exists is
+  # decided by `var.dns_enabled`, never inferred from this value.
+  cloudflare_zone_id = var.dns_enabled ? data.terraform_remote_state.shared.outputs.cloudflare_zone_id : ""
 
   # ── Connection-pool budget ──────────────────────────────────────────────────
   # `DATABASE_POOL_MAX` defaults to 20 per PROCESS in env.schema.ts, and nothing here
@@ -75,8 +81,9 @@ locals {
 
   # Reserved off the top: 3 for Postgres' superuser slots, 10 for migrations (which
   # run DURING a deploy while api and worker are still up), 5 for an operator holding
-  # a psql session while debugging.
-  db_pool_budget = local.db_max_connections - 18
+  # a psql session while debugging. One more per worker task: the outbox wake's LISTEN
+  # connection (libs/platform/src/outbox/outbox-wake.ts), held outside the pool.
+  db_pool_budget = local.db_max_connections - 18 - var.worker.max_count
 
   # Split 60/40 api:worker, each divided by that service's autoscaling ceiling. The
   # worker's share is not proportional to its task count: a relay tick holds one
@@ -154,11 +161,6 @@ locals {
 
   # Secrets both services share. The DATABASE_* pair is NOT here — see the two locals above.
   app_secrets = concat([
-    # The public half is DERIVED from this at boot, so there is no second secret to fall
-    # out of step with it. A mismatched pair is the one failure a keypair cannot
-    # otherwise have: signing succeeds, every verification rejects, and both values look
-    # individually valid to Terraform and to the app's env schema.
-    { name = "JWT_PRIVATE_KEY", secret_arn = module.secrets.secret_arns["jwt-private"] },
     { name = "COOKIE_SECRET", secret_arn = module.secrets.secret_arns["cookie-secret"] },
     # Required by the env schema, so it is injected unconditionally rather than gated
     # like the two below: it is a random key this side generates, not a credential
@@ -166,15 +168,45 @@ locals {
     { name = "CSRF_SECRET", secret_arn = module.secrets.secret_arns["csrf-secret"] },
   ])
 
-  # The API's ALONE: the BFF's confidential-client secret. The worker never completes a sign-in, and its
-  # env schema REFUSES TO START with ENTRA_CLIENT_SECRET set, so this must not be in `app_secrets`.
-  # Gated: an empty Secrets Manager value cannot be injected at all, so wiring it before the Entra app
-  # registration has one would stop every task from starting. While it is off, the login START still
-  # works and the callback's token exchange is what fails — the app boots, and the Bearer path is
-  # unaffected.
-  api_secrets = var.entra_client_secret_set ? [
-    { name = "ENTRA_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["entra-client-secret"] },
-  ] : []
+  # The API's ALONE: what only a sign-in or a visitor's request needs. The worker never completes a sign-in or
+  # serves a visitor, and its env schema REFUSES TO START with any of these set, so they must not be in
+  # `app_secrets`.
+  #
+  #  - BETTER_AUTH_SECRET: identity 8 (Better Auth) signs its cookies and encrypts what it stores with it.
+  #    Required by the API's env schema (>= 32 characters), so it is injected unconditionally: a random value
+  #    generated on this side (`openssl rand -base64 48`), not a credential minted in someone else's console. It
+  #    REPLACES the v7 JWT keypair: there is no token to sign any more.
+  #  - ENTRA_CLIENT_SECRET: the sign-in app's confidential-client secret. UNCONDITIONAL now: the API's env
+  #    schema refuses to boot NODE_ENV=production without it (a deployed environment with no way to sign in is
+  #    a failed deploy, not a degraded one). The value must already be in Secrets Manager before the tasks
+  #    start: ECS cannot inject an empty secret.
+  #  - EDGE_CLIENT_IP_SECRET: the key the Cloudflare Pages Function signs the visitor's address with
+  #    (`@quynhonsemiconductor/platform-http/edge`) and `clientIp()` verifies. Behind a Pages Function the API's
+  #    `cf-connecting-ip` is a Cloudflare address shared by every visitor, so without it the `AUTH_LOGIN` bucket (5
+  #    attempts per 15 minutes) would be the whole company's. A random value generated on this side
+  #    (`openssl rand -base64 48`), and the SAME value as the Pages project's secret of that name, which Terraform
+  #    does not manage (`production_env_vars` below carries plain variables only): it is set with
+  #    `wrangler pages secret put EDGE_CLIENT_IP_SECRET` or in the dashboard. Unconditional here for the same reason
+  #    as the two above; the API itself treats an absent key as "no signed address", and the Function answers 500
+  #    without its copy, so the two ends are set together (owner steps in the PR that introduced it).
+  #
+  # WHERE THE VALUES LIVE. Develop runs with `secrets_use_bundle = true`, so these are KEYS in the `app`
+  # bundle's JSON (`opshub/develop/app`), not secrets of their own: no container is created for them and
+  # Terraform cannot put the value there. `better-auth-secret` must be added to the bundle by hand BEFORE the
+  # new task definition starts, or ECS cannot resolve the key and the task does not start. (Without the
+  # bundle, a standalone container is created by the apply and then needs its value.)
+  api_secrets = concat(
+    [
+      { name = "BETTER_AUTH_SECRET", secret_arn = module.secrets.secret_arns["better-auth-secret"] },
+      { name = "ENTRA_CLIENT_SECRET", secret_arn = module.secrets.secret_arns["entra-client-secret"] },
+      { name = "EDGE_CLIENT_IP_SECRET", secret_arn = module.secrets.secret_arns["edge-client-ip-secret"] },
+    ],
+    # Only DURING a rotation: the key being retired, still accepted for verification. Gated because ECS cannot
+    # resolve a bundle key that is not there, so injecting it unconditionally would make an optional key mandatory.
+    var.edge_client_ip_secret_previous_set ? [
+      { name = "EDGE_CLIENT_IP_SECRET_PREVIOUS", secret_arn = module.secrets.secret_arns["edge-client-ip-secret-previous"] },
+    ] : [],
+  )
 
   # Microsoft Graph is the WORKER's alone. The API task is given no GRAPH_* variable and no Graph
   # secret: an API request that needs Graph writes a graph_task_outbox row and the worker performs it
@@ -200,10 +232,15 @@ locals {
   # disagree about any of the three.
   shared_env = [
     # "production" in DEVELOP too, on purpose: NODE_ENV selects the app's SECURITY
-    # posture (cookie flags, dev-login refusal, error verbosity), and a deployed
+    # posture (cookie flags, test-login refusal, error verbosity), and a deployed
     # environment should never run the relaxed one. Environment identity travels in
     # tags and log groups instead.
     { name = "NODE_ENV", value = "production" },
+    # The DEPLOYMENT environment (develop | production), distinct from NODE_ENV above, which is "production" everywhere on purpose. The shared
+    # observability package reads DEPLOYMENT_ENV for the OTel `deployment.environment.name` and the log `env` field and FALLS BACK to NODE_ENV, so
+    # without this opshub's develop logs said "env":"production" and its resource said production before the collector sidecar overwrote it.
+    # rova sets it; opshub never did.
+    { name = "DEPLOYMENT_ENV", value = var.env },
     { name = "VALKEY_URL", value = local.valkey_url },
     { name = "AWS_REGION", value = var.region },
     # Head sampling, read by `resolveSampler` in libs/platform/src/observability/otel.ts and
@@ -218,23 +255,17 @@ locals {
     { name = "S3_FILES_BUCKET", value = module.app_bucket.bucket },
     { name = "ENTRA_TENANT_ID", value = var.entra_tenant_id },
     { name = "ENTRA_CLIENT_ID", value = var.entra_client_id },
-    # The SPA origin, NOT the API origin: Entra redirects the browser here, and the
-    # session cookie is set on that response — it has to land same-origin with the SPA or
-    # the `__Host-` cookie is refused. The Pages Function forwards /v1/* to the API.
-    # This exact string must also be registered as a redirect URI on the app registration.
-    { name = "ENTRA_REDIRECT_URI", value = "${local.app_url}/v1/bff/callback" },
     # Terraform already knows the deployed tag, so the version needs no CI plumbing.
     # Read by the OTel resource and by the served OpenAPI document, both of which
     # reported "dev" in every environment before this was injected.
     { name = "SERVICE_VERSION", value = var.image_tag },
-    # Mail. Both services send: the api sends inline where a caller waits for the result, the worker
-    # relays the outbox — so a value set on one and not the other is a half outage that reads as a
-    # flake. Shared for that reason rather than duplicated per service.
+    # Mail. The WORKER relays the outbox and is the only process that sends; the api writes outbox rows. The provider and sender are shared so the
+    # two never disagree about which transport is configured.
     { name = "EMAIL_PROVIDER", value = var.email_provider },
-    { name = "MAIL_FROM_NAME", value = var.mail_from_name },
-    { name = "MAIL_FROM_EMAIL", value = var.mail_from_email },
+    # The shared mailbox Graph sends as. Not a secret. The WORKER's Graph credential (GRAPH_CLIENT_ID, GRAPH_CLIENT_CERTIFICATE) is what lets it send; the
+    # api gets only this, because it never sends (it writes outbox rows).
+    { name = "MAIL_GRAPH_SENDER", value = var.mail_graph_sender },
     { name = "MAIL_REPLY_TO", value = var.mail_reply_to },
-    { name = "SES_CONFIGURATION_SET", value = aws_sesv2_configuration_set.email_feedback.configuration_set_name },
   ]
 }
 
@@ -256,9 +287,8 @@ module "secrets" {
   use_bundle        = var.secrets_use_bundle
   create_standalone = var.secrets_create_standalone
 
-  # Three secrets, not five. `db-url` is gone — the credential is read live from the
-  # RDS-managed secret AWS rotates (see local.app_secrets) — and so is `jwt-public-key`,
-  # which the app derives from the private half at boot.
+  # `db-url` is gone — the credential is read live from the RDS-managed secret AWS rotates (see
+  # local.app_secrets) — and so is every JWT key: identity 8 has no tokens, only `better-auth-secret`.
   # Merged rather than a flat map so `observability-token` can be omitted ENTIRELY while the
   # OTel path is dormant. It is the one secret that cannot exist empty: the collector sidecar
   # reads it as an Authorization header, and ECS refuses to inject a secret with no value —
@@ -268,22 +298,27 @@ module "secrets" {
   secret_names = merge(var.observability.otlp_endpoint == "" ? {} : {
     "observability-token" = "Authorization header for the OTLP backend (e.g. 'Basic <base64>')"
     }, {
-    "jwt-private"   = "JWT ES256 private key, EC P-256 (PEM or base64-encoded PEM). The public half is derived from it."
-    "cookie-secret" = "Fastify cookie signing secret (min 32 chars)"
-    "csrf-secret"   = "HMAC key binding a CSRF token to its session (min 32 chars). Distinct from cookie-secret so the two rotate independently."
+    "edge-client-ip-secret" = "Key the Cloudflare Pages Function signs the visitor's address with, verified by the API (min 32 chars; openssl rand -base64 48). Same value as the Pages secret EDGE_CLIENT_IP_SECRET."
+    "better-auth-secret"    = "identity 8 (Better Auth) signing/encryption secret (min 32 chars; openssl rand -base64 48). Rotating it signs everyone out."
+    "cookie-secret"         = "Fastify cookie signing secret (min 32 chars)"
+    "csrf-secret"           = "HMAC key binding a CSRF token to its session (min 32 chars). Distinct from cookie-secret so the two rotate independently."
     # NOTE: no "tunnel-token" key here any more. It belonged to the OLD manual-tunnel
     # design (cloudflared tunnel create by hand, id pasted into a variable) — Terraform
     # now owns the tunnel's whole lifecycle (module.tunnel) and creates its OWN separate
     # aws_secretsmanager_secret.tunnel_token, populated automatically from the tunnel
     # resource's own token output. Nothing reads this bundle's key any more.
-    "entra-client-secret" = "Entra confidential-client secret for the BFF server-side code exchange"
+    "entra-client-secret" = "Entra sign-in app confidential-client secret, for identity 8's server-side code exchange"
     # Passwords for the least-privilege roles migration 0012 creates. The CONTAINERS exist
     # unconditionally so `secret_arns["db-app-password"]` always resolves and the IAM list
     # keeps a plan-time-known length; what is gated is the INJECTION — see
     # `db_role_passwords_set` and `db_least_privilege`. Empty until step 2 of the runbook.
     "db-app-password"    = "Password for the opshub_app Postgres role (api). [A-Za-z0-9_-], 24+ chars."
     "db-worker-password" = "Password for the opshub_worker Postgres role (worker). [A-Za-z0-9_-], 24+ chars."
-  })
+    }, var.edge_client_ip_secret_previous_set ? {
+    # Present only DURING a rotation (see `edge_client_ip_secret_previous_set`): the retired key, still accepted for
+    # verification. Absent otherwise, so no empty container is created and no bundle key is required.
+    "edge-client-ip-secret-previous" = "The retired edge-client-ip-secret, accepted by the API for verification while the Pages secret is rotated."
+  } : {})
 
   tags = local.tags
 }
@@ -318,9 +353,6 @@ module "rds" {
 #   - SSE notifications publish on `user:{id}` from whichever api task handled the
 #     write, and the browser is subscribed through a different one, so the event was
 #     delivered only when the two happened to be the same task;
-#   - `relay:wake` is published by the api and subscribed by the WORKER, in a
-#     different task entirely, so it never arrived and delivery silently fell back to
-#     the 5s cron poll;
 #   - the authorization cache is invalidated on role writes, and an invalidation that
 #     reaches only the publishing task leaves every other task serving revoked
 #     permissions until the 300s TTL expires.
@@ -406,7 +438,7 @@ module "ecs_cluster" {
 
 # ── ECS service — API ─────────────────────────────────────────────────────────
 module "api" {
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.5.0"
 
   use_firelens = module.firelens_agent_api.enabled
   # Moves with the caller's build_runner/image_platforms in ONE change — see the
@@ -428,11 +460,14 @@ module "api" {
   subnet_ids        = data.terraform_remote_state.runtime.outputs.private_subnet_ids
   security_group_id = data.terraform_remote_state.runtime.outputs.sg_app_id
 
-  # One task at rest in both environments; autoscaling adds more on load. Production
-  # buys redundancy through `max_count` and the ALB health check rather than by
-  # standing a second task up permanently.
-  desired_count = 1
-  min_count     = 1
+  # The INITIAL count is the floor, like the worker's. It was a literal 1, which made a freshly created service
+  # in an environment provisioned idle (`min_count = 0`: production before go-live) start an api task the moment
+  # it was created, against secrets and a database that were not ready. `desired_count` is under `ignore_changes`
+  # in the ecs-service module, so this changes only what a NEW service starts with: an existing service is not
+  # touched (its count is set by the deploy pipeline, the wake schedule and autoscaling). With autoscaling on, the
+  # floor is the scalable target's minimum, which is what `min_count` means everywhere else.
+  desired_count = var.api.min_count
+  min_count     = var.api.min_count
   max_count     = var.api.max_count
   use_spot      = var.api.use_spot
   # Off for an environment driven by a schedule rather than by load: autoscaling would
@@ -442,8 +477,8 @@ module "api" {
   memory_target_pct  = var.api.memory_target_pct
   log_retention_days = var.log_retention_days
 
-  # Host-based routing on the SHARED ALB, so opshub and rally coexist on one listener.
-  # Priority 200 is opshub's slot in both environments (rally holds 100) — a constant,
+  # Host-based routing on the SHARED ALB, so opshub and rova coexist on one listener.
+  # Priority 200 is opshub's slot in both environments (rova holds 100) — a constant,
   # not a variable, because two products colliding on a priority is a deploy failure
   # and the value has to be reasoned about across repos, not per environment.
   # Tunnel and ALB are mutually exclusive. A task served by a tunnel must not also be an
@@ -468,12 +503,18 @@ module "api" {
     module.firelens_agent_api.container_definitions,
   )
 
+  # ECS stops containers in the REVERSE of their dependencies, so the app stops BEFORE the collector and its shutdown "flush telemetry" step (5 s) reaches a
+  # live agent; without this both get SIGTERM at once and the flush times out. Built from the agent module's own output, so it is EMPTY when the agent is
+  # disabled and the name always matches the container that is really in the task (a dependsOn naming an absent container fails task registration).
+  # START, not HEALTHY: the ADOT image has no health check.
+  container_depends_on = [for c in module.otel_agent_api.container_definitions : { container_name = c.name, condition = "START" }]
+
   # Includes the AWS-managed RDS secret: the execution role needs GetSecretValue on it
   # to inject DATABASE_USER/PASSWORD. Omit it and the task cannot start at all ("unable
   # to pull secrets") — a boot failure, not a runtime error. The migrator reuses the
   # api's roles, so it is covered by the api's copy of this list too.
   #
-  # aws_secretsmanager_secret.tunnel_token[*].arn (not [0].arn): matches rally's own
+  # aws_secretsmanager_secret.tunnel_token[*].arn (not [0].arn): matches rova's own
   # fix for a real prod outage — tunnel_token's ARN is unknown-until-apply on an
   # environment where the secret doesn't exist yet, so a `[0]` index or a `length()`
   # call on it makes this whole expression's count unknown. `[*].arn` takes its
@@ -487,7 +528,7 @@ module "api" {
   # the next task start as "unable to pull secrets", long after the apply reported success.
   #
   # Caught on 2026-09-13 by reading the rendered policy after enabling the bundle: the
-  # grant listed `opshub/develop/app-g5z7BM:jwt-private::` and friends with no container
+  # grant listed `opshub/develop/app-g5z7BM:cookie-secret::` and friends with no container
   # ARN among them. Develop is idled to zero, so nothing was running to fail; the next
   # scheduled scale-up would have been the first symptom. rova documents the same trap at
   # its own api execution role.
@@ -505,6 +546,10 @@ module "api" {
     # Per-task pool ceiling, derived from the RDS class — see local.api_pool_max.
     { name = "DATABASE_POOL_MAX", value = tostring(local.api_pool_max) },
     { name = "CORS_ORIGINS", value = local.app_url },
+    # The SPA origin, NOT the API origin: identity 8 derives its base URL, its trusted origin and the Entra
+    # redirect URI (`${APP_URL}/api/auth/callback/microsoft`) from `APP_URL`, and the session cookie is set
+    # on that response, so it has to land same-origin with the SPA. The Pages Function forwards /v1/* and
+    # /api/auth/* to the API. That exact redirect URI must also be registered on the app registration.
     { name = "APP_URL", value = local.app_url },
     # Telemetry. `enabled` and `endpoint` both come FROM the sidecar module, so the app can
     # never be told to export to a collector that was not created — the two cannot disagree.
@@ -520,7 +565,7 @@ module "api" {
 
 # ── ECS service — worker ──────────────────────────────────────────────────────
 module "worker" {
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.3.2"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecs-service?ref=ecs-service-v2.5.0"
 
   use_firelens = module.firelens_agent_worker.enabled
   # Moves with the caller's build_runner/image_platforms in ONE change — see the
@@ -559,6 +604,12 @@ module "worker" {
     module.firelens_agent_worker.container_definitions,
   )
 
+  # ECS stops containers in the REVERSE of their dependencies, so the app stops BEFORE the collector and its shutdown "flush telemetry" step (5 s) reaches a
+  # live agent; without this both get SIGTERM at once and the flush times out. Built from the agent module's own output, so it is EMPTY when the agent is
+  # disabled and the name always matches the container that is really in the task (a dependsOn naming an absent container fails task registration).
+  # START, not HEALTHY: the ADOT image has no health check.
+  container_depends_on = [for c in module.otel_agent_worker.container_definitions : { container_name = c.name, condition = "START" }]
+
   # Includes the AWS-managed RDS secret: the execution role needs GetSecretValue on it
   # to inject DATABASE_USER/PASSWORD. Omit it and the task cannot start at all ("unable
   # to pull secrets") — a boot failure, not a runtime error. The migrator reuses the
@@ -574,7 +625,7 @@ module "worker" {
   # the next task start as "unable to pull secrets", long after the apply reported success.
   #
   # Caught on 2026-09-13 by reading the rendered policy after enabling the bundle: the
-  # grant listed `opshub/develop/app-g5z7BM:jwt-private::` and friends with no container
+  # grant listed `opshub/develop/app-g5z7BM:cookie-secret::` and friends with no container
   # ARN among them. Develop is idled to zero, so nothing was running to fail; the next
   # scheduled scale-up would have been the first symptom. rova documents the same trap at
   # its own api execution role.
@@ -676,10 +727,10 @@ module "migrator" {
 #
 # The WORKER gets none — it is a relay with no HTTP surface.
 #
-# Created and owned by Terraform, unlike rally's two tunnels (created by hand, then
+# Created and owned by Terraform, unlike rova's two tunnels (created by hand, then
 # adopted) — opshub has never had one, so there is nothing existing to preserve and no
 # adopt-then-manage two-step needed. `hostname` is set from creation, so this tunnel
-# is never inert (rally production once went live with an ingress-rule-less tunnel
+# is never inert (rova production once went live with an ingress-rule-less tunnel
 # that connected, reported healthy, and 503'd every request).
 module "tunnel" {
   count  = var.tunnel_enabled && var.cloudflare_account_id != "" ? 1 : 0
@@ -720,11 +771,36 @@ resource "aws_secretsmanager_secret" "tunnel_token" {
   tags = local.tags
 }
 
-resource "aws_secretsmanager_secret_version" "tunnel_token" {
+# The connector token's VALUE, written at apply time and never held as a Terraform attribute.
+#
+# The version resource that used to hold it read the value on every refresh, and that needs
+# secretsmanager:GetSecretValue on the plan role. The plan role must not have it, so the
+# container above stays managed here and this resource writes the token into a new version
+# when it changes (a tunnel recreate changes the hash). No plan reads a secret value.
+#
+# The version resource that held the value is forgotten here, not destroyed. A bare `removed` block
+# (OpenTofu 1.9: no `lifecycle` inside it; it forgets by default) takes the old version out of state on
+# apply, and leaves the secret's current version alone. Without it, the removal would plan a DESTROY of
+# the version, which can strip the AWSCURRENT stage the sidecar reads.
+removed {
+  from = aws_secretsmanager_secret_version.tunnel_token
+}
+
+resource "terraform_data" "tunnel_token_value" {
   count = var.tunnel_enabled && var.cloudflare_account_id != "" ? 1 : 0
 
-  secret_id     = aws_secretsmanager_secret.tunnel_token[0].id
-  secret_string = module.tunnel[0].token
+  # A hash, so the token itself never lands in state or in a plan.
+  triggers_replace = sha256(module.tunnel[0].token)
+
+  # The token goes in through the environment and stdin, never argv, and is never echoed. Only the
+  # new version id is printed.
+  provisioner "local-exec" {
+    environment = {
+      TUNNEL_TOKEN = module.tunnel[0].token
+      SECRET_ID    = aws_secretsmanager_secret.tunnel_token[0].id
+    }
+    command = "set -eu; command -v aws >/dev/null || { echo 'aws CLI missing on the runner' >&2; exit 1; }; printf '%s' \"$TUNNEL_TOKEN\" | aws secretsmanager put-secret-value --region ${var.region} --secret-id \"$SECRET_ID\" --secret-string file:///dev/stdin --query VersionId --output text"
+  }
 }
 
 module "tunnel_api" {
@@ -746,7 +822,7 @@ module "tunnel_api" {
 # turning telemetry on a one-line change per environment rather than a migration, and it is
 # why adopting this costs nothing while it is off.
 module "otel_agent_api" {
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.1.0"
 
   product       = var.product
   env           = var.env
@@ -756,10 +832,11 @@ module "otel_agent_api" {
   token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
   log_group        = local.api_log_group
   region           = var.region
+  debug_metrics    = var.observability.debug_metrics
 }
 
 module "otel_agent_worker" {
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/observability-agent?ref=observability-agent-v1.1.0"
 
   product          = var.product
   env              = var.env
@@ -767,10 +844,11 @@ module "otel_agent_worker" {
   token_secret_arn = try(module.secrets.secret_arns["observability-token"], "")
   log_group        = local.worker_log_group
   region           = var.region
+  debug_metrics    = var.observability.debug_metrics
 }
 
 # Ships each service's router (task-level, non-app) logs to Loki, same shared stack the
-# OTel sidecars push metrics/traces to. Adopted from rally — opshub previously had no log
+# OTel sidecars push metrics/traces to. Adopted from rova — opshub previously had no log
 # shipping at all, so an incident meant reading CloudWatch Logs Insights by hand instead
 # of Grafana Explore alongside the metrics and traces for the same request.
 module "firelens_agent_api" {
@@ -806,26 +884,58 @@ module "firelens_agent_worker" {
 # Cloudflare account is wired.
 module "web" {
   count  = var.cloudflare_account_id != "" ? 1 : 0
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/pages-web?ref=pages-web-v1.0.1"
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/pages-web?ref=pages-web-v1.0.2"
 
   account_id  = var.cloudflare_account_id
   name        = "${local.name}-web"
   zone_id     = local.cloudflare_zone_id
-  domain      = local.cloudflare_zone_id != "" ? var.app_domain : ""
-  record_name = local.cloudflare_zone_id != "" ? var.web_record : ""
+  domain      = var.dns_enabled ? var.app_domain : ""
+  record_name = var.dns_enabled ? var.web_record : ""
   comment     = "${local.name} web SPA → Cloudflare Pages (managed by ${var.product}-infra ${var.env})"
 
-  # Upstream for the Pages Function at apps/web/functions/v1/[[path]].ts, which
-  # forwards /v1/* (including /v1/bff/*) to the API. That proxy is what keeps the SPA
-  # and the API on ONE origin, and it is a requirement rather than an optimisation:
-  # a `__Host-` session cookie cannot be set cross-site, so the BFF auth flow only
-  # works same-origin. It also removes CORS from the browser path entirely.
+  # Upstream for the Pages Functions at apps/web/functions/v1/[[path]].ts and
+  # apps/web/functions/api/auth/[[path]].ts, which forward /v1/* and identity 8's /api/auth/* (sign-in, the
+  # Microsoft callback, sign-out) to the API. That proxy is what keeps the SPA and the API on ONE origin,
+  # and it is a requirement rather than an optimisation: the session cookie is set on the response the
+  # browser lands on after Entra, which has to come from the SPA host. It also removes CORS from the
+  # browser path entirely.
   #
   # The SPA is built with VITE_API_URL unset, so it calls relative /v1 paths and has
   # no knowledge of this hostname; setting VITE_API_URL would send the browser
   # straight to the API origin and break the cookie.
+  #
+  # The Functions also need the Pages SECRET `EDGE_CLIENT_IP_SECRET` (the same value as the API's key of that
+  # name), which is not set here: this module carries plain variables only. Without it a Function answers 500
+  # rather than forward unsigned (see apps/web/functions/_lib/proxy.ts).
   production_env_vars = {
     API_ORIGIN = "https://${var.api_domain}"
+  }
+}
+
+# ── Guard: when DNS is on, the zone id must be a zone id ──────────────────────
+# A resource precondition, not a variable validation (the value is read from remote state, which a
+# validation block cannot see) and not a `check` block (a failed check is a warning and the plan still
+# exits 0). `input` is bound to the value so it re-evaluates on every plan.
+#
+# PROTECTION AGAINST DESTROY. `lifecycle { prevent_destroy }` on the API CNAME, the web CNAME and the
+# Pages domain is NOT set here, deliberately: those resources live inside tf-modules (`dns-record`,
+# `pages-web`), and `prevent_destroy` must be a literal on the resource itself, so it can only be set
+# there — for every consumer. That would also make `dns_enabled = false` and any environment teardown
+# (which those modules document as removing the records, so none is left to collide on a rebuild)
+# impossible without editing the module. What stops THIS class of incident is the cause: DNS is decided
+# by an explicit boolean, never by the zone value, and an invalid zone id fails the plan. The
+# plan-level backstop is the destructive-guard (see .github/workflows/infra-apply.yml, TODO).
+resource "terraform_data" "dns_zone_id_is_valid" {
+  input = {
+    dns_enabled = var.dns_enabled
+    zone_id     = local.cloudflare_zone_id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !var.dns_enabled || can(regex("^[0-9a-f]{32}$", local.cloudflare_zone_id))
+      error_message = "dns_enabled is true but the shared stack's cloudflare_zone_id is not a 32-hex zone id (empty or missing). Refusing to plan: with it, the API and web DNS records and the Pages domain would be destroyed. Re-apply infra/live/_shared with TF_VAR_cloudflare_zone_id set (CI: vars.CLOUDFLARE_ZONE_ID)."
+    }
   }
 }
 
@@ -835,7 +945,7 @@ module "web" {
 module "dns_api" {
   source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/dns-record?ref=dns-record-v1.1.0"
 
-  enabled = local.cloudflare_zone_id != ""
+  enabled = var.dns_enabled
   zone_id = local.cloudflare_zone_id
   name    = var.api_record
   type    = "CNAME"
@@ -853,7 +963,7 @@ module "dns_api" {
 
 # ── Guard: the OTel/FireLens sidecars must watch the log group the app actually
 # writes to ────────────────────────────────────────────────────────────────────
-# Mirrors rally's stack module exactly. ENFORCED as a resource precondition, not a
+# Mirrors rova's stack module exactly. ENFORCED as a resource precondition, not a
 # `check` block — a violated check emits a warning and the plan exits 0, which
 # would leave a collector silently pointed at the wrong log group, exactly what
 # this guard exists to prevent.
@@ -901,7 +1011,7 @@ resource "terraform_data" "otel_agent_log_groups_match_services" {
 # the resource already exists in state.
 #
 # Left as a check in #116 on the grounds that it "needs a lifecycle precondition and is worth
-# its own change"; rally then did exactly that in quynhonsemiconductor/rally#392, so this closes the gap
+# its own change"; rova then did exactly that in quynhonsemiconductor/rova#392, so this closes the gap
 # rather than leaving the two repos with different mechanisms for the same guard.
 resource "terraform_data" "db_pool_fits_instance_class" {
   input = {
@@ -1081,7 +1191,7 @@ resource "aws_scheduler_schedule" "ecs_scale_down" {
 #
 # BOTH gates are required. `tunnel_enabled` says the ALB alarm cannot do this job;
 # `monitor_ingress` says there is something running worth watching. See the variable for why
-# the second defaults to false here while rally defaults it true.
+# the second defaults to false here while rova defaults it true.
 locals {
   # An environment whose service floors are 0 spends most of its time at zero tasks, and a
   # health check against a hostname with nothing behind it sits in ALARM for every one of
@@ -1293,7 +1403,7 @@ resource "aws_scheduler_schedule" "ecs_scale_up" {
 # ── Guard: an environment without a cache must run no tasks ───────────────────
 # `cache.enabled = false` deletes the node, and ElastiCache has no stopped state, so it
 # is the only way to stop an idled environment paying for one. But a task that cannot
-# reach its cache does NOT fail loudly here: REDIS_URL is optional in the app's env
+# reach its cache does NOT fail loudly here: VALKEY_URL is optional in the app's env
 # schema, and the token denylist and the rate limiter both FAIL OPEN when Valkey is
 # unreachable. So the dangerous state is not "no cache" — it is "no cache, tasks
 # running", which degrades two security controls silently.
@@ -1307,13 +1417,13 @@ resource "aws_scheduler_schedule" "ecs_scale_up" {
 # ALB — per-target-group latency and unhealthy hosts. The module also OWNS the alert topic, so
 # there is exactly one topic and one subscription to confirm per environment.
 #
-# Adopted from rally. opshub had no alarms at all, which is the state where an outage is
+# Adopted from rova. opshub had no alarms at all, which is the state where an outage is
 # discovered by a person rather than by a page.
 
 # ── Burstable-RDS alarm sizing, keyed by instance class ──────────────────────
 # opshub runs `db.t4g.micro` in BOTH environments (infra/live/develop/main.tf and
 # infra/live/prod/main.tf), so both of the observability module's opt-in burstable alarms
-# apply here and both get a real floor. This is not an assumption inherited from rally —
+# apply here and both get a real floor. This is not an assumption inherited from rova —
 # it was read off opshub's own live files.
 #
 # Why these alarms matter to this product in particular: a burstable class does not fail
@@ -1322,7 +1432,7 @@ resource "aws_scheduler_schedule" "ecs_scale_up" {
 # sits pinned at its baseline percentage, so `CPUUtilization` reads healthy while every
 # query slows; a memory-starved one loses its filesystem cache and reads fall through to
 # EBS. Both surface downstream as application p99 latency — which is exactly the alert
-# that just paged rally with an uninterpretable value, and exactly the alert this change
+# that just paged rova with an uninterpretable value, and exactly the alert this change
 # has now made quieter. Removing noise from the symptom while leaving the cause unalarmed
 # would be a net loss of coverage, so the two halves belong in one change.
 #
@@ -1414,7 +1524,7 @@ module "observability" {
   ecs_service_names = [module.api.service_name, module.worker.service_name]
 
   # Node mode only (var.cache.mode default), null for serverless — same guard
-  # rally's stack uses. opshub's cache is always its own dedicated node/instance
+  # rova's stack uses. opshub's cache is always its own dedicated node/instance
   # per environment (no shared-node concept here), so this is always safe to
   # wire when the cache is enabled at all.
   #
@@ -1437,7 +1547,7 @@ module "observability" {
 
   # `identifier` (opshub-dev), NOT `instance_id` (db-XXXX…). CloudWatch publishes RDS metrics
   # under the DBInstanceIdentifier dimension, and passing the resource id leaves the RDS alarms
-  # in INSUFFICIENT_DATA permanently while appearing covered — a trap rally fell into for six
+  # in INSUFFICIENT_DATA permanently while appearing covered — a trap rova fell into for six
   # alarms across both environments. observability-v3.0.0+ rejects a resource id outright, so
   # this fails the plan rather than regressing silently.
   rds_instance_id = module.rds.identifier
@@ -1473,17 +1583,18 @@ module "observability" {
 }
 
 # ── Alerting: security controls that failed OPEN ──────────────────────────────
-# The access-token denylist (JwtAuthGuard) and the rate limiter both fail open when Valkey
-# is unreachable. Each choice is right on its own — an outage should not lock every user
-# out, and rate limiting is protective rather than load-bearing — but TOGETHER a cache
-# outage accepts revoked tokens AND serves unlimited traffic, with nothing watching.
+# The rate limiters (opshub's request limiter and identity's sign-in limiter) fail open when Valkey is
+# unreachable. Each choice is right on its own — an outage should not lock every user out, and rate limiting
+# is protective rather than load-bearing — but an outage serves unlimited traffic with nothing watching.
+# (The v7 access-token denylist, which also failed open and made this alarm matter more, is gone: identity 8
+# sessions fall back to Postgres, which fails SAFE.)
 #
 # Log-based rather than OTel-based, deliberately: `OTEL_ENABLED` is false until
 # `observability.otlp_endpoint` is set, so a counter would report nothing while looking
 # like monitoring. Container logs reach CloudWatch regardless of the OTel path.
 #
 # The field comes from `FAIL_OPEN_FIELD` in @quynhonsemiconductor/observability, emitted by
-# `failOpenLog()` at the two guards. Renaming it there would silently disarm this filter,
+# `failOpenLog()` at the request-limit guard and at identity's storage-degraded callback. Renaming it there would silently disarm this filter,
 # so libs/platform/src/observability/fail-open.spec.ts greps THIS file for the pattern and
 # fails if the two disagree.
 resource "aws_cloudwatch_log_metric_filter" "security_fail_open" {
@@ -1530,7 +1641,7 @@ resource "aws_cloudwatch_metric_alarm" "security_fail_open" {
 # would break the day someone rewords the log line.
 #
 # Until this existed the field was greppable and nothing more: three relays emitted it
-# and no alarm watched it. Ported from rally, where it is the same pair.
+# and no alarm watched it. Ported from rova, where it is the same pair.
 resource "aws_cloudwatch_log_metric_filter" "outbox_dead_letter" {
   name           = "${local.name}-outbox-dead-letter"
   log_group_name = module.worker.log_group_name
@@ -1566,6 +1677,43 @@ resource "aws_cloudwatch_metric_alarm" "outbox_dead_letter" {
   ok_actions    = [module.observability.alarm_topic_arn]
 }
 
+# ── The Graph mail sender is refused (403/404 on sendMail) ──────────────────────
+# Not a dead-letter: the email relay DEFERS every row for 15 minutes without spending its attempts, so `outbox-dead-letter` stays silent while no
+# email leaves. Causes: the Exchange role assignment is missing or still propagating (up to ~2 hours), or the mailbox is missing / not REST-enabled
+# (docs/runbooks/mail-graph.md). The field is SENDER_BLOCKED_FIELD in libs/platform/src/email/providers/graph.provider.ts. The provider logs it
+# once per block, i.e. every ~15 minutes while the cause stands, so the alarm looks back over four 5-minute periods and stays in ALARM until
+# the blocks stop.
+resource "aws_cloudwatch_log_metric_filter" "email_sender_blocked" {
+  name           = "${local.name}-email-sender-blocked"
+  log_group_name = module.worker.log_group_name
+  pattern        = "{ $.senderBlocked = \"*\" }"
+
+  metric_transformation {
+    name          = "EmailSenderBlocked"
+    namespace     = "${var.product}/${var.env}"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "email_sender_blocked" {
+  alarm_name        = "${local.name}-email-sender-blocked"
+  alarm_description = "Microsoft Graph refused the shared mailbox (403/404 on sendMail): no email is leaving, and nothing is dead-lettered. Exchange role missing or still propagating, or the mailbox is missing. docs/runbooks/mail-graph.md, \"When Graph refuses, or does not answer\"."
+
+  namespace           = "${var.product}/${var.env}"
+  metric_name         = "EmailSenderBlocked"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 4
+  datapoints_to_alarm = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [module.observability.alarm_topic_arn]
+  ok_actions    = [module.observability.alarm_topic_arn]
+}
+
 # The cache/floors invariant is enforced by a `validation` block on `var.cache` in
 # variables.tf, NOT by a `check` block here.
 #
@@ -1576,197 +1724,20 @@ resource "aws_cloudwatch_metric_alarm" "outbox_dead_letter" {
 # which described enforcement that did not exist: the forbidden combination would have
 # applied cleanly behind a warning nobody reads in CI output.
 
-# ── Outbound email: the permission half ───────────────────────────────────────
-#
-# WITHOUT `ses:SendEmail` ON THE TASK ROLE, EVERY SEND FAILS `AccessDenied` — before the sender is
-# even looked at. The relay's attempts exhaust, the rows dead-letter, and the service goes on
-# reporting healthy, so the first symptom is somebody asking why they never got an email. The sibling
-# repo ran BOTH of its environments that way for a while, with `EMAIL_PROVIDER=ses` and a correct
-# `MAIL_FROM_EMAIL` sitting right beside the missing grant. Shipping the provider without this would
-# reproduce that exactly.
-#
-# SCOPED TWO WAYS, because `ses:SendEmail` on `"*"` would let a compromised task send as any verified
-# identity in the account — including another environment's:
-#   • `Resource` is this account's identity for the SENDER'S OWN DOMAIN, so one environment cannot
-#     send through an identity it does not share.
-#   • The `ses:FromAddress` condition pins the envelope sender to exactly `mail_from_email`, so the
-#     grant cannot be turned into impersonating another address on the same domain.
-#
-# THE ARN IS CONSTRUCTED, not read from the identity resource. IAM will happily reference a resource
-# that does not exist yet, so verifying the domain and applying this stack can happen in either order
-# and the permission simply starts working once verification completes. A data source would make the
-# whole stack fail until the identity existed.
-#
-# `count` on the sender rather than on the provider: the grant is harmless when mail is off, and tying
-# it to `email_provider` would mean an apply that flips the provider also has to create the policy,
-# turning a config change into a permissions change.
-locals {
-  mail_domain      = var.mail_from_email == "" ? "" : split("@", var.mail_from_email)[1]
-  ses_identity_arn = "arn:aws:ses:${var.region}:${data.aws_caller_identity.current.account_id}:identity/${local.mail_domain}"
-
-  ses_send_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
-        Resource = local.ses_identity_arn
-        Condition = {
-          StringEquals = { "ses:FromAddress" = var.mail_from_email }
-        }
-      },
-    ]
-  })
-}
-
-resource "aws_iam_role_policy" "api_ses_send" {
-  count  = var.mail_from_email == "" ? 0 : 1
-  name   = "${local.name}-api-ses-send"
-  role   = split("/", module.api.task_role_arn)[1]
-  policy = local.ses_send_policy
-}
-
-# The worker relays the outbox, so it sends more mail than the api does. Both need the grant.
-resource "aws_iam_role_policy" "worker_ses_send" {
-  count  = var.mail_from_email == "" ? 0 : 1
-  name   = "${local.name}-worker-ses-send"
-  role   = split("/", module.worker.task_role_arn)[1]
-  policy = local.ses_send_policy
-}
-
-# ── SES bounce/complaint feedback loop ──────────────────────────────────────────
-# Mirrors rally's stack module exactly. Unconditional, like rally — a configuration
-# set, its SNS topic and its SQS queue cost nothing idle and don't depend on
-# mail_from_email being set yet, unlike the send grants above.
-#
-# Without this, a bounce or complaint SES reports arrives as an event nothing can
-# tie back to the message that caused it, and the app keeps sending mail to
-# addresses SES already told us are bad — a compliance-relevant failure mode, not
-# just a delivery one.
-resource "aws_sesv2_configuration_set" "email_feedback" {
-  # `configuration_set_name`, not `name`: matches the pinned provider version rally uses.
-  configuration_set_name = "${local.name}-email-feedback"
-}
-
-resource "aws_sns_topic" "ses_bounce_events" {
-  name = "${local.name}-ses-bounce-events"
-}
-
-resource "aws_sesv2_configuration_set_event_destination" "bounces" {
-  configuration_set_name = aws_sesv2_configuration_set.email_feedback.configuration_set_name
-  event_destination_name = "bounce-complaints-to-sqs"
-
-  event_destination {
-    enabled              = true
-    matching_event_types = ["BOUNCE", "COMPLAINT"]
-    sns_destination {
-      topic_arn = aws_sns_topic.ses_bounce_events.arn
-    }
-  }
-}
-
-resource "aws_sqs_queue" "ses_bounce_feedback" {
-  name = "${local.name}-ses-bounce-feedback"
-}
-
-resource "aws_sqs_queue_policy" "ses_bounce_feedback" {
-  queue_url = aws_sqs_queue.ses_bounce_feedback.url
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Principal = { Service = "sns.amazonaws.com" }
-        Action    = "sqs:SendMessage"
-        Resource  = aws_sqs_queue.ses_bounce_feedback.arn
-        Condition = {
-          ArnEquals = { "aws:SourceArn" = aws_sns_topic.ses_bounce_events.arn }
-        }
-      },
-    ]
-  })
-}
-
-resource "aws_sns_topic_subscription" "ses_bounce_to_sqs" {
-  topic_arn = aws_sns_topic.ses_bounce_events.arn
-  protocol  = "sqs"
-  endpoint  = aws_sqs_queue.ses_bounce_feedback.arn
-}
-
-# If the worker's bounce-feedback consumer stalls (a bug, a permission change, a
-# deploy that drops the consumer), events pile up silently: no failed health check,
-# no 5xx — the app keeps sending mail to addresses SES already flagged.
-resource "aws_cloudwatch_metric_alarm" "ses_bounce_queue_depth" {
-  alarm_name          = "${local.name}-ses-bounce-queue-depth-high"
-  namespace           = "AWS/SQS"
-  metric_name         = "ApproximateNumberOfMessagesVisible"
-  dimensions          = { QueueName = aws_sqs_queue.ses_bounce_feedback.name }
-  statistic           = "Maximum"
-  period              = 300
-  evaluation_periods  = 3
-  threshold           = 100
-  comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = [module.observability.alarm_topic_arn]
-  tags                = local.tags
-}
-
-# The direct "is anyone draining this" signal — depth alone can spike from a real
-# burst and clear on its own; age only grows when nothing is consuming.
-resource "aws_cloudwatch_metric_alarm" "ses_bounce_queue_stalled" {
-  alarm_name          = "${local.name}-ses-bounce-queue-stalled"
-  namespace           = "AWS/SQS"
-  metric_name         = "ApproximateAgeOfOldestMessage"
-  dimensions          = { QueueName = aws_sqs_queue.ses_bounce_feedback.name }
-  statistic           = "Maximum"
-  period              = 300
-  evaluation_periods  = 1
-  threshold           = 3600
-  comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = [module.observability.alarm_topic_arn]
-  tags                = local.tags
-}
-
-# The feedback half of the loop: whichever worker service consumes it long-polls this
-# queue. Scoped to the one queue and the three calls a drain makes — Receive, Delete
-# (the consumer acks whether or not the event matched a row, so an unmatched event
-# can never poison the queue into an unresolvable retry), and GetQueueAttributes for
-# the SDK's standard startup probe. No wildcard.
-resource "aws_iam_role_policy" "worker_sqs_bounce_feedback" {
-  name = "${local.name}-worker-sqs-bounce-feedback"
-  role = split("/", module.worker.task_role_arn)[1]
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
-        Resource = aws_sqs_queue.ses_bounce_feedback.arn
-      },
-    ]
-  })
-}
-
 # ── Grafana Alerting + Dashboards ──────────────────────────────────────────────
-# Mirrors rally's stack module — same thresholds philosophy (per-env, single
+# Mirrors rova's stack module — same thresholds philosophy (per-env, single
 # source of truth shared between the alert condition and the dashboard's threshold
 # line), same `or vector(0)`/absent-vector fix on every ratio query (confirmed live
-# in rally's own prod: a zero-failure series is ABSENT, not present-at-zero, and
+# in rova's own prod: a zero-failure series is ABSENT, not present-at-zero, and
 # dividing by an absent vector renders as "No data" instead of the honest 0%).
 #
-# `db-pool-contention` and its dashboard panel are included for structural parity
-# with rally, but stay DARK until `DbPoolMetrics` is wired into opshub's own
-# `DatabaseModule` — not done as part of this change (application code, not infra).
-# `db_pool_in_use`/`db_pool_waiting` are simply absent metrics until then, so the
-# panel shows "No data" and the alert's `no_data_state` (see the module's own
-# default) keeps it from paging on that absence.
+# `db-pool-contention` and its dashboard panel read `db_pool_in_use` / `db_pool_waiting`, which
+# `DrizzleProvider` now emits (observability's `DbPoolMetrics`) from BOTH the api and the worker pool. Before that
+# they were absent series and the alert could not fire.
 #
-# NO LONGER a byte-for-byte mirror of rally as of this change: the four
+# NO LONGER a byte-for-byte mirror of rova as of this change: the four
 # statistically-unsound rules gained a minimum-sample gate and `http-slow-request-count`
-# was added. rally carries the same fix for the same defect — see the gate comment below
+# was added. rova carries the same fix for the same defect — see the gate comment below
 # for the production page that prompted it.
 locals {
   # ── Minimum-sample gates: why four rules carry one ──────────────────────────
@@ -1774,7 +1745,7 @@ locals {
   # handful of samples is not a rate. Both of the affected rule shapes here were
   # capable of paging on a single request.
   #
-  # The evidence is a real page on the sibling `rally` product, which runs these SAME
+  # The evidence is a real page on the sibling `rova` product, which runs these SAME
   # rules from this SAME shared module: `http-p99-latency` fired in production with
   # `A=10000` and resolved at `A=48.5`. Neither number is what it looks like:
   #
@@ -1784,7 +1755,7 @@ locals {
   #     boundary. It meant only "at least one request took longer than 10s" — the true
   #     value could have been 11s or 200s. The same change that added this gate widened
   #     the view out to 60000 (`local.http_duration_buckets_ms` below, mirroring
-  #     apps/api/src/otel.ts), so a repeat of that page lands in a bucket that separates
+  #     apps/api/src/http-duration-boundaries.ts), so a repeat of that page lands in a bucket that separates
   #     12s from a spent retry budget. The clamp itself is a property of the TOP bucket,
   #     not of the number 10000, and it still applies there.
   #   * `48.5` being the resolve value is the tell. A service does not travel from 10s to
@@ -1806,7 +1777,7 @@ locals {
   # worse than no alarm." The Grafana rules never got the same treatment. Same bug, one
   # side unfixed until now.
   #
-  # WHERE OPSHUB'S NUMBERS COME FROM — and where they do NOT. Unlike rally, opshub has no
+  # WHERE OPSHUB'S NUMBERS COME FROM — and where they do NOT. Unlike rova, opshub has no
   # measured traffic to derive a floor from, because opshub has never served any: per
   # docs/system-roadmap.md `infra/` has never been applied and there is no deployed
   # environment, production is provisioned with `min_count = 0`, autoscaling off and a
@@ -1898,6 +1869,20 @@ locals {
   }
   alert_thresholds = lookup(local.alert_thresholds_by_env, var.env, local.alert_thresholds_by_env.develop)
 
+  # `http.server.duration` has ONE emitter here: observability's `HttpMetrics`, meter scope `qnsc`. With
+  # `@opentelemetry/instrumentation-http` 0.221.0 its own duration instrument is not exported under this name, so the
+  # selector pins that scope (`otel_scope_name="qnsc"`): the series exists, and a second emitter (an instrumentation-http
+  # upgrade that records under the same name) cannot double the counts unnoticed. NEVER `!=` the scope: an earlier
+  # version excluded `qnsc`, which excluded the only series and left every latency alarm and panel selecting nothing.
+  # Consequence: the latency series covers only requests that reach the access-log interceptor (see below). After a
+  # deploy, `count by (otel_scope_name) (http_server_duration_milliseconds_bucket)` must return one row, `qnsc`.
+  #
+  # WHAT IS OUTSIDE `http_server_requests_total` / `_errors_total` (the `HttpMetrics` counters): a request a guard
+  # rejects (401, 403, 429 never reach an interceptor), a request that matches no route (404), and everything
+  # identity serves under `/api/auth/*` (a Fastify plugin, not a Nest controller). So the 5xx ratio and the
+  # volume gates describe API handler traffic; a sign-in outage shows in `auth-login-failure-rate`, not here.
+  http_duration_scope = "otel_scope_name=\"qnsc\""
+
   # The explicit bucket boundaries of `http_server_duration_milliseconds`, in the
   # instrument's own unit (milliseconds — `http.server.duration` is declared `unit: 'ms'`,
   # which is why the Prometheus exposition names it
@@ -1907,7 +1892,7 @@ locals {
   # from not knowing this list, and because `slow_request_bucket_ms` is only meaningful as
   # a member of it.
   #
-  # MIRRORS apps/api/src/otel.ts, and is NOT the SDK defaults any more. The same change
+  # MIRRORS apps/api/src/http-duration-boundaries.ts, and is NOT the SDK defaults any more. The same change
   # that added the volume gate passed `httpDurationBoundaries` to `startOtel`, because a
   # top finite bucket of 10000 is exactly where a slow request goes to hide. The first
   # fifteen entries are the OTel JS defaults verbatim, so the low end a healthy p99 sits
@@ -1919,8 +1904,7 @@ locals {
   # Note what is still NOT here: 2000, 3000, 1500. Those are the round numbers an
   # operator reaches for, and every one of them selects nothing.
   http_duration_buckets_ms = [
-    0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000,
-    15000, 30000, 45000, 60000,
+    0, 250, 1000, 2500, 5000, 10000, 60000, 180000,
   ]
 
   runbook_base_url = "https://github.com/quynhonsemiconductor/opshub/blob/main/docs/runbooks/alerts"
@@ -2021,7 +2005,7 @@ resource "terraform_data" "slow_request_bucket_is_exported_boundary" {
 #
 # The DENOMINATOR SERIES is per rule, not shared: each gate counts the population that
 # rule's own arithmetic divides by — `http_server_requests_total` for the two HTTP rules,
-# `job_runs_total` for the worker rule, `auth_login_total` for the login rule. Gating the
+# `job_runs_total` for the worker rule, `identity_security_events_total` (sign-in events) for the login rule. Gating the
 # worker rule on HTTP traffic would tie the worker's alerting to a signal it has nothing
 # to do with, and would leave it dark on an api-idle environment that is still running
 # jobs.
@@ -2051,7 +2035,7 @@ module "alerts" {
     },
     {
       name        = "http-5xx-rate"
-      promql      = "(sum(rate(http_server_errors_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
+      promql      = "(sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\", status_class=\"5xx\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
       for         = "5m"
       op          = "gt"
       threshold   = local.alert_thresholds.http_error_rate
@@ -2061,7 +2045,7 @@ module "alerts" {
     },
     {
       name        = "http-p99-latency"
-      promql      = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le)) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
+      promql      = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, deployment_environment_name=\"${var.env}\"}[5m])) by (le)) and on() (sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m])) * 300 >= ${local.alert_thresholds.min_samples_5m})"
       for         = "5m"
       op          = "gt"
       threshold   = local.alert_thresholds.http_p99_latency_ms
@@ -2077,7 +2061,7 @@ module "alerts" {
     # over 4 requests as over 40,000, so no sample floor is needed or wanted, and none is
     # applied.
     #
-    # It is also the rule that would have described rally's page HONESTLY. Where p99
+    # It is also the rule that would have described rova's page HONESTLY. Where p99
     # reported `A=10000` — a clamped bucket boundary that an on-call reader has to know the
     # histogram's internals to interpret — this reports a plain integer count of requests
     # that crossed the line, which needs no interpretation at all.
@@ -2099,13 +2083,80 @@ module "alerts" {
     # compares different spans of traffic.
     {
       name        = "http-slow-request-count"
-      promql      = "sum(increase(http_server_duration_milliseconds_bucket{le=\"+Inf\", deployment_environment_name=\"${var.env}\"}[30m])) - sum(increase(http_server_duration_milliseconds_bucket{le=\"${local.alert_thresholds.slow_request_bucket_ms}\", deployment_environment_name=\"${var.env}\"}[30m]))"
+      promql      = "sum(increase(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, le=\"+Inf\", deployment_environment_name=\"${var.env}\"}[30m])) - sum(increase(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, le=\"${local.alert_thresholds.slow_request_bucket_ms}\", deployment_environment_name=\"${var.env}\"}[30m]))"
       for         = "5m"
       op          = "gt"
       threshold   = local.alert_thresholds.slow_request_count_30m
       severity    = "warning"
       summary     = "More than ${local.alert_thresholds.slow_request_count_30m} requests took longer than ${local.alert_thresholds.slow_request_bucket_ms}ms in ${var.env} over 30m — a count, not a percentile, so this is meaningful at any traffic level and is not volume-gated."
       runbook_url = "${local.runbook_base_url}/http-slow-request-count.md"
+    },
+    # A signed visitor address the API REFUSED (`edge_client_ip.rejected{reason}`, from platform-http's `clientIp()`).
+    # Nothing legitimate is refused once both ends hold the same key: a rejection is a forged or replayed header, a
+    # Function and an API on different secrets (a rotation half done), a clock skew over 60 s, or a caller reaching
+    # the API origin directly with edge headers. In every case the request still succeeds, but with the shared
+    # Cloudflare address, so the rate limiter and the log silently stop knowing who the visitor is. A count, not a
+    # ratio, so no sample floor: one rejection that persists for 10 minutes is the signal.
+    {
+      name        = "edge-client-ip-rejected"
+      promql      = "sum(increase(edge_client_ip_rejected_total{deployment_environment_name=\"${var.env}\"}[10m]))"
+      for         = "10m"
+      op          = "gt"
+      threshold   = 0
+      severity    = "warning"
+      summary     = "The API refused signed client addresses from the Pages Function in ${var.env} for 10m — the two ends hold different EDGE_CLIENT_IP_SECRET values, or a header is being forged. Visitors are being keyed on a shared Cloudflare address."
+      runbook_url = "${local.runbook_base_url}/edge-client-ip-rejected.md"
+    },
+    # An outbox relay whose PASS throws, continuously. `WebhookRelayService`'s claim query failed on every pass (every
+    # 10 s) for weeks - `FOR UPDATE must specify unqualified relation names` - and nothing alerted: the relays are not
+    # timed by JobMetrics (so `worker-job-failure-rate` never saw them; its runbook said it did), `queue_failures_total`
+    # counts ROWS that failed to deliver and is recorded only after the claim, and `outboxDeadLetter` needs a row to
+    # have been claimed. `outbox_relay_pass_failed_total{relay}` is counted by AbstractOutboxRelay when a pass throws.
+    # A relay passes every 5-10 s, so a failure that persists shows an increase in every 3-minute window; for 10m makes
+    # it "failing continuously", and one transient blip (a connection reset) clears long before. `sum by (relay)`, so
+    # each failing relay is its own alert instance and names itself (`{{ $labels.relay }}`); healthy, the series
+    # does not exist and the rule's no-data state is OK. No sample floor: it is not a ratio. Not gated on idle: the
+    # counter is emitted only by a running worker.
+    {
+      name        = "outbox-relay-failing"
+      promql      = "sum by (relay) (increase(outbox_relay_pass_failed_total{deployment_environment_name=\"${var.env}\"}[3m]))"
+      for         = "10m"
+      op          = "gt"
+      threshold   = 0
+      severity    = "warning"
+      summary     = "Outbox relay {{ $labels.relay }} has failed its pass continuously for 10m in ${var.env} - a claim query or the database connection is failing before any row is reached, so nothing is delivered. The error is in the worker log (`level=error`, the relay's class name)."
+      runbook_url = "${local.runbook_base_url}/outbox-relay-failing.md"
+    },
+    # A scheduled job (an `ExclusiveJob` user) that FAILED, whatever the volume. `worker-job-failure-rate` below is a RATIO over a 5-minute window
+    # gated on `min_samples_5m` job runs - but only ExclusiveJob users are timed by JobMetrics (the outbox relays are not), and they run once an
+    # hour, once a day, or every few minutes, so a 5-minute window never holds the floor's worth of runs and that rule cannot fire. It did
+    # not when `this.cache.tryLock is not a function` failed EVERY scheduled job for 14 hours on develop (2026-10-15): no alert.
+    # This one has no floor: any failure of a scheduled job in the last hour, per job (`{{ $labels.job_name }}` names it).
+    #
+    # `job_name`, not `job`: through OTLP -> Prometheus `job` is overwritten with service.namespace/service.name, so a metric attribute called
+    # `job` collapsed every cron of a worker into one series (observability < 0.6.0). From 0.6.0 the attribute is `job_name`; until a product runs
+    # that release the series is still one per worker: this rule still fires, but with no job name (read the worker log).
+    #
+    # THE BLIND SPOT, and why the expression is shaped this way. A counter first added to by its first failure appears at 1, and `increase()` sees
+    # no change in a series' first sample. observability >= 0.6.0 creates the series at 0 before each run, which covers a failure after an earlier
+    # run; but the exporter sends every 30 s, so a job whose VERY FIRST run after a pod start fails exports 0 and 1 in the same batch and still
+    # starts at 1. So the value is `increase()` PLUS, for a series that did not exist an hour ago (`X unless X offset 1h`), its current value (the
+    # failures since it appeared). The obvious `increase(X) or (X unless X offset 1h)` does NOT work: a new series with two or more samples has an
+    # `increase` result (0), so `or` never reaches the right side. Both shapes were run through promtool (prom/prometheus v3.5.0) against a new
+    # series appearing at 1, a series at 0 then failing, an old constant series (no alert), a new series at 0 (no alert) and another environment.
+    #
+    # `for = "5m"` only delays the page by five minutes; it does NOT filter one-off failures. The one-hour `increase` window means a job that
+    # failed once stays above zero for an hour, so a single failure of an hourly or daily job pages. That is intended: a scheduled job that
+    # threw has not done its work. Healthy, the series does not exist and the no-data state is OK.
+    {
+      name        = "scheduled-job-failed"
+      promql      = "sum by (job_name) (increase(job_failures_total{deployment_environment_name=\"${var.env}\"}[1h])) + (sum by (job_name) (job_failures_total{deployment_environment_name=\"${var.env}\"} unless job_failures_total{deployment_environment_name=\"${var.env}\"} offset 1h) or sum by (job_name) (increase(job_failures_total{deployment_environment_name=\"${var.env}\"}[1h])) * 0)"
+      for         = "5m"
+      op          = "gt"
+      threshold   = 0
+      severity    = "warning"
+      summary     = "Scheduled job {{ $labels.job_name }} failed in the last hour in ${var.env} - it throws before or while doing its work, so what it does (a sweep, a sync, a purge) is not being done. The exception is in the worker log (`level=error`, `context` = the job)."
+      runbook_url = "${local.runbook_base_url}/scheduled-job-failed.md"
     },
     {
       name        = "worker-job-failure-rate"
@@ -2119,12 +2170,12 @@ module "alerts" {
     },
     {
       name        = "auth-login-failure-rate"
-      promql      = "(sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\", outcome=\"failure\"}[15m])) or vector(0)) / sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m])) and on() (sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m])) * 900 >= ${local.alert_thresholds.min_login_attempts_15m})"
+      promql      = "(sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=\"sign_in.failure\"}[15m])) or vector(0)) / sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=~\"sign_in[.](success|failure)\"}[15m])) and on() (sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=~\"sign_in[.](success|failure)\"}[15m])) * 900 >= ${local.alert_thresholds.min_login_attempts_15m})"
       for         = "15m"
       op          = "gt"
       threshold   = local.alert_thresholds.auth_login_failure_rate
       severity    = "warning"
-      summary     = "Login failure rate above ${local.alert_thresholds.auth_login_failure_rate * 100}% in ${var.env} for 15m, over at least ${local.alert_thresholds.min_login_attempts_15m} attempts — entra-login/dev-login both collapse their failure detail before it reaches the caller, check Recent errors / Logs Explorer for the actual cause."
+      summary     = "Login failure rate above ${local.alert_thresholds.auth_login_failure_rate * 100}% in ${var.env} for 15m, over at least ${local.alert_thresholds.min_login_attempts_15m} attempts — identity 8 reports a refused Microsoft sign-in (wrong tenant, a guest, an address off qnsc.vn, a failed role sync) as one `sign_in.failure` event and tells the caller little; the cause is in the API log (`security event: sign_in.failure`, `identity.auth_handler_threw`, `STAFF_SIGN_IN_REFUSED`) and in the audit log (`auth.login.failed`)."
       runbook_url = "${local.runbook_base_url}/auth-login-failure-rate.md"
     },
   ]
@@ -2205,7 +2256,7 @@ data "grafana_data_source" "tempo" {
   name     = var.grafana_alerting.traces_datasource_name
 }
 
-# TWO dashboards, not one growing page — same RED/USE split as rally: "is something
+# TWO dashboards, not one growing page — same RED/USE split as rova: "is something
 # wrong" (Overview) is a different question from "why" (Runtime & Dependencies).
 resource "grafana_dashboard" "overview" {
   count     = var.grafana_alerting_auth != "" ? 1 : 0
@@ -2298,7 +2349,7 @@ resource "grafana_dashboard" "overview" {
           }
         }
         targets = [{
-          expr         = "(sum(rate(http_server_errors_total{deployment_environment_name=\"${var.env}\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m]))"
+          expr         = "(sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\", status_class=\"5xx\"}[5m])) or vector(0)) / sum(rate(http_server_requests_total{deployment_environment_name=\"${var.env}\"}[5m]))"
           legendFormat = "error rate"
           refId        = "A"
         }]
@@ -2335,24 +2386,24 @@ resource "grafana_dashboard" "overview" {
         }
         targets = [
           {
-            expr         = "histogram_quantile(0.50, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            expr         = "histogram_quantile(0.50, sum(rate(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
             legendFormat = "p50"
             refId        = "A"
           },
           {
-            expr         = "histogram_quantile(0.95, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            expr         = "histogram_quantile(0.95, sum(rate(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
             legendFormat = "p95"
             refId        = "B"
           },
           {
-            expr         = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
+            expr         = "histogram_quantile(0.99, sum(rate(http_server_duration_milliseconds_bucket{${local.http_duration_scope}, deployment_environment_name=\"${var.env}\"}[5m])) by (le))"
             legendFormat = "p99"
             refId        = "C"
           },
         ]
       },
       # "Is login itself working" — moved ABOVE DB pool/worker rate, same reordering
-      # rally applied: this and the HTTP error rate above are the two golden-signal
+      # rova applied: this and the HTTP error rate above are the two golden-signal
       # panels most worth seeing without scrolling.
       {
         id         = 5
@@ -2373,13 +2424,13 @@ resource "grafana_dashboard" "overview" {
           }
         }
         targets = [{
-          expr         = "(sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\", outcome=\"failure\"}[15m])) or vector(0)) / sum(rate(auth_login_total{deployment_environment_name=\"${var.env}\"}[15m]))"
+          expr         = "(sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=\"sign_in.failure\"}[15m])) or vector(0)) / sum(rate(identity_security_events_total{deployment_environment_name=\"${var.env}\", event=~\"sign_in[.](success|failure)\"}[15m]))"
           legendFormat = "failure rate"
           refId        = "A"
         }]
       },
       # DARK until DbPoolMetrics is wired app-side — see this block's own header
-      # comment. Kept for structural/layout parity with rally.
+      # comment. Kept for structural/layout parity with rova.
       {
         id         = 6
         title      = "DB pool: in use vs waiting"
@@ -2541,13 +2592,16 @@ resource "grafana_dashboard" "runtime" {
       },
       {
         id         = 3
-        title      = "Outbound HTTP client calls: rate + p99 latency"
+        title      = "Outbound HTTP client calls: rate by server"
         type       = "timeseries"
         gridPos    = { h = 8, w = 12, x = 0, y = 8 }
         datasource = { type = "prometheus", uid = data.grafana_data_source.prometheus[0].uid }
         targets = [{
-          expr         = "sum(rate(http_client_duration_milliseconds_count{deployment_environment_name=\"${var.env}\"}[5m])) by (net_peer_name)"
-          legendFormat = "{{net_peer_name}}"
+          # http_client_request_duration_seconds_count: the ONLY outbound-HTTP series @opentelemetry/instrumentation-http 0.221 emits (stable
+          # semconv, seconds, labelled server_address). This panel read the legacy http_client_duration_milliseconds_count / net_peer_name,
+          # which 0.221 no longer creates, so it had been EMPTY since the upgrade.
+          expr         = "sum(rate(http_client_request_duration_seconds_count{deployment_environment_name=\"${var.env}\"}[5m])) by (server_address)"
+          legendFormat = "{{server_address}}"
           refId        = "A"
         }]
       },

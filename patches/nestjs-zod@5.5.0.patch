@@ -1,0 +1,26 @@
+diff --git a/dist/dto-CHeB-l1i.mjs b/dist/dto-CHeB-l1i.mjs
+index 71150dbea8fed02a5f524d4db5c0193bd77f0e65..72ba5eb21d04b817edfa3ae6bb6dc0b9d9873989 100644
+--- a/dist/dto-CHeB-l1i.mjs
++++ b/dist/dto-CHeB-l1i.mjs
+@@ -368,7 +368,7 @@ function openApiMetadataFactory({ schema, io }) {
+ 	return properties;
+ }
+ function generateJsonSchema(schema, io) {
+-	const generatedJsonSchema = "_zod" in schema ? toJSONSchema(schema, { io }) : zodV3ToOpenAPI(schema);
++	const generatedJsonSchema = "_zod" in schema ? toJSONSchema(schema, { io, target: "openapi-3.0" }) : zodV3ToOpenAPI(schema);
+ 	const $defs = "$defs" in generatedJsonSchema && generatedJsonSchema.$defs ? generatedJsonSchema.$defs : void 0;
+ 	const newSchema = cleanupRefs(generatedJsonSchema, io);
+ 	const newDefs = {};
+diff --git a/dist/dto-sWxCeI9D.cjs b/dist/dto-sWxCeI9D.cjs
+index b01e7e7d7ca3fc93a9eb88857d715ba409edfe96..b0afa1dd9bd1a1dead60bcaaa3a934b94b2f9b26 100644
+--- a/dist/dto-sWxCeI9D.cjs
++++ b/dist/dto-sWxCeI9D.cjs
+@@ -391,7 +391,7 @@ function openApiMetadataFactory({ schema, io }) {
+ 	return properties;
+ }
+ function generateJsonSchema(schema, io) {
+-	const generatedJsonSchema = "_zod" in schema ? (0, zod_v4_core.toJSONSchema)(schema, { io }) : zodV3ToOpenAPI(schema);
++	const generatedJsonSchema = "_zod" in schema ? (0, zod_v4_core.toJSONSchema)(schema, { io, target: "openapi-3.0" }) : zodV3ToOpenAPI(schema);
+ 	const $defs = "$defs" in generatedJsonSchema && generatedJsonSchema.$defs ? generatedJsonSchema.$defs : void 0;
+ 	const newSchema = cleanupRefs(generatedJsonSchema, io);
+ 	const newDefs = {};

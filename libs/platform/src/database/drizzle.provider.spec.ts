@@ -24,10 +24,13 @@
  * that keeps the provider's own lifecycle code under test, and the same approach the
  * neighbouring provider specs take.
  */
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Env } from '../config/env.schema';
 import { AppConfigService } from '../config/app-config.service';
-import { DrizzleProvider } from './drizzle.provider';
+import { DrizzleProvider, databaseClientConfig } from './drizzle.provider';
 
 /** A typed AppConfigService stand-in — only the keys this provider reads need values. */
 function makeConfig(overrides: Partial<Env> = {}): AppConfigService {
@@ -168,5 +171,70 @@ describe('DrizzleProvider pool warm-up', () => {
     await provider.onModuleInit();
 
     expect(pool.connect).not.toHaveBeenCalled();
+  });
+});
+
+describe('DrizzleProvider shutdown and readiness', () => {
+  it('closes the pool in onApplicationShutdown, AFTER the phase in which relays and crons stop', async () => {
+    // Nest runs onModuleDestroy -> beforeApplicationShutdown -> (HTTP server) -> onApplicationShutdown. The
+    // work that uses the pool stops in the first; a pool closed there too is gone under a query in flight.
+    const provider = new DrizzleProvider(makeConfig());
+    const stub = stubPool(provider);
+    const pool = (provider as unknown as { pool: { end: ReturnType<typeof vi.fn> } }).pool;
+    expect(stub).toBeDefined();
+    expect('onModuleDestroy' in provider).toBe(false);
+
+    await provider.onApplicationShutdown();
+
+    expect(pool.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes the pool itself, for platform-runtime’s /readyz (provided under platform-db’s token)', () => {
+    const provider = new DrizzleProvider(makeConfig());
+    expect(provider.rawPool).toBe((provider as unknown as { pool: unknown }).pool);
+  });
+});
+
+describe('databaseClientConfig TLS', () => {
+  const CA = '-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----\n';
+  const requireUrl = 'postgresql://test:test@db.internal:5432/opshub?sslmode=require';
+
+  function caFile(): string {
+    const path = join(
+      tmpdir(),
+      `drizzle-tls-spec-${process.pid}-${Math.random().toString(36).slice(2)}.pem`,
+    );
+    writeFileSync(path, CA);
+    return path;
+  }
+
+  it('a CA turns on verify-full for the shared config (pool AND outbox LISTEN connection)', () => {
+    const config = databaseClientConfig(
+      makeConfig({ DATABASE_URL: requireUrl, DATABASE_SSL_CA: caFile(), NODE_ENV: 'production' }),
+    );
+    expect(config.ssl).toMatchObject({ ca: CA, rejectUnauthorized: true });
+  });
+
+  it('production with no CA fails closed, naming the variable', () => {
+    expect(() =>
+      databaseClientConfig(
+        makeConfig({
+          DATABASE_URL: requireUrl,
+          DATABASE_SSL_CA: undefined,
+          NODE_ENV: 'production',
+        }),
+      ),
+    ).toThrow(/DATABASE_SSL_CA/);
+  });
+
+  it('sslmode=disable stays plaintext whatever the CA says', () => {
+    const config = databaseClientConfig(
+      makeConfig({
+        DATABASE_URL: 'postgresql://test:test@localhost:5432/opshub?sslmode=disable',
+        DATABASE_SSL_CA: caFile(),
+        NODE_ENV: 'production',
+      }),
+    );
+    expect(config.ssl).toBeUndefined();
   });
 });

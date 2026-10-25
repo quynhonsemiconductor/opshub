@@ -1,5 +1,5 @@
 /**
- * Seed script — two tiers (mirrors rally's seed architecture):
+ * Seed script — two tiers (mirrors rova's seed architecture):
  *
  *   1. RBAC reference catalogue (permissions + roles + grants) — PROD-SAFE.
  *      Reference data the PolicyGuard and JIT SSO provisioning depend on; it
@@ -12,8 +12,8 @@
  *
  *   2. Demo fixtures (login-able employees, one per system role) — DEV/E2E ONLY.
  *      Exported as `seed`, gated behind SEED_ON_DEPLOY and refused on a real
- *      production deploy. Lets `POST /v1/auth/dev-login` mint a session without
- *      hand-inserting employees. Idempotent via fixed UUIDs + onConflictDoNothing.
+ *      production deploy. Lets `POST /api/auth/test-login` mint a session without
+ *      hand-inserting employees (and creates the matching `identity.user` rows, same ids). Idempotent via fixed UUIDs + onConflictDoNothing.
  *
  * Run standalone : pnpm db:seed          (catalogue + demo fixtures)
  * Called by      : db/migrate.ts — seedRbacCatalog always; seed when SEED_ON_DEPLOY=true
@@ -27,10 +27,12 @@ try {
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { inArray, eq, sql } from 'drizzle-orm';
 import { Pool } from 'pg';
-import { pgOptions } from './pg-ssl';
+import { pgOptions, tlsFromEnv } from './pg-ssl';
 import { resolveDatabaseUrl } from './database-url';
+import { log } from './script-log';
 import { permissions, roles, rolePermissions, userRoleAssignments } from './schema/authz';
 import { employees } from './schema/identity';
+import { user as identityUser } from './schema/identity-auth';
 import { controls } from './schema/isms-controls';
 import { ANNEX_A_CONTROLS } from './annex-a-controls';
 import {
@@ -60,11 +62,11 @@ const ROLES: Array<{ key: string; name: string; permissions: string[] }> = Objec
   (key) => ({ key, name: ROLE_NAMES[key], permissions: [...ROLE_PERMISSIONS[key]] }),
 );
 
-// ── Demo employees — one per system role, for RBAC + dev-login testing ───────
+// ── Demo employees — one per system role, for RBAC + test-login testing ───────
 // Fixed UUIDs keep re-seeds idempotent. Each employee gets the matching legacy
-// `employees.roles` jsonb (drives the JWT claims) AND a global
+// `employees.roles` jsonb (the denormalised copy) AND a global
 // `user_role_assignments` row (drives effective permissions via authz.resolve).
-// Sign in locally with any of these via `POST /v1/auth/dev-login`.
+// Sign in locally with any of these via `POST /api/auth/test-login` (IDENTITY_TEST_LOGIN=enabled).
 const ADMIN_EMPLOYEE_ID = '00000000-0000-7000-8000-000000000001';
 
 /**
@@ -250,9 +252,7 @@ async function seedRbacCatalogInto(db: SeedDb): Promise<void> {
     }
   });
 
-  console.log(
-    `✅ RBAC catalogue seeded: ${PERMISSIONS.length} permissions | ${ROLES.length} roles`,
-  );
+  log.info(`✅ RBAC catalogue seeded: ${PERMISSIONS.length} permissions | ${ROLES.length} roles`);
 }
 
 /**
@@ -293,7 +293,7 @@ export async function seedRbacCatalog(connectionUrl?: string): Promise<void> {
   // DATABASE_* parts, and throws naming what is missing. See db/database-url.ts.
   const url = connectionUrl ?? resolveDatabaseUrl();
 
-  const pool = new Pool({ ...pgOptions(url), max: 1 });
+  const pool = new Pool({ ...pgOptions(url, tlsFromEnv()), max: 1 });
   const db = drizzle(pool);
   try {
     await seedRbacCatalogInto(db);
@@ -313,7 +313,7 @@ export async function seedRbacCatalog(connectionUrl?: string): Promise<void> {
 async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
   const adminEmail = process.env['ADMIN_EMAIL'] ?? 'admin@opshub.local';
 
-  // 1. Employees — legacy roles jsonb drives the JWT claims (RolesClaimsProvider).
+  // 1. Employees — `employees.roles` is the denormalised copy of the role assignments below.
   await db
     .insert(employees)
     .values(
@@ -322,11 +322,41 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
         // Keyed on the PRIMARY admin's id, not on its role. `ADMIN_EMAIL` overrides one seat, and the
         // condition used to be `roleKey === 'admin'` — which rewrote every admin-role fixture to the same
         // address, so the second seat collided on `employees.email`, was dropped by
-        // `onConflictDoNothing`, and dev-login answered "No active account exists for this email".
+        // `onConflictDoNothing`, and test-login minted a NEW user instead of finding the fixture.
         email: e.id === ADMIN_EMPLOYEE_ID ? adminEmail : e.email,
         displayName: e.displayName,
         roles: [e.roleKey],
         status: 'active' as const,
+      })),
+    )
+    .onConflictDoNothing();
+
+  // 1b. The identity user of each fixture, with the SAME id (`identity.user.id = identity.employees.id`):
+  // `/api/auth/test-login` finds an existing user by email, and creates a NEW one (new id) if there is none,
+  // which would sever the fixture from every foreign key it is the target of.
+  const seeded = await db
+    .select({
+      id: employees.id,
+      email: employees.email,
+      displayName: employees.displayName,
+      status: employees.status,
+    })
+    .from(employees)
+    .where(
+      inArray(
+        employees.id,
+        DEMO_EMPLOYEES.map((e) => e.id),
+      ),
+    );
+  await db
+    .insert(identityUser)
+    .values(
+      seeded.map((e) => ({
+        id: e.id,
+        name: e.displayName,
+        email: e.email.toLowerCase(),
+        emailVerified: true,
+        banned: e.status === 'offboarded',
       })),
     )
     .onConflictDoNothing();
@@ -357,7 +387,7 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
       .onConflictDoNothing();
   }
 
-  console.log(`✅ Demo employees seeded: ${DEMO_EMPLOYEES.length} (one per role)`);
+  log.info(`✅ Demo employees seeded: ${DEMO_EMPLOYEES.length} (one per role)`);
 }
 
 /**
@@ -374,7 +404,7 @@ export async function seed(connectionUrl?: string): Promise<void> {
   // DATABASE_* parts, and throws naming what is missing. See db/database-url.ts.
   const url = connectionUrl ?? resolveDatabaseUrl();
 
-  const pool = new Pool({ ...pgOptions(url), max: 1 });
+  const pool = new Pool({ ...pgOptions(url, tlsFromEnv()), max: 1 });
   const db = drizzle(pool);
   try {
     // Reference catalogue first so role assignments below resolve.
@@ -389,7 +419,7 @@ export async function seed(connectionUrl?: string): Promise<void> {
 // Run directly: pnpm db:seed
 if (process.argv[1]?.endsWith('seed.ts') || process.argv[1]?.endsWith('seed.js')) {
   seed().catch((err) => {
-    console.error('❌ Seed failed:', err);
+    log.error({ err }, 'Seed failed');
     process.exit(1);
   });
 }

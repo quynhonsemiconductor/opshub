@@ -11,7 +11,7 @@ import type { storedFileStatusEnum } from '../../../../db/schema';
  * Adding a surface is a descriptor here plus, for multi-file surfaces, a link row in
  * `storage.attachments`. It is never a change to `StorageService`.
  *
- * Ported from rally's `attachment-policy.ts`, which reached this shape after every new upload
+ * Ported from rova's `attachment-policy.ts`, which reached this shape after every new upload
  * surface had produced another copy of presign/confirm.
  *
  *   - allowedMimeTypes    — checked against the client-declared Content-Type

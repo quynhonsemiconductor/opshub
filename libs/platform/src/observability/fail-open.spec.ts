@@ -16,7 +16,7 @@ import { FAIL_OPEN_FIELD, failOpenLog } from '@quynhonsemiconductor/observabilit
  * The alarm even treats missing data as `notBreaching`, which is right for the real
  * no-events case and precisely why a broken filter cannot be told apart from a quiet one.
  *
- * Adopted from rally, which keeps the same spec for the same reason.
+ * Adopted from rova, which keeps the same spec for the same reason.
  */
 
 const ROOT = join(__dirname, '..', '..', '..', '..');
@@ -31,10 +31,10 @@ describe('failOpenLog', () => {
     // The guards pass `{ err }` and, for the rate limiter, the key. Losing that would leave
     // an alarm that fires with nothing to debug it from.
     const err = new Error('valkey unreachable');
-    expect(failOpenLog('rate_limit', { err, key: 'AUTH_LOGIN:127.0.0.1' })).toEqual({
+    expect(failOpenLog('rate_limit', { err, key: 'IP:127.0.0.1' })).toEqual({
       securityFailOpen: 'rate_limit',
       err,
-      key: 'AUTH_LOGIN:127.0.0.1',
+      key: 'IP:127.0.0.1',
     });
   });
 
@@ -67,12 +67,20 @@ describe('the metric filter matches what the app emits', () => {
   });
 
   it('both fail-open call sites use the helper rather than a bare object', () => {
-    // The two guards are the only places that fail open. A future one that logs
+    // The rate-limit guard and the identity factory (its sign-in rate limit fails open when Valkey is down) are
+    // the only places that fail open. A future one that logs
     // `{ securityFailOpen: 'x' }` by hand would work today and break on the next rename, so
     // this asserts the helper is the single source of the field.
     const callers = execFileSync(
       'git',
-      ['grep', '-l', 'failOpenLog(', '--', 'libs/platform/src/auth/jwt.guard.ts', 'libs/platform/src/rate-limit/rate-limit.guard.ts'],
+      [
+        'grep',
+        '-l',
+        'failOpenLog(',
+        '--',
+        'libs/modules/identity/src/infrastructure/auth/create-opshub-identity.ts',
+        'libs/platform/src/rate-limit/rate-limit.guard.ts',
+      ],
       { cwd: ROOT, encoding: 'utf8' },
     )
       .split('\n')

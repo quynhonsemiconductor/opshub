@@ -11,19 +11,21 @@
  * `app.inject()` rather than a listening socket: the full Fastify lifecycle runs — hooks,
  * guards, interceptors, pipes, filters — with no port to allocate and no race to poll.
  *
- * Nothing is stubbed. Tokens come from `POST /v1/auth/dev-login`, which the shared
- * AuthService refuses whenever `NODE_ENV === 'production'`, so the specs authenticate as
- * the real seeded fixtures with real signed JWTs and real permission resolution.
+ * Nothing is stubbed. Sessions come from identity 8's `POST /api/auth/test-login`, which loads only
+ * when `IDENTITY_TEST_LOGIN=enabled` AND `NODE_ENV` is exactly `test` or `development` (identity
+ * refuses to boot otherwise), so the specs authenticate as the real seeded fixtures with a real
+ * session row, the real session cookie and real permission resolution. The same CSRF token a browser
+ * gets from `GET /v1/auth/me` is fetched here, because the cookie is the ONLY credential now and every
+ * state-changing request therefore needs it.
  *
  * Prereqs: `docker compose -f docker-compose.dev.yml up -d` and `pnpm db:seed`.
  */
 import 'reflect-metadata';
-import { NestFactory } from '@nestjs/core';
-import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { prepareHttpApp } from '@quynhonsemiconductor/platform-runtime/bootstrap';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { RATE_LIMIT_TIERS } from '@platform';
-import { AppModule } from '../../../apps/api/src/app.module';
-import { bootstrapApp } from '../../../apps/api/src/bootstrap/app.bootstrap';
+import { CSRF_SECRET_COOKIE, RATE_LIMIT_TIERS, SESSION_COOKIE } from '@platform';
+import { apiAppOptions } from '../../../apps/api/src/app-options';
 
 /**
  * Seeded demo employees (`db/seed.ts`), addressed by the tier they represent rather than
@@ -84,12 +86,10 @@ export const FIXTURE = {
 } as const;
 
 export async function createTestApp(): Promise<NestFastifyApplication> {
-  const app = await NestFactory.create<NestFastifyApplication>(
-    AppModule,
-    new FastifyAdapter({ logger: false, trustProxy: true }),
-    { bufferLogs: true, logger: false },
-  );
-  await bootstrapApp(app);
+  // EXACTLY what production starts (`createHttpApp(apiAppOptions)` minus listening): the role hook, the lazy `AppModule`, the OTel options, the 10 MB
+  // body limit, and `configure` (correlation id, then `bootstrapApp`), around the one shared pino logger. The environment is the suite's
+  // (`LOG_LEVEL=fatal`). A harness that rebuilt these by hand would test an app that does not ship.
+  const app = await prepareHttpApp(apiAppOptions);
   await app.init();
   // Fastify only builds its routing table and runs plugin `onReady` hooks here. Without
   // it `inject()` on a freshly created app can 404 a route that is in fact registered.
@@ -103,84 +103,124 @@ export async function createTestApp(): Promise<NestFastifyApplication> {
  * The counters live in Valkey, which OUTLIVES the test process, so they accumulate across
  * runs. Two failure modes, both measured rather than predicted:
  *
- *   • `AUTH_LOGIN` allows 5 attempts per 15 minutes per IP. Every spec file logs in as two
- *     or three fixtures, so the third run inside one window fails with a 429 — surfacing as
- *     `dev-login failed`, which reads exactly like an unseeded database.
+ *   • The per-address pre-auth bucket (`PRE_AUTH_IP_BUCKET`, 1000 per minute per IP) holds a slot for every request
+ *     identity has not verified. Signed-in traffic gives its slot back, so the bucket fills from unverified requests
+ *     (401s, forged cookies). The suite
+ *     runs serially (see vitest.e2e.config.ts), and the e2e config raises the ceiling for the run.
  *   • `DEFAULT` allows 200 requests per minute per userId. One full suite pass is well over
  *     100 requests as `hr` alone, so a SECOND pass started inside the same minute 429s partway
  *     in, on whichever spec happens to be running. Clearing only the login tier left this half
  *     of the problem in place, and it cost a debugging round today.
  *
- * Tiers come from `RATE_LIMIT_TIERS` rather than a list written out here, so a tier added
- * later is covered without anyone remembering this file. Subjects are the IP plus every
- * fixture id, because a tier keyed by `userId` buckets per caller — and `app.inject()` has no
- * socket, so Fastify reports `127.0.0.1` for the ip-keyed ones.
+ * Per-user tiers come from `RATE_LIMIT_TIERS` rather than a list written out here, so a tier added later is covered
+ * without anyone remembering this file. Subjects are the IP (the pre-auth bucket) plus every fixture id, because the
+ * per-user buckets key on the user, and `app.inject()` has no socket, so Fastify reports `127.0.0.1` for the address.
  *
  * Goes through the app's own `CacheService.del`, not a raw client, so the namespace prefix
  * and the `rl:` key shape stay in ONE place: `consumeRateLimit` builds the same key, and a
  * hard-coded string here would silently stop matching if either changed.
  */
 async function clearRateLimits(app: NestFastifyApplication): Promise<void> {
-  const subjects = ['127.0.0.1', ...Object.values(FIXTURE).map((f) => f.id)];
+  const ids = Object.values(FIXTURE).map((f) => f.id);
   try {
     const cache = app.get(CacheService);
-    await Promise.all(
-      Object.keys(RATE_LIMIT_TIERS).flatMap((tier) =>
-        subjects.map((subject) => cache.del(`rl:${tier}:${subject}`)),
+    await Promise.all([
+      // The pre-auth bucket: one per verified client address (127.0.0.1 under app.inject()).
+      cache.del('rl:IP:127.0.0.1'),
+      // The per-user buckets: one per tier per fixture user.
+      ...Object.keys(RATE_LIMIT_TIERS).flatMap((tier) =>
+        ids.map((id) => cache.del(`rl:${tier}:uid:${id}`)),
       ),
-    );
+    ]);
   } catch {
     // Cache optional in some configurations; the limiter fails open there anyway.
   }
 }
 
-/** A dev-login result: the bearer token plus the cookies the login set. */
+/** A test-login result: the session cookie, plus the CSRF half a browser would hold. */
 export interface Session {
-  accessToken: string;
-  /** Raw `set-cookie` values, for specs that need to replay them (CSRF, refresh). */
-  cookies: string[];
-  /** `name=value; name=value` — ready for a `cookie` request header. */
+  /** The signed-in user's id (`identity.user.id` = `identity.employees.id`). */
+  userId: string;
+  /** The session cookie's `name=value`, alone: what a spec replays to be "logged in". */
+  sessionCookie: string;
+  /** Session cookie AND CSRF secret cookie, ready for a `cookie` request header. */
   cookieHeader: string;
+  /** The token for the `x-csrf-token` header, bound to this session. */
+  csrfToken: string;
+}
+
+/** Pull one cookie's `name=value` pair out of a `set-cookie` header list. */
+export function readCookie(
+  setCookie: string | string[] | undefined,
+  name: string,
+): string | undefined {
+  const all = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+  for (const raw of all) {
+    const [pair] = raw.split(';');
+    const [key] = pair.split('=');
+    if (key.trim() === name) return pair.trim();
+  }
+  return undefined;
+}
+
+/**
+ * Sign in WITHOUT the CSRF round trip: the session cookie only. For specs about the sign-in itself, and
+ * about what a request carrying only that cookie may do.
+ */
+export async function signInCookie(
+  app: NestFastifyApplication,
+  fixture: { email: string },
+): Promise<{ userId: string; sessionCookie: string }> {
+  await clearRateLimits(app);
+
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/auth/test-login',
+    payload: { email: fixture.email },
+  });
+  const sessionCookie = readCookie(res.headers['set-cookie'], SESSION_COOKIE);
+
+  if (res.statusCode !== 200 || !sessionCookie) {
+    throw new Error(
+      `test-login failed for ${fixture.email}: ${res.statusCode} ${res.body}. ` +
+        'Is the database seeded (`pnpm db:seed`)? Is IDENTITY_TEST_LOGIN=enabled, and NODE_ENV test?',
+    );
+  }
+  return { userId: res.json<{ user: { id: string } }>().user.id, sessionCookie };
 }
 
 /**
  * Authenticate as a seeded fixture and return everything needed to act as them.
  *
- * Throws on a non-200 instead of returning a token-less session: a spec that silently
- * continues unauthenticated would then assert a 403 and pass for the wrong reason, which
- * is the exact failure mode an authorization suite must not have.
+ * Throws on a failure instead of returning a half-session: a spec that silently continues
+ * unauthenticated would then assert a 401/403 and pass for the wrong reason, which is the exact failure
+ * mode an authorization suite must not have.
  */
 export async function login(
   app: NestFastifyApplication,
   fixture: { email: string },
 ): Promise<Session> {
-  await clearRateLimits(app);
+  const { userId, sessionCookie } = await signInCookie(app, fixture);
 
-  const res = await app.inject({
-    method: 'POST',
-    url: '/v1/auth/dev-login',
-    payload: { email: fixture.email },
+  const me = await app.inject({
+    method: 'GET',
+    url: '/v1/auth/me',
+    headers: { cookie: sessionCookie },
   });
-
-  if (res.statusCode !== 200) {
+  const secret = readCookie(me.headers['set-cookie'], CSRF_SECRET_COOKIE);
+  const { csrfToken } = me.json<{ csrfToken?: string }>();
+  if (me.statusCode !== 200 || !secret || !csrfToken) {
     throw new Error(
-      `dev-login failed for ${fixture.email}: ${res.statusCode} ${res.body}. ` +
-        'Is the database seeded (`pnpm db:seed`)? Is NODE_ENV production?',
+      `GET /v1/auth/me gave no CSRF token for ${fixture.email}: ${me.statusCode} ${me.body}`,
     );
   }
 
-  const raw = res.headers['set-cookie'];
-  const cookies = Array.isArray(raw) ? raw : raw ? [String(raw)] : [];
-  return {
-    accessToken: (JSON.parse(res.body) as { accessToken: string }).accessToken,
-    cookies,
-    cookieHeader: cookies.map((c) => c.split(';')[0]).join('; '),
-  };
+  return { userId, sessionCookie, cookieHeader: `${sessionCookie}; ${secret}`, csrfToken };
 }
 
-/** Bearer authorization header for a session. */
-export function bearer(session: Session): Record<string, string> {
-  return { authorization: `Bearer ${session.accessToken}` };
+/** The headers that authenticate a request as this session, CSRF included. */
+export function authHeaders(session: Session): Record<string, string> {
+  return { cookie: session.cookieHeader, 'x-csrf-token': session.csrfToken };
 }
 
 /** The HTTP verbs the suites use. Named so `apiRequest` cannot be handed a typo. */
@@ -208,7 +248,7 @@ export async function apiRequest(
   url: string,
   payload?: Record<string, unknown>,
   /**
-   * Extra request headers, merged over the bearer token.
+   * Extra request headers, merged over the session headers.
    *
    * For behaviour that lives in a HEADER rather than a body — `Idempotency-Key` is the first — so a
    * suite that needs one does not drop to a hand-rolled `app.inject` and lose the `/v1` prefix, the
@@ -219,7 +259,7 @@ export async function apiRequest(
   const res = await app.inject({
     method,
     url: `/v1${url}`,
-    headers: { ...bearer(session), ...headers },
+    headers: { ...authHeaders(session), ...headers },
     ...(payload === undefined ? {} : { payload }),
   });
   return {

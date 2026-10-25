@@ -1,10 +1,19 @@
 name: Infrastructure · Apply
+# What the run list shows. Without this a dispatch with `allow_destructive` on is indistinguishable, in the
+# list, from one with it off, and it is the one that may delete DNS records. A push or tag shows its ref.
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Infrastructure · Apply · dispatch{0}', inputs.allow_destructive && ' · ALLOW DESTRUCTIVE' || '') || format('Infrastructure · Apply · {0}', github.ref_name) }}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Infra apply, gated the same way as the app deploys (backend-deploy.yml):
 #   push to main       → apply _shared + develop  (auto)
-#   push a v*.*.* tag  → apply _shared + prod      (prod also gated by the
-#                        "production" GitHub Environment's required reviewer)
+#   (prod is GONE — destroyed 2026-10-22, destroy run 39677842432 on v0.4.2:
+#    "0 added, 0 changed, 81 destroyed". opshub has no prod in the on-prem plan.
+#    Snapshots kept: opshub-prod-final-2026-10-21 and opshub-prod-final. The
+#    empty opshub/prod/terraform.tfstate is removed at the AWS wind-down, not
+#    before — it is the audit record of what that run applied.
+#    The apply-prod job and the v*.*.* tag trigger were removed, so nothing can
+#    recreate the stack from this repo.
+#    final snapshot opshub-prod-final-2026-10-21 retained.)
 #
 # Prod infra can NOT be applied by a normal merge to main — it only happens on
 # a deliberate semver tag, so an accidental push can never touch production.
@@ -16,15 +25,13 @@ name: Infrastructure · Apply
 # apply fails if the runtime state doesn't exist yet. The platform pipeline
 # applies runtime first.
 #
-# Structure is intentionally identical to rally/.github/workflows/infra-apply.yml
+# Structure is intentionally identical to rova/.github/workflows/infra-apply.yml
 # (shared composite actions + the same staged/gated jobs); only the values differ
 # (role prefix, TF_VARs). Keep the two products in lock-step.
 # ─────────────────────────────────────────────────────────────────────────────
 on:
   push:
     branches: [main]
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
     paths:
       - "infra/live/**"
       # modules/** matters too: `module "stack"` is a LOCAL path module
@@ -35,17 +42,21 @@ on:
       - "infra/modules/**"
       - ".github/workflows/infra-apply.yml"
   workflow_dispatch:
+    inputs:
+      allow_destructive:
+        description: "Let this run delete or replace DNS / identity resources (destructive-guard). Off by default; on a push the label `allow-dns-destroy` on the merged PR does the same."
+        type: boolean
+        default: false
 
-# Serialize by ENVIRONMENT, matching backend-deploy.yml and web-deploy.yml: all
-# prod (tag) applies share one group, all develop (branch) applies share another,
-# and the two run in PARALLEL.
+# Serialize by ENVIRONMENT, matching backend-deploy.yml and web-deploy.yml:
+# develop (branch) applies share one group.
 #
 # This was briefly one constant group for the whole repo, to stop a release's
 # near-simultaneous main push and vX.Y.Z tag running apply-shared against the same
 # infra/live/_shared state concurrently — a real bug, state-lock failure on every
 # release. But a repo-wide group also makes DEVELOP queue behind PROD, and prod is
 # gated on a required reviewer, so an unapproved production apply freezes every
-# develop apply until a human notices. rally shipped that variant, found it
+# develop apply until a human notices. rova shipped that variant, found it
 # silently swallowed two develop applies, and moved the lock to where the
 # collision actually lives.
 #
@@ -56,7 +67,7 @@ on:
 #
 # Never cancel a running apply.
 concurrency:
-  group: infra-apply-${{ github.repository }}-${{ github.ref_type == 'tag' && 'prod' || 'develop' }}
+  group: infra-apply-${{ github.repository }}-develop
   cancel-in-progress: false
 
 permissions:
@@ -76,6 +87,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      pull-requests: read # destructive-guard reads the labels of the PR being merged
     timeout-minutes: 60
 
     # The one thing that genuinely must not run twice at once, and the reason the
@@ -86,7 +98,7 @@ jobs:
     # A CONSTANT group here (not keyed on ref) keeps that serialised while leaving
     # the per-environment applies free to run in parallel. This job holds the lock
     # only while it is actually applying: the production approval gate is on
-    # apply-prod, a separate job, so a release waiting for a reviewer no longer
+    # a separate job, so a release waiting for a reviewer no longer
     # blocks develop.
     concurrency:
       group: infra-apply-shared-${{ github.repository }}
@@ -97,7 +109,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/opshub-github-infra-apply
           aws-region: ${{ env.AWS_REGION }}
@@ -111,21 +123,52 @@ jobs:
         working-directory: infra/live/_shared
         run: tofu validate
 
-      - name: tofu apply
+      # Plan, then apply THAT PLAN. A bare `tofu apply -auto-approve` plans again and applies the result without any
+      # check reading it: on 2026-10-09 a provider lock bump turned nine DNS/edge resources into "replace"
+      # (zone_id -> null) and that is what was applied. Here the plan is printed by this step and saved to `tfplan`,
+      # and the next step applies that file, so what the log shows is what runs, and a guard can read the same file.
+      #
+      # Variables are given HERE only. A saved plan carries its own variable values: OpenTofu 1.9 (this workflow's
+      # version) ignores a TF_VAR_* in the environment at apply time, and later versions refuse a different one
+      # ("Mismatch between input and plan variable value"). Either way the apply step below deliberately has no
+      # `env`. `tfplan` holds those values (sensitive ones included): it stays on this runner, never uploaded.
+      - name: tofu plan (saved as tfplan)
         working-directory: infra/live/_shared
-        run: tofu apply -input=false -auto-approve
+        run: tofu plan -input=false -out=tfplan
+        env:
+          # REQUIRED by infra/live/_shared (validated, no default). An organisation variable.
+          TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+
+      # Refuse a saved plan that DELETES or REPLACES a DNS, edge, mail-identity, certificate or key resource (the
+      # 2026-10-09 outage) unless this run is allowed to: the PR being merged carries the label `allow-dns-destroy`
+      # (ON TAG RUNS THE LOOKUP RESOLVES TO THE RELEASE PR, so a destructive prod change needs the label on the
+      # release PR), or a manual dispatch passed `allow_destructive`. It judges `tfplan` through `tofu show -json`
+      # (piped, never written out): byte for byte the plan the next step applies. See
+      # docs/runbooks/infra-destructive-guard.md.
+      - name: destructive-guard (tfplan)
+        uses: quynhonsemiconductor/ci/actions/destructive-guard@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        with:
+          working-directory: infra/live/_shared
+          plan-file: tfplan
+          dispatch-allow: ${{ inputs.allow_destructive }}
+
+      - name: tofu apply (the saved plan)
+        working-directory: infra/live/_shared
+        run: tofu apply -input=false tfplan
 
   # ───────────────────────────────────────────────────────────────────────────
   # Develop — only on a branch push to main (NOT on tag pushes).
   # ───────────────────────────────────────────────────────────────────────────
   apply-develop:
-    needs: apply-shared
+    # Branch pushes to main only.
     if: github.ref_type == 'branch'
+    needs: apply-shared
     runs-on: ubuntu-latest
     environment: develop   # no approval gate
     permissions:
       contents: read
       id-token: write
+      pull-requests: read # destructive-guard reads the labels of the PR being merged
     timeout-minutes: 45
 
     steps:
@@ -133,7 +176,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/opshub-github-infra-apply
           aws-region: ${{ env.AWS_REGION }}
@@ -147,20 +190,46 @@ jobs:
         working-directory: infra/live/develop
         run: tofu validate
 
-      - name: tofu apply
+      # Plan, then apply THAT PLAN. A bare `tofu apply -auto-approve` plans again and applies the result without any
+      # check reading it: on 2026-10-09 a provider lock bump turned nine DNS/edge resources into "replace"
+      # (zone_id -> null) and that is what was applied. Here the plan is printed by this step and saved to `tfplan`,
+      # and the next step applies that file, so what the log shows is what runs, and a guard can read the same file.
+      #
+      # Variables are given HERE only. A saved plan carries its own variable values: OpenTofu 1.9 (this workflow's
+      # version) ignores a TF_VAR_* in the environment at apply time, and later versions refuse a different one
+      # ("Mismatch between input and plan variable value"). Either way the apply step below deliberately has no
+      # `env`. `tfplan` holds those values (sensitive ones included): it stays on this runner, never uploaded.
+      - name: tofu plan (saved as tfplan)
         working-directory: infra/live/develop
-        run: tofu apply -input=false -auto-approve
+        run: tofu plan -input=false -out=tfplan
         env:
           # The Entra ids and the Cloudflare account id are public identifiers held in
           # infra/live/develop/variables.tf, so plan and apply now read the same values
           # (see infra-plan.yml); develop's image_tag is `latest` in the caller; and
           # acm_cert_arn was a required variable no resource read.
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # Org-level secret, same one rally already maps. Without this,
+          # Org-level secret, same one rova already maps. Without this,
           # grafana_alerting_auth stays empty and module.alerts/grafana_slo/
           # grafana_dashboard all count-gate to zero — apply "succeeds" but creates
           # no Grafana resources at all, silently.
           TF_VAR_grafana_alerting_auth: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
+
+      # Refuse a saved plan that DELETES or REPLACES a DNS, edge, mail-identity, certificate or key resource (the
+      # 2026-10-09 outage) unless this run is allowed to: the PR being merged carries the label `allow-dns-destroy`
+      # (ON TAG RUNS THE LOOKUP RESOLVES TO THE RELEASE PR, so a destructive prod change needs the label on the
+      # release PR), or a manual dispatch passed `allow_destructive`. It judges `tfplan` through `tofu show -json`
+      # (piped, never written out): byte for byte the plan the next step applies. See
+      # docs/runbooks/infra-destructive-guard.md.
+      - name: destructive-guard (tfplan)
+        uses: quynhonsemiconductor/ci/actions/destructive-guard@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        with:
+          working-directory: infra/live/develop
+          plan-file: tfplan
+          dispatch-allow: ${{ inputs.allow_destructive }}
+
+      - name: tofu apply (the saved plan)
+        working-directory: infra/live/develop
+        run: tofu apply -input=false tfplan
 
       # Mint a short-lived installation token from the qnsc-automation GitHub App
       # (same app release.yml uses) so we never need a long-lived user PAT.
@@ -211,109 +280,4 @@ jobs:
           set_var PAGES_PROJECT         "$(tofu output -raw web_pages_project)"
           if [[ $missed -ne 0 ]]; then
             echo "::warning title=infra-id publish::One or more develop infra-ID vars were not auto-published — the deploy reads these, so verify they match Terraform outputs to avoid drift."
-          fi
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # Production — only on a v*.*.* tag push, AND requires manual approval via the
-  # "production" GitHub Environment (configure a required reviewer there).
-  # ───────────────────────────────────────────────────────────────────────────
-  apply-prod:
-    needs: apply-shared
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    environment: production
-    permissions:
-      contents: read
-      id-token: write
-    timeout-minutes: 45
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@v1
-        with:
-          role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/opshub-github-infra-apply
-          aws-region: ${{ env.AWS_REGION }}
-          tofu-version: ${{ env.TOFU_VERSION }}
-
-      - name: tofu init
-        working-directory: infra/live/prod
-        run: tofu init -input=false
-
-      - name: tofu validate
-        working-directory: infra/live/prod
-        run: tofu validate
-
-      - name: tofu apply
-        working-directory: infra/live/prod
-        run: tofu apply -input=false -auto-approve
-        env:
-          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          # Org-level secret, same one rally already maps. Without this,
-          # grafana_alerting_auth stays empty and module.alerts/grafana_slo/
-          # grafana_dashboard all count-gate to zero — apply "succeeds" but creates
-          # no Grafana resources at all, silently.
-          TF_VAR_grafana_alerting_auth: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
-          # Pin production to the exact release tag that triggered this apply (e.g.
-          # v1.4.2), so an infra apply can never move production onto a different image
-          # than the release it belongs to.
-          #
-          # This read `vars.PINNED_IMAGE_TAG`, a variable a human had to remember to
-          # update — and which does not exist on this repo, so the apply would have
-          # failed on a missing required variable. github.ref_name is the tag itself and
-          # cannot go stale.
-          TF_VAR_image_tag:            ${{ github.ref_name }}
-
-      # Mint a short-lived installation token from the qnsc-automation GitHub App so we
-      # never need a long-lived user PAT. Requires the app to have
-      # "Variables: read and write" on this repo. Falls back to no token (publish step
-      # skipped) when the app isn't configured.
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
-        id: app-token
-        if: ${{ vars.QNSC_AUTOMATION_APP_ID != '' }}
-        continue-on-error: true
-        with:
-          app-id: ${{ vars.QNSC_AUTOMATION_APP_ID }}
-          private-key: ${{ secrets.QNSC_AUTOMATION_PRIVATE_KEY }}
-
-      # The production half of the output sync, which this workflow simply did not have:
-      # develop published its infra IDs and production never did, so backend-deploy.yml
-      # would read whatever a human had typed into the production environment — and
-      # today that environment holds no variables at all.
-      #
-      # NOTE: `production` is a PROTECTED environment (required reviewers), and a GitHub
-      # App installation token cannot write variables to a protected environment (403
-      # "Resource not accessible by integration"). When that happens each variable is
-      # named in a ::warning:: to reconcile by hand — never a silent green — but the
-      # apply is not blocked. The prod infra IDs are deterministic and stable, so they
-      # persist between applies; a human reconciles them on the rare rebuild that
-      # changes one.
-      - name: Publish infra IDs to production environment variables
-        if: ${{ steps.app-token.outputs.token != '' }}
-        working-directory: infra/live/prod
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          missed=0
-          set_var() {
-            if gh variable set "$1" --env production --repo "$REPO" --body "$2"; then
-              echo "  set $1"
-            else
-              echo "::warning title=infra-id publish::could not set '$1' on the production environment (a protected env rejects App-token writes) — reconcile manually: gh variable set $1 --env production --repo $REPO --body '$2'"
-              missed=1
-            fi
-          }
-          set_var ECS_CLUSTER           "$(tofu output -raw ecs_cluster_name)"
-          set_var ECS_API_SERVICE       "$(tofu output -raw ecs_api_service)"
-          set_var ECS_WORKER_SERVICE    "$(tofu output -raw ecs_worker_service)"
-          set_var ECS_MIGRATOR_TASK_DEF "$(tofu output -raw ecs_migrator_task_def)"
-          set_var ECS_MIGRATOR_SUBNET   "$(tofu output -json private_subnet_ids | jq -r 'join(",")')"
-          set_var ECS_MIGRATOR_SG       "$(tofu output -raw sg_app_id)"
-          set_var PAGES_PROJECT         "$(tofu output -raw web_pages_project)"
-          if [[ $missed -ne 0 ]]; then
-            echo "::warning title=infra-id publish::One or more production infra-ID vars were not auto-published — the deploy reads these, so verify they match Terraform outputs to avoid drift."
           fi

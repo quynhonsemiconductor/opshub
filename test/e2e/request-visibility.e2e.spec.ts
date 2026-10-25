@@ -30,7 +30,14 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { RequestEngine } from '@platform';
 import { REQUEST_TYPE } from '@shared-kernel';
-import { FIXTURE, apiRequest, bearer, createTestApp, login, type Session } from './support/harness';
+import {
+  FIXTURE,
+  apiRequest,
+  authHeaders,
+  createTestApp,
+  login,
+  type Session,
+} from './support/harness';
 
 let app: NestFastifyApplication;
 /** `employee` holds NO permission codes — the tier every narrowing rule must constrain. */
@@ -40,7 +47,7 @@ let hr: Session;
 /**
  * Holds `*`, so it can decide any request regardless of type.
  *
- * Logged in once here rather than inside the tests that need it: `AUTH_LOGIN` is rate limited, and a
+ * Logged in once here rather than inside the tests that need it: logins share a per-address bucket, and a
  * suite that logs the same identity in from three places starts failing on a 429 that has nothing to do
  * with what it is testing.
  */
@@ -82,7 +89,7 @@ async function getRequest(session: Session, id: string): Promise<RequestRow> {
   const res = await app.inject({
     method: 'GET',
     url: `/v1/requests/${id}`,
-    headers: bearer(session),
+    headers: authHeaders(session),
   });
   expect(res.statusCode, res.body).toBe(200);
   /*
@@ -99,7 +106,7 @@ async function listRequests(session: Session, query = ''): Promise<RequestRow[]>
   const res = await app.inject({
     method: 'GET',
     url: `/v1/requests${query}`,
-    headers: bearer(session),
+    headers: authHeaders(session),
   });
   expect(res.statusCode, res.body).toBe(200);
   return (JSON.parse(res.body) as { data: RequestRow[] }).data;
@@ -117,7 +124,7 @@ beforeAll(async () => {
   const res = await app.inject({
     method: 'POST',
     url: '/v1/workforce/leave',
-    headers: bearer(employee),
+    headers: authHeaders(employee),
     payload: {
       leaveType: 'annual',
       startDate: '2027-03-01',
@@ -137,7 +144,7 @@ beforeAll(async () => {
   const hrRes = await app.inject({
     method: 'POST',
     url: '/v1/workforce/leave',
-    headers: bearer(hr),
+    headers: authHeaders(hr),
     payload: {
       leaveType: 'annual',
       startDate: '2027-04-01',
@@ -158,7 +165,7 @@ beforeAll(async () => {
   const grantRes = await app.inject({
     method: 'POST',
     url: '/v1/access-requests',
-    headers: bearer(hr),
+    headers: authHeaders(hr),
     payload: {
       accessType: 'pim_role',
       target: 'visibility-fixture',
@@ -207,7 +214,7 @@ beforeAll(async () => {
   const decided = await app.inject({
     method: 'POST',
     url: `/v1/requests/${toDecide.id}/approve`,
-    headers: bearer(admin),
+    headers: authHeaders(admin),
     payload: {},
   });
   expect(decided.statusCode, decided.body).toBe(200);
@@ -271,7 +278,7 @@ describe('request visibility', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/v1/employees',
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload: { email, displayName: 'Departing Requester', roles: ['employee'] },
     });
     expect(created.statusCode, created.body).toBe(201);
@@ -282,7 +289,7 @@ describe('request visibility', () => {
     const filed = await app.inject({
       method: 'POST',
       url: '/v1/workforce/leave',
-      headers: bearer(leaver),
+      headers: authHeaders(leaver),
       payload: {
         // A Monday and a Tuesday: a weekend window is refused with LEAVE_NO_WORKING_DAYS, which is
         // what the first version of this test picked.
@@ -297,7 +304,7 @@ describe('request visibility', () => {
     const offboarded = await app.inject({
       method: 'PATCH',
       url: `/v1/employees/${leaverId}/status`,
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload: { status: 'offboarded' },
     });
     expect(offboarded.statusCode, offboarded.body).toBe(200);
@@ -547,7 +554,7 @@ describe('request visibility', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/requests/${foreignRequestId}`,
-      headers: bearer(employee),
+      headers: authHeaders(employee),
     });
 
     expect(res.statusCode, res.body).toBe(403);
@@ -557,7 +564,7 @@ describe('request visibility', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/requests/${ownRequestId}`,
-      headers: bearer(employee),
+      headers: authHeaders(employee),
     });
 
     expect(res.statusCode, res.body).toBe(200);
@@ -567,7 +574,7 @@ describe('request visibility', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/requests/${foreignRequestId}/comments`,
-      headers: bearer(employee),
+      headers: authHeaders(employee),
     });
 
     expect(res.statusCode, res.body).toBe(403);
@@ -578,7 +585,7 @@ describe('request visibility', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/requests/${foreignRequestId}/comments`,
-      headers: bearer(employee),
+      headers: authHeaders(employee),
       payload: { body: 'should not be accepted' },
     });
 
@@ -589,7 +596,7 @@ describe('request visibility', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/requests/${ownRequestId}/comments`,
-      headers: bearer(employee),
+      headers: authHeaders(employee),
       payload: { body: 'my own request' },
     });
 
@@ -600,7 +607,7 @@ describe('request visibility', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/access-requests',
-      headers: bearer(employee),
+      headers: authHeaders(employee),
     });
     expect(res.statusCode, res.body).toBe(200);
 
@@ -615,7 +622,7 @@ describe('request visibility', () => {
     const hrRes = await app.inject({
       method: 'GET',
       url: '/v1/access-requests',
-      headers: bearer(hr),
+      headers: authHeaders(hr),
     });
     expect(hrRes.statusCode, hrRes.body).toBe(200);
     const hrOwned = (JSON.parse(hrRes.body) as { data: { requesterId: string }[] }).data;

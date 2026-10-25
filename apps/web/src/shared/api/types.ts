@@ -7,7 +7,6 @@ import type { components, paths } from './generated/api';
 export type { components, paths };
 
 // Auth
-export type AuthResponse = components['schemas']['AuthResponseDto'];
 export type MeResponse = components['schemas']['MeResponseDto'];
 
 // Employees

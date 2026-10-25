@@ -1,15 +1,31 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, lt, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { Cron } from '@nestjs/schedule';
 import { createHmac } from 'crypto';
-import { AbstractOutboxRelay, InjectDrizzle, Span, describeUnsafeResolvedTarget } from '@platform';
+import {
+  AbstractOutboxRelay,
+  AppConfigService,
+  DB_NOW,
+  dbDelay,
+  InjectDrizzle,
+  Span,
+  describeUnsafeResolvedTarget,
+} from '@platform';
 import type { Claimed, DrizzleDB, DrizzleTx, OutboxLeaseTable } from '@platform';
+import { WEBHOOK_WAKE } from '@platform';
 import { webhookDeliveries, webhookSubscriptions } from '../../../../../db/schema';
 import { MS_PER_SEC } from '@shared-kernel';
 
 const WEBHOOK_TIMEOUT_MS = 10_000; // 10s per delivery attempt
 const RETRY_DELAYS_SECONDS = [60, 300, 900, 3600]; // 1m → 5m → 15m → 1h
 const MAX_DELIVERY_ERROR_LENGTH = 2_000; // chars stored in lastError column
+/**
+ * Most rows ONE claim expires: a cap on the work (and the locks) a single transaction takes on. It is not a cap on what is
+ * safe: `selectDue` carries the same age predicate, so an over-age row beyond this cap is simply not claimed, never sent,
+ * and the next claim or pass expires it. A backlog of any size drains over several claims.
+ */
+const DEFAULT_EXPIRE_PER_CLAIM = 500;
 
 type DeliveryRow = {
   id: string;
@@ -31,8 +47,86 @@ type DeliveryRow = {
  */
 @Injectable()
 export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
-  constructor(@InjectDrizzle() db: DrizzleDB) {
+  constructor(
+    @InjectDrizzle() db: DrizzleDB,
+    private readonly config: AppConfigService,
+  ) {
     super(db);
+  }
+
+  /** Rows one claim may expire. A seam: a test lowers it to prove the claim itself refuses over-age rows. */
+  protected readonly expirePerClaim: number = DEFAULT_EXPIRE_PER_CLAIM;
+
+  /** The age cutoff of the claim in progress: set by `beforeSelect`, used (and cleared) by the `selectDue` that follows. */
+  private claimCutoff: SQL | null = null;
+
+  /** Whole hours a delivery may stay `pending` before it is expired instead of sent (WEBHOOK_DELIVERY_MAX_AGE_HOURS). */
+  private get maxAgeHours(): number {
+    return this.config.get('WEBHOOK_DELIVERY_MAX_AGE_HOURS');
+  }
+
+  /**
+   * EXPIRY, inside the claim transaction, before the due rows are selected.
+   *
+   * A delivery still `pending` after WEBHOOK_DELIVERY_MAX_AGE_HOURS is not sent: it is marked `failed`
+   * ("expired: pending longer than N h") and kept. The body a receiver gets carries the time of SENDING, so a
+   * stale event is indistinguishable from a fresh one, and a relay that was down for a day would otherwise replay
+   * that day to every subscriber the moment it recovered.
+   *
+   * RACE-FREE, by the same rules as a claim: the candidate rows are locked `FOR UPDATE SKIP LOCKED` in THIS
+   * transaction (a row another transaction holds is skipped, not waited for), and a row whose lease is live is not
+   * a candidate at all (a relay is delivering it; its finish is fenced by `lease_token`). The update clears
+   * `lease_token`, so a relay whose lease had lapsed and that is still running cannot write `delivered` over
+   * `failed`: its fence (`lease_token = ...`) no longer matches. No other relay can claim an expired row either,
+   * because it is no longer `pending`.
+   */
+  protected override async beforeSelect(tx: DrizzleTx): Promise<void> {
+    // Computed ONCE per claim, in the database's clock: `selectDue` uses this same expression, so a row is either
+    // expired here or too old to claim there, never sent in between (the Time rule, .github#29).
+    const cutoff = sql`${DB_NOW} - make_interval(hours => ${this.maxAgeHours})`;
+    this.claimCutoff = cutoff;
+    const stale = await tx
+      .select({ id: webhookDeliveries.id })
+      .from(webhookDeliveries)
+      .where(
+        and(
+          eq(webhookDeliveries.status, 'pending'),
+          lt(webhookDeliveries.createdAt, cutoff),
+          or(isNull(webhookDeliveries.lockedUntil), lte(webhookDeliveries.lockedUntil, DB_NOW)),
+        ),
+      )
+      .orderBy(asc(webhookDeliveries.seq), asc(webhookDeliveries.id))
+      .limit(this.expirePerClaim)
+      .for('update', { skipLocked: true });
+    if (stale.length === 0) return;
+
+    const expired = await tx
+      .update(webhookDeliveries)
+      .set({
+        status: 'failed',
+        lastError: `expired: pending longer than ${this.maxAgeHours} h`,
+        leaseToken: null,
+        lockedUntil: null,
+      })
+      .where(
+        and(
+          inArray(
+            webhookDeliveries.id,
+            stale.map((r) => r.id),
+          ),
+          eq(webhookDeliveries.status, 'pending'),
+        ),
+      )
+      .returning({ id: webhookDeliveries.id });
+    this.recordExpired(expired.length);
+    this.logger.warn(
+      { expired: expired.length, maxAgeHours: this.maxAgeHours },
+      `Expired ${expired.length} webhook deliver(ies) pending longer than ${this.maxAgeHours} h; not sent`,
+    );
+  }
+
+  override get wakeKind(): string {
+    return WEBHOOK_WAKE;
   }
 
   @Cron('*/10 * * * * *', { name: 'webhook-relay' })
@@ -55,36 +149,54 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     seq: webhookDeliveries.seq,
   };
 
-  protected async selectDue(tx: DrizzleTx, limit: number, now: Date): Promise<DeliveryRow[]> {
+  protected async selectDue(tx: DrizzleTx, limit: number, now: SQL): Promise<DeliveryRow[]> {
+    /*
+     * `FOR UPDATE OF <table>`, because the join to `webhook_subscriptions` must NOT lock subscriptions: an API call
+     * editing or deleting a subscription would otherwise wait behind a relay pass, and two relays could never
+     * claim different deliveries of the same subscription.
+     *
+     * The table is ALIASED, and `of` names the alias. Postgres requires the `OF` operand to be an UNQUALIFIED
+     * relation name (a table, or its alias), and Drizzle renders `of: webhookDeliveries` as the qualified
+     * `"messaging"."webhook_deliveries"` for a table in a `pgSchema`, which Postgres rejects with `FOR UPDATE must
+     * specify unqualified relation names`: this relay failed every pass, and no delivery was ever made. Aliased, the
+     * query renders `... from "messaging"."webhook_deliveries" "d" ... for update of "d" skip locked`.
+     * (test/e2e/webhook-relay-claim.e2e.spec.ts runs this query against PostgreSQL.)
+     */
+    const d = alias(webhookDeliveries, 'd');
+    // THE AGE LIMIT AGAIN, on the claim itself. `beforeSelect` expires at most `expirePerClaim` rows, so with a bigger
+    // backlog the rest are still over-age here; without this predicate they would be claimed and SENT in this very pass.
+    // The cutoff is the one `beforeSelect` used for this claim (or, for a caller that skipped it, derived from `now`).
+    const cutoff = this.claimCutoff ?? sql`${DB_NOW} - make_interval(hours => ${this.maxAgeHours})`;
+    this.claimCutoff = null;
     return tx
       .select({
-        id: webhookDeliveries.id,
-        subscriptionId: webhookDeliveries.subscriptionId,
-        eventType: webhookDeliveries.eventType,
-        payload: webhookDeliveries.payload,
-        attempts: webhookDeliveries.attempts,
+        id: d.id,
+        subscriptionId: d.subscriptionId,
+        eventType: d.eventType,
+        payload: d.payload,
+        attempts: d.attempts,
         url: webhookSubscriptions.url,
         secret: webhookSubscriptions.secret,
       })
-      .from(webhookDeliveries)
+      .from(d)
       .innerJoin(
         webhookSubscriptions,
-        and(
-          eq(webhookDeliveries.subscriptionId, webhookSubscriptions.id),
-          eq(webhookSubscriptions.active, true),
-        ),
+        and(eq(d.subscriptionId, webhookSubscriptions.id), eq(webhookSubscriptions.active, true)),
       )
       .where(
         and(
-          eq(webhookDeliveries.status, 'pending'),
-          lt(webhookDeliveries.attempts, this.maxAttempts),
-          lte(webhookDeliveries.nextAttemptAt, now),
-          this.notLeased(now),
+          eq(d.status, 'pending'),
+          gte(d.createdAt, cutoff),
+          lt(d.attempts, this.maxAttempts),
+          lte(d.nextAttemptAt, now),
+          // `this.notLeased(now)` says the same about the UNALIASED column, which no longer exists in this query:
+          // the table is `d` here. Same predicate, written against the alias.
+          or(isNull(d.lockedUntil), lte(d.lockedUntil, now)),
         ),
       )
-      .orderBy(asc(webhookDeliveries.seq), asc(webhookDeliveries.id))
+      .orderBy(asc(d.seq), asc(d.id))
       .limit(limit)
-      .for('update', { skipLocked: true, of: webhookDeliveries });
+      .for('update', { skipLocked: true, of: d });
   }
 
   /** The HTTP POST, with NO transaction open: a slow receiver holds a connection, not row locks. */
@@ -138,7 +250,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
   protected async markSent(tx: DrizzleTx, row: Claimed<DeliveryRow>): Promise<void> {
     await tx
       .update(webhookDeliveries)
-      .set({ status: 'delivered', deliveredAt: new Date() })
+      .set({ status: 'delivered', deliveredAt: DB_NOW })
       .where(eq(webhookDeliveries.id, row.id));
   }
 
@@ -150,17 +262,16 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     // Deliberately IGNORED: webhook deliveries follow their own RETRY_DELAYS_SECONDS curve,
     // which is a per-endpoint contract rather than a generic backoff. The base class passes
     // its default so a relay that has no opinion gets one for free; this one has an opinion.
-    _nextAttemptAt: Date,
+    _delayMs: number,
   ): Promise<void> {
     const delaySeconds =
       RETRY_DELAYS_SECONDS[Math.min(row.attempts - 1, RETRY_DELAYS_SECONDS.length - 1)] ?? 3600;
-    const nextAttemptAt = new Date(Date.now() + delaySeconds * MS_PER_SEC);
     await tx
       .update(webhookDeliveries)
       .set({
         status: newStatus,
         lastError: error.slice(0, MAX_DELIVERY_ERROR_LENGTH),
-        nextAttemptAt: newStatus === 'failed' ? new Date() : nextAttemptAt,
+        nextAttemptAt: newStatus === 'failed' ? DB_NOW : dbDelay(delaySeconds * MS_PER_SEC),
       })
       .where(eq(webhookDeliveries.id, row.id));
   }

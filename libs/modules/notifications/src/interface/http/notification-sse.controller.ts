@@ -19,6 +19,10 @@
  *     data: { "notificationId": "...", "type": "...", "title": "...",
  *              "body": "...", "resourceId": "..." }
  *
+ *   Server closing (deploy): the client should reconnect; the response ends right after.
+ *     event: reconnect
+ *     data: {}
+ *
  *   Heartbeat (every 25s — prevents proxy/LB from closing idle connections):
  *     : heartbeat
  *
@@ -37,6 +41,7 @@ import { Auth, CurrentUser, SelfScoped } from '@platform';
 import type { JwtPayload } from '@platform';
 import { NotificationPubSubService } from '@platform/notifications';
 import { NotificationsService } from '../../application/notifications.service';
+import { SseStreams } from '../../application/sse-streams.service';
 
 /** SSE heartbeat cadence — keeps TCP alive through proxies and load balancers (RFC 6202 §5.3). */
 const HEARTBEAT_INTERVAL_MS = 25_000;
@@ -48,6 +53,7 @@ export class NotificationSseController {
   constructor(
     private readonly pubSub: NotificationPubSubService,
     private readonly notificationsService: NotificationsService,
+    private readonly streams: SseStreams,
   ) {}
   @Get('stream')
   @SelfScoped("subscribes to the caller's own notification channel")
@@ -73,6 +79,8 @@ export class NotificationSseController {
     // Prevents Nginx, Caddy, and AWS ALB from buffering the stream.
     raw.setHeader('X-Accel-Buffering', 'no');
     raw.flushHeaders();
+    // So a server close can end it (SseStreams: a `preClose` hook sends `reconnect` and ends the response).
+    this.streams.register(raw);
 
     // Send the current unread count immediately on connect so the client does
     // not need a separate GET /notifications/unread-count round-trip.

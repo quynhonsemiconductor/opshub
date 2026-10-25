@@ -2,7 +2,7 @@
 # Web · CI — browser end-to-end flows against a live API and a seeded database
 #
 # The SPA had NO workflow of its own. Its typecheck/lint run inside the backend
-# build and `codegen:check` lives in Backend · CI, but nothing ever opened a
+# build and `codegen:check` used to live in Backend · CI (it now runs below), but nothing ever opened a
 # browser: every screen was unverified above the API boundary, so a broken auth
 # bootstrap, a form that posts the wrong shape, or a list that never re-fetches
 # shipped green.
@@ -14,6 +14,7 @@
 name: Web · CI
 
 on:
+  merge_group:
   push:
     branches: [main]
   pull_request:
@@ -34,8 +35,24 @@ on:
     types: [opened, synchronize, reopened]
 
 concurrency:
-  group: ci-web-${{ github.ref }}
-  cancel-in-progress: true
+  # A PUSH TO MAIN IS NEVER CANCELLED, and that takes a group of its own per commit. The group used to be
+  # `ci-web-${{ github.ref }}` with cancel-in-progress, so two commits landing on main close together shared
+  # `ci-web-refs/heads/main` and the second CANCELLED the first's run. The first commit's deploy then failed its
+  # "wait for Web · CI on this commit" gate: a green commit that could not deploy ("Canceling since a higher
+  # priority waiting request for ci-web-refs/heads/main exists").
+  #
+  # `cancel-in-progress: false` alone would NOT have fixed it: GitHub keeps ONE pending run per group and cancels
+  # every other pending one, so a third push still killed the second's run. Only a distinct group per commit
+  # keeps them all.
+  #
+  #   pull_request -> one group per PR, cancel in progress (a newer push to the PR supersedes the older run:
+  #                   unchanged behaviour; refs/pull/N/merge was already per PR)
+  #   push (main)  -> one group per COMMIT, never cancelled
+  #   anything else (schedule, dispatch) -> its own run id, so it can neither cancel nor be cancelled by a push
+  #
+  # `pr-title.yml` deliberately has its own group and is unaffected.
+  group: ci-web-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || (github.event_name == 'push' && format('main-{0}', github.sha) || format('{0}-{1}', github.event_name, github.run_id)) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -46,11 +63,74 @@ env:
   PNPM_VERSION: '10.33.2'
 
 jobs:
+  # Does this pull request change anything this workflow tests? A change that touches only files the matching DEPLOY workflow ignores
+  # (its `paths-ignore`) cannot affect what this workflow builds, so the heavy jobs are skipped and one cheap gate reports instead.
+  # A push to main ALWAYS runs everything (deploys wait for that run), and every doubt (API error, empty file list, any file not on
+  # the list) runs everything too: see actions/changed-paths in the ci repo.
+  # WEB CI IGNORES ONLY DOCS. Its E2E job builds and runs the REAL API and migrations, the only full-stack end-to-end in the repo, so
+  # a change to apps/api, libs or db must still run it. (Backend CI can skip web-only changes; the reverse is not true.)
+  changes:
+    name: Which parts changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.paths.outputs.run }}
+      quickstart: ${{ steps.quickstart-paths.outputs.run }}
+    steps:
+      # The local quickstart is DENYLIST-gated, never allowlisted: skip it only when EVERY
+      # changed file matches a known-safe ignore glob. An ignore entry missed costs one
+      # extra run; an allowlist entry missed silently lets a breaking change merge (the
+      # first review of the allowlist shape found a dozen such paths). changed-paths fails
+      # open on every doubt (API error, empty list, 3,000-file ceiling) and always runs off
+      # pull_request — push to main and merge-queue entries never skip.
+      # The SPA source (apps/web/src/**) is safe to ignore: the quickstart starts Vite dev
+      # (which proxies /v1 and /api/auth to the compose stack) but never builds or bundles
+      # the web app, and nothing in src/ configures that proxy — vite.config.ts lives
+      # OUTSIDE src/, so this glob cannot hide it.
+      - id: quickstart-paths
+        name: Quickstart relevance (skip only on known-safe paths)
+        # Only a PR can skip the quickstart; on merge_group changed-paths WOULD list the
+        # queue's files and could return false — the queue entry must always run it. The
+        # skipped step leaves the output empty and the gate's `!= 'false'` branch runs it.
+        if: github.event_name == 'pull_request'
+        uses: quynhonsemiconductor/ci/actions/changed-paths@dcdd8dc937aa9d199a4e75e0e187eb52ca520836 # v1.23.1
+        with:
+          ignore: |
+            **/*.md
+            docs/**
+            .claude/**
+            .github/ISSUE_TEMPLATE/**
+            .github/PULL_REQUEST_TEMPLATE/**
+            .github/labeler.yml
+            renovate.json
+            apps/web/src/**
+            **/*.spec.ts
+            **/*.spec.tsx
+            **/*.test.ts
+            **/*.test.tsx
+      - id: paths
+        uses: quynhonsemiconductor/ci/actions/changed-paths@dcdd8dc937aa9d199a4e75e0e187eb52ca520836 # v1.23.1
+        with:
+          ignore: |
+            **/*.md
+            docs/**
+            .claude/**
+          # A release-please PR: only when the author is the release bot (a branch name is chosen by whoever opens the PR, so the
+          # prefix alone proves nothing) AND the diff is the changelog, the manifest and `version` lines. The push to main it becomes
+          # runs everything. Renovate PRs are NOT skipped: an action bump must be exercised on its PR.
+          skip-heads: |
+            release-please--@qnsc-automation[bot]=CHANGELOG.md,.release-please-manifest.json,version-only:**/package.json
+
   # ─────────────────────────────────────────────────────────────────────────
   # 1. Lint + typecheck (fast gate — no deps needed)
   # ─────────────────────────────────────────────────────────────────────────
   quality:
     name: Lint & typecheck
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -61,7 +141,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -77,6 +157,8 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   test:
     name: Unit tests
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -89,7 +171,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -137,7 +219,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -157,17 +239,32 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   e2e:
     name: E2E (Playwright)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Official Playwright image, version LOCKED to @playwright/test in
+    # apps/web (1.62.1 — a skew fails loudly: the bundled browsers must match
+    # the driver). The digest is bumped by the same Renovate PR that bumps
+    # @playwright/test (packageRules: playwright group in renovate.json).
+    # The image ships the browsers and OS libraries — the apt install-deps
+    # step (and its #477 hardening) is deleted, not moved: there is no apt
+    # step left to be flaky.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+    # The image's default shell is dash, which has no pipefail — steps here use
+    # `set -euo pipefail`, so pin bash (like the idf container jobs do).
+    defaults:
+      run:
+        shell: bash
 
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18.6
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: opshub_test
-        ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -175,71 +272,43 @@ jobs:
           --health-retries 10
 
       redis:
-        image: redis:7-alpine
-        ports: ['6379:6379']
+        image: valkey/valkey:8.1.10-alpine
         options: >-
-          --health-cmd "redis-cli ping"
+          --health-cmd "valkey-cli ping"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 5
 
-      # OBJECT STORAGE, because without it this job could not see uploads at all.
-      #
-      # `StorageService` stubs every presign when `S3_FILES_BUCKET` is unset, so the upload specs
-      # answered 500 here while passing locally — and that blind spot is exactly how THREE dead
-      # upload paths reached main: a missing CSRF header, a CORS allow-list that refused a header the
-      # presign signs, and a replacement lookup by key through a by-id finder. None of them are
-      # visible without a bucket to PUT to.
-      # Image pinned to the SAME MAJOR as docker-compose.dev.yml. Not a preference — MEASURED. With
-      # identical bucket CORS applied, the browser's preflight for the presigned PUT is:
-      #
-      #   LocalStack 3 → 403 AccessForbidden "CORSResponse: This CORS request is not allowed"
-      #   LocalStack 4 → 200
-      #
-      # …for `Access-Control-Request-Headers: content-type,content-disposition`. On `:3` the presign
-      # therefore succeeded and the PUT produced no response at all, which surfaced as a
-      # `waitForResponse` timeout rather than anything naming CORS. Reproduced by running both majors
-      # side by side locally before changing this line.
-      localstack:
-        image: localstack/localstack:4
-        env:
-          SERVICES: s3
-          AWS_DEFAULT_REGION: ap-southeast-1
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
-          DEBUG: '0'
-        ports: ['4566:4566']
-        options: >-
-          --health-cmd "curl -sf http://localhost:4566/_localstack/health || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 12
 
     env:
+      # Playwright's documented container setting: the image user is root and
+      # without HOME some tooling misbehaves (@swc/core ERR_SWC_NATIVE_CACHE).
+      HOME: /root
       # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Shared by migrate/seed and the API process. Connects as the owner rather than the
       # restricted role: Backend · CI already proves the least-privilege grants are complete,
       # and repeating that here would only add a second way for this job to fail.
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
-      DATABASE_MIGRATION_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
-      VALKEY_URL: redis://localhost:6379
-      # The BFF session lives in Valkey, so the cache is NOT optional here — a run without it
-      # would log in successfully and then lose the session on the next request.
-      JWT_ISSUER: opshub-api
-      JWT_AUDIENCE: opshub-web
-      JWT_ACCESS_EXPIRY: 8h
-      JWT_REFRESH_EXPIRY_DAYS: '7'
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/opshub_test?sslmode=disable
+      DATABASE_MIGRATION_URL: postgresql://postgres:postgres@postgres:5432/opshub_test?sslmode=disable
+      VALKEY_URL: redis://redis:6379
+      # The identity 8 session cache lives in Valkey and the cookie is verified against this secret. The
+      # cache degrades to Postgres, but a run without it would exercise a path production does not.
+      BETTER_AUTH_SECRET: ci-test-better-auth-secret-min-32-characters-ok
       COOKIE_SECRET: ci-test-cookie-secret-min-32-characters-ok
       CSRF_SECRET: ci-test-csrf-secret-min-32-characters-okay
-      CORS_ORIGINS: http://localhost:5173
-      # 3001, because apps/web/vite.config.ts proxies /v1 there. A different port here means
-      # every request 502s through the proxy and every spec fails on its first assertion.
+      CORS_ORIGINS: http://localhost:5174
+      # Better Auth trusts only APP_URL for sign-in: without it the API falls back to the schema default and every test login
+      # is refused with INVALID_ORIGIN.
+      APP_URL: http://localhost:5174
+      # PORT is the API port. apps/web/vite.config.ts forwards /v1 to PORT (3001 when unset), so the API and the proxy must
+      # agree. A different port here means every request 502s through the proxy and every spec fails on its first assertion.
       PORT: '3001'
-      # `POST /v1/bff/dev-login` is refused under NODE_ENV=production by design, and it is how
-      # global-setup signs in — OpsHub's login page is a single Entra SSO button, and CI has no
-      # Entra tenant.
+      # `POST /api/auth/test-login` (identity 8) loads only with IDENTITY_TEST_LOGIN=enabled AND NODE_ENV
+      # exactly `test` or `development`, and it is how global-setup signs in — OpsHub's login page is a
+      # single Entra SSO button, and CI has no Entra tenant.
       NODE_ENV: test
+      IDENTITY_TEST_LOGIN: enabled
       # The suite drives ~50 specs through four seeded identities in three minutes, and each page load
       # costs about fifteen calls — so the DEFAULT tier's 200/min per user is crossed and whichever
       # request lands next fails a spec that was testing something else. Measured here twice after
@@ -248,17 +317,19 @@ jobs:
       # The env schema REFUSES this value above 200 when NODE_ENV=production, so it cannot become a dial
       # in a deployed environment — see `env.schema.ts` and its spec.
       RATE_LIMIT_DEFAULT_LIMIT: '5000'
+      RATE_LIMIT_IP_LIMIT: '100000'
       LOG_LEVEL: warn
       OTEL_ENABLED: 'false'
-      # Object storage points at LocalStack. `STORAGE_ENDPOINT` and not `AWS_ENDPOINT_URL`:
-      # StorageService selects its backend separately, because in production the bucket may live in
-      # Cloudflare R2 under different credentials. Path-style addressing, which LocalStack and R2 both
-      # require — virtual-host style resolves a bucket subdomain that does not exist here.
+      # Object storage points at the Garage started in THIS job (same binary + config as the local
+      # stack). `STORAGE_ENDPOINT` and not `AWS_ENDPOINT_URL`: StorageService selects its backend
+      # separately, because in production the bucket may live in Cloudflare R2 under different
+      # credentials. Path-style addressing, which Garage and R2 both require — virtual-host style
+      # resolves a bucket subdomain that does not exist here. Localhost: same container as the API.
       AWS_REGION: ap-southeast-1
       S3_FILES_BUCKET: opshub-files-ci
-      STORAGE_ENDPOINT: http://localhost:4566
-      STORAGE_ACCESS_KEY_ID: test
-      STORAGE_SECRET_ACCESS_KEY: test
+      STORAGE_ENDPOINT: http://localhost:3900
+      STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
+      STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
       STORAGE_FORCE_PATH_STYLE: 'true'
 
     steps:
@@ -266,34 +337,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@v1
+      # The container runs as root over a uid-1001 workspace; without this git
+      # treats the repo as dubious and `git diff` falls into no-index mode.
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
-      - name: Generate ephemeral JWT keypair
-        # Fresh EC P-256 keypair per run — never a static secret, matching Backend · CI.
-        # JWT_PUBLIC_KEY is derived from the private key at boot, so only the private one is
-        # strictly required; both are exported to keep the two workflows readable side by side.
-        run: |
-          node - << 'EOF'
-          const { generateKeyPairSync } = require('crypto');
-          const fs = require('fs');
-          const { privateKey, publicKey } = generateKeyPairSync('ec', {
-            namedCurve: 'P-256',
-            privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-            publicKeyEncoding:  { type: 'spki',  format: 'pem' },
-          });
-          fs.appendFileSync(process.env.GITHUB_ENV, `JWT_PRIVATE_KEY=${Buffer.from(privateKey).toString('base64')}\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `JWT_PUBLIC_KEY=${Buffer.from(publicKey).toString('base64')}\n`);
-          console.log('JWT keypair generated');
-          EOF
-
       # `pnpm db:migrate` always ensures the RBAC catalogue, but the login-able DEMO EMPLOYEES
       # are fixtures behind `SEED_ON_DEPLOY` — and `admin@opshub.local`, the principal
       # global-setup signs in as, is one of them. Without this the migrate step succeeds and
-      # dev-login then answers `401 AUTH_INVALID_CREDENTIALS: No active account exists for this
-      # email`, which is what the first run of this workflow did.
+      # test-login finds no `identity.user` for the email, so it mints one with a NEW id that matches no employee
+      # and every request is refused (the fixtures also create the identity users, with the employees' ids).
       #
       # Safe here, and it has to be explicit: `db/migrate.ts` refuses the fixtures whenever
       # `NODE_ENV=production`, which only deployed migrator tasks set. Backend · CI needs no
@@ -306,29 +364,41 @@ jobs:
       # The bucket AND its CORS rules. The rules are not optional decoration: the browser PUTs
       # straight to the presigned URL, and `presignUpload` signs `content-disposition` as well as
       # `content-type`, so a preflight that allows only Content-Type refuses every upload with an
-      # opaque `net::ERR_FAILED`. Mirrors scripts/localstack/01-bootstrap.sh and the app-bucket
-      # module's `cors_rules`; the origin is the Vite dev server Playwright starts.
-      - name: Create the CI bucket
+      # opaque `net::ERR_FAILED`. scripts/garage/init.mjs writes those rules and proves a preflight
+      # for each origin; the origin is the Vite dev server Playwright starts (WEB_DEV_PORT, 5174).
+      # OBJECT STORAGE, because without it this job could not see uploads at all: `StorageService` stubs
+      # every presign when `S3_FILES_BUCKET` is unset, and that blind spot is exactly how THREE dead upload
+      # paths reached main. Garage runs from the static musl release binary INSIDE the job container (a
+      # service cannot mount the repo's garage.toml — services start before checkout), with the same
+      # docker/garage/garage.toml the local stack uses; endpoints are localhost. The bucket/CORS/lifecycle
+      # setup is a small node script on @aws-sdk/client-s3 (already a dependency) — no pip, no awscli.
+      - name: Start Garage and create the CI bucket
+        timeout-minutes: 5
         env:
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
-          AWS_DEFAULT_REGION: ap-southeast-1
+          GARAGE_ADMIN_TOKEN: local-dev-garage-admin-token-not-a-secret
+          STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
+          # Quoted on purpose: an unquoted all-zero scalar is read by YAML as the integer 0, and Garage then gets "0".
+          STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+          # The e2e suite uploads to THIS bucket (S3_FILES_BUCKET below). Without it Garage answers the
+          # browser's preflight without CORS headers and every upload test times out.
+          BUCKETS: opshub-files-ci
         run: |
-          aws --endpoint-url http://localhost:4566 s3api create-bucket \
-            --bucket opshub-files-ci \
-            --region ap-southeast-1 \
-            --create-bucket-configuration LocationConstraint=ap-southeast-1
-          aws --endpoint-url http://localhost:4566 s3api put-bucket-cors \
-            --bucket opshub-files-ci \
-            --cors-configuration '{
-              "CORSRules": [{
-                "AllowedMethods": ["PUT", "GET", "HEAD"],
-                "AllowedOrigins": ["http://localhost:5173"],
-                "AllowedHeaders": ["Content-Type", "Content-Disposition"],
-                "ExposeHeaders": ["ETag"],
-                "MaxAgeSeconds": 3600
-              }]
-            }'
+          set -euo pipefail
+          # Pinned release binary (x86_64 musl, from garagehq.deuxfleurs.fr),
+          # verified by sha256 (computed from that URL 2026-10-24). Retry: the
+          # download is the one network step here that has flaked.
+          curl -sfL --retry 3 --retry-all-errors --max-time 120 -o /tmp/garage \
+            https://garagehq.deuxfleurs.fr/_releases/v1.3.1/x86_64-unknown-linux-musl/garage
+          echo "0441419f7c0b372d37e533a80e08367023d30fa56a56d1db3f8a2aff27e24c92  /tmp/garage" | sha256sum -c -
+          chmod +x /tmp/garage
+          /tmp/garage -c docker/garage/garage.toml server > /tmp/garage.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf -H "Authorization: Bearer $GARAGE_ADMIN_TOKEN" http://localhost:3903/v1/status >/dev/null && break
+            sleep 1
+          done
+          curl -sf -H "Authorization: Bearer $GARAGE_ADMIN_TOKEN" http://localhost:3903/v1/status >/dev/null || {
+            echo "::error::Garage did not come up"; tail -20 /tmp/garage.log; exit 1; }
+          node scripts/garage/init.mjs
 
       - name: Build API
         run: pnpm build:api
@@ -345,40 +415,17 @@ jobs:
           done
           echo "API failed to start"; cat /tmp/api.log; exit 1
 
-      # ── Playwright browser ────────────────────────────────────────────────────
-      #
-      # CACHED, AND WITH ITS OWN TIMEOUT, because this step is the only part of this job that has ever
-      # failed for a reason unrelated to the code.
-      #
-      # It downloads Chromium from the Playwright CDN on every run. Measured across nineteen runs: 20-35s
-      # when the CDN is healthy, 248s / 301s / 336s when it is not, and twice it simply hung -- 1441s and
-      # 1446s -- until the job's 25-minute budget ran out. Both of those surfaced as a CANCELLED job with
-      # the tests never started, which reads exactly like a flaky suite and is nothing of the kind.
-      #
-      # The cache key is the Playwright package version, because that is what decides the browser build.
-      # Keying on a lockfile hash instead would miss the cache on every unrelated dependency change; on
-      # the version alone, a Playwright upgrade downloads once and every later run is a hit.
-      - name: Resolve the Playwright version
-        id: playwright
+      # The SPA's API client is generated from the API's OpenAPI spec and COMMITTED, so it can silently fall behind a DTO change, or be
+      # hand-edited, with nothing to notice: `tsc` can pass against stale build info and a route the client has never heard of only fails
+      # at runtime. Regenerating from the running API and diffing is the cheapest proof the two agree. This used to run in Backend CI,
+      # which skips web-only changes; it lives here, next to the running API, so it runs for every change to either side.
+      # Fix a failure with `pnpm --filter opshub-web codegen` against a local API, then commit.
+      - name: Generated web client matches the spec
         run: |
-          version=$(node -p "require('./apps/web/node_modules/@playwright/test/package.json').version")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ms-playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-
-      # The deps flag stays on a cache hit: the cache carries the BROWSER, while --with-deps installs the
-      # OS libraries it links against, which live outside that path. Playwright skips the download when
-      # the browser is already present, so a hit costs only the apt step.
-      #
-      # The step timeout is the important half. Without it a hung download eats the job budget and the
-      # failure is reported as a cancellation of the whole job; with it the step fails in eight minutes
-      # naming itself, and a re-run becomes a decision rather than a guess.
-      - name: Install Playwright browser
-        timeout-minutes: 8
-        run: pnpm --filter opshub-web exec playwright install --with-deps chromium
+          curl -sf http://localhost:3001/api/docs-json -o "$RUNNER_TEMP/openapi.json"
+          pnpm --filter opshub-web codegen:check
+        env:
+          OPENAPI_SPEC: ${{ runner.temp }}/openapi.json
 
       - name: Run browser E2E
         run: pnpm --filter opshub-web exec playwright test --reporter=line
@@ -396,6 +443,128 @@ jobs:
       - name: API logs on failure
         if: failure()
         run: cat /tmp/api.log || true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 5. Local quickstart — the README's "Local stack", executed.
+  #
+  # A clean clone must run with `cp .env.example .env` and the README's commands, nothing else. This job IS that
+  # clone: it copies the example, starts the compose stack, migrates (and seeds the demo users), boots the API and the
+  # worker from that `.env` with the README's own start scripts, boots the Vite server, and signs in with the test
+  # login THROUGH the Vite proxy. Every other job passes its configuration as `env:` and would stay green while
+  # `.env.example` rotted; this one reads nothing else.
+  #
+  # What it caught on the day it was written: PORT=3000 against a Vite proxy to :3001 (every SPA request 502), no
+  # SEED_ON_DEPLOY (no demo users, every test login refused). It lives in WEB CI rather than Backend CI because the
+  # drift runs both ways: a proxy-port edit in apps/web touches no backend file, and Backend CI skips web-only changes.
+  #
+  # The commands below mirror the README (test/env-example.spec.ts fails when the two stop agreeing).
+  # ─────────────────────────────────────────────────────────────────────────
+  quickstart:
+    name: local quickstart
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' && needs.changes.outputs.quickstart != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      LOGS: ${{ github.workspace }}/quickstart-logs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: cp .env.example .env
+        run: |
+          cp .env.example .env
+          mkdir -p "$LOGS"
+
+      # `--wait` returns when every healthcheck passes. The bucket setup is a one-shot (garage-init), so its exit status is read
+      # on the next step: 0 means both buckets, their lifecycle and CORS for localhost and 127.0.0.1 are set and each preflight passed.
+      - name: docker compose -f docker-compose.dev.yml up -d --wait
+        run: docker compose -f docker-compose.dev.yml up -d --wait --wait-timeout 240
+
+      - name: The bucket setup exited 0 (garage-init)
+        run: |
+          code=$(docker inspect -f '{{.State.ExitCode}}' "$(docker compose -f docker-compose.dev.yml ps -aq garage-init)")
+          echo "garage-init exit code: $code"
+          test "$code" = 0 || { docker compose -f docker-compose.dev.yml logs garage-init; exit 1; }
+
+      - name: pnpm db:migrate
+        run: pnpm db:migrate
+
+      # `SEED_ON_DEPLOY=true` in the example is what makes the migrate step load the demo users. Without them the test
+      # login is refused, so ask the database directly and fail by name rather than at a 401 later.
+      - name: The demo users exist
+        run: |
+          n=$(docker compose -f docker-compose.dev.yml exec -T postgres psql -U opshub -d opshub -Atc "select count(*) from identity.\"user\" where email = 'admin@opshub.local'")
+          echo "admin@opshub.local rows: $n"
+          test "$n" = 1
+
+      - name: Start the API, the worker and the web dev server
+        run: |
+          nohup pnpm start:dev        > "$LOGS/api.log"    2>&1 &
+          nohup pnpm start:dev:worker > "$LOGS/worker.log" 2>&1 &
+          nohup pnpm dev:web          > "$LOGS/web.log"    2>&1 &
+
+      # /readyz is the API's own probe (database and cache both up).
+      - name: The API answers /readyz
+        run: |
+          for _ in $(seq 1 90); do
+            if body=$(curl -sf http://localhost:3001/readyz); then
+              echo "$body"
+              echo "$body" | jq -e '.status == "ok" and .checks.database == "up" and .checks.cache == "up"'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the API did not answer /readyz on :3001 within 3 minutes. Is PORT in .env.example the port the Vite proxy forwards to?"
+          exit 1
+
+      # The worker serves no HTTP, and `nest start --watch` keeps running after a config refusal, so the log is the
+      # signal: it must say it started and must not contain an error (a refusal names the variable).
+      - name: The worker started from the same .env
+        run: |
+          for _ in $(seq 1 60); do
+            grep -q "Worker process started" "$LOGS/worker.log" && break
+            sleep 2
+          done
+          grep -q "Worker process started" "$LOGS/worker.log" || { echo "::error::the worker did not start"; exit 1; }
+          sleep 10
+          if grep -aE "ERROR|FATAL" "$LOGS/worker.log" "$LOGS/api.log"; then
+            echo "::error::an error in the API or worker log after boot"
+            exit 1
+          fi
+
+      # THROUGH THE VITE PROXY (:5174), not the API directly: this is the call a browser makes, and it is the one that
+      # breaks when the proxy cannot reach the API on the PORT in .env.example.
+      - name: Sign in with the test login and make an authenticated /v1 call, through the SPA's proxy
+        run: |
+          for _ in $(seq 1 30); do curl -sf http://localhost:5174/v1/healthz >/dev/null && break; sleep 2; done
+          curl -sf http://localhost:5174/v1/healthz || { echo "::error::/v1 through the Vite proxy failed: the API must listen on PORT (.env.example), which the proxy forwards to (apps/web/vite.config.ts)"; exit 1; }
+          curl -sf -c "$LOGS/jar.txt" -H 'content-type: application/json' \
+            -d '{"email":"admin@opshub.local"}' http://localhost:5174/api/auth/test-login
+          me=$(curl -sf -b "$LOGS/jar.txt" http://localhost:5174/v1/auth/me)
+          echo "$me" | jq '{email, roles}'
+          echo "$me" | jq -e '.email == "admin@opshub.local" and (.roles | index("admin"))'
+          curl -sf -b "$LOGS/jar.txt" -o /dev/null -w 'GET /v1/assets -> %{http_code}\n' http://localhost:5174/v1/assets
+
+      - name: Logs
+        if: always()
+        run: |
+          for f in api worker web; do echo "::group::$f.log"; tail -n 120 "$LOGS/$f.log" || true; echo "::endgroup::"; done
+          docker compose -f docker-compose.dev.yml ps || true
+
+      - name: Tear down
+        if: always()
+        run: |
+          pkill -f "nest start" || true
+          pkill -f vite || true
+          docker compose -f docker-compose.dev.yml down -v || true
 
   # ── The aggregate gate ──────────────────────────────────────────────────────
   # `Web CI required` is THE required check for this workflow. It exists because GitHub counts a
@@ -416,10 +585,39 @@ jobs:
   ci-required:
     name: Web CI required
     if: always()
-    needs: [quality, test, build, e2e]
+    needs: [changes, quality, test, build, e2e, quickstart]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@v1
+      # No `allow-skipped`, so a renamed or removed job still fails loudly. The two branches are exclusive:
+      #  * `changes` said run: every job must be `success`;
+      #  * otherwise: only `changes` itself must be `success` (the rest are skipped by design). If `changes` FAILED its output is
+      #    empty, this branch runs, and the gate fails: it cannot turn "could not decide" into a pass.
+      - name: Every job must have succeeded
+        if: ${{ needs.changes.outputs.run == 'true' && needs.changes.outputs.quickstart != 'false' }}
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           results: ${{ join(needs.*.result, ',') }}
+
+      # NEW JOBS: add them to `needs:` above AND to the explicit results list in the
+      # "Everything but the quickstart" branch below — the join() in branch 1 covers
+      # them only while the quickstart actually runs; branch 2 is the one that runs
+      # when the quickstart was skipped.
+      - name: Everything but the quickstart must have succeeded
+        if: ${{ needs.changes.outputs.run == 'true' && needs.changes.outputs.quickstart == 'false' }}
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        with:
+          results: ${{ needs.changes.result }},${{ needs.quality.result }},${{ needs.test.result }},${{ needs.build.result }},${{ needs.e2e.result }}
+
+      - name: The quickstart was skipped by its path filter (and only by that)
+        if: ${{ needs.changes.outputs.run == 'true' && needs.changes.outputs.quickstart == 'false' }}
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        with:
+          results: ${{ needs.quickstart.result }}
+          allow-skipped: true
+
+      - name: Nothing here to test (every changed file is ignorable)
+        if: ${{ needs.changes.outputs.run != 'true' }}
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        with:
+          results: ${{ needs.changes.result }}

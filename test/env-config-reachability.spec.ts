@@ -48,18 +48,32 @@ const READ_BY_SHARED_PACKAGES = new Set([
   'OTEL_ENABLED',
   'OTEL_EXPORTER_OTLP_ENDPOINT',
   'OTEL_SERVICE_NAMESPACE',
+  // Read by scripts/localstack/01-bootstrap.sh (the aws CLI through LocalStack). That script is not TypeScript, so this scan never sees it.
+  'AWS_ENDPOINT_URL',
   // The bootstrap's own default for the service name, read when no `serviceNameEnvVar` overrides it —
   // which is the api's case.
   'OTEL_SERVICE_NAME',
+  // `clientIp()` in `@quynhonsemiconductor/platform-http` reads these from `process.env` (the rate limiter, the access log,
+  // idempotency and identity's mount all go through it), and `assertEdgeClientIpEnv()` refuses a bad one at boot.
+  // Declared here so the schema validates them and the worker's schema can refuse them.
+  'EDGE_CLIENT_IP_SECRET',
+  'EDGE_CLIENT_IP_SECRET_PREVIOUS',
+  // `createHttpApp` / `createWorkerApp` (platform-runtime/bootstrap) read these from the environment BY CONVENTION, before Nest exists: the
+  // listen address, and the logger's `env`, level and pretty-printing. Declared here so the schema validates them.
+  'PORT',
+  'HOST',
+  'DEPLOYMENT_ENV',
+  'LOG_LEVEL',
+  'LOG_PRETTY',
 ]);
 
 /**
  * Variables consumed inside the schema itself.
  *
- * `VALKEY_URL` is the infra-injected alias for `REDIS_URL` and is normalised into it at parse time, so it
+ * `REDIS_URL` is the DEPRECATED alias of `VALKEY_URL` and is folded into it at parse time, so it
  * is read exactly once — in the file that declares it, which the scan excludes.
  */
-const RESOLVED_IN_SCHEMA = new Set(['VALKEY_URL']);
+const RESOLVED_IN_SCHEMA = new Set(['REDIS_URL']);
 
 function declaredKeys(): string[] {
   const schema = readFileSync(join(ROOT, SCHEMA), 'utf8');

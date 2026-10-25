@@ -16,12 +16,11 @@ title = "opshub gitleaks config"
 [allowlist]
 description = "Known false-positives in test and dev files"
 
-# Test JWT key pairs in vitest.config.ts — placeholder EC P-256 keys, never used for real signing.
+# vitest.config.ts carries test-only placeholder values (BETTER_AUTH_SECRET, COOKIE_SECRET, CSRF_SECRET).
 paths = [
   '''vitest\.config\.ts''',
   # .env.example is a TEMPLATE — every value in it is a placeholder, including
-  # JWT_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----,
-  # which is what trips the `private-key` rule. A path entry rather than a regex
+  # BETTER_AUTH_SECRET=change-me-..., which is what trips the generic-secret rules. A path entry rather than a regex
   # because the whole file is placeholders by definition; a real secret does not
   # belong here in any form, and one committed to .env.example would be a mistake
   # to fix at the source rather than to detect.
@@ -40,4 +39,7 @@ regexes = [
   # Smoke-test webhook secret in scripts/smoke-api.py — a fixed placeholder posted to
   # https://example.invalid, named for the length rule it exists to satisfy.
   '''smoke-secret-at-least-16-chars''',
+  # Image version tags in the dev compose files (e.g. valkey/valkey:7.2.14-alpine). The tag has enough entropy to trip
+  # generic-api-key, because "valkey" contains "key". Anchored to a bare version tag, so no secret can match.
+  '''^\d+(\.\d+){1,2}-alpine$''',
 ]

@@ -1,9 +1,9 @@
 /**
  * End-to-end proof that a permission change takes effect on the user's NEXT request — with
- * no token refresh, no re-login, and nothing for the client to do.
+ * no re-login, and nothing for the client to do.
  *
- * The property under test is the ABSENCE of a snapshot. opshub's access token carries
- * identity plus a `claims.roles` display array, and NOTHING else: `PolicyGuard` resolves
+ * The property under test is the ABSENCE of a snapshot. opshub's session carries
+ * identity and NOTHING else (the roles shown by `/v1/auth/me` are read from `employees.roles`): `PolicyGuard` resolves
  * permissions from the database on every request, cached per user in Valkey and invalidated
  * by the write paths. So there is no embedded permission list to go stale, and no epoch
  * counter needed to expire one early — the same token simply gets a different answer.
@@ -32,18 +32,21 @@ import {
   type IRoleAssignmentRepository,
   type IRoleRepository,
 } from '@modules/authz';
-import type { RoleAssignment, RoleWithPermissions } from '@platform';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { DRIZZLE, type DrizzleDB, type RoleAssignment, type RoleWithPermissions } from '@platform';
+import { eq } from 'drizzle-orm';
+import { employees } from '../../db/schema';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 const PROBE_ROUTE = '/v1/audit-logs';
 
 let app: NestFastifyApplication;
 let admin: AuthzAdminService;
+let db: DrizzleDB;
 let roles: IRoleRepository;
 let assignments: IRoleAssignmentRepository;
 /** The `auditor` role — the smallest seeded bundle that includes `audit.read`. */
 let auditorRole: RoleWithPermissions;
-/** Bearer session for the fixture that holds NO permissions. */
+/** Session for the fixture that holds NO permissions. */
 let victim: Session;
 
 /**
@@ -74,22 +77,23 @@ async function grantAuditor(
 }
 
 function probe() {
-  return app.inject({ method: 'GET', url: PROBE_ROUTE, headers: bearer(victim) });
+  return app.inject({ method: 'GET', url: PROBE_ROUTE, headers: authHeaders(victim) });
 }
 
-/** Decode the access token payload without verifying — this inspects claims, not trust. */
-function decodeClaims(
-  token: string,
-): { claims?: Record<string, unknown> } & Record<string, unknown> {
-  const payload = token.split('.')[1];
-  return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
-    claims?: Record<string, unknown>;
-  };
+/** The roles `/v1/auth/me` displays for a session: a DISPLAY list, read from `employees.roles`. */
+async function displayedRoles(session: Session): Promise<string[]> {
+  const res = await app.inject({
+    method: 'GET',
+    url: '/v1/auth/me',
+    headers: { cookie: session.cookieHeader },
+  });
+  return res.json<{ roles: string[] }>().roles;
 }
 
 beforeAll(async () => {
   app = await createTestApp();
   admin = app.get(AuthzAdminService);
+  db = app.get<DrizzleDB>(DRIZZLE);
   roles = app.get<IRoleRepository>(ROLE_REPOSITORY);
   assignments = app.get<IRoleAssignmentRepository>(ROLE_ASSIGNMENT_REPOSITORY);
 
@@ -116,19 +120,30 @@ afterAll(async () => {
 });
 
 describe('permission changes take effect on the next request', () => {
-  it('mints tokens that carry no permissions at all', () => {
-    // The absence IS the mechanism. While a token carries its own permission list, every
-    // authorization answer is as old as the token, and something has to exist to expire it
-    // early. `claims.roles` is present but is a DISPLAY snapshot — the assertions below
-    // prove nothing authorizes from it.
-    const decoded = decodeClaims(victim.accessToken);
+  it('keeps no permission list in the session', async () => {
+    // The absence IS the mechanism. While a session carries its own permission list, every
+    // authorization answer is as old as the session, and something has to exist to expire it
+    // early. The session cookie is an opaque id: `/v1/auth/me` RESOLVES the permissions it returns from
+    // the database on each call, so they follow a grant without a new sign-in.
+    const meBefore = await app.inject({
+      method: 'GET',
+      url: '/v1/auth/me',
+      headers: { cookie: victim.cookieHeader },
+    });
+    expect(meBefore.json<{ permissions: string[] }>().permissions).not.toContain('audit.read');
 
-    expect(decoded.claims?.['permissions']).toBeUndefined();
-    expect(decoded.claims?.['authzEpoch']).toBeUndefined();
-    expect(decoded.claims?.['roles']).toBeDefined();
+    await grantAuditor();
+
+    const meAfter = await app.inject({
+      method: 'GET',
+      url: '/v1/auth/me',
+      headers: { cookie: victim.cookieHeader },
+    });
+    expect(meAfter.json<{ permissions: string[] }>().permissions).toContain('audit.read');
+    expect(meAfter.json<Record<string, unknown>>()['authzEpoch']).toBeUndefined();
   });
 
-  it('a GRANT takes effect on the same token, on the very next request', async () => {
+  it('a GRANT takes effect on the same session, on the very next request', async () => {
     // 1. The fixture holds the `employee` role, whose permission bundle is empty by design.
     expect((await probe()).statusCode).toBe(403);
 
@@ -136,13 +151,13 @@ describe('permission changes take effect on the next request', () => {
     //    holder to refresh before it meant anything.
     await grantAuditor();
 
-    // 3. Same bearer token, no refresh, no re-login: allowed now. Immediately — the
+    // 3. Same session cookie, no re-login: allowed now. Immediately — the
     //    resolve cache has a 300s TTL, so without the write path's invalidate this stays
     //    403 for five minutes.
     expect((await probe()).statusCode).toBe(200);
   });
 
-  it('a REVOCATION takes effect on the same token, on the very next request', async () => {
+  it('a REVOCATION takes effect on the same session, on the very next request', async () => {
     const assignment = await grantAuditor();
     expect((await probe()).statusCode).toBe(200);
 
@@ -156,31 +171,25 @@ describe('permission changes take effect on the next request', () => {
     expect(after.statusCode).toBe(403);
   });
 
-  it('does not authorize from the stale roles[] claim left in the token', async () => {
-    // The strongest form of the property, and the reason the RoleGuard that read this array
-    // was removed. `syncEmployeeRoleClaims` rewrites `employees.roles` on every grant, but
-    // the ALREADY-MINTED token keeps whatever it was minted with — so after a grant and a
-    // revoke, a token can still carry `auditor` while holding no audit permission.
-    const assignment = await grantAuditor();
-
-    // Re-login so the fresh token's claims genuinely include the granted role.
-    const elevated = await login(app, FIXTURE.NO_PERMISSIONS);
-    expect(decodeClaims(elevated.accessToken).claims?.['roles']).toEqual(
-      expect.arrayContaining(['auditor']),
-    );
-    expect(
-      (await app.inject({ method: 'GET', url: PROBE_ROUTE, headers: bearer(elevated) })).statusCode,
-    ).toBe(200);
-
-    await admin.revokeAssignment(assignment.id, ACTOR);
-    created = created.filter((a) => a.id !== assignment.id);
-
-    // The claim still says auditor. The answer must not.
-    const stillClaimsAuditor = decodeClaims(elevated.accessToken).claims?.['roles'];
-    expect(stillClaimsAuditor).toEqual(expect.arrayContaining(['auditor']));
-    expect(
-      (await app.inject({ method: 'GET', url: PROBE_ROUTE, headers: bearer(elevated) })).statusCode,
-    ).toBe(403);
+  it('does not authorize from the displayed roles list', async () => {
+    // The strongest form of the property, and the reason the RoleGuard that read a roles array
+    // was removed. `syncEmployeeRoleClaims` rewrites `employees.roles` on every grant, and
+    // `/v1/auth/me` shows it. So write `auditor` there WITHOUT an assignment: the list says
+    // auditor, the authorization decision must still say no.
+    const before = await displayedRoles(victim);
+    await db
+      .update(employees)
+      .set({ roles: [...before, 'auditor'] })
+      .where(eq(employees.id, FIXTURE.NO_PERMISSIONS.id));
+    try {
+      expect(await displayedRoles(victim)).toEqual(expect.arrayContaining(['auditor']));
+      expect((await probe()).statusCode).toBe(403);
+    } finally {
+      await db
+        .update(employees)
+        .set({ roles: before })
+        .where(eq(employees.id, FIXTURE.NO_PERMISSIONS.id));
+    }
   });
 
   it('an already-expired assignment grants nothing', async () => {

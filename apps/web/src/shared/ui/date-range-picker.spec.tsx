@@ -150,6 +150,46 @@ describe('DateRangePicker', () => {
     expect(onChange).toHaveBeenLastCalledWith({ from: '2026-03-20', to: '2026-03-25' });
   });
 
+  describe('the calendar closes when focus moves on to another control', () => {
+    function withNeighbour() {
+      setup(null, {});
+      const neighbour = document.createElement('button');
+      neighbour.textContent = 'Next field';
+      document.body.appendChild(neighbour);
+      return neighbour;
+    }
+
+    it('closes when focus leaves the picker for another control, so the layout is settled before the next click', () => {
+      const next = withNeighbour();
+      fireEvent.focus(toField());
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+      fireEvent.blur(toField(), { relatedTarget: next });
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      next.remove();
+    });
+
+    it('stays open while focus moves between the picker’s own fields', () => {
+      withNeighbour();
+      fireEvent.focus(fromField());
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+      fireEvent.blur(fromField(), { relatedTarget: toField() });
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('does not close on a blur that names no new target (a click inside the grid, in a browser that does not focus buttons)', () => {
+      withNeighbour();
+      fireEvent.focus(fromField());
+
+      fireEvent.blur(fromField(), { relatedTarget: null });
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+  });
+
   it('does not commit half a pair, and does not call half-typing an error', () => {
     const { onChange } = setup(null);
 

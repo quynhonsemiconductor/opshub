@@ -1,10 +1,7 @@
 // GlobalExceptionFilter is sourced from @quynhonsemiconductor/platform-http (single source of truth).
-// Re-exported here so '@platform' consumers keep their import paths unchanged.
-export {
-  GlobalExceptionFilter,
-  REQUEST_CONTEXT,
-  type RequestContextAccessor,
-} from '@quynhonsemiconductor/platform-http';
+// Re-exported here so '@platform' consumers keep their import paths unchanged. It reads the request context
+// by itself: no REQUEST_CONTEXT binding (platform-http 5).
+export { GlobalExceptionFilter } from '@quynhonsemiconductor/platform-http';
 export * from './csrf';
 // Request-arrival timing is sourced from @quynhonsemiconductor/platform-runtime.
 export {

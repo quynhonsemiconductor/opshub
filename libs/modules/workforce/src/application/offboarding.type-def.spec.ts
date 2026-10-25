@@ -2,8 +2,8 @@
  * OffboardingTypeDef.onApprove() unit tests.
  *
  * Tests that the 5 cleanup operations (employee status, role assignments,
- * access grants, asset assignments + asset status reset, refresh token
- * revocation) are all called with the correct table arguments, and that the Entra disable +
+ * access grants, asset assignments + asset status reset, ban + session
+ * removal) are all called with the correct table arguments, and that the Entra disable +
  * session revoke are QUEUED in the same transaction rather than called.
  *
  * Tables are identified by object identity (imported singleton references),
@@ -17,7 +17,8 @@ import {
   accessGrants,
   assetAssignments,
   assets,
-  refreshTokens,
+  session as identitySession,
+  user as identityUser,
 } from '../../../../../db/schema';
 
 // ── Mock tx builder ───────────────────────────────────────────────────────────
@@ -52,12 +53,7 @@ function makeTx(
   }
 
   const updateMock = vi.fn().mockImplementation((table: unknown) => {
-    const returning =
-      table === assetAssignments
-        ? assetReturnRows
-        : table === refreshTokens
-          ? sessionReturnRows
-          : [];
+    const returning = table === assetAssignments ? assetReturnRows : [];
     const chain = makeUpdateChain(returning);
     updateCalls.push({ table, chain });
     return chain;
@@ -67,7 +63,8 @@ function makeTx(
     deleteCalls.push({ table });
     // `.returning()` because each removed assignment is audited individually — the chain has to
     // resolve to the removed rows, not to `undefined`.
-    const where = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(roleReturnRows) });
+    const rows = table === identitySession ? sessionReturnRows : roleReturnRows;
+    const where = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(rows) });
     return { where };
   });
 
@@ -117,6 +114,7 @@ describe('OffboardingTypeDef.onApprove()', () => {
       { enqueue } as never,
       { invalidate } as never,
       mockAudit as never,
+      { offboard: vi.fn().mockResolvedValue(undefined), reinstate: vi.fn() },
     );
   });
 
@@ -186,25 +184,28 @@ describe('OffboardingTypeDef.onApprove()', () => {
     expect(assetCalls).toHaveLength(0);
   });
 
-  it('revokes all active refresh tokens (sets revoked=true)', async () => {
+  it('bans the identity user (so they cannot sign in again) and deletes every session row', async () => {
     const tx = makeTx();
     await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-    const tokenCall = tx._updateCalls.find((c) => c.table === refreshTokens);
-    expect(tokenCall).toBeDefined();
-    expect(tokenCall!.chain.set).toHaveBeenCalledWith(expect.objectContaining({ revoked: true }));
+    const ban = tx._updateCalls.find((c) => c.table === identityUser);
+    expect(ban).toBeDefined();
+    expect(ban!.chain.set).toHaveBeenCalledWith(
+      expect.objectContaining({ banned: true, banReason: 'offboarded' }),
+    );
+    expect(tx._deleteCalls.some((c) => c.table === identitySession)).toBe(true);
   });
 
   it('performs all 5 cleanup operations (5 updates + 1 delete)', async () => {
     const tx = makeTx([{ assetId: 'x' }]);
     await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
     // employees(status) + employees(roles) + access_grants + asset_assignments + assets(×1) +
-    // refresh_tokens = 6 updates. The second `employees` write clears the denormalised role claims;
+    // identity user (ban) = 6 updates. The second `employees` write clears the denormalised role claims;
     // see the comment at that call site for why it is not a post-commit sync.
     expect(tx._updateCalls).toHaveLength(6);
     expect(tx._updateCalls.filter((c) => c.table === employees)).toHaveLength(2);
-    // user_role_assignments = 1 delete
-    expect(tx._deleteCalls).toHaveLength(1);
+    // user_role_assignments + identity session rows = 2 deletes
+    expect(tx._deleteCalls).toHaveLength(2);
   });
 
   it('clears the denormalised role claims alongside the assignments', async () => {
@@ -309,6 +310,25 @@ describe('OffboardingTypeDef.onApprove()', () => {
     });
   });
 
+  describe('the leaver’s identity session and the Entra account, together', () => {
+    it('bans the identity user, deletes the sessions AND queues the Entra reconcile, all in the ONE transaction', async () => {
+      const tx = makeTx();
+      await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
+
+      // the local half: banned, session rows gone, through the transaction handed in
+      expect(tx._updateCalls.some((c) => c.table === identityUser)).toBe(true);
+      expect(tx._deleteCalls.some((c) => c.table === identitySession)).toBe(true);
+      // the Entra half: a task enqueued with that same tx, never a Graph call
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      expect(enqueue.mock.calls[0]?.[1]).toBe(tx);
+      // and the order is the safe one: the local ban is written before the task that follows it
+      const ban = tx._updateCalls.find((c) => c.table === identityUser)!;
+      expect(ban.chain.set.mock.invocationCallOrder[0]).toBeLessThan(
+        enqueue.mock.invocationCallOrder[0],
+      );
+    });
+  });
+
   describe('the Entra account', () => {
     it('is reconciled by a TASK queued in the approval transaction, naming the employee and nothing else', async () => {
       const tx = makeTx();
@@ -337,6 +357,51 @@ describe('OffboardingTypeDef.onApprove()', () => {
   it('onReject is a no-op (mutates no state)', async () => {
     const tx = makeTx();
     await typeDef.onReject(PAYLOAD, 'req-1', 'hr-user', tx as never);
+    expect(tx.update).not.toHaveBeenCalled();
+    expect(tx.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe('OffboardingTypeDef.afterApprove(): the cached sessions', () => {
+  const build = (sessions?: { offboard: ReturnType<typeof vi.fn> }) => {
+    const invalidate = vi.fn().mockResolvedValue(undefined);
+    const typeDef = new OffboardingTypeDef(
+      { register: vi.fn() } as never,
+      {} as never,
+      { enqueue: vi.fn() } as never,
+      { invalidate } as never,
+      { forResource: vi.fn().mockReturnValue({ record: vi.fn() }) } as never,
+      sessions as never,
+    );
+    return { typeDef, invalidate };
+  };
+
+  it('ends the cached sessions through the SessionRevoker, after the commit', async () => {
+    const sessions = { offboard: vi.fn().mockResolvedValue(undefined) };
+    const { typeDef } = build(sessions);
+    await typeDef.afterApprove(PAYLOAD);
+    expect(sessions.offboard).toHaveBeenCalledWith(EMPLOYEE_ID, 'offboarded');
+  });
+
+  it('fails loudly when the cache cannot be cleared, instead of leaving a leaver’s cached session behind', async () => {
+    const sessions = { offboard: vi.fn().mockRejectedValue(new Error('cache unavailable')) };
+    const { typeDef } = build(sessions);
+    await expect(typeDef.afterApprove(PAYLOAD)).rejects.toThrow('cache unavailable');
+  });
+
+  it('REFUSES where no revoker is bound (the worker): afterApprove throws instead of skipping the cache clear', async () => {
+    const { typeDef } = build(undefined);
+    await expect(typeDef.afterApprove(PAYLOAD)).rejects.toThrow(/needs a SessionRevoker/);
+  });
+
+  it('onApprove refuses BEFORE changing anything where no revoker is bound', async () => {
+    const { typeDef } = build(undefined);
+    const tx = makeTx();
+
+    await expect(typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never)).rejects.toThrow(
+      /needs a SessionRevoker/,
+    );
+
     expect(tx.update).not.toHaveBeenCalled();
     expect(tx.delete).not.toHaveBeenCalled();
   });

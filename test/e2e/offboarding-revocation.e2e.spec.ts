@@ -27,7 +27,7 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 /** Holds `*`: creates the throwaway employee and assigns it a role to be stripped. */
@@ -55,7 +55,7 @@ async function post(
   payload: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   // Bearer only: the CSRF hook guards COOKIE sessions, and every e2e spec authenticates with a token.
-  const res = await app.inject({ method: 'POST', url, headers: bearer(who), payload });
+  const res = await app.inject({ method: 'POST', url, headers: authHeaders(who), payload });
   expect(res.statusCode, `${url} → ${res.body}`).toBeLessThan(300);
   return JSON.parse(res.body) as Record<string, unknown>;
 }
@@ -67,7 +67,7 @@ async function auditEntries(
   const res = await app.inject({
     method: 'GET',
     url: `/v1/audit-logs?resourceType=${resourceType}&resourceId=${resourceId}&limit=50`,
-    headers: bearer(admin),
+    headers: authHeaders(admin),
   });
   expect(res.statusCode, res.body).toBe(200);
   // `data`, not `items`: that is the shape `buildPageResult` produces.
@@ -95,7 +95,7 @@ describe('offboarding leaves evidence', () => {
     const roles = await app.inject({
       method: 'GET',
       url: '/v1/authz/roles',
-      headers: bearer(admin),
+      headers: authHeaders(admin),
     });
     expect(roles.statusCode, roles.body).toBe(200);
     // A bare array, not a paged envelope — this route returns `RoleResponseDto[]`.
@@ -112,7 +112,7 @@ describe('offboarding leaves evidence', () => {
     /*
      * THE LEAVER SIGNS IN, so there is a session to revoke.
      *
-     * A freshly created employee holds no refresh token, and step 5 correctly records nothing when it
+     * A freshly created employee holds no session, and step 5 correctly records nothing when it
      * revokes nothing — so without this the `session.revoked` assertion below would fail against
      * CORRECT code, and pass against code that recorded the event unconditionally. The login is what
      * makes the absence meaningful.
@@ -166,14 +166,14 @@ describe('offboarding leaves evidence', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/employees/${employeeId}`,
-      headers: bearer(admin),
+      headers: authHeaders(admin),
     });
     expect(res.statusCode, res.body).toBe(200);
     const employee = JSON.parse(res.body) as { status: string; roles: string[] };
 
     expect(employee.status).toBe('offboarded');
     /*
-     * `employees.roles` is the denormalised copy that feeds the JWT claims, and nothing maintained it
+     * `employees.roles` is the denormalised copy that feeds `/v1/auth/me`, and nothing maintained it
      * here — so an offboarded row still listed `helpdesk` after the assignment behind it was deleted.
      * A stale claim is not merely cosmetic: it is what a token is minted from.
      */

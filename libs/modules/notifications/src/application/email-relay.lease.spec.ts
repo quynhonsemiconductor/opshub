@@ -8,7 +8,7 @@ describe('EmailRelayService lease', () => {
      * A send still in flight after the lease lapsed is a send another relay can repeat, and a row the
      * reaper dead-letters while it is still being delivered.
      */
-    const relay = new EmailRelayService({} as never, {} as never, {} as never);
+    const relay = new EmailRelayService({} as never, {} as never);
     const lease = (relay as unknown as { leaseMsFor(): number }).leaseMsFor();
 
     expect(lease).toBeGreaterThanOrEqual(EMAIL_SEND_TIMEOUT_MS + EMAIL_LEASE_MARGIN_MS);

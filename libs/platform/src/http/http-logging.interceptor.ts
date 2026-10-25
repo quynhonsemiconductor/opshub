@@ -1,9 +1,13 @@
 import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common';
-import { DomainException as SharedDomainException } from '@quynhonsemiconductor/platform-http';
+import {
+  DomainException as SharedDomainException,
+  clientIp,
+  currentUserId,
+} from '@quynhonsemiconductor/platform-http';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
-import { RequestContextService } from '../context/request-context';
+import { HttpMetrics, normalizeRoute } from '@quynhonsemiconductor/observability';
 import { albReceivedAtMs, albWaitMs, arrivalAtMs } from '@quynhonsemiconductor/platform-runtime';
 
 /** Health/readiness probes — suppress from access logs to avoid noise. */
@@ -59,15 +63,16 @@ function redactBody(body: unknown): unknown {
  *   - 2xx/3xx → LOG
  *
  * Includes:
- *   - `ip`     — client IP (honouring X-Real-IP / X-Forwarded-For proxy headers)
- *   - `userId` — from ALS after JWT validation (undefined on unauthenticated routes)
+ *   - `ip`     — `clientIp()`: the signed edge address, else `cf-connecting-ip`, else the socket (never
+ *                `x-real-ip`, which any caller can set)
+ *   - `userId` — from ALS after session authentication (undefined on unauthenticated routes)
  *   - `body`   — redacted request body on 4xx/5xx only (useful for debugging)
  */
 @Injectable()
 export class HttpLoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
-
-  constructor(private readonly ctx: RequestContextService) {}
+  /** RED metrics (`http.server.requests` / `.errors` / `.duration`) that the HTTP alarms are written against. */
+  private readonly metrics = new HttpMetrics();
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
@@ -78,11 +83,7 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     if (SILENT_PREFIXES.some((p) => req.url.startsWith(p))) return next.handle();
 
     const start = Date.now();
-    const ip =
-      (req.headers['x-real-ip'] as string) ??
-      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
-      req.ip ??
-      'unknown';
+    const ip = clientIp(req);
 
     // Interval attribution. `start` is Nest pipeline entry, so `durationMs` has never
     // included anything before it. `albWaitMs` is the ALB-to-app gap decoded from
@@ -96,13 +97,50 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     );
     const bodyWait = arrival !== undefined ? start - arrival : undefined;
 
+    // ONE metric per request. A handler that streams (the notifications SSE route emits many values) would
+    // otherwise count once per value, and the request counter would read as events rather than requests.
+    let recorded = false;
+    const record = (statusCode: number, err?: unknown): void => {
+      if (recorded) return;
+      recorded = true;
+      this.recordMetrics(req, statusCode, Date.now() - start, err);
+    };
+
     return next.handle().pipe(
       tap({
-        next: () => this.emit(req, res.statusCode, start, ip, albWait, bodyWait),
-        error: (err: unknown) =>
-          this.emit(req, resolveErrorStatus(err, res), start, ip, albWait, bodyWait),
+        next: () => {
+          this.emit(req, res.statusCode, start, ip, albWait, bodyWait);
+          record(res.statusCode);
+        },
+        error: (err: unknown) => {
+          const status = resolveErrorStatus(err, res);
+          this.emit(req, status, start, ip, albWait, bodyWait);
+          record(status, err);
+        },
       }),
     );
+  }
+
+  /**
+   * The route TEMPLATE (`/v1/assets/:id`), never the concrete path: an id in a label mints a series per value.
+   * Fastify knows the template; `normalizeRoute` is the safety net for a request that matched no route.
+   * `errorCode` is the domain error catalogue's code, bounded by construction. Never throws: the recorder
+   * catches, and nothing here may be able to fail a request.
+   */
+  private recordMetrics(
+    req: FastifyRequest,
+    statusCode: number,
+    durationMs: number,
+    err?: unknown,
+  ): void {
+    const route = req.routeOptions?.url ?? normalizeRoute(req.url);
+    this.metrics.record({
+      route,
+      method: req.method,
+      statusCode,
+      durationMs,
+      ...(err instanceof SharedDomainException ? { errorCode: err.code } : {}),
+    });
   }
 
   private emit(
@@ -113,7 +151,7 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     albWaitMs?: number,
     bodyWaitMs?: number,
   ): void {
-    const userId = this.ctx.getUserId();
+    const userId = currentUserId();
     const base = {
       method: req.method,
       url: req.url,

@@ -33,8 +33,8 @@ provider "aws" {
   }
 }
 
-// Reads CLOUDFLARE_API_TOKEN (or TF_VAR_cloudflare_api_token). DNS/Pages resources
-// are skipped when the zone is unset, so the stack applies before Cloudflare exists.
+// Reads CLOUDFLARE_API_TOKEN (or TF_VAR_cloudflare_api_token). DNS/Pages resources exist when
+// `dns_enabled` is true; the zone id comes from the _shared stack and must be valid or the plan fails.
 // Route 53 publishes health-check metrics ONLY to us-east-1, so the ingress alarm has to
 // be created there even though every other resource is in ap-southeast-1. Same credentials,
 // different region — this is not a second account.
@@ -92,31 +92,34 @@ module "stack" {
   shared_state_key  = "opshub/shared/terraform.tfstate"
   runtime_state_key = "platform/runtime-dev/terraform.tfstate"
 
-  // Develop tracks the newest image; production pins the release tag.
-  image_tag = "latest"
+  // A PLACEHOLDER, on purpose. `latest` never exists: the ECR repositories are IMMUTABLE and the deploy pushes
+  // `sha-<commit>` tags only. Terraform registers the BASELINE task definition; the deploy derives each rollout from the
+  // family's latest revision and replaces the tag in the product container (api / worker / migrator). The services have
+  // `ignore_changes = [task_definition]`, so an apply never moves a running service onto this baseline. The value only has to
+  // be one that can never be mistaken for a real tag; the module rejects `latest` and empty (2026-10: qnsc-kb's worker went
+  // down on a baseline tag that was never pushed).
+  image_tag = "set-by-the-deploy-never-a-real-tag"
+
+  // Mail through Microsoft 365 (Graph): ON. The worker sends as noreply-opshub-dev@qnsc.vn with the "OpsHub Dev Service" app below (certificate only; Exchange
+  // "Application Mail.Send" scoped to that one mailbox, no Mail.* in Entra). A non-prod environment never sends from the prod mailbox.
+  // docs/runbooks/mail-graph.md.
+  mail_graph_sender = "noreply-opshub-dev@qnsc.vn"
 
   entra_tenant_id = var.entra_tenant_id
   entra_client_id = var.entra_client_id
 
-  // The sign-in secret is populated in Secrets Manager (opshub/develop/entra-client-secret) —
-  // this is the second, ordered step that actually wires it into api/worker. See the variable's
-  // description in modules/stack for why this is staged rather than unconditional.
-  entra_client_secret_set = true
+  // The sign-in secret (entra-client-secret, a key in the `app` bundle) is injected into the API
+  // unconditionally: identity 8 cannot sign anyone in without it, and the API's env schema refuses to boot
+  // production without it.
 
-  // Microsoft Graph is OFF: the "OpsHub Graph Worker" app does not exist yet (it is created at the
-  // on-prem move, with a federated credential), and the sign-in app holds no application
-  // permissions. With graph_client_id empty every Graph feature skips with one info log.
-  // docs/graph-worker-app.md has the app's exact permissions and credential setup.
-  graph_client_certificate_set = false
-  graph_client_id              = ""
+  // Microsoft Graph is ON, with the "OpsHub Dev Service" app: certificate only, no client secret, and ONLY the three READ permissions
+  // (SecurityEvents.Read.All, DeviceManagementManagedDevices.Read.All, User.Read.All). Develop shares the real tenant, so it deliberately cannot
+  // disable or sign out an account (the account tasks fail closed). The certificate is the standalone secret opshub/develop/graph-client-certificate.
+  // docs/graph-worker-app.md.
+  graph_client_certificate_set = true
+  graph_client_id              = "328bac47-4848-42b5-9464-bb4ba7b0cb56"
 
-  // qnsc.vn is a verified SES domain identity in this account (rally already sends from
-  // it). A distinct local-part from rally's own noreply@qnsc.vn keeps bounce/reply
-  // routing distinguishable per product, though the domain-level identity would permit
-  // either. SES_CONFIGURATION_SET is NOT set here — it's derived automatically from the
-  // real aws_sesv2_configuration_set.email_feedback resource this module now creates.
-  email_provider  = "ses"
-  mail_from_email = "opshub-noreply@qnsc.vn"
+  email_provider = "graph"
 
   // Cost-leaning: short retention, immediate secret deletion so a destroy+redeploy
   // cycle does not trip "secret scheduled for deletion".
@@ -181,7 +184,7 @@ module "stack" {
   // ── Ingress: no ALB exists any more ─────────────────────────────────────────
   // The shared ALBs in qnsc-infra/live/runtime-{dev,prod} were DELETED once both
   // products moved to Cloudflare Tunnels, so `https_listener_arn` is null and there is
-  // nothing to attach to. Unlike rally (which had to ADOPT two tunnels already created
+  // nothing to attach to. Unlike rova (which had to ADOPT two tunnels already created
   // by hand in the dashboard), opshub has never had one — module.tunnel (the shared
   // cf-tunnel module) creates it, its connector token and its routing rule outright, so
   // turning this on is the only step needed. The alternative is `enable_alb = true` in
@@ -190,7 +193,7 @@ module "stack" {
 
   // ── Graviton ────────────────────────────────────────────────────────────────
   // ARM64 bills ~20% less per vCPU-hour and GB-hour than X86_64 for identical sizing,
-  // with no capability difference. rally has run this since its own build moved; opshub
+  // with no capability difference. rova has run this since its own build moved; opshub
   // was still on the module's X86_64 default, which is drift rather than a decision — it
   // is not recorded in docs/DIVERGENCE.md, and nothing about opshub's workload argues for
   // x86.
@@ -209,10 +212,16 @@ module "stack" {
   cpu_architecture = "ARM64"
 
   // ── Parked between deploys ──────────────────────────────────────────────────
-  // Twice daily, matching rally. Develop is exercised by CI deploys and the occasional
+  // Twice daily, matching rova. Develop is exercised by CI deploys and the occasional
   // manual poke, so the useful default is "down unless something just deployed": the
   // deploy pipeline wakes RDS and restores the desired count, and this puts it back.
-  idle_schedule = "cron(0 21,3 * * ? *)"
+  // OFF since 2026-10-14, at the owner's request: develop stays up around the clock for the rest of
+  // October 2026 (the owner decides then whether to turn idling back on). To restore idling, put back
+  // exactly:
+  //   idle_schedule = "cron(0 21,3 * * ? *)"
+  //   wake_schedule = null // OFF since 2026-10-14; see idle_schedule above
+  // (both together; idling without the wake leaves develop down until the next deploy).
+  idle_schedule = null
 
   // 08:00 local, MON-FRI. The weekday restriction is the entire cost control here: a 7-day
   // wake would pay for two days a week nobody works, which is a large share of what idling
@@ -230,7 +239,7 @@ module "stack" {
   // Net effect: develop moves from "up on merge days only" to roughly 13h/day on weekdays
   // and 0h at weekends. So this BUYS availability rather than saving money; the saving comes
   // from the weekends and the 21:00-08:00 window, which the idle schedule already owned.
-  wake_schedule = "cron(0 8 ? * MON-FRI *)"
+  wake_schedule = null // OFF since 2026-10-14; see idle_schedule above
 
   rds = {
     instance_class           = "db.t4g.micro"
@@ -278,6 +287,10 @@ module "stack" {
 
   cloudflare_account_id = var.cloudflare_account_id
 
+  // This environment owns its public DNS (API and web CNAMEs, Pages custom domain). An explicit
+  // switch, never inferred from the zone id; the zone id itself is validated in the stack module.
+  dns_enabled = true
+
   // Telemetry stays DORMANT until otlp_endpoint is set: no collector sidecar, OTEL_ENABLED
   // false, no observability-token secret created. Put the Authorization header in that secret
   // FIRST, then set this — reversing the order starts a collector that cannot authenticate.
@@ -287,6 +300,7 @@ module "stack" {
     // only reason to enable it here at all. Applied by resolveSampler in
     // libs/platform/src/observability/otel.ts, and asserted by otel.spec.ts.
     sampling_probability = 1.0
+
   }
 
   // No dashboard in develop. CloudWatch bills dashboards per ACCOUNT — three free, then

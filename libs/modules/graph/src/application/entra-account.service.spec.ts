@@ -44,8 +44,27 @@ function make(reads: Array<Row | undefined>, directory: Record<string, unknown> 
   reads.forEach((r) => limit.mockResolvedValueOnce(r ? [r] : []));
   const chain = { from: vi.fn().mockReturnThis(), where: vi.fn().mockReturnThis(), limit };
   select.mockReturnValue(chain);
-  const db = { select };
-  return { service: new EntraAccountService(graph as never, db as never), get, patch, post, limit };
+  // The lease check asks the DATABASE how much lease is left. The stub answers from the instant the query carries,
+  // measured on this host's clock as a stand-in for the database's (the stub has no database of its own).
+  const execute = vi.fn((q: { queryChunks: unknown[] }) =>
+    Promise.resolve({ rows: [{ left: leaseLeftFromSql(q) }] }),
+  );
+  const db = { select, execute };
+  return {
+    service: new EntraAccountService(graph as never, db as never),
+    get,
+    patch,
+    post,
+    limit,
+    execute,
+  };
+}
+
+/** The lease instant the check sent, as the stub's database reads it: the time left from now. */
+function leaseLeftFromSql(q: { queryChunks: unknown[] }): number {
+  // drizzle keeps a bound Date as the chunk itself.
+  const lease = q.queryChunks.find((chunk): chunk is Date => chunk instanceof Date);
+  return (lease as Date).getTime() - Date.now();
 }
 
 describe('EntraAccountService.reconcile — identity check', () => {
@@ -244,22 +263,85 @@ describe('EntraAccountService.reconcile — will not START a change it may not f
   });
 
   it('re-checks before the SECOND change: a slow disable must not be followed by a revoke that cannot finish', async () => {
-    const { service, patch, post } = make([employee({ status: 'offboarded' })]);
-    let calls = 0;
-    // Plenty of lease for the disable, then (after it) too little for the revoke.
-    const lease = {
-      getTime: () => (calls++ === 0 ? Date.now() + 150_000 : Date.now() + 5_000),
-    } as unknown as Date;
+    const { service, patch, post, execute } = make([employee({ status: 'offboarded' })]);
+    // Plenty of lease for the disable, then (after it) too little for the revoke: the DATABASE answers each time.
+    execute
+      .mockResolvedValueOnce({ rows: [{ left: 150_000 }] })
+      .mockResolvedValueOnce({ rows: [{ left: 5_000 }] });
 
-    await expect(service.reconcile('emp-1', lease)).rejects.toThrow(NOT_ENOUGH_LEASE);
+    await expect(service.reconcile('emp-1', LEASE_OK())).rejects.toThrow(NOT_ENOUGH_LEASE);
 
     expect(patch).toHaveBeenCalledTimes(1);
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('passes the lease instant to the lease query as a bound Date value, not as SQL text', async () => {
+    // drizzle's sql`` binds EVERY interpolated value, a string included; only sql.raw() inlines text. So the premise is
+    // the Date itself: the driver sends it with its UTC offset, and the ::timestamptz cast reads it exactly. The check
+    // below is that the instant is a value chunk, and that no ISO timestamp text sits in the SQL.
+    const { service, execute } = make([employee({ status: 'offboarded' })]);
+    const lease = new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS + 5_000);
+    await service.reconcile('emp-1', lease);
+
+    const query = execute.mock.calls[0][0];
+    const iso = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+    const inlinedText = query.queryChunks.filter(
+      (chunk): chunk is string => typeof chunk === 'string' && iso.test(chunk),
+    );
+    expect(inlinedText, 'an ISO timestamp was inlined into the SQL text').toEqual([]);
+    expect(query.queryChunks).toContain(lease);
+  });
+
+  it('gives a read that returns no number its own message, not a measured "NaN s of lease left"', async () => {
+    const { service, execute, patch } = make([employee({ status: 'offboarded' })]);
+    execute.mockResolvedValueOnce({ rows: [] });
+
+    const err: unknown = await service
+      .reconcile('emp-1', new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS + 5_000))
+      .catch((e: unknown) => e);
+
+    expect((err as Error).message).toMatch(/no usable instant/);
+    expect((err as Error).message).not.toMatch(/NaN|\d+ s of\s+lease left/);
+    expect(patch).not.toHaveBeenCalled();
   });
 
   it('proceeds when a full call deadline plus the margin remains', async () => {
     const { service, patch } = make([employee({ status: 'offboarded' })]);
     await service.reconcile('emp-1', new Date(Date.now() + MIN_LEASE_TO_MUTATE_MS + 5_000));
     expect(patch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('EntraAccountService — FAILS CLOSED where the write permissions are not granted (develop holds only the three read ones)', () => {
+  const forbidden = () => Object.assign(new Error('Insufficient privileges'), { statusCode: 403 });
+
+  it.each([
+    ['disable', 'User.EnableDisableAccount.All', 'patch'],
+    ['revoke sessions of', 'User.RevokeSessions.All', 'post'],
+  ] as const)(
+    'a 403 on %s dead-letters at once with one clear log naming %s, and nothing is retried or changed further',
+    async (action, permission, call) => {
+      const { service, patch, post } = make([employee({ status: 'offboarded' })]);
+      (call === 'patch' ? patch : post).mockRejectedValue(forbidden());
+      const logged = vi.spyOn(service['logger'], 'error').mockImplementation(() => undefined);
+
+      const error = await service.reconcile('emp-1', LEASE_OK()).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(NonRetryableError);
+      expect((error as Error).message).toContain(permission);
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged.mock.calls[0][0]).toEqual({ permission, entraOid: OID });
+      expect(String(logged.mock.calls[0][1])).toContain(`Refused to ${action}`);
+      expect(String(logged.mock.calls[0][1])).toContain('Nothing was changed');
+      // A disable that is refused must not go on to revoke.
+      if (call === 'patch') expect(post).not.toHaveBeenCalled();
+    },
+  );
+
+  it('leaves any other Graph error to the relay (a 503 is not turned into a permission failure)', async () => {
+    const { service, patch } = make([employee({ status: 'offboarded' })]);
+    const unavailable = Object.assign(new Error('down'), { statusCode: 503 });
+    patch.mockRejectedValue(unavailable);
+    await expect(service.reconcile('emp-1', LEASE_OK())).rejects.toBe(unavailable);
   });
 });

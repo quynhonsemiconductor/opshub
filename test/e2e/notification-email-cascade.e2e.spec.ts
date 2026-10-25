@@ -30,9 +30,10 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { setProcessRole } from '@platform/config/process-role';
 import { eq, sql } from 'drizzle-orm';
 import { DRIZZLE, EMAIL_PROVIDER, type DrizzleDB, type IEmailProvider } from '@platform';
-import { NotificationSchedulerService } from '@platform';
+import { NotificationSchedulerService, OutboxWakeService } from '@platform';
 import { NotificationRelayService } from '../../libs/modules/notifications/src/application/notification-relay.service';
 import { EmailRelayService } from '../../libs/modules/notifications/src/application/email-relay.service';
 import { NotificationPreferencesService } from '../../libs/modules/notifications/src/application/notification-preferences.service';
@@ -52,6 +53,12 @@ const TYPE = 'request.submitted';
 
 beforeAll(async () => {
   app = await createTestApp();
+  /*
+   * THE EMAIL RELAY ONLY RUNS IN THE WORKER (`relay()` returns in any other process role, so the API can never claim a row it holds no credential
+   * to send). test/setup.ts boots every suite as the API; the app above was built as such (so nothing subscribed itself to the wake signal), and
+   * from here this spec plays the worker by calling the relays itself. Restored in afterAll.
+   */
+  setProcessRole('worker');
   db = app.get<DrizzleDB>(DRIZZLE);
   scheduler = app.get(NotificationSchedulerService);
   notificationRelay = app.get(NotificationRelayService);
@@ -67,21 +74,20 @@ beforeAll(async () => {
   /*
    * DROP THE WAKE SUBSCRIPTIONS, so this spec is the only thing that makes a relay run.
    *
-   * Both relays subscribe to a Valkey wake channel in `onModuleInit`, and every enqueue publishes to
-   * it — so a pass can start at any moment, including inside another relay's post-commit window. With
+   * The worker's OutboxWakeService LISTENs, and every enqueue NOTIFYs at commit — so a pass can start at any moment, including inside another relay's post-commit window. With
    * that running, no arrangement of explicit `relay()` calls is deterministic: work lands in a pass this
    * file did not start, at a moment it cannot predict. I watched that produce three different outcomes
    * across three identical runs.
    *
-   * `onModuleDestroy` unsubscribes and leaves the objects fully usable, which is exactly what is
-   * wanted: the cron is worker-only, so with the wake channel gone the ONLY driver is this file. The
+   * Stopping the wake service leaves the relays fully usable, which is exactly what is
+   * wanted: the cron is worker-only, so with the listener gone the ONLY driver is this file. The
    * production path is unchanged and still covered — `relay()` is the same method the cron calls.
    */
-  await notificationRelay.onModuleDestroy();
-  await emailRelay.onModuleDestroy();
+  await app.get(OutboxWakeService).onModuleDestroy();
 });
 
 afterAll(async () => {
+  setProcessRole('api');
   await app?.close();
 });
 

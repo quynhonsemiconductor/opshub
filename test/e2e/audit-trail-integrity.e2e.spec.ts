@@ -35,7 +35,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DRIZZLE, type DrizzleDB } from '@platform';
 import { AUDIT_ACTION, AUDIT_RESOURCE, AuditService } from '@modules/audit';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 let admin: Session;
@@ -77,7 +77,7 @@ describe('audit trail integrity', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/employees',
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload: {
         email: `audit-once-${unique}@opshub.local`,
         displayName: `Audit Once ${unique}`,
@@ -109,7 +109,7 @@ describe('audit trail integrity', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/authz/roles',
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload: {
         key: `audit-once-${unique}`,
         name: `Audit Once ${unique}`,
@@ -133,7 +133,7 @@ describe('audit trail integrity', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/compliance/software',
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload: {
         name: `audit-once-${unique}`,
         vendor: 'Audit',
@@ -210,7 +210,7 @@ describe('audit trail integrity', () => {
     const assetRes = await app.inject({
       method: 'POST',
       url: '/v1/assets',
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload: {
         assetTag: `AUDIT-${unique}`,
         type: 'laptop',
@@ -223,7 +223,7 @@ describe('audit trail integrity', () => {
     const assignRes = await app.inject({
       method: 'POST',
       url: `/v1/assets/${assetId}/assign`,
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload: { employeeId: FIXTURE.NO_PERMISSIONS.id },
     });
     // 200: assigning an asset is a transition, not a creation — it always documented 200.
@@ -277,7 +277,7 @@ describe('the actorEmail filter', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/v1/audit-logs?actorEmail=filter.probe&resourceId=${tag}`,
-      headers: bearer(admin),
+      headers: authHeaders(admin),
     });
     expect(res.statusCode, res.body).toBe(200);
     const rows = (JSON.parse(res.body) as { data: { actorEmail: string | null }[] }).data;
@@ -292,7 +292,7 @@ describe('the actorEmail filter', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/audit-logs?actorEmail=',
-      headers: bearer(admin),
+      headers: authHeaders(admin),
     });
     expect(res.statusCode).toBe(422);
   });

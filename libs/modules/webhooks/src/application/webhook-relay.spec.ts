@@ -30,6 +30,8 @@ vi.mock('node:dns/promises', () => ({
 import { createHmac } from 'crypto';
 import { WebhookRelayService } from './webhook-relay.service';
 import type { DrizzleTx } from '@platform';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
 
 // ── Test subclass exposing protected methods ──────────────────────────────────
 
@@ -60,8 +62,8 @@ class TestableRelayService extends WebhookRelayService {
     error: string,
   ) {
     // The base class's generic backoff, which this relay ignores in favour of its own
-    // RETRY_DELAYS_SECONDS curve. A recognisable sentinel keeps that visible: if epoch 0 ever
-    // shows up in an assertion below, the relay stopped honouring its own schedule.
+    // RETRY_DELAYS_SECONDS curve. A recognisable sentinel keeps that visible: if a 0 ever
+    // shows up as the delay in an assertion below, the relay stopped honouring its own schedule.
     return this.markFailed(
       tx,
       {
@@ -71,7 +73,7 @@ class TestableRelayService extends WebhookRelayService {
       },
       newStatus,
       error,
-      new Date(0),
+      0,
     );
   }
 }
@@ -121,7 +123,7 @@ describe('WebhookRelayService — HMAC signature', () => {
 
   beforeEach(() => {
     const db = makeMockDb();
-    service = new TestableRelayService(db as never);
+    service = new TestableRelayService(db as never, { get: () => 24 } as never);
 
     mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', mockFetch);
@@ -229,15 +231,17 @@ describe('WebhookRelayService — markFailed() backoff delays', () => {
     updateChain.update.mockReturnValue(updateChain);
     updateChain.set.mockReturnValue(updateChain);
 
-    service = new TestableRelayService({ update: updateChain.update } as never);
+    service = new TestableRelayService(
+      { update: updateChain.update } as never,
+      { get: () => 24 } as never,
+    );
     vi.stubGlobal('fetch', vi.fn());
   });
 
   afterEach(() => vi.unstubAllGlobals());
 
   for (let attempt = 1; attempt <= 4; attempt++) {
-    it(`sets nextAttemptAt ≈ now + ${EXPECTED_DELAYS[attempt - 1]}s on attempt ${attempt}`, async () => {
-      const before = Date.now();
+    it(`sets nextAttemptAt = the database's now() + ${EXPECTED_DELAYS[attempt - 1]}s on attempt ${attempt}`, async () => {
       await service.exposedMarkFailed(
         updateChain as never,
         'del-1',
@@ -245,14 +249,14 @@ describe('WebhookRelayService — markFailed() backoff delays', () => {
         'pending',
         'some error',
       );
-      const after = Date.now();
 
       const setArgs = updateChain.set.mock.calls[0]?.[0] as Record<string, unknown>;
-      const nextAt = (setArgs?.['nextAttemptAt'] as Date).getTime();
-      const expectedDelay = (EXPECTED_DELAYS[attempt - 1] ?? 3600) * 1000;
-
-      expect(nextAt).toBeGreaterThanOrEqual(before + expectedDelay - 50);
-      expect(nextAt).toBeLessThanOrEqual(after + expectedDelay + 50);
+      // A SQL expression computed by the database (never a host Date): now() plus the curve's seconds.
+      const nextAt = setArgs?.['nextAttemptAt'] as { queryChunks: unknown[] };
+      const text = JSON.stringify(nextAt.queryChunks);
+      expect(text).toContain('now() + make_interval');
+      expect(text).not.toContain('statement_timestamp');
+      expect(nextAt.queryChunks).toContain(EXPECTED_DELAYS[attempt - 1] ?? 3600);
     });
   }
 
@@ -281,7 +285,7 @@ describe('WebhookRelayService — markFailed() backoff delays', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('WebhookRelayService — markSent()', () => {
-  it('sets status=delivered and deliveredAt to now', async () => {
+  it('sets status=delivered and deliveredAt to the database now()', async () => {
     const chain = {
       update: vi.fn(),
       set: vi.fn(),
@@ -290,17 +294,20 @@ describe('WebhookRelayService — markSent()', () => {
     chain.update.mockReturnValue(chain);
     chain.set.mockReturnValue(chain);
 
-    const service = new TestableRelayService({ update: chain.update } as never);
+    const service = new TestableRelayService(
+      { update: chain.update } as never,
+      { get: () => 24 } as never,
+    );
 
-    const before = Date.now();
     await service.exposedMarkSent(chain as never, 'del-1');
-    const after = Date.now();
 
     const setArgs = chain.set.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(setArgs?.['status']).toBe('delivered');
-    const deliveredAt = (setArgs?.['deliveredAt'] as Date).getTime();
-    expect(deliveredAt).toBeGreaterThanOrEqual(before - 50);
-    expect(deliveredAt).toBeLessThanOrEqual(after + 50);
+    // The timestamp is the database's clock, rendered as SQL, not a host Date.
+    expect(new PgDialect().sqlToQuery(setArgs?.['deliveredAt'] as SQL)).toEqual({
+      sql: 'now()',
+      params: [],
+    });
   });
 });
 
@@ -317,7 +324,7 @@ describe('the target is checked again at delivery time', () => {
   it('refuses an unsafe target and never issues the request', async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
-    const relay = new TestableRelayService({} as never);
+    const relay = new TestableRelayService({} as never, { get: () => 24 } as never);
 
     await expect(
       relay.exposedProcessRow(makeRow({ url: 'https://169.254.169.254/latest/meta-data/' })),
@@ -334,7 +341,7 @@ describe('the target is checked again at delivery time', () => {
      * subscription that looks healthy and delivers nothing.
      */
     vi.stubGlobal('fetch', vi.fn());
-    const relay = new TestableRelayService({} as never);
+    const relay = new TestableRelayService({} as never, { get: () => 24 } as never);
 
     await expect(
       relay.exposedProcessRow(makeRow({ url: 'https://10.0.4.17:5432/' })),
@@ -345,7 +352,7 @@ describe('the target is checked again at delivery time', () => {
     // The converse. A relay that refused everything would satisfy both cases above.
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: 'OK' });
     vi.stubGlobal('fetch', fetchSpy);
-    const relay = new TestableRelayService({} as never);
+    const relay = new TestableRelayService({} as never, { get: () => 24 } as never);
 
     await relay.exposedProcessRow(makeRow({ url: 'https://hooks.example.com/opshub' }));
 

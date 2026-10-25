@@ -20,7 +20,7 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 /** The four collections that share the optional-`employeeId` shape. */
 const COLLECTIONS = [
@@ -56,7 +56,7 @@ describe('workforce record isolation', () => {
     // The request the SPA actually issues: no employeeId at all. Before the fix this
     // returned every employee's rows, which was both the leak and a functional bug.
     it('returns only the caller own rows when no filter is given', async () => {
-      const res = await app.inject({ method: 'GET', url, headers: bearer(plain) });
+      const res = await app.inject({ method: 'GET', url, headers: authHeaders(plain) });
 
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body) as PagedBody;
@@ -68,7 +68,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'GET',
         url: `${url}?employeeId=${FIXTURE.HR.id}`,
-        headers: bearer(plain),
+        headers: authHeaders(plain),
       });
       expect(res.statusCode).toBe(403);
     });
@@ -78,7 +78,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'GET',
         url: `${url}?employeeId=${FIXTURE.NO_PERMISSIONS.id}`,
-        headers: bearer(hr),
+        headers: authHeaders(hr),
       });
       expect(res.statusCode).toBe(200);
     });
@@ -87,7 +87,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'GET',
         url: `${url}?employeeId=${FIXTURE.NO_PERMISSIONS.id}`,
-        headers: bearer(plain),
+        headers: authHeaders(plain),
       });
       expect(res.statusCode).toBe(200);
     });
@@ -122,7 +122,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'GET',
         url: `/v1/workforce/timesheets?employeeId=${FIXTURE.NO_PERMISSIONS.id}&employeeId=${FIXTURE.HR.id}`,
-        headers: bearer(plain),
+        headers: authHeaders(plain),
       });
       expect(res.statusCode).toBe(422);
     });
@@ -133,7 +133,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/workforce/timesheets?employeeId=',
-        headers: bearer(plain),
+        headers: authHeaders(plain),
       });
       expect(res.statusCode).toBe(422);
     });
@@ -142,7 +142,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/v1/workforce/timesheets',
-        headers: bearer(plain),
+        headers: authHeaders(plain),
         payload: { employeeId: FIXTURE.HR.id },
       });
       expect(res.statusCode).toBe(200);
@@ -156,7 +156,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'GET',
         url: `/v1/workforce/timesheets?employeeId=${FIXTURE.HR.id}`,
-        headers: bearer(plain),
+        headers: authHeaders(plain),
       });
       expect(res.statusCode).toBe(403);
     });
@@ -175,7 +175,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/v1/workforce/timesheets',
-        headers: bearer(plain),
+        headers: authHeaders(plain),
         payload: { workDate: '2026-08-03', minutesWorked: 480, note: 'e2e isolation fixture' },
       });
       expect(res.statusCode, res.body).toBe(201);
@@ -186,7 +186,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'POST',
         url: `/v1/workforce/timesheets/${ownTimesheetId}/submit`,
-        headers: bearer(plain),
+        headers: authHeaders(plain),
       });
       expect(res.statusCode, res.body).toBe(201);
     });
@@ -199,7 +199,7 @@ describe('workforce record isolation', () => {
       const hrTimesheet = await app.inject({
         method: 'POST',
         url: '/v1/workforce/timesheets',
-        headers: bearer(hr),
+        headers: authHeaders(hr),
         payload: { workDate: '2026-08-04', minutesWorked: 480, note: 'e2e foreign fixture' },
       });
       expect(hrTimesheet.statusCode, hrTimesheet.body).toBe(201);
@@ -208,7 +208,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'POST',
         url: `/v1/workforce/timesheets/${foreignId}/submit`,
-        headers: bearer(plain),
+        headers: authHeaders(plain),
       });
       expect(res.statusCode).toBe(403);
     });
@@ -217,7 +217,7 @@ describe('workforce record isolation', () => {
       const created = await app.inject({
         method: 'POST',
         url: '/v1/workforce/timesheets',
-        headers: bearer(plain),
+        headers: authHeaders(plain),
         payload: { workDate: '2026-08-05', minutesWorked: 480, note: 'e2e hr-acts-for fixture' },
       });
       expect(created.statusCode, created.body).toBe(201);
@@ -226,7 +226,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'POST',
         url: `/v1/workforce/timesheets/${id}/submit`,
-        headers: bearer(hr),
+        headers: authHeaders(hr),
       });
       expect(res.statusCode, res.body).toBe(201);
     });
@@ -243,7 +243,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'POST',
         url: `/v1/employees/${FIXTURE.HR.id}/avatar/presign`,
-        headers: bearer(plain),
+        headers: authHeaders(plain),
         payload: { fileName: 'a.png', mimeType: 'image/png', sizeBytes: 1024 },
       });
       expect(res.statusCode).toBe(403);
@@ -253,7 +253,7 @@ describe('workforce record isolation', () => {
       const res = await app.inject({
         method: 'POST',
         url: `/v1/employees/${FIXTURE.NO_PERMISSIONS.id}/avatar/presign`,
-        headers: bearer(hr),
+        headers: authHeaders(hr),
         payload: { fileName: 'a.png', mimeType: 'image/png', sizeBytes: 1024 },
       });
       // 200 when object storage is configured; 422/500 if it is not. Either proves the

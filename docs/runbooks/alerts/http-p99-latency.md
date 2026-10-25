@@ -4,6 +4,12 @@ p99 of `http_server_duration_milliseconds` has stayed above the environment's
 threshold (1000ms prod / 2000ms develop) for 5 minutes straight, in a 5-minute window
 that held at least the environment's minimum request count (50 prod / 20 develop).
 
+**Series.** `http.server.duration` is emitted by observability's `HttpMetrics` (meter scope `qnsc`), the only
+emitter with `@opentelemetry/instrumentation-http` 0.221.0. The query pins that scope (`otel_scope_name="qnsc"`),
+so it covers requests that reach the access-log interceptor: **not** a request a guard rejects, an unmatched
+404 or `/api/auth/*`. Confirm after a deploy: `count by (otel_scope_name) (http_server_duration_milliseconds_bucket)`
+returns one row, `qnsc`; no row means the alarm and the panels are blind.
+
 ## Read the number before you act on it
 
 Two things about this alert's value are not obvious from the notification, and both have
@@ -14,7 +20,7 @@ already sent someone down the wrong path on the sibling product:
   clamps there. When the boundaries ended at 10000, a page reading `A=10000` meant only
   "at least one request took longer than 10 seconds, and the histogram cannot say how
   much longer" — the real value could have been 11 seconds or 4 minutes. The view is now
-  widened to 60000 (`apps/api/src/otel.ts`, mirrored by
+  widened to 60000 (`apps/api/src/http-duration-boundaries.ts`, mirrored by
   `local.http_duration_buckets_ms`), so the resolution is better, but the clamp is a
   property of the TOP bucket rather than of any particular number and still applies
   there. To find an actual duration, go to the traces or the request log for the window,

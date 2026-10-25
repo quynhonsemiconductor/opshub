@@ -1,10 +1,11 @@
 # =============================================================================
 # Backend · Deploy — thin caller of the shared reusable (ci).
 #
-# Triggers:
+# Trigger:
 #   develop → push to main (auto)
-#   prod    → push a semver tag v*.*.*  (gated by the "production" GitHub
-#             Environment's required reviewer, enforced inside the reusable)
+#   (prod is GONE: the AWS opshub production stack was destroyed 2026-10-21 —
+#   owner decision; the v*.*.* tag trigger was removed so no tag can deploy a
+#   prod that no longer exists.)
 #
 # The reusable builds/attests on main, promotes the exact dev image on tag,
 # migrates, then rolls the ECS services. All ECS_*/RDS/APP_URL config is read
@@ -28,7 +29,7 @@ on:
     # SERVICE is never moved onto the revision Terraform registers — this pipeline
     # owns that. With infra ignored here, an infra-only merge registered a new task
     # definition that nothing ever rolled onto, and the change silently did not
-    # take effect. Rally hit exactly that: its develop ran against a DELETED cache
+    # take effect. Rova hit exactly that: its develop ran against a DELETED cache
     # endpoint (`valkey: down` on /v1/readyz) after a cache migration, because the
     # apply succeeded, the new definition was correct, and no deploy ran.
     #
@@ -43,10 +44,7 @@ on:
       - 'docs/**'
       - '.claude/**'
       - 'apps/web/**'
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'   # semver only — no -rc suffix
-
-  # Manual re-run, matching rally. Needed because a deploy can fail for reasons that have
+  # Manual re-run, matching rova. Needed because a deploy can fail for reasons that have
   # nothing to do with the commit — an expired token, a throttled ECS API, a registry
   # hiccup — and without it the only way to retry is an empty commit, which rewrites
   # history to work around an infrastructure problem.
@@ -54,16 +52,14 @@ on:
   # Safe on both refs, and the gates below are why: nothing here branches on the TRIGGER,
   # only on the ref. `wait-for-infra` keys off whether this sha touched infra/**;
   # `wait-for-ci` skips entirely on a tag and otherwise waits on the Backend · CI run for
-  # this sha — which, for an already-merged commit, is complete, so `gh run watch` returns
+  # this sha — which, for an already-merged commit, is complete, so the wait returns
   # at once. It fails CLOSED when no run exists, so dispatching a commit that never passed
   # CI blocks rather than deploys.
   workflow_dispatch:
 
 concurrency:
-  # Serialize by ENVIRONMENT, not raw ref: all prod (tag) deploys share one
-  # group so prod DB migrations never run concurrently; develop shares another.
-  # prod and develop still run in parallel (different groups).
-  group: deploy-backend-${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'develop' }}
+  # Serialize by ENVIRONMENT. develop only now — the prod path is gone.
+  group: deploy-backend-develop
   cancel-in-progress: false   # never cancel a running deploy
 
 jobs:
@@ -102,14 +98,6 @@ jobs:
       - name: Does this commit change infrastructure?
         id: touched
         run: |
-          # Tags ALWAYS gate. infra-apply's apply-prod job is `if: ref_type ==
-          # 'tag'`, so a tag is the ONLY thing that applies prod infra — and the
-          # prod deploy fires on the same tag. Path filters are not applied to tag
-          # pushes either, so infra-apply always runs for a tag regardless of what
-          # the commit touched.
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "infra=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
           # infra/modules/** is included ahead of the stack extraction: once the
           # environments call a LOCAL path module, a module-only commit changes both
           # plans, and matching only infra/live/ would let the deploy race the apply.
@@ -121,38 +109,29 @@ jobs:
 
       - name: Wait for Infrastructure · Apply on this commit
         if: steps.touched.outputs.infra == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # The sibling run may not be registered the instant this job starts, so
-          # allow a grace period before concluding there is none.
-          #
-          # `|| ID=""` is not cosmetic: these runners use `set -e`, and an
-          # assignment takes its command substitution's exit status, so a
-          # rate-limited `gh run list` would skip the retry loop entirely and turn
-          # a recoverable blip into a failed gate.
-          for _ in $(seq 1 12); do
-            ID=$(gh run list --workflow=infra-apply.yml --commit "$GITHUB_SHA" \
-                   --limit 1 --json databaseId --jq '.[0].databaseId // empty') || ID=""
-            [ -n "$ID" ] && break
-            sleep 10
-          done
-
-          if [ -z "${ID:-}" ]; then
-            echo "::warning::infra changed but no Infrastructure · Apply run found for $GITHUB_SHA — proceeding."
-            exit 0
-          fi
-
-          echo "Waiting on infra-apply run $ID …"
-          gh run watch "$ID" --exit-status
-          echo "Infrastructure applied; deploy may proceed."
+        # The retry-then-poll logic, and the rule that a rate limit is not a verdict on the
+        # awaited run, live in the shared action — see `quynhonsemiconductor/ci`. This was
+        # hand-written here, with `gh run watch --exit-status`, which reports a 403 the same
+        # way it reports a failed run: rova lost both deploys on 2026-09-13 to exactly that.
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        with:
+          workflow: infra-apply.yml
+          label: Infrastructure · Apply
+          # The run on THIS ref: a release commit is pushed twice (main, and the vX.Y.Z tag) and both start an
+          # Infrastructure · Apply on the same sha. Without a branch the gate takes the newest of the two, which on
+          # a tag run can be the develop apply instead of the tag's prod apply it exists to wait for. `ref_name` is
+          # `main` for a push to main and the tag name for a tag push (a run's head branch is the tag name).
+          branch: ${{ github.ref_name }}
+          # Warn: infra changed but no apply run exists. See the block comment above.
+          if-missing: warn
+          missing-message: >-
+            infra changed but no Infrastructure · Apply run was found for this commit.
 
   # ───────────────────────────────────────────────────────────────────────────
   # CI gate — a red main must not deploy.
   #
-  #   - push to main → wait for Backend · CI on this sha; `gh run watch
-  #     --exit-status` propagates its conclusion, so a failed CI blocks deploy.
+  #   - push to main → wait for Backend · CI on this sha; the shared `wait-for-run` action
+  #     propagates its conclusion, so a failed CI blocks deploy.
   #   - tag push → wait for the DEVELOP deploy of this sha instead. See below.
   #
   # Fails CLOSED: if no CI run is found for the sha, block rather than ship blind.
@@ -166,7 +145,7 @@ jobs:
   # action's own failure message states ("The commit must be merged to main and deployed to
   # develop before tagging a release").
   #
-  # With no gate the two runs race. This is PORTED FROM RALLY, where prod lost that race
+  # With no gate the two runs race. This is PORTED FROM ROVA, where prod lost that race
   # on v0.7.13 (2026-08-31): a release merge fires both runs on the same commit, the tag
   # run cleared this gate in 3 seconds while the main run sat here for 15m16s waiting on
   # Backend · CI, and prod then exhausted the promote step's poll budget waiting for an
@@ -177,7 +156,7 @@ jobs:
   # cut a release slow enough to expose it.
   #
   # Waiting on the whole develop RUN, not just its build jobs, is deliberate: it is the
-  # documented contract, it is one `gh run watch` rather than per-job polling, and it means
+  # documented contract, it is ONE run's conclusion rather than per-job polling, and it means
   # prod can never ship an image develop itself failed to deploy.
   #
   # NOT-FOUND WARNS RATHER THAN BLOCKING, unlike the main branch below. A release tag
@@ -193,7 +172,7 @@ jobs:
     name: Wait for Backend · CI
     runs-on: ubuntu-latest
     # 45, not 30: the tag branch now awaits the develop deploy, whose own slowest input is
-    # a Docker build that a lockfile change forces to rebuild from scratch. Rally measured
+    # a Docker build that a lockfile change forces to rebuild from scratch. Rova measured
     # 24m24s for that run on the release this fix comes from.
     timeout-minutes: 45
     permissions:
@@ -201,63 +180,16 @@ jobs:
       actions: read
     steps:
       - name: Wait for Backend · CI on this commit
-        if: github.ref_type != 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # This job does not check out the repo, so `gh` cannot infer it from a
-          # local remote — pass it explicitly.
-          for _ in $(seq 1 12); do
-            ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow backend-ci.yml \
-                   --branch main --commit "$GITHUB_SHA" \
-                   --limit 1 --json databaseId --jq '.[0].databaseId // empty') || ID=""
-            [ -n "$ID" ] && break
-            sleep 10
-          done
-          if [ -z "${ID:-}" ]; then
-            echo "::error::No Backend · CI run found for $GITHUB_SHA — blocking deploy (fail closed)."
-            exit 1
-          fi
-          echo "Waiting on Backend · CI run $ID …"
-          gh run watch --repo "$GITHUB_REPOSITORY" "$ID" --exit-status
-          echo "Backend · CI succeeded; deploy may proceed."
-
-      # Prod promotes the image the develop deploy pushed, so this is the tag run's real
-      # precondition. See the block comment above this job for the race it closes.
-      - name: Wait for the develop deploy of this commit
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # `--branch main` is what excludes THIS run: the develop deploy's headBranch is
-          # `main` while the tag run's is the tag ref, so the two never match each other
-          # despite sharing a workflow file and a commit. Without it this would find
-          # itself and wait forever.
-          #
-          # `|| ID=""` on the assignment, matching wait-for-infra above and for the same
-          # reason: runners use `set -e`, an assignment takes its command substitution's
-          # exit status, so a rate-limited `gh run list` would skip the retry loop.
-          for _ in $(seq 1 12); do
-            ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow backend-deploy.yml \
-                   --branch main --commit "$GITHUB_SHA" \
-                   --limit 1 --json databaseId --jq '.[0].databaseId // empty') || ID=""
-            [ -n "$ID" ] && break
-            sleep 10
-          done
-
-          if [ -z "${ID:-}" ]; then
-            echo "::warning::No develop Backend · Deploy run found for $GITHUB_SHA — proceeding, the promote step's ECR poll is the backstop."
-            exit 0
-          fi
-
-          echo "Waiting on develop Backend · Deploy run $ID …"
-          if ! gh run watch --repo "$GITHUB_REPOSITORY" "$ID" --exit-status; then
-            echo "::error::The develop deploy of $GITHUB_SHA did not succeed (run $ID). Prod promotes the image that run pushes, so there is nothing to promote. Fix develop, then re-run this deploy."
-            exit 1
-          fi
-          echo "Develop deployed this commit; the sha image exists and prod may promote it."
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        with:
+          workflow: backend-ci.yml
+          # `main` and not the tag ref: Backend · CI only runs on main.
+          branch: main
+          label: Backend · CI
+          # Fail closed: no CI run for this sha means shipping blind.
+          if-missing: fail
+          missing-message: >-
+            No Backend · CI run was found for this commit.
 
   deploy:
     needs: [wait-for-infra, wait-for-ci]
@@ -272,7 +204,7 @@ jobs:
       id-token: write
       attestations: write
       packages: read # build-push-ecr pulls private @quynhonsemiconductor/* from GitHub Packages
-    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@v1
+    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
     with:
       product: opshub
       has_worker: true
@@ -292,8 +224,12 @@ jobs:
       # NATIVE ARM RUNNER, not QEMU: emulating an arm64 pnpm + Nest compile on an x86
       # runner multiplies build minutes by enough to outweigh the Fargate saving, which is
       # the reusable workflow's own stated reason for having a separate runner input.
-      build_runner: ubuntu-24.04-arm
-      image_platforms: linux/arm64
+      #
+      # MULTI-ARCH (2026-10-13): the on-prem k3s host is amd64, so the image is now built for BOTH architectures: linux/amd64 on
+      # ubuntu-24.04 and linux/arm64 on ubuntu-24.04-arm, natively, merged into one manifest by the reusable's `merge` job.
+      # ECS stays on Graviton (cpu_architecture = ARM64 above) and pulls the arm64 entry of the same tag; `build_runner` and
+      # `image_platforms` are ignored while multi_arch is true. Drop this when the product has left ECS.
+      multi_arch: true
 
       # ── Build cache: GHA, not the `registry` default ─────────────────────────
       # The registry backend writes a `:buildcache` tag to ECR with `mode=max` and PULLS it
@@ -318,12 +254,12 @@ jobs:
       SLACK_DEPLOY_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
 
   # ───────────────────────────────────────────────────────────────────────────
-  # Grafana deploy annotation — ported from rally.
+  # Grafana deploy annotation — ported from rova.
   #
   # WHY THIS IS NOT COSMETIC. opshub's Grafana alert rules fire on symptoms that a
   # deploy is one of the likeliest causes of, and without a deploy marker on the
   # dashboard there is nothing on screen that distinguishes "the service regressed"
-  # from "a task was replaced 40 seconds ago". rally's `http-p99-latency` page on
+  # from "a task was replaced 40 seconds ago". rova's `http-p99-latency` page on
   # 2026-08-31 was exactly that: the slow request was a cold start after a task
   # replacement, and establishing it took reading workflow job timestamps by hand
   # because the latency panel carried no deploy markers to line the spike up against.
@@ -356,7 +292,7 @@ jobs:
         continue-on-error: true
         env:
           GRAFANA_ALERTS_TOKEN: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
-          DEPLOY_ENV: ${{ github.ref_type == 'tag' && 'production' || 'develop' }}
+          DEPLOY_ENV: develop
         run: |
           curl -sf -X POST "https://qnsc.grafana.net/api/annotations" \
             -H "Authorization: Bearer ${GRAFANA_ALERTS_TOKEN}" \

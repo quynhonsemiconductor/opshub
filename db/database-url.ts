@@ -19,7 +19,7 @@
  * `db-url` secret holding a copy of that password. Every rotation silently
  * invalidates such a copy, and the next deploy dies with
  * `28P01 password authentication failed for user "app_admin"` — with nothing
- * drifting in Terraform to hint at why. Rally hit exactly that and removed the
+ * drifting in Terraform to hint at why. Rova hit exactly that and removed the
  * copy; this is the same fix, before the first rotation rather than after.
  *
  * Composing from parts removes the copy entirely. ECS reads the managed secret at

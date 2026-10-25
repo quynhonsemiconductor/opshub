@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { DeferError } from '../outbox/abstract-outbox-relay';
 import { AppConfigService } from '../config/app-config.service';
 import {
   EMAIL_PROVIDER,
@@ -17,16 +18,6 @@ import { renderEmailTemplate, type EmailTemplateName, type EmailTemplateVars } f
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  /**
-   * `undefined` when no sender is configured, never a string containing "undefined".
-   *
-   * `MAIL_FROM_EMAIL` lost its default, because defaulting it made a misconfigured production send
-   * from a domain it may not own. Interpolating the absent value would produce
-   * `OpsHub <undefined>` — a syntactically valid header that fails at the recipient, which is the
-   * same silent failure by a shorter route. The env schema refuses to boot a non-dev provider without
-   * one, so this is only reachable under `dev`, where the provider logs and has nothing to send from.
-   */
-  private readonly from: string | undefined;
   /** Deployment-wide reply-to, from `MAIL_REPLY_TO`. Overridden per call by `opts.replyTo`. */
   private readonly replyTo: string | undefined;
 
@@ -34,9 +25,6 @@ export class EmailService {
     @Inject(EMAIL_PROVIDER) private readonly provider: IEmailProvider,
     config: AppConfigService,
   ) {
-    const name = config.get('MAIL_FROM_NAME');
-    const email = config.get('MAIL_FROM_EMAIL');
-    this.from = email ? `${name} <${email}>` : undefined;
     /*
      * `MAIL_REPLY_TO` WAS DECLARED AND READ BY NOTHING.
      *
@@ -52,6 +40,14 @@ export class EmailService {
     this.replyTo = config.get('MAIL_REPLY_TO');
   }
 
+  /**
+   * Fails now if the configured transport cannot work (the Graph provider names the missing variable). The worker calls this when its relay
+   * starts, so a bad deploy stops there instead of dead-lettering the first invitation. A provider with nothing to check passes.
+   */
+  assertReady(): void {
+    (this.provider as { assertReady?: () => void }).assertReady?.();
+  }
+
   async sendTemplate<K extends EmailTemplateName>(
     to: string,
     template: K,
@@ -63,34 +59,44 @@ export class EmailService {
       // Returned so the relay can persist the provider's message id at acceptance —
       // that id is the feedback loop's only exact match key for a later verdict.
       return await withDeadline(
-        this.provider.send({
-          to,
-          from: this.from,
-          replyTo: opts?.replyTo ?? this.replyTo,
-          subject: rendered.subject,
-          html: rendered.html,
-          text: rendered.text,
-          category: 'transactional',
-          idempotencyKey: opts?.idempotencyKey,
-        }),
+        (signal) =>
+          this.provider.send(
+            {
+              to,
+              replyTo: opts?.replyTo ?? this.replyTo,
+              subject: rendered.subject,
+              html: rendered.html,
+              text: rendered.text,
+              category: 'transactional',
+              idempotencyKey: opts?.idempotencyKey,
+            },
+            { signal },
+          ),
         EMAIL_SEND_TIMEOUT_MS,
       );
     } catch (err) {
-      // Log and re-throw — the relay will catch this and update the outbox row.
-      this.logger.error({ err, to, template }, 'Failed to send email');
+      // Re-throw: the relay catches it and updates the outbox row. A DeferError is not a failure (the provider already logged the one block, and
+      // every deferred row of a batch would repeat it); anything else is logged WITHOUT the recipient.
+      if (!(err instanceof DeferError))
+        this.logger.error({ err, template }, 'Failed to send email');
       throw err;
     }
   }
 }
 
-/** Rejects if `work` has not settled within `ms`. Does not cancel `work`; see EMAIL_SEND_TIMEOUT_MS. */
-function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+/**
+ * Runs `work` with a hard deadline: at `ms` the SIGNAL passed to it is aborted (so a provider that can cancel stops the request, its in-place
+ * retries and any wait: nothing is accepted after the caller has given up and the relay has retried), and the returned promise rejects even if
+ * the provider ignores the signal.
+ */
+function withDeadline<T>(work: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`Email provider did not answer within ${Math.round(ms / 1000)} s`)),
-      ms,
-    );
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`Email provider did not answer within ${Math.round(ms / 1000)} s`));
+    }, ms);
   });
-  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+  return Promise.race([work(controller.signal), deadline]).finally(() => clearTimeout(timer));
 }

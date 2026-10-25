@@ -183,3 +183,79 @@ describe('AuthzAdminService — role-definition changes', () => {
     expect(authz.invalidate).not.toHaveBeenCalled();
   });
 });
+
+describe('AuthzAdminService.syncUserRolesByKeys — the Entra App Role reconcile', () => {
+  /** Roles `employee`, `hr` and `admin` exist; `current` is what the person holds globally. */
+  function buildSync(current: Array<{ id: string; roleId: string }>) {
+    const t = build();
+    const roles = [
+      { id: 'r-employee', key: 'employee' },
+      { id: 'r-hr', key: 'hr' },
+      { id: 'r-admin', key: 'admin' },
+    ];
+    t.roleRepo.list.mockResolvedValue(roles);
+    t.assignmentRepo.listForUser.mockResolvedValue(
+      current.map((a) => ({ ...a, scopeType: 'global' })),
+    );
+    t.assignmentRepo.assign.mockResolvedValue({ id: 'new' });
+    t.assignmentRepo.revoke.mockResolvedValue(undefined);
+    return t;
+  }
+  const assigned = (t: ReturnType<typeof buildSync>) =>
+    t.assignmentRepo.assign.mock.calls.map((c) => (c[0] as { roleId: string }).roleId);
+  const revoked = (t: ReturnType<typeof buildSync>) =>
+    t.assignmentRepo.revoke.mock.calls.map((c) => c[0] as string);
+
+  it('with no role claim and the floor, a newcomer holds `employee` and NOTHING else', async () => {
+    const t = buildSync([]);
+
+    await t.service.syncUserRolesByKeys('u', [], actor, 'employee');
+
+    expect(assigned(t)).toEqual(['r-employee']);
+  });
+
+  it('only roles opshub has never heard of count as no claim: the floor applies, nothing unknown is granted', async () => {
+    const t = buildSync([]);
+
+    await t.service.syncUserRolesByKeys('u', ['SuperUser', 'root'], actor, 'employee');
+
+    expect(assigned(t)).toEqual(['r-employee']);
+  });
+
+  it('the floor is NOT added to roles the token does name', async () => {
+    const t = buildSync([]);
+
+    await t.service.syncUserRolesByKeys('u', ['hr'], actor, 'employee');
+
+    expect(assigned(t)).toEqual(['r-hr']);
+  });
+
+  it('DEMOTES at the next sign-in: an App Role removed in Entra is revoked, and the person falls to the floor', async () => {
+    const t = buildSync([
+      { id: 'a-admin', roleId: 'r-admin' },
+      { id: 'a-hr', roleId: 'r-hr' },
+    ]);
+
+    await t.service.syncUserRolesByKeys('u', [], actor, 'employee');
+
+    expect(revoked(t).sort()).toEqual(['a-admin', 'a-hr']);
+    expect(assigned(t)).toEqual(['r-employee']);
+  });
+
+  it('without a floor, an empty claim leaves no role (the original contract is unchanged)', async () => {
+    const t = buildSync([]);
+
+    await t.service.syncUserRolesByKeys('u', [], actor);
+
+    expect(assigned(t)).toEqual([]);
+  });
+
+  it('a missing floor role does not fail the sign-in or grant anything else', async () => {
+    const t = buildSync([]);
+    t.roleRepo.list.mockResolvedValue([{ id: 'r-hr', key: 'hr' }] as never);
+
+    await t.service.syncUserRolesByKeys('u', [], actor, 'employee');
+
+    expect(assigned(t)).toEqual([]);
+  });
+});

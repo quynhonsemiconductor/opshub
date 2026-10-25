@@ -10,14 +10,14 @@ import {
   type PermissionRequirement,
 } from './decorators';
 import type { PolicyScope, ResourceAttrs } from './authz.types';
-import type { JwtPayload } from './jwt.strategy';
+import type { JwtPayload } from './principal';
 
 /**
  * Permission guard — enforces the fine-grained permission declared via
- * @RequirePermission(...). Runs after JwtAuthGuard, so request.user is set.
+ * @RequirePermission(...). Runs after SessionAuthGuard, so request.user is set.
  *
  * DENIES A ROUTE THAT DECLARED NOTHING. This used to `return true` on missing metadata, so a
- * handler nobody decorated was open to every authenticated caller: `JwtAuthGuard` proved who
+ * handler nobody decorated was open to every authenticated caller: `SessionAuthGuard` proved who
  * you were and then nothing checked whether you may. 43 handlers were in that state, and a
  * new one was a silently world-readable endpoint that every test still passed.
  *

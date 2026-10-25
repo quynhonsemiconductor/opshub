@@ -4,40 +4,6 @@
  */
 
 export interface paths {
-  '/v1/healthz': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Liveness probe */
-    get: operations['HealthController_healthz'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/readyz': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Readiness probe — checks database and cache connectivity */
-    get: operations['HealthController_readyz'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/v1/audit-logs': {
     parameters: {
       query?: never;
@@ -281,74 +247,6 @@ export interface paths {
     post?: never;
     /** Delete the employee avatar */
     delete: operations['EmployeesController_deleteAvatar'];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/auth/entra-login': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** SSO login — validate Entra ID id_token, JIT-provision employee, mint internal JWT */
-    post: operations['AuthController_entraLogin'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/auth/dev-login': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Dev login (non-production) — mint a session for an active employee */
-    post: operations['AuthController_devLogin'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/auth/refresh': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Silently refresh the access token using the HttpOnly refresh cookie */
-    post: operations['AuthController_refresh'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/auth/logout': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Revoke the current session — invalidates both the refresh token and the active access token */
-    post: operations['AuthController_logout'];
-    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -5197,6 +5095,7 @@ export interface components {
       displayName?: string;
       department?: string | null;
       jobTitle?: string | null;
+      /** Format: uuid */
       managerId?: string | null;
     };
     UpdateStatusDto: {
@@ -5213,19 +5112,6 @@ export interface components {
       /** Format: uuid */
       fileId: string;
     };
-    EntraLoginDto: {
-      idToken: string;
-    };
-    AuthResponseDto: {
-      /** @description Short-lived access JWT. Store in memory only — never localStorage. */
-      accessToken: string;
-      /** @description Seconds until the access token expires. */
-      expiresIn: number;
-    };
-    DevLoginDto: {
-      /** Format: email */
-      email: string;
-    };
     MeResponseDto: {
       sub: string;
       email: string;
@@ -5238,11 +5124,10 @@ export interface components {
        */
       permissions: string[];
       /**
-       * @description Double-submit CSRF token, bound by HMAC to the session that requested it.
+       * @description Double-submit CSRF token, bound by HMAC to the session cookie that requested it. The SPA echoes it
+       *     in the `X-CSRF-Token` header on every state-changing request.
        *
-       *     Present ONLY for a request authenticated by the BFF session cookie — a Bearer
-       *     caller is not exposed to CSRF and is not issued one. The SPA echoes it in the
-       *     `X-CSRF-Token` header on every state-changing request.
+       *     Absent only for a request that carries no session cookie (there is nothing for a forged request to ride on).
        */
       csrfToken?: string;
     };
@@ -5288,6 +5173,7 @@ export interface components {
        */
       scopeType: 'global' | 'self' | 'team' | 'dept' | 'region';
       scopeId?: string | null;
+      /** Format: date-time */
       expiresAt?: string | null;
     };
     CreateDelegationDto: {
@@ -5917,11 +5803,13 @@ export interface components {
     CreateLicenseDto: {
       name: string;
       vendor: string;
+      /** Format: uuid */
       vendorId?: string | null;
       /** @enum {string} */
       licenseType: 'perpetual' | 'subscription' | 'per_seat' | 'concurrent';
       seatCount?: number | null;
       costPerSeatCents?: number | null;
+      /** Format: date */
       renewalDate?: string | null;
       notes?: string | null;
       externalId?: string | null;
@@ -5944,11 +5832,13 @@ export interface components {
     UpdateLicenseDto: {
       name?: string;
       vendor?: string;
+      /** Format: uuid */
       vendorId?: string | null;
       /** @enum {string} */
       licenseType?: 'perpetual' | 'subscription' | 'per_seat' | 'concurrent';
       seatCount?: number | null;
       costPerSeatCents?: number | null;
+      /** Format: date */
       renewalDate?: string | null;
       /** @enum {string} */
       status?: 'active' | 'expiring_soon' | 'expired' | 'cancelled';
@@ -6210,13 +6100,16 @@ export interface components {
     DraftContractDto: {
       /** Format: uuid */
       employeeId: string;
+      /** Format: uuid */
       positionId?: string | null;
       reference: string;
       /** @enum {string} */
       contractType: 'permanent' | 'fixed_term' | 'probation' | 'internship' | 'contractor';
       /** Format: date */
       startDate: string;
+      /** Format: date */
       endDate?: string | null;
+      /** Format: date */
       probationEndDate?: string | null;
       noticePeriodDays?: number;
       compensation?: {
@@ -6225,16 +6118,20 @@ export interface components {
         /** @enum {string} */
         salaryPeriod: 'hourly' | 'monthly' | 'annual';
       } | null;
+      /** Format: uuid */
       documentId?: string | null;
       notes?: string | null;
     };
     UpdateContractDto: {
+      /** Format: uuid */
       positionId?: string | null;
       /** @enum {string} */
       contractType?: 'permanent' | 'fixed_term' | 'probation' | 'internship' | 'contractor';
       /** Format: date */
       startDate?: string;
+      /** Format: date */
       endDate?: string | null;
+      /** Format: date */
       probationEndDate?: string | null;
       noticePeriodDays?: number;
       compensation?: {
@@ -6243,6 +6140,7 @@ export interface components {
         /** @enum {string} */
         salaryPeriod: 'hourly' | 'monthly' | 'annual';
       } | null;
+      /** Format: uuid */
       documentId?: string | null;
       notes?: string | null;
     };
@@ -6462,6 +6360,7 @@ export interface components {
       periodStart: string;
       /** Format: date */
       periodEnd: string;
+      /** Format: date */
       selfAssessmentDue?: string | null;
       /** Format: date */
       reviewDue: string;
@@ -6523,7 +6422,7 @@ export interface components {
         rating: 'unsatisfactory' | 'needs_improvement' | 'meets' | 'exceeds' | 'outstanding';
       }[];
     };
-    CancelReviewDto: {
+    PerformanceCancelReviewDto: {
       reason: string;
     };
     RiskResponseDto: {
@@ -6579,6 +6478,7 @@ export interface components {
       title: string;
       description: string;
       category: string;
+      /** Format: uuid */
       assetId?: string | null;
       /** Format: uuid */
       ownerId: string;
@@ -6586,12 +6486,14 @@ export interface components {
         likelihood: number;
         impact: number;
       };
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     UpdateRiskDto: {
       title?: string;
       description?: string;
       category?: string;
+      /** Format: uuid */
       assetId?: string | null;
       /** Format: uuid */
       ownerId?: string;
@@ -6599,6 +6501,7 @@ export interface components {
         likelihood: number;
         impact: number;
       };
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     AssessRiskDto: {
@@ -6608,6 +6511,7 @@ export interface components {
         likelihood: number;
         impact: number;
       };
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     MarkTreatedDto: {
@@ -6615,10 +6519,12 @@ export interface components {
         likelihood: number;
         impact: number;
       };
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     AcceptRiskDto: {
       justification: string;
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     AcceptRiskResponseDto: {
@@ -6648,15 +6554,18 @@ export interface components {
       description: string;
       /** Format: uuid */
       ownerId: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     UpdateTreatmentDto: {
       description?: string;
       /** Format: uuid */
       ownerId?: string;
+      /** Format: date */
       dueOn?: string | null;
       /** @enum {string} */
       status?: 'planned' | 'in_progress' | 'done' | 'cancelled';
+      /** Format: date */
       completedOn?: string | null;
     };
     SoaRowResponseDto: {
@@ -6740,11 +6649,15 @@ export interface components {
       /** @enum {string} */
       status: 'not_applicable' | 'not_implemented' | 'partially_implemented' | 'implemented';
       implementationNote?: string | null;
+      /** Format: uuid */
       evidenceDocumentId?: string | null;
+      /** Format: uuid */
       ownerId?: string | null;
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     MarkReviewedDto: {
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     ControlResponseDto: {
@@ -6798,7 +6711,9 @@ export interface components {
       severity: 'low' | 'medium' | 'high' | 'critical';
       /** Format: date-time */
       detectedAt: string;
+      /** Format: uuid */
       assetId?: string | null;
+      /** Format: uuid */
       riskId?: string | null;
       personalDataBreach?: boolean;
     };
@@ -6848,7 +6763,9 @@ export interface components {
       severity?: 'low' | 'medium' | 'high' | 'critical';
       /** Format: date-time */
       detectedAt?: string;
+      /** Format: uuid */
       assetId?: string | null;
+      /** Format: uuid */
       riskId?: string | null;
       personalDataBreach?: boolean;
     };
@@ -6980,6 +6897,7 @@ export interface components {
       classificationReason: string;
       /** Format: uuid */
       ownerId: string;
+      /** Format: uuid */
       custodianId?: string | null;
       confidentiality: number;
       integrity: number;
@@ -6987,6 +6905,7 @@ export interface components {
       personalData?: boolean;
       location?: string | null;
       retentionMonths?: number | null;
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     InformationAssetResponseDto: {
@@ -7043,6 +6962,7 @@ export interface components {
         | 'other';
       /** Format: uuid */
       ownerId?: string;
+      /** Format: uuid */
       custodianId?: string | null;
       confidentiality?: number;
       integrity?: number;
@@ -7050,6 +6970,7 @@ export interface components {
       personalData?: boolean;
       location?: string | null;
       retentionMonths?: number | null;
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     ReclassifyDto: {
@@ -7068,6 +6989,7 @@ export interface components {
       changedAt: string;
     };
     MarkAssetReviewedDto: {
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     InformationAssetDeviceResponseDto: {
@@ -7197,9 +7119,12 @@ export interface components {
       /** Format: uuid */
       ownerId: string;
       dataProcessor?: boolean;
+      /** Format: uuid */
       dataProcessingAgreementId?: string | null;
       dataLocation?: string | null;
+      /** Format: date */
       contractStartsOn?: string | null;
+      /** Format: date */
       contractEndsOn?: string | null;
       noticePeriodDays?: number | null;
     };
@@ -7212,9 +7137,12 @@ export interface components {
       /** Format: uuid */
       ownerId?: string;
       dataProcessor?: boolean;
+      /** Format: uuid */
       dataProcessingAgreementId?: string | null;
       dataLocation?: string | null;
+      /** Format: date */
       contractStartsOn?: string | null;
+      /** Format: date */
       contractEndsOn?: string | null;
       noticePeriodDays?: number | null;
     };
@@ -7227,6 +7155,7 @@ export interface components {
       scope: string;
       findings?: string | null;
       conditions?: string | null;
+      /** Format: uuid */
       evidenceDocumentId?: string | null;
       /** Format: date-time */
       assessedAt?: string;
@@ -7341,8 +7270,11 @@ export interface components {
       ownerId: string;
       /** Format: date-time */
       detectedAt?: string;
+      /** Format: uuid */
       incidentId?: string | null;
+      /** Format: uuid */
       internalAuditId?: string | null;
+      /** Format: uuid */
       evidenceDocumentId?: string | null;
     };
     NonconformanceResponseDto: {
@@ -7403,8 +7335,11 @@ export interface components {
       ownerId?: string;
       /** Format: date-time */
       detectedAt?: string;
+      /** Format: uuid */
       incidentId?: string | null;
+      /** Format: uuid */
       internalAuditId?: string | null;
+      /** Format: uuid */
       evidenceDocumentId?: string | null;
     };
     ContainNonconformanceDto: {
@@ -7477,6 +7412,7 @@ export interface components {
       reference: string;
       /** Format: uuid */
       ownerId: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     CapaAnalysisDto: {
@@ -7484,6 +7420,7 @@ export interface components {
       /** @enum {string} */
       rootCauseMethod: 'five_whys' | 'fishbone' | 'fault_tree' | 'pareto' | 'other';
       actionPlan: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     MarkImplementedDto: {
@@ -7542,7 +7479,9 @@ export interface components {
       criteria: string;
       /** Format: uuid */
       leadAuditorId: string;
+      /** Format: date */
       plannedStartOn?: string | null;
+      /** Format: date */
       plannedEndOn?: string | null;
     };
     InternalAuditResponseDto: {
@@ -7577,7 +7516,9 @@ export interface components {
       criteria?: string;
       /** Format: uuid */
       leadAuditorId?: string;
+      /** Format: date */
       plannedStartOn?: string | null;
+      /** Format: date */
       plannedEndOn?: string | null;
     };
     StartAuditDto: {
@@ -7712,6 +7653,7 @@ export interface components {
       period: string;
       /** Format: uuid */
       chairId: string;
+      /** Format: date */
       scheduledFor?: string | null;
     };
     ManagementReviewResponseDto: {
@@ -7745,6 +7687,7 @@ export interface components {
       description?: string;
       /** Format: uuid */
       ownerId?: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     ReviewActionResponseDto: {
@@ -7775,6 +7718,7 @@ export interface components {
       period?: string;
       /** Format: uuid */
       chairId?: string;
+      /** Format: date */
       scheduledFor?: string | null;
     };
     HoldReviewDto: {
@@ -7786,12 +7730,16 @@ export interface components {
       /** Format: uuid */
       minutesDocumentId: string;
     };
+    QmsCancelReviewDto: {
+      reason: string;
+    };
     RaiseReviewActionDto: {
       /** @enum {string} */
       category: 'improvement' | 'qms_change' | 'resource_need';
       description: string;
       /** Format: uuid */
       ownerId: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     ChatRequestDto: {
@@ -7861,141 +7809,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-  HealthController_healthz: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  HealthController_readyz: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description The Health Check is successful */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            /** @example ok */
-            status?: string;
-            /**
-             * @example {
-             *       "database": {
-             *         "status": "up"
-             *       }
-             *     }
-             */
-            info?: {
-              [key: string]: {
-                status: string;
-              } & {
-                [key: string]: unknown;
-              };
-            } | null;
-            /** @example {} */
-            error?: {
-              [key: string]: {
-                status: string;
-              } & {
-                [key: string]: unknown;
-              };
-            } | null;
-            /**
-             * @example {
-             *       "database": {
-             *         "status": "up"
-             *       }
-             *     }
-             */
-            details?: {
-              [key: string]: {
-                status: string;
-              } & {
-                [key: string]: unknown;
-              };
-            };
-          };
-        };
-      };
-      /** @description The Health Check is not successful */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            /** @example error */
-            status?: string;
-            /**
-             * @example {
-             *       "database": {
-             *         "status": "up"
-             *       }
-             *     }
-             */
-            info?: {
-              [key: string]: {
-                status: string;
-              } & {
-                [key: string]: unknown;
-              };
-            } | null;
-            /**
-             * @example {
-             *       "redis": {
-             *         "status": "down",
-             *         "message": "Could not connect"
-             *       }
-             *     }
-             */
-            error?: {
-              [key: string]: {
-                status: string;
-              } & {
-                [key: string]: unknown;
-              };
-            } | null;
-            /**
-             * @example {
-             *       "database": {
-             *         "status": "up"
-             *       },
-             *       "redis": {
-             *         "status": "down",
-             *         "message": "Could not connect"
-             *       }
-             *     }
-             */
-            details?: {
-              [key: string]: {
-                status: string;
-              } & {
-                [key: string]: unknown;
-              };
-            };
-          };
-        };
-      };
-    };
-  };
   AuditController_list: {
     parameters: {
       query?: {
@@ -8698,109 +8511,6 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  AuthController_entraLogin: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['EntraLoginDto'];
-      };
-    };
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['AuthResponseDto'];
-        };
-      };
-      /** @description Unauthorized — missing or invalid authentication */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  AuthController_devLogin: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['DevLoginDto'];
-      };
-    };
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['AuthResponseDto'];
-        };
-      };
-      /** @description Unauthorized — missing or invalid authentication */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  AuthController_refresh: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['AuthResponseDto'];
-        };
-      };
-      /** @description Unauthorized — missing or invalid authentication */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  AuthController_logout: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      204: {
         headers: {
           [name: string]: unknown;
         };
@@ -16754,7 +16464,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CancelReviewDto'];
+        'application/json': components['schemas']['PerformanceCancelReviewDto'];
       };
     };
     responses: {
@@ -23170,7 +22880,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CancelReviewDto'];
+        'application/json': components['schemas']['QmsCancelReviewDto'];
       };
     };
     responses: {

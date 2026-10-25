@@ -7,10 +7,16 @@ import swc from 'unplugin-swc';
 // Load .env before this config — and the AppModule it boots — reads process.env. Node does
 // not auto-load .env files, and nothing else in the e2e path did, so ConfigModule's Zod
 // validation failed on any machine without these already exported in the shell.
-try {
-  process.loadEnvFile('.env');
-} catch {
-  /* no .env file — CI injects the vars directly */
+// E2E_ENV_FILE names an isolated stack's env (scripts/e2e/run.sh writes it). A name that does not exist fails here, loudly: a
+// misspelled path must not fall back to the developer's .env. Only the default .env may be absent (CI injects the vars directly).
+if (process.env.E2E_ENV_FILE) {
+  process.loadEnvFile(process.env.E2E_ENV_FILE);
+} else {
+  try {
+    process.loadEnvFile('.env');
+  } catch {
+    /* no .env file — CI injects the vars directly */
+  }
 }
 
 // E2E config: runs the real AppModule against a real Postgres + Valkey.
@@ -22,6 +28,24 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    /**
+     * Identity 8's passwordless sign-in, which the harness' `login()` uses. It loads only with this AND
+     * NODE_ENV exactly `test` (vitest's default) or `development`; production refuses both the env value and
+     * the boot. `BETTER_AUTH_SECRET` is a throwaway: nothing outside this process ever verifies it.
+     */
+    env: {
+      IDENTITY_TEST_LOGIN: 'enabled',
+      // Every e2e request comes from one loopback address, and the suite runs as a handful of seeded users, so the
+      // pre-auth ceiling and the DEFAULT tier are raised for the run. CI web e2e does the same (web-ci.yml). Production
+      // refuses both values above their defaults (env.schema.ts).
+      RATE_LIMIT_IP_LIMIT: '100000',
+      RATE_LIMIT_DEFAULT_LIMIT: '5000',
+      // .env.example sends mail to Mailpit (EMAIL_PROVIDER=smtp). The e2e suite must never send real mail, so it runs on the
+      // dev provider, as the CI job (which has no .env) does.
+      EMAIL_PROVIDER: 'dev',
+      BETTER_AUTH_SECRET:
+        process.env['BETTER_AUTH_SECRET'] ?? 'e2e-better-auth-secret-minimum-32-chars!!',
+    },
     include: ['test/e2e/**/*.e2e.spec.ts'],
     /**
      * NOT `passWithNoTests`. It was true while the directory was empty, which made the
@@ -39,7 +63,7 @@ export default defineConfig({
      * requests and tear down NOTHING, so without this a developer's database grows on every
      * pass — and the leftovers then make list assertions count-dependent, or collide with
      * the seed's own fixed ids under `onConflictDoNothing`, which reports nothing and leaves
-     * the fixture silently absent. Adopted from rally, which hit both.
+     * the fixture silently absent. Adopted from rova, which hit both.
      */
     globalSetup: ['./test/e2e/support/global-setup.ts'],
     testTimeout: 30_000,
@@ -49,13 +73,13 @@ export default defineConfig({
     /**
      * Run spec FILES one at a time. These specs share ONE Postgres and ONE Valkey, and
      * vitest runs files in parallel workers by default — so two files can mutate
-     * overlapping rows, and both draw from the same per-IP `AUTH_LOGIN` bucket during their
+     * overlapping rows, and both draw from the same per-address pre-auth bucket during their
      * `beforeAll` logins. Both are cross-file interference, not real product flake. Serial
      * execution removes the class; tests within a file still run in order. Slower, but a
      * shared stateful backend cannot be driven in parallel without per-spec isolation,
      * which this suite does not have.
      *
-     * Adopted from rally, where both failure modes were diagnosed the hard way.
+     * Adopted from rova, where both failure modes were diagnosed the hard way.
      */
     fileParallelism: false,
   },

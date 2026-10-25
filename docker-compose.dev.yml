@@ -1,15 +1,25 @@
+# Local stack for OpsHub. Project name `opshub` unless COMPOSE_PROJECT_NAME is set (in .env or the shell): that is
+# what lets a second copy of this repo run beside the first. No container_name is set on purpose, for the same reason.
+#
+# Image versions match the data-store track: PostgreSQL 18.6 (RDS target) and Valkey 8.1.10 (ElastiCache target 8.1,
+# the same engine; no Valkey 8.2 image is published). Tags are pinned to a full version, not a moving major tag.
+# PostgreSQL is the Debian image, not -alpine: glibc collation, as on RDS.
+#
+# Every host port is bound to 127.0.0.1 and read from .env (`*_HOST_PORT`, defaults below). `.env.example` lists them.
+name: opshub
+
 services:
   postgres:
-    image: postgres:18-alpine
-    container_name: opshub-postgres
+    image: postgres:18.6
     environment:
       POSTGRES_USER: opshub
       POSTGRES_PASSWORD: opshub
       POSTGRES_DB: opshub
     ports:
-      # 5433 avoids conflict with other local Postgres instances (e.g. rally on 5432).
-      - '5433:5432'
+      - '127.0.0.1:${POSTGRES_HOST_PORT:-5410}:5432'
     volumes:
+      # PostgreSQL 18 images keep data in a major-version subdirectory of /var/lib/postgresql; mounting
+      # the old /data path makes the image refuse to start.
       - opshub_pgdata:/var/lib/postgresql
       - ./db/init:/docker-entrypoint-initdb.d
     healthcheck:
@@ -19,58 +29,91 @@ services:
       retries: 5
 
   valkey:
-    image: valkey/valkey:8-alpine
-    container_name: opshub-valkey
+    image: valkey/valkey:8.1.10-alpine
     ports:
-      # 6380 avoids conflict with other local Redis/Valkey instances (e.g. rally on 6379).
-      - '6380:6379'
+      - '127.0.0.1:${VALKEY_HOST_PORT:-6310}:6379'
     healthcheck:
       test: ['CMD', 'valkey-cli', 'ping']
       interval: 5s
       timeout: 5s
       retries: 5
 
-  localstack:
-    image: localstack/localstack:4
-    container_name: opshub-localstack
-    environment:
-      AWS_DEFAULT_REGION: ap-southeast-1
-      PERSISTENCE: 1
-      # Standard fake credentials — the AWS SDK v3 requires credentials to sign
-      # with even when the endpoint is an emulator that ignores them.
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
+  # Mailpit catches the mail the API sends with EMAIL_PROVIDER=smtp. Nothing leaves the machine: SMTP accepts any message and the
+  # web UI (and its API, which the check command reads) shows it. Pinned to a full version. Development only.
+  mailpit:
+    image: axllent/mailpit:v1.31.4
     ports:
-      # 4567 avoids conflict with other local LocalStack instances (rally on 4566),
-      # matching how postgres and valkey are offset above. AWS_ENDPOINT_URL and
-      # SQS_OUTBOX_URL in .env must carry this port, not 4566.
-      - '4567:4566'
-    volumes:
-      - opshub_localstack:/var/lib/localstack
-      # Init hook: runs every time LocalStack becomes ready, creating the SQS
-      # queue, its DLQ and the files bucket. Mirrors how db/init bootstraps
-      # Postgres above.
-      - ./scripts/localstack:/etc/localstack/init/ready.d:ro
+      # MAIL_SMTP_PORT in .env must carry the SMTP port; the UI and API are on the UI port.
+      - '127.0.0.1:${MAILPIT_SMTP_HOST_PORT:-1110}:1025'
+      - '127.0.0.1:${MAILPIT_UI_HOST_PORT:-8110}:8025'
     healthcheck:
-      test: ['CMD', 'awslocal', 'sqs', 'list-queues']
-      interval: 10s
-      timeout: 5s
+      # The image has wget and serves /readyz on the UI port once the SMTP listener is up.
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://localhost:8025/readyz']
+      interval: 5s
+      timeout: 3s
       retries: 10
-      start_period: 15s
+
+  # Garage is the local stand-in for the R2 bucket: one node, named volumes, so uploads survive `docker compose restart`
+  # (LocalStack's community edition does not keep data across a restart). Pinned to a full version. Development only.
+  garage:
+    image: dxflrs/garage:v1.3.1
+    ports:
+      # STORAGE_ENDPOINT in .env must carry the same port.
+      - '127.0.0.1:${STORAGE_HOST_PORT:-4610}:3900'
+    volumes:
+      - ./docker/garage/garage.toml:/etc/garage.toml:ro
+      - garagemeta:/var/lib/garage/meta
+      - garagedata:/var/lib/garage/data
+    healthcheck:
+      # The image has no shell and no curl; `garage status` answers once the node is up.
+      test: ['CMD', '/garage', 'status']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    mem_limit: 512m
+
+  # One-shot: layout, the fixed local key, both buckets (the dev bucket and the e2e suite's), their lifecycle and CORS for the
+  # web origins, then a preflight proof per bucket and origin. It exits 0 only when all of that holds. Read its exit status after
+  # `up --wait` (see README → "Local stack"). Bucket names are kept in step with .env.example and test/env-example.spec.ts.
+  # Runs the SAME script the CI container job runs (scripts/garage/init.mjs — there is no second
+  # implementation to drift). The repo's node_modules must exist first (`pnpm install`): the S3
+  # calls import @aws-sdk/client-s3 from it — the bare node image ships no packages of its own.
+  garage-init:
+    image: node:24-alpine
+    working_dir: /repo
+    entrypoint: ['node', 'scripts/garage/init.mjs']
+    depends_on:
+      garage:
+        condition: service_healthy
+    environment:
+      GARAGE_ADMIN_TOKEN: local-dev-garage-admin-token-not-a-secret
+      # The script defaults to localhost (the CI container runs Garage in-process); from a sidecar
+      # container Garage is only reachable by service DNS name.
+      GARAGE_ADMIN_URL: http://garage:3903
+      GARAGE_S3_URL: http://garage:3900
+      STORAGE_ACCESS_KEY_ID: GK000000000000000000000001
+      # Quoted on purpose: an unquoted all-zero scalar is read by YAML as the integer 0, and Garage then gets "0".
+      STORAGE_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+      BUCKETS: opshub-files-dev opshub-files-test
+      WEB_ORIGINS: http://localhost:${WEB_DEV_PORT:-5174},http://127.0.0.1:${WEB_DEV_PORT:-5174}
+    volumes:
+      # ONLY the script and the node_modules it imports from — never the whole repo:
+      # a full mount would expose .env to the container.
+      - ./scripts/garage:/repo/scripts/garage:ro
+      - ./node_modules:/repo/node_modules:ro
+    restart: 'no'
 
   otel:
     image: otel/opentelemetry-collector-contrib:0.140.1
-    container_name: opshub-otel
     command: ['--config=/etc/otel/collector.yaml']
     volumes:
       - ./scripts/otel/collector.yaml:/etc/otel/collector.yaml:ro
     ports:
-      # 4319 avoids conflict with other local collectors (rally would take 4318), matching
-      # how postgres (5433), valkey (6380) and localstack (4567) are offset. `.env` must
-      # point OTEL_EXPORTER_OTLP_ENDPOINT at this port, not 4318.
-      - '4319:4318'
-      # Prometheus scrape/inspect endpoint: `curl -s localhost:8890/metrics`.
-      - '8890:8889'
+      # OTEL_EXPORTER_OTLP_ENDPOINT in .env must carry the OTLP port.
+      - '127.0.0.1:${OTEL_OTLP_HOST_PORT:-4410}:4318'
+      # Prometheus scrape/inspect endpoint: `curl -s localhost:8410/metrics`.
+      - '127.0.0.1:${OTEL_METRICS_HOST_PORT:-8410}:8889'
     healthcheck:
       # The collector image has no shell and no curl, so probe the OTLP port from the host
       # side instead — an open socket is all this needs to prove.
@@ -81,4 +124,5 @@ services:
 
 volumes:
   opshub_pgdata:
-  opshub_localstack:
+  garagemeta:
+  garagedata:

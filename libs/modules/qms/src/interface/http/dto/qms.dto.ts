@@ -469,7 +469,7 @@ export const CancelReviewSchema = z.object({
   /** Why it did not happen. Required by `ck_mr_cancelled_pair`. */
   reason: substantial,
 });
-export class CancelReviewDto extends createZodDto(CancelReviewSchema) {}
+export class QmsCancelReviewDto extends createZodDto(CancelReviewSchema) {}
 
 export const RaiseReviewActionSchema = z.object({
   /** One of §9.3.3's three outputs. The clause is a closed list, so there is no `other`. */

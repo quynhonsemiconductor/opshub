@@ -72,9 +72,23 @@ variable "runtime_state_key" {
 // ── Application ─────────────────────────────────────────────────────────────────
 
 variable "image_tag" {
-  description = "Container image tag for api/worker/migrator. `latest` is acceptable in develop; production pins the release tag that triggered the apply."
+  description = <<-EOT
+    Container image tag for the BASELINE task definitions (api, worker, migrator). Required: no default.
+
+    NEVER `latest`: the ECR repositories are IMMUTABLE and the deploy pushes `sha-<commit>` / `v*` tags only, so `latest` does not
+    exist, and a task definition that references it cannot start (`CannotPullContainerError`). That is the bug that took qnsc-kb's
+    worker down in 2026-10: a Terraform-registered baseline pointing at a tag that was never pushed (qnsc-kb-backend#201).
+
+    Develop passes an obviously invalid placeholder, because the deploy rewrites the tag in the product container before it registers
+    the revision it rolls out, and the services ignore Terraform's task_definition (`ignore_changes`), so the baseline is never pulled.
+    Production pins the release tag that triggered the apply.
+  EOT
   type        = string
-  default     = "latest"
+
+  validation {
+    condition     = var.image_tag != "latest" && var.image_tag != ""
+    error_message = "image_tag must not be \"latest\" or empty: that tag does not exist in the immutable ECR repositories. Use the release tag, or in develop the placeholder \"set-by-the-deploy-never-a-real-tag\"."
+  }
 }
 
 variable "entra_tenant_id" {
@@ -87,34 +101,13 @@ variable "entra_client_id" {
     Entra application (client) id for THIS environment — a distinct app registration
     per environment, because the redirect URIs differ.
 
-    Empty leaves SSO dormant: `ENTRA_CLIENT_ID` is optional in the API's env schema,
-    so the task still boots and the Entra-dependent features self-disable rather than
-    crash-looping. That is the state production is in until its app registration
-    exists.
+    Must be set for a deployed environment: identity 8's `staff` preset signs everyone in with
+    Microsoft, and the env schema refuses to boot NODE_ENV=production without
+    ENTRA_TENANT_ID / ENTRA_CLIENT_ID / ENTRA_CLIENT_SECRET. The registration is DELEGATED-ONLY
+    (OpenID scopes, no Graph application permissions); Graph runs under its own app. The redirect
+    URI registered on it is `https://<app_domain>/api/auth/callback/microsoft`.
   EOT
   type        = string
-}
-
-variable "entra_client_secret_set" {
-  description = <<-EOT
-    Inject `entra-client-secret` into api and worker, enabling the BFF's server-side
-    code exchange.
-
-    OFF by default for the same mechanical reason as `graph_client_certificate_set`: ECS
-    cannot inject a Secrets Manager secret that holds no value — the task dies before the
-    app runs — so wiring a credential that has not been minted yet takes the whole
-    environment down.
-
-    This one cannot be generated on this side. It is a confidential-client secret created
-    on the Entra app registration, so the order is: create the secret in Entra, put it in
-    Secrets Manager, then flip this.
-
-    While it is false the SPA can still reach `POST /v1/bff/login` and receive an
-    authorize URL; the callback is what fails, closed, with a generic 401. Everything
-    that does not depend on interactive login is unaffected.
-  EOT
-  type        = bool
-  default     = false
 }
 
 variable "graph_client_certificate_set" {
@@ -243,7 +236,7 @@ variable "tunnel_enabled" {
     connector owns, and traffic could arrive by two paths with different TLS termination.
 
     The tunnel itself, its connector token and the routing rule are all created and
-    owned BY TERRAFORM (`module.tunnel`, the shared `cf-tunnel` module) — unlike rally,
+    owned BY TERRAFORM (`module.tunnel`, the shared `cf-tunnel` module) — unlike rova,
     which had to ADOPT two tunnels already created by hand in the dashboard, opshub has
     never had one, so there is nothing to preserve and no adopt-then-manage two-step
     needed. Turning this on with `cloudflare_account_id` set is enough on its own.
@@ -558,7 +551,7 @@ variable "api" {
   #
   # A `validation`, so it fails a plan. Both environments already pair floor 0 with autoscaling
   # off, so this changes nothing today — it exists so the broken pairing cannot be introduced
-  # while every plan stays green. Ported from rally, which had it and opshub did not.
+  # while every plan stays green. Ported from rova, which had it and opshub did not.
   validation {
     condition     = !var.api.enable_autoscaling || var.api.min_count >= 1
     error_message = "api.enable_autoscaling = true requires min_count >= 1 (got ${var.api.min_count}). Target tracking scales on CPU and memory, which a service at zero tasks does not publish, so nothing can scale it back out — a floor of at least 1 is what restores capacity. Raise the floor, or set enable_autoscaling = false and let the deploy and idle_schedule own the count."
@@ -587,7 +580,7 @@ variable "worker" {
   #
   # A `validation`, so it fails a plan. Both environments already pair floor 0 with autoscaling
   # off, so this changes nothing today — it exists so the broken pairing cannot be introduced
-  # while every plan stays green. Ported from rally, which had it and opshub did not.
+  # while every plan stays green. Ported from rova, which had it and opshub did not.
   validation {
     condition     = !var.worker.enable_autoscaling || var.worker.min_count >= 1
     error_message = "worker.enable_autoscaling = true requires min_count >= 1 (got ${var.worker.min_count}). Target tracking scales on CPU and memory, which a service at zero tasks does not publish, so nothing can scale it back out — a floor of at least 1 is what restores capacity. Raise the floor, or set enable_autoscaling = false and let the deploy and idle_schedule own the count."
@@ -608,6 +601,17 @@ variable "uploads" {
     extra_cors_origins = optional(list(string), [])
   })
   default = {}
+}
+
+variable "dns_enabled" {
+  description = <<-EOT
+    Whether this environment owns its public DNS: the API CNAME, the web CNAME and the Pages custom
+    domain. REQUIRED, no default, so every environment states it. Set it to false only to decommission
+    DNS on purpose: it is the one switch that removes the records, and it is never inferred from the
+    zone id (an empty id used to mean "off", which silently destroyed the records). When true, the
+    shared stack must export a valid 32-hex `cloudflare_zone_id` or the plan fails.
+  EOT
+  type        = bool
 }
 
 variable "cloudflare_account_id" {
@@ -639,11 +643,18 @@ variable "observability" {
     libs/platform/src/observability/otel.ts builds a ParentBased/TraceIdRatio sampler from it,
     and otel.spec.ts asserts a configured probability changes the decisions. It was inert
     before that — declared here and in the env schema, and ignored by opshub's own OTel
-    bootstrap, which had drifted behind the `@quynhonsemiconductor/observability` package rally uses.
+    bootstrap, which had drifted behind the `@quynhonsemiconductor/observability` package rova uses.
+
+    `debug_metrics` is a TEMPORARY DIAGNOSTIC for DEVELOP ONLY (the tf-modules observability-agent
+    `debug_metrics`): the collector sidecars also log every metric datapoint, with its timestamp, to
+    their CloudWatch stream, to find which writer emits duplicate-timestamp samples. It costs
+    CloudWatch ingestion (~5 GB/day) and logs application data. Default false; never set it in
+    production; turn it off by deleting the line in live/develop (runbook: quynhonsemiconductor/ci docs/runbooks/otel-duplicate-timestamps.md).
   EOT
   type = object({
     otlp_endpoint        = optional(string, "")
     sampling_probability = optional(number, 1.0)
+    debug_metrics        = optional(bool, false)
   })
   default = {}
 
@@ -673,18 +684,18 @@ variable "monitor_ingress" {
 
     That matters because a health check against a hostname with no tasks behind it sits in
     ALARM permanently: it pages for a condition that IS the intended state, and bills every
-    month for that non-signal. rally hit exactly that — its develop had floors of 0, an idle
+    month for that non-signal. rova hit exactly that — its develop had floors of 0, an idle
     schedule taking it to zero tasks nightly and all weekend, and this variable unset, so it
-    paid for a probe that was red most of the week (fixed in quynhonsemiconductor/rally#393, which is
+    paid for a probe that was red most of the week (fixed in quynhonsemiconductor/rova#393, which is
     where this derivation comes from).
 
-    Default true, matching rally, because the idle gate makes true SAFE: it cannot create a
+    Default true, matching rova, because the idle gate makes true SAFE: it cannot create a
     check against an environment that is not serving.
 
     Cost, since this is the one guard here that bills per month rather than per alarm: one
     health check on a non-AWS endpoint, with `measure_latency = false` and no string match,
     so no optional-feature charge — plus one CloudWatch alarm and an SNS topic that costs
-    nothing until it notifies. Worth stating precisely because rally's own comment quotes
+    nothing until it notifies. Worth stating precisely because rova's own comment quotes
     "$0.75 base + $2.00 for the string-match/latency option" while its resource enables
     NEITHER option, so that arithmetic describes something it did not build.
   EOT
@@ -733,7 +744,7 @@ variable "grafana_alerting_auth" {
   description = <<-EOT
     Stack service account token — qnsc-infra/live/observability's
     `alerting_service_account_token` output. A SEPARATE variable from
-    `grafana_alerting` below, same reason as rally's own copy of this
+    `grafana_alerting` below, same reason as rova's own copy of this
     variable: it carries a raw secret value directly through Terraform, and
     `sensitive = true` only masks plan/apply output for a variable as a
     whole — nesting it into the config object would either blunt-hide the
@@ -765,11 +776,11 @@ variable "grafana_alerting" {
 
     `alerts_folder_uid`, `dashboards_folder_uid` and
     `product_dashboards_folder_uid` are THREE DIFFERENT folders in the same
-    shared Grafana stack — do not collapse them, and do not repeat rally's
+    shared Grafana stack — do not collapse them, and do not repeat rova's
     own real bug of reusing `alerts_folder_uid` for the dashboard resource.
     `product_dashboards_folder_uid` is qnsc-infra/live/observability's
     `opshub_dashboards_folder_uid` output — created ONCE, centrally, exactly
-    like rally's own subfolder, not re-derived per environment (rally hit a
+    like rova's own subfolder, not re-derived per environment (rova hit a
     real duplicate-folder bug doing that: develop and prod are separate
     Terraform root modules with separate state, so a `grafana_folder`
     resource created HERE would create two separate "Opshub" folders).
@@ -791,43 +802,55 @@ variable "grafana_alerting" {
 
 variable "email_provider" {
   description = <<-EOT
-    Which transport sends mail: "dev" logs and sends nothing, "ses" uses this account's SES.
+    Which transport sends mail: "dev" logs and sends nothing, "graph" sends through Microsoft 365 (Graph
+    `sendMail`) from the product's shared mailbox. SES and Resend were removed (opshub#405).
 
-    Defaults to "dev" so applying this module changes nothing about mail until somebody chooses to
-    turn it on. Choosing "ses" needs `mail_from_email` set AND the sender's domain verified in SES —
-    the IAM grant below is created either way, and grants nothing when there is no sender.
+    Defaults to "dev" so applying this module changes nothing about mail until somebody chooses to turn it on.
+
+    "graph" needs `mail_graph_sender`, the Graph worker app (`graph_client_id`) and its certificate in the worker task
+    (`graph_client_certificate_set`): the WORKER is the only process that sends. The mailbox is granted to that app by
+    Exchange RBAC for Applications, NOT by a Graph permission in Entra: docs/runbooks/mail-graph.md has the owner steps.
   EOT
   type        = string
   default     = "dev"
 
   validation {
-    condition     = contains(["dev", "ses", "resend"], var.email_provider)
-    error_message = "email_provider must be dev, ses or resend."
+    condition     = contains(["dev", "graph"], var.email_provider)
+    error_message = "email_provider must be dev or graph."
+  }
+
+  validation {
+    condition = var.email_provider != "graph" || (
+      var.mail_graph_sender != "" && var.graph_client_id != "" && var.graph_client_certificate_set
+    )
+    error_message = "email_provider = \"graph\" needs mail_graph_sender, graph_client_id and graph_client_certificate_set = true (the worker's credential for the mailbox). Finish docs/runbooks/mail-graph.md first: ECS cannot inject a secret that holds no value."
   }
 }
 
-variable "mail_from_email" {
+variable "mail_graph_sender" {
   description = <<-EOT
-    The verified sender address, e.g. no-reply@opshub.example.com.
+    The shared mailbox Graph sends as, e.g. `noreply-opshub@qnsc.vn`. Required for email_provider = "graph". A public
+    address, held in git. Graph sends as exactly this mailbox: the Exchange role assignment is scoped to its
+    PrimarySmtpAddress, so any other sender is a 403.
 
-    NO DEFAULT, deliberately. The app used to default this to a domain a deployment may not own, and
-    the result was not a failure: mail went out failing SPF and DKIM, which is silent non-delivery or
-    delivery to spam. Empty is the honest value when mail is off, and the app refuses to boot with a
-    non-dev provider and no sender.
+    A NON-PROD ENVIRONMENT NEVER SENDS FROM THE PROD MAILBOX (decision 2026-10-18, HYBRID-INFRA-PLAN §7.4): develop sends as
+    `noreply-opshub-dev@qnsc.vn`, scoped to the develop Graph worker app; production sends as `noreply-opshub@qnsc.vn`, scoped to the
+    production one. docs/runbooks/mail-graph.md has the steps.
   EOT
   type        = string
   default     = ""
 
   validation {
-    condition     = var.email_provider == "dev" || var.mail_from_email != ""
-    error_message = "mail_from_email is required when email_provider is not \"dev\"."
+    condition     = var.mail_graph_sender == "" || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.mail_graph_sender))
+    error_message = "mail_graph_sender must be a single bare email address (no display name)."
   }
-}
 
-variable "mail_from_name" {
-  description = "Display name on outgoing mail."
-  type        = string
-  default     = "OpsHub"
+  # A non-prod environment never sends from the prod mailbox, and production never from the dev one. Each is scoped to its own Graph worker app in
+  # Exchange; this stops the wrong address being typed into the wrong environment's live/main.tf.
+  validation {
+    condition     = var.mail_graph_sender == "" || lower(trimspace(var.mail_graph_sender)) == (var.env == "production" ? "noreply-${var.product}@qnsc.vn" : "noreply-${var.product}-dev@qnsc.vn")
+    error_message = "mail_graph_sender must be noreply-opshub@qnsc.vn in production and noreply-opshub-dev@qnsc.vn in every other environment (a non-prod environment never sends from the prod mailbox)."
+  }
 }
 
 variable "mail_reply_to" {
@@ -883,4 +906,22 @@ variable "cpu_architecture" {
 
     Defaults to X86_64 so a caller that has not moved its build keeps working.
   EOT
+}
+
+variable "edge_client_ip_secret_previous_set" {
+  description = <<-EOT
+    Inject `edge-client-ip-secret-previous` into the API as EDGE_CLIENT_IP_SECRET_PREVIOUS: the key being retired,
+    still accepted when the API verifies the Pages Function's signed client address. ONLY during a rotation.
+
+    OFF by default for the same mechanical reason as `graph_client_certificate_set`: ECS cannot resolve a bundle key that
+    is not there, and the task does not start. Rotation, in this order:
+      1. API first: set the bundle's `edge-client-ip-secret` to the NEW value, add `edge-client-ip-secret-previous`
+         with the OLD value, set this to true, apply, wait for the API to roll;
+      2. then the Pages secret `EDGE_CLIENT_IP_SECRET` = the new value, and redeploy the web (a Pages secret
+         applies to new deployments only);
+      3. when no signature under the old key can still arrive, set this back to false, apply, remove the bundle key.
+    The `edge-client-ip-rejected` alert must stay quiet throughout.
+  EOT
+  type        = bool
+  default     = false
 }

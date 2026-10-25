@@ -3,12 +3,17 @@
 Ratio of `job_failures_total` to `job_runs_total` over 5 minutes has crossed the
 environment's threshold (5% prod / 10% develop) for 5 minutes straight.
 
+> **Limit.** This is a ratio over five minutes and is gated on a minimum number of job runs in that window (`min_samples_5m`). Only scheduled
+> jobs that run through `ExclusiveJob` are counted here (outbox relays are not), and they run every few minutes to once a day, so the gate is
+> rarely open. A single failing scheduled job is caught by `scheduled-job-failed`, which has no floor.
+
 ## What this means
 
 A meaningful share of background jobs (cron jobs — security-posture sync, compliance
 sync, audit cleanup, delegation expiry, review-due, storage cleanup, request expiry,
-contract expiry, SLA breach — plus the webhook and notification/email relays) are
-failing. This is the worker process (`apps/worker`), not the API.
+contract expiry, SLA breach) are failing. The outbox relay PASSES (webhook, notification,
+email, Graph) are NOT in this ratio: they are not timed by `JobMetrics`, and a relay whose pass throws is watched by
+`outbox-relay-failing`. This is the worker process (`apps/worker`), not the API.
 
 ## First checks
 
@@ -19,9 +24,9 @@ failing. This is the worker process (`apps/worker`), not the API.
 3. Check the Deploys annotation — did this start right after a deploy to the worker?
 4. Check which JOB TYPE is failing (log `context` field). Different jobs have different
    likely causes:
-   - Email relay: check `MAIL_FROM_EMAIL`/SES verification and the SES bounce/complaint
+   - Email relay (its rows failing, not its pass): check `MAIL_FROM_EMAIL`/SES verification and the SES bounce/complaint
      queue depth (CloudWatch).
-   - Webhook relay / notification relay: check the outbox table for `status = 'failed'`
+   - Webhook relay / notification relay (rows): check the outbox table for `status = 'failed'`
      rows and any outbox dead-letter CloudWatch alarm.
    - Compliance/security-posture sync crons: check the upstream source's own health and
      rate limits.

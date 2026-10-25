@@ -27,6 +27,10 @@ sum(increase(http_server_duration_milliseconds_bucket{le="+Inf",   ...}[30m]))
   - sum(increase(http_server_duration_milliseconds_bucket{le="1000", ...}[30m]))
 ```
 
+Both selectors also carry `otel_scope_name="qnsc"`: `HttpMetrics` is the only emitter of the duration (with
+instrumentation-http 0.221.0). Check with `count by (otel_scope_name) (http_server_duration_milliseconds_bucket)`: one
+row, `qnsc`. Guard rejections, unmatched 404s and `/api/auth/*` are not in this series.
+
 The `le` value is matched as a **string label**, so it must be one of the boundaries the
 service actually exports. A plausible-looking number that is not a real boundary — 2000,
 1500, 3000 — matches no series at all, the subtraction returns an empty result, and the
@@ -36,7 +40,7 @@ fails the plan rather than letting that pass review, and it enforces a second ru
 well: the bucket may not sit BELOW the same environment's own p99 threshold, or this rule
 would count requests the latency rule considers acceptable and the two would contradict
 each other. `local.http_duration_buckets_ms` in the same file is the list of legal
-values. That list mirrors `apps/api/src/otel.ts`; if one moves, both move.
+values. That list mirrors `apps/api/src/http-duration-boundaries.ts`; if one moves, both move.
 
 ## First checks
 

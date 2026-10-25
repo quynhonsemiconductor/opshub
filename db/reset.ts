@@ -4,7 +4,7 @@
  * Why this exists. Nothing in the e2e suite tears down what it creates — every `afterAll`
  * closes the Nest app and cleans nothing — while the specs insert timesheets, leave and
  * requests on every pass. So a developer's database grows forever, and two things follow,
- * both of which rally hit for real before this pattern was adopted there:
+ * both of which rova hit for real before this pattern was adopted there:
  *
  *   • Tests read each other's leftovers. A list assertion that holds on a clean database
  *     becomes order- or count-dependent once fifty rows from earlier runs exist, and the
@@ -23,7 +23,7 @@
  * helper is exactly what invites that, so the gate is that `seed()` never calls this itself.
  */
 import { Pool } from 'pg';
-import { pgOptions } from './pg-ssl';
+import { pgOptions, tlsFromEnv } from './pg-ssl';
 import { resolveMigrationUrl } from './database-url';
 
 /**
@@ -47,6 +47,10 @@ import { resolveMigrationUrl } from './database-url';
  * Both are reconciled idempotently by `seedRbacCatalog` / `seed`, so they need no reset.
  */
 export const FIXTURE_TABLES = [
+  // identity 8 sessions (and verification rows): every test-login adds one, and nothing else ends them.
+  // `identity.user` and `identity.account` are deliberately NOT here: the users ARE the fixture set.
+  'identity.session',
+  'identity.verification',
   // workforce — what the isolation suite creates on every run
   'workforce.timesheets',
   'workforce.leave_requests',
@@ -185,7 +189,7 @@ export async function resetFixtureTables(connectionUrl?: string): Promise<void> 
   // application role is not guaranteed to hold it.
   const url = connectionUrl ?? resolveMigrationUrl();
 
-  const pool = new Pool({ ...pgOptions(url), max: 1 });
+  const pool = new Pool({ ...pgOptions(url, tlsFromEnv()), max: 1 });
   try {
     await pool.query(`TRUNCATE TABLE ${FIXTURE_TABLES.join(', ')} CASCADE`);
   } finally {

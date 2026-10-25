@@ -13,11 +13,11 @@ do nothing. Moving the runtime off the owner is what makes that layer possible a
 
 ## Design
 
-| Role | Rights | Used by |
-| --- | --- | --- |
-| `opshub_app` | `SELECT, INSERT, UPDATE, DELETE` on every application table; `USAGE, SELECT` on sequences | API task |
-| `opshub_worker` | the same | worker task |
-| `opshub_migrate` | `ALL` on the application schemas and on `drizzle` | migrator task |
+| Role             | Rights                                                                                    | Used by       |
+| ---------------- | ----------------------------------------------------------------------------------------- | ------------- |
+| `opshub_app`     | `SELECT, INSERT, UPDATE, DELETE` on every application table; `USAGE, SELECT` on sequences | API task      |
+| `opshub_worker`  | the same                                                                                  | worker task   |
+| `opshub_migrate` | `ALL` on the application schemas and on `drizzle`                                         | migrator task |
 
 No runtime role holds `CREATE`, `DROP`, `TRUNCATE` or ownership. Per-role
 `statement_timeout` (30s app / 120s worker) and `idle_in_transaction_session_timeout` are set
@@ -84,14 +84,14 @@ definition or in CloudTrail.
 
 Every check it performs, and what each one catches:
 
-| Check | Catches |
-| --- | --- |
-| role exists | migration 0012 never ran against this database |
-| `rolcanlogin` after `ALTER ROLE` | the `ALTER` silently did nothing |
+| Check                                                                       | Catches                                                                              |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| role exists                                                                 | migration 0012 never ran against this database                                       |
+| `rolcanlogin` after `ALTER ROLE`                                            | the `ALTER` silently did nothing                                                     |
 | no `rolsuper`/`rolbypassrls`/`rolcreatedb`/`rolcreaterole`/`rolreplication` | a role that **looks** restricted but is worse than the master credential it replaces |
-| all four DML privileges on **every** table in all 14 schemas | a table or whole schema the grants missed — invisible until a request touches it |
-| `SELECT` on a real table succeeds | a role so restricted it cannot serve any request |
-| `CREATE TABLE` **fails** | grants widened to ownership, making the split decorative |
+| all four DML privileges on **every** table in all 14 schemas                | a table or whole schema the grants missed — invisible until a request touches it     |
+| `SELECT` on a real table succeeds                                           | a role so restricted it cannot serve any request                                     |
+| `CREATE TABLE` **fails**                                                    | grants widened to ownership, making the split decorative                             |
 
 The DDL probe runs inside a transaction that always rolls back, so a failure part-way cannot
 leave a stray table in a real schema.
@@ -105,7 +105,7 @@ Two infra variables, in this order, **one deploy apart**:
 2. `db_least_privilege = true` — switches `DATABASE_USER`/`DATABASE_PASSWORD` on the api and
    worker tasks to `opshub_app` / `opshub_worker`. The migrator keeps the master credential.
 
-Splitting the two means the secrets exist and are readable *before* anything depends on them,
+Splitting the two means the secrets exist and are readable _before_ anything depends on them,
 so a permissions problem on the secret surfaces as a failed plan rather than a task that
 cannot boot.
 
@@ -120,7 +120,7 @@ migration needs reverting.
 **Ownership transfer.** The master role still owns every object. Until ownership moves to
 `opshub_migrate`, `ALTER DEFAULT PRIVILEGES … FOR ROLE opshub_migrate` cannot be set from the
 migration — Postgres only allows setting another role's default privileges with ADMIN OPTION
-on it, and whether the master user holds that depends on who created the role. rally hit
+on it, and whether the master user holds that depends on who created the role. rova hit
 exactly this: the statement's success varied by environment and a
 `permission denied to change default privileges` aborted the whole migration, breaking a
 develop deploy. It also buys nothing while `opshub_migrate` is NOLOGIN and creates no objects.
@@ -138,12 +138,12 @@ Nothing to do. The local stack connects as the `opshub` superuser, and migration
 sit unused. To reproduce the CI split locally:
 
 ```bash
-DATABASE_MIGRATION_URL='postgres://opshub:opshub@localhost:5433/opshub' \
+DATABASE_MIGRATION_URL='postgres://opshub:opshub@localhost:5410/opshub' \
 DATABASE_APP_PASSWORD='local-opshub-app-least-privilege' \
   pnpm db:roles:enable
 
-DATABASE_URL='postgres://opshub_app:local-opshub-app-least-privilege@localhost:5433/opshub' \
-DATABASE_MIGRATION_URL='postgres://opshub:opshub@localhost:5433/opshub' \
+DATABASE_URL='postgres://opshub_app:local-opshub-app-least-privilege@localhost:5410/opshub' \
+DATABASE_MIGRATION_URL='postgres://opshub:opshub@localhost:5410/opshub' \
   pnpm test:e2e
 ```
 

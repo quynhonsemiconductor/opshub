@@ -1,5 +1,5 @@
 # PR auto-labeler config — maps file path patterns to labels.
-# Used by the labeler workflow (labeler.yml).
+# Used by the PR-title job (pr-title.yml), through ci actions/pr-labels.
 # Labels must exist in the repo before they can be applied.
 
 area/web:
@@ -29,7 +29,3 @@ area/infra:
 area/ci:
   - changed-files:
     - any-glob-to-any-file: ".github/**"
-
-area/contracts:
-  - changed-files:
-    - any-glob-to-any-file: "libs/contracts/**"

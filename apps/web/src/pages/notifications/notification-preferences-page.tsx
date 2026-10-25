@@ -71,6 +71,11 @@ const EVENT_GROUPS: EventGroup[] = [
         hint: 'Sent to the first approver when a request enters the queue.',
       },
       {
+        type: 'request.no_approver',
+        label: 'A request has no one left to approve it',
+        hint: 'Sent to administrators when a request is waiting and its only holder of the approval permission is the requester.',
+      },
+      {
         type: 'request.step_ready',
         label: 'A request has reached your step',
         hint: 'Multi-step approvals only — an earlier approver has signed off and it is now with you.',

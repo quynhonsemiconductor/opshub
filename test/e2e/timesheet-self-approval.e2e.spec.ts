@@ -21,7 +21,7 @@
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE, bearer, createTestApp, login, type Session } from './support/harness';
+import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
 
 let app: NestFastifyApplication;
 /** Holds `workforce.approve` GLOBALLY — so the only thing that can refuse it here is ownership. */
@@ -45,7 +45,7 @@ async function submittedTimesheet(session: Session, workDate: string): Promise<s
   const created = await app.inject({
     method: 'POST',
     url: '/v1/workforce/timesheets',
-    headers: bearer(session),
+    headers: authHeaders(session),
     payload: { workDate, minutesWorked: 480, note: 'e2e self-approval fixture' },
   });
   expect(created.statusCode, created.body).toBe(201);
@@ -54,7 +54,7 @@ async function submittedTimesheet(session: Session, workDate: string): Promise<s
   const submitted = await app.inject({
     method: 'POST',
     url: `/v1/workforce/timesheets/${id}/submit`,
-    headers: bearer(session),
+    headers: authHeaders(session),
   });
   expect(submitted.statusCode, submitted.body).toBe(201);
   return id;
@@ -90,7 +90,7 @@ describe('timesheet review, separation of duties', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/workforce/timesheets/${id}/review`,
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: { approve: true },
     });
 
@@ -109,7 +109,7 @@ describe('timesheet review, separation of duties', () => {
     const after = await app.inject({
       method: 'GET',
       url: `/v1/workforce/timesheets?employeeId=${FIXTURE.HR.id}&limit=100`,
-      headers: bearer(hr),
+      headers: authHeaders(hr),
     });
     expect(after.statusCode, after.body).toBe(200);
     const rows = (
@@ -132,7 +132,7 @@ describe('timesheet review, separation of duties', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/workforce/timesheets/${id}/review`,
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: { approve: false },
     });
 
@@ -148,7 +148,7 @@ describe('timesheet review, separation of duties', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/workforce/timesheets/${id}/review`,
-      headers: bearer(hr),
+      headers: authHeaders(hr),
       payload: { approve: true },
     });
 
@@ -172,7 +172,7 @@ describe('timesheet review, separation of duties', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/workforce/timesheets/${id}/review`,
-      headers: bearer(admin),
+      headers: authHeaders(admin),
       payload: { approve: true },
     });
 
@@ -189,7 +189,7 @@ describe('timesheet review, separation of duties', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/workforce/timesheets/${id}/review`,
-      headers: bearer(plain),
+      headers: authHeaders(plain),
       payload: { approve: true },
     });
 

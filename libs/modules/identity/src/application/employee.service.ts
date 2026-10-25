@@ -1,15 +1,16 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import {
   NotFoundException,
   ConflictException,
   ErrorCodes,
   InjectDrizzle,
+  SESSION_REVOKER,
   StorageService,
   type DrizzleDB,
+  type SessionRevoker,
 } from '@platform';
-import { AuthTokenCache } from '@quynhonsemiconductor/identity';
 import type { PresignUploadResult } from '@platform';
-import { SEC_PER_DAY } from '@shared-kernel';
+import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
 import {
   AuditService,
   AUDIT_ACTION,
@@ -17,10 +18,7 @@ import {
   type ResourceAuditTrail,
 } from '@modules/audit';
 import { EMPLOYEE_REPOSITORY, type IEmployeeRepository } from '../domain/ports/employee.repository';
-import {
-  REFRESH_TOKEN_REPOSITORY,
-  type IRefreshTokenRepository,
-} from '../domain/ports/refresh-token.repository';
+import { UserDirectory } from '../infrastructure/auth/user-directory';
 import type {
   CreateEmployeeInput,
   UpdateEmployeeInput,
@@ -43,6 +41,10 @@ export interface Actor {
  * be created, renamed or offboarded with nothing in the trail and nothing anywhere saying so. The entry now
  * commits with the row or not at all.
  *
+ * EVERY EMPLOYEE HAS A MATCHING IDENTITY USER, with the same id, written in the same transaction
+ * (`UserDirectory`): otherwise the person's first Microsoft sign-in would create an identity user with a NEW
+ * id, and every foreign key to the employee would stop meaning them.
+ *
  * WHAT STAYS OUTSIDE THE TRANSACTION, deliberately: revoking sessions in Valkey and deleting an old avatar
  * from S3. Neither can be rolled back by Postgres, so holding them inside a transaction would buy nothing and
  * would keep the row locked across a network call. They run after it commits, in the order that fails safe —
@@ -51,16 +53,24 @@ export interface Actor {
 @Injectable()
 export class EmployeeService {
   private readonly trail: ResourceAuditTrail;
+  private readonly sessionTrail: ResourceAuditTrail;
 
   constructor(
     @Inject(EMPLOYEE_REPOSITORY) private readonly employeeRepo: IEmployeeRepository,
-    @Inject(REFRESH_TOKEN_REPOSITORY) private readonly refreshTokenRepo: IRefreshTokenRepository,
-    private readonly authCache: AuthTokenCache,
+    private readonly users: UserDirectory,
     private readonly storage: StorageService,
     @InjectDrizzle() private readonly db: DrizzleDB,
     audit: AuditService,
+    /** Queues the Entra account reconcile in the status transaction. Needs no Graph credential (see the queue). */
+    private readonly graphTasks: GraphTaskQueue,
+    /**
+     * Ends sessions and blocks sign-in. Bound by the API's AuthModule; ABSENT in the worker, which compiles
+     * this service (contracts and training import it) but never changes an employee's status.
+     */
+    @Optional() @Inject(SESSION_REVOKER) private readonly sessions?: SessionRevoker,
   ) {
     this.trail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE);
+    this.sessionTrail = audit.forResource(AUDIT_RESOURCE.SESSION);
   }
 
   async create(input: CreateEmployeeInput, actor: Actor): Promise<Employee> {
@@ -73,6 +83,7 @@ export class EmployeeService {
         { ...input, email: input.email.toLowerCase() },
         tx,
       );
+      await this.users.ensure(employee, tx);
       await this.trail.record(AUDIT_ACTION.EMPLOYEE_CREATED, employee.id, actor, tx, {
         after: {
           email: employee.email,
@@ -133,6 +144,7 @@ export class EmployeeService {
 
     return this.db.transaction(async (tx) => {
       const updated = await this.employeeRepo.update(id, input, tx);
+      await this.users.ensure(updated, tx); // the join key to Entra and the display name follow the employee
       await this.trail.record(AUDIT_ACTION.EMPLOYEE_UPDATED, id, actor, tx, { after: input });
       return updated;
     });
@@ -140,38 +152,81 @@ export class EmployeeService {
 
   /**
    * Change employee status.
-   * - Offboarding: immediately revokes all active refresh token sessions AND
-   *   fast-revokes outstanding access tokens via the shared AuthTokenCache
-   *   user-revocation denylist.
-   * - Re-activating: clears the revocation entry so the employee can log in again.
+   *
+   * - Offboarding: IN THE SAME TRANSACTION as the status, the identity user is banned and every session row
+   *   is deleted (`UserDirectory.ban`). That is the authoritative step and needs only Postgres. After the
+   *   commit, `SessionRevoker.offboard` clears the sessions cached in Valkey (identity 8's `setUserBanned`).
+   *   That second step REFUSES while Valkey is down (`SessionStoreUnavailableError`) and the request then
+   *   fails, but by then the leaver is already banned with no session rows, so they cannot sign in again and
+   *   a cached copy that comes back is refused on its first read.
+   * - Offboarding an employee who is ALREADY offboarded re-applies the ban and the cache clear instead of
+   *   returning early. That is what makes the retry after the failure above work: the status is already
+   *   `offboarded`, so a no-op would leave the cached sessions behind for good.
+   * - Leaving `offboarded` (to `active` or `on_leave`, both of which may sign in): the ban is lifted in the
+   *   transaction. Nothing is re-created; the person signs in with Microsoft as before.
    */
   async updateStatus(id: string, status: EmployeeStatus, actor: Actor): Promise<Employee> {
     const employee = await this.employeeRepo.findById(id);
     if (!employee) throw new NotFoundException(ErrorCodes.EMPLOYEE_NOT_FOUND, 'Employee not found');
-    if (employee.status === status) return employee;
+
+    const wasOffboarded = employee.status === 'offboarded';
+    const toOffboarded = status === 'offboarded';
+    if (employee.status === status && !toOffboarded) return employee;
+
+    // Refuse BEFORE changing anything where no revoker is bound (the worker): a wiring error, not a no-op.
+    const revoker = toOffboarded || wasOffboarded ? this.revoker() : undefined;
 
     const updated = await this.db.transaction(async (tx) => {
-      const row = await this.employeeRepo.updateStatus(id, status, tx);
-      await this.trail.record(AUDIT_ACTION.EMPLOYEE_STATUS_CHANGED, id, actor, tx, {
-        before: { status: employee.status },
-        after: { status },
-      });
+      let row = employee;
+      if (employee.status !== status) {
+        row = await this.employeeRepo.updateStatus(id, status, tx);
+        await this.trail.record(AUDIT_ACTION.EMPLOYEE_STATUS_CHANGED, id, actor, tx, {
+          before: { status: employee.status },
+          after: { status },
+        });
+      }
+      // Entering or leaving `offboarded` changes what Entra should say about this person: queue a reconcile, in
+      // THIS transaction, so the task exists if and only if the status change committed. LEVEL-TRIGGERED: the task
+      // carries the employee id and nothing else, and the worker reads the CURRENT status when it runs (offboarded:
+      // disable the account and revoke its sign-in sessions; otherwise: enable it), so a repeated task, a retry
+      // (`offboarded` → `offboarded`) or an older one run later all converge on the same state.
+      if (toOffboarded || wasOffboarded) {
+        await this.graphTasks.enqueue(
+          { kind: GRAPH_TASK.ACCOUNT_RECONCILE, payload: { employeeId: id } },
+          tx,
+        );
+      }
+      if (toOffboarded) {
+        const ended = await this.users.ban(id, 'offboarded', tx);
+        if (ended > 0) {
+          await this.sessionTrail.record(AUDIT_ACTION.SESSION_REVOKED, id, actor, tx, {
+            after: { revokedSessions: ended, reason: 'offboarding' },
+          });
+        }
+      } else if (wasOffboarded) {
+        await this.users.unban(id, tx);
+      }
       return row;
     });
 
-    // AFTER the commit, and outside it: Valkey and the session table cannot be rolled back with the row.
-    if (status === 'offboarded') {
-      // Revoke all DB sessions immediately
-      await this.refreshTokenRepo.revokeAllForEmployee(id);
-      // Fast-revoke any live access tokens — blocks them within milliseconds
-      // TTL = 24h to cover any edge cases (access tokens expire in 15 min anyway)
-      await this.authCache.revokeUser(id, SEC_PER_DAY);
-    } else if (status === 'active') {
-      // Clear revocation if re-activating an offboarded employee
-      await this.authCache.unrevokeUser(id);
+    // AFTER the commit, and outside it: Valkey cannot be rolled back with the row. Cache-only now.
+    if (toOffboarded) {
+      await revoker!.offboard(id, 'offboarded');
+    } else if (wasOffboarded) {
+      await revoker!.reinstate(id);
     }
 
     return updated;
+  }
+
+  /** The port is bound in the API only; changing a status anywhere else is a wiring error, not a no-op. */
+  private revoker(): SessionRevoker {
+    if (!this.sessions) {
+      throw new Error(
+        'EmployeeService.updateStatus needs a SessionRevoker: bind it in the API (AuthModule).',
+      );
+    }
+    return this.sessions;
   }
 
   async list(

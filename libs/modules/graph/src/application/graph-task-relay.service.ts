@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, asc, eq, inArray, lt, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
 import {
   AbstractOutboxRelay,
+  DB_NOW,
   DeferError,
+  dbDelay,
   ExclusiveJob,
   InjectDrizzle,
   NonRetryableError,
@@ -11,7 +13,7 @@ import {
 } from '@platform';
 import type { Claimed, DrizzleDB, DrizzleTx, OutboxLeaseTable } from '@platform';
 import { graphTaskOutbox } from '../../../../../db/schema';
-import { GRAPH_TASK, graphLeaseMs } from '../graph-task';
+import { GRAPH_TASK, GRAPH_WAKE, graphLeaseMs } from '../graph-task';
 import { classifyGraphError } from '../graph-errors';
 import { GRAPH_LOCK } from '../graph-locks';
 import { GraphClientService } from '../graph-client.service';
@@ -31,6 +33,11 @@ export interface TaskRow {
   payload: Record<string, unknown>;
   attempts: number;
   createdAt: Date;
+  /**
+   * Milliseconds since the request was queued, measured by the DATABASE when the row was claimed (now() - created_at).
+   * The dead-letter bound reads this, never the host clock (the Time rule, .github#29).
+   */
+  waitedMs: number;
 }
 
 /**
@@ -107,15 +114,18 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
     return `${this.queueName}[${this.kinds.join(',')}]`;
   }
 
-  protected selectDue(tx: DrizzleTx, limit: number, now: Date): Promise<TaskRow[]> {
-    if (!this.graph.isEnabled()) return Promise.resolve([]);
-    return tx
+  protected async selectDue(tx: DrizzleTx, limit: number, now: SQL): Promise<TaskRow[]> {
+    if (!this.graph.isEnabled()) return [];
+    const rows = await tx
       .select({
         id: graphTaskOutbox.id,
         kind: graphTaskOutbox.kind,
         payload: graphTaskOutbox.payload,
         attempts: graphTaskOutbox.attempts,
         createdAt: graphTaskOutbox.createdAt,
+        waitedMs: sql<
+          number | string
+        >`extract(epoch from (${DB_NOW} - ${graphTaskOutbox.createdAt})) * 1000`,
       })
       .from(graphTaskOutbox)
       .where(
@@ -133,13 +143,14 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
                AND other.id <> ${graphTaskOutbox.id}
                AND other.status = 'pending'
                AND (other.seq < ${graphTaskOutbox.seq}
-                    OR (other.lease_token IS NOT NULL AND other.locked_until > ${now.toISOString()}::timestamptz))
+                    OR (other.lease_token IS NOT NULL AND other.locked_until > ${now}))
           ))`,
         ),
       )
       .orderBy(asc(graphTaskOutbox.seq), asc(graphTaskOutbox.id))
       .limit(limit)
       .for('update', { skipLocked: true });
+    return rows.map((r) => ({ ...r, waitedMs: Number(r.waitedMs) }));
   }
 
   protected async deliver(row: Claimed<TaskRow>): Promise<void> {
@@ -186,10 +197,9 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
     });
     if (ran) return;
 
-    const waitedMs = Date.now() - row.createdAt.getTime();
-    if (waitedMs > lock.ttlMs + LOCK_WAIT_MARGIN_MS) {
+    if (row.waitedMs > lock.ttlMs + LOCK_WAIT_MARGIN_MS) {
       throw new NonRetryableError(
-        `${lock.name} stayed held for ${Math.round(waitedMs / 60_000)} min, longer than its ` +
+        `${lock.name} stayed held for ${Math.round(row.waitedMs / 60_000)} min, longer than its ` +
           `${Math.round(lock.ttlMs / 60_000)} min TTL: giving up on this request`,
       );
     }
@@ -199,7 +209,7 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
   protected async markSent(tx: DrizzleTx, row: Claimed<TaskRow>): Promise<void> {
     await tx
       .update(graphTaskOutbox)
-      .set({ status: 'sent', sentAt: new Date(), lastError: null })
+      .set({ status: 'sent', sentAt: DB_NOW, lastError: null })
       .where(eq(graphTaskOutbox.id, row.id));
   }
 
@@ -208,11 +218,15 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
     row: Claimed<TaskRow>,
     newStatus: 'pending' | 'failed',
     error: string,
-    nextAttemptAt: Date,
+    delayMs: number,
   ): Promise<void> {
     await tx
       .update(graphTaskOutbox)
-      .set({ status: newStatus, lastError: error.slice(0, MAX_ERROR_LENGTH), nextAttemptAt })
+      .set({
+        status: newStatus,
+        lastError: error.slice(0, MAX_ERROR_LENGTH),
+        nextAttemptAt: dbDelay(delayMs),
+      })
       .where(eq(graphTaskOutbox.id, row.id));
   }
 }
@@ -221,6 +235,9 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
 @Injectable()
 export class GraphAccountRelayService extends GraphTaskRelay {
   protected readonly kinds = [GRAPH_TASK.ACCOUNT_RECONCILE];
+  override get wakeKind(): string {
+    return GRAPH_WAKE.ACCOUNT;
+  }
   /** Held for the SUM of the batch's leases (150 s each): 3 rows is 7.5 minutes if a worker dies. */
   protected override readonly batchSize = 3;
 
@@ -246,6 +263,9 @@ export class GraphAccountRelayService extends GraphTaskRelay {
 @Injectable()
 export class GraphScanRelayService extends GraphTaskRelay {
   protected readonly kinds = [GRAPH_TASK.SHADOW_IT_SCAN, GRAPH_TASK.POSTURE_SYNC];
+  override get wakeKind(): string {
+    return GRAPH_WAKE.SCAN;
+  }
   protected override readonly batchSize = 1;
 
   constructor(

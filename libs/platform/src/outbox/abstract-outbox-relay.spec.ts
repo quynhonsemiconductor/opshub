@@ -10,6 +10,19 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+
+// The counter is created when the module loads, so the mock must be in place before the import below.
+const { passFailedAdd } = vi.hoisted(() => ({ passFailedAdd: vi.fn() }));
+vi.mock('@opentelemetry/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@opentelemetry/api')>();
+  return {
+    ...actual,
+    metrics: {
+      ...actual.metrics,
+      getMeter: () => ({ createCounter: () => ({ add: passFailedAdd }) }),
+    },
+  };
+});
 import {
   AbstractOutboxRelay,
   DEAD_LETTER_FIELD,
@@ -72,7 +85,7 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
     attempts: number;
     status: 'pending' | 'failed';
     error: string;
-    nextAttemptAt: Date;
+    delayMs: number;
   }> = [];
   stampedAttempts = new Map<string, number>();
   reaped = 0;
@@ -101,8 +114,17 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
   /** More batches for the same pass: each claim takes the next one. */
   queuedBatches: TestRow[][] = [];
 
+  /** Exposes the protected recorder. */
+  expose(count: number): void {
+    this.recordExpired(count);
+  }
+
+  /** The claim query itself fails (a SQL error, a dropped connection). */
+  selectThrows: Error | null = null;
+
   protected selectDue(): Promise<TestRow[]> {
     this.claims += 1;
+    if (this.selectThrows) return Promise.reject(this.selectThrows);
     const rows = this.due;
     this.due = this.queuedBatches.shift() ?? [];
     for (const r of this.due) this.byId.set(r.id, r);
@@ -118,12 +140,13 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
     _tx: DrizzleTx,
     ids: string[],
     _token: string,
-    lockedUntil: Date,
-  ): Promise<Map<string, number>> {
+    holdMs: number,
+  ): Promise<{ attempts: Map<string, number>; leaseExpiresAt: Date }> {
     const map = new Map(ids.map((id) => [id, this.byId.get(id)!.attempts + 1]));
     this.stampedAttempts = map;
-    this.heldUntil.push(lockedUntil);
-    return Promise.resolve(map);
+    const leaseExpiresAt = new Date(Date.now() + holdMs);
+    this.heldUntil.push(leaseExpiresAt);
+    return Promise.resolve({ attempts: map, leaseExpiresAt });
   }
 
   /** The `locked_until` each claim stamped. */
@@ -206,10 +229,10 @@ class TestRelay extends AbstractOutboxRelay<TestRow, string> {
     row: Claimed<TestRow>,
     status: 'pending' | 'failed',
     error: string,
-    nextAttemptAt: Date,
+    delayMs: number,
   ): Promise<void> {
     if (this.markFailedThrows) return Promise.reject(new Error('could not record the failure'));
-    this.failed.push({ id: row.id, attempts: row.attempts, status, error, nextAttemptAt });
+    this.failed.push({ id: row.id, attempts: row.attempts, status, error, delayMs });
     return Promise.resolve();
   }
 }
@@ -222,6 +245,25 @@ function make() {
 
 const backoff = (relay: TestRelay, n: number) =>
   (relay as unknown as { backoffDelayMs(n: number): number }).backoffDelayMs(n);
+
+describe('AbstractOutboxRelay.stampLeases — an empty RETURNING fails the claim', () => {
+  it('throws instead of handing out rows with an invented, already-expired lease', async () => {
+    const { relay } = make();
+    // The UPDATE touched no row: the base implementation, not the test double's override, must refuse.
+    const tx = {
+      update: () => ({
+        set: () => ({ where: () => ({ returning: () => Promise.resolve([]) }) }),
+      }),
+    } as never;
+    const base = AbstractOutboxRelay.prototype as unknown as {
+      stampLeases(tx: DrizzleTx, ids: string[], token: string, holdMs: number): Promise<unknown>;
+    };
+
+    await expect(base.stampLeases.call(relay, tx, ['a', 'b'], 'token', 1_000)).rejects.toThrow(
+      /touched none of 2 claimed row/,
+    );
+  });
+});
 
 describe('AbstractOutboxRelay.backoffDelayMs()', () => {
   it('doubles the delay per attempt starting at 30s, capped at 30 minutes', () => {
@@ -270,18 +312,16 @@ describe('AbstractOutboxRelay — attempts are spent at claim', () => {
   it('counts the claim as an attempt, so markFailed sees attempt 1 on the first failure', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 0, deliver: 'fail' }]);
-    const before = Date.now();
-
     await relay.relay();
 
     expect(relay.failed).toHaveLength(1);
     const call = relay.failed[0];
     expect(call.attempts).toBe(1);
     expect(call.status).toBe('pending');
-    // attempt 1 -> ~30s. Immediate retry is the defect backoff replaced: five of them fit inside a
-    // brief outage and the fifth dead-letters the row for good.
-    expect(call.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(before + 29_000);
-    expect(call.nextAttemptAt.getTime()).toBeLessThanOrEqual(before + 31_000);
+    // attempt 1 -> 30s. Immediate retry is the defect backoff replaced: five of them fit inside a
+    // brief outage and the fifth dead-letters the row for good. The delay is handed over as a number; the
+    // relay writes it as dbDelay(delayMs), so the database computes the instant, not this host.
+    expect(call.delayMs).toBe(30_000);
   });
 
   it('dead-letters once the claimed attempt is the last one', async () => {
@@ -325,14 +365,10 @@ describe('AbstractOutboxRelay — failure classification', () => {
   it('honours Retry-After when it is longer than the backoff', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 0, deliver: 'retry-after' }]);
-    const before = Date.now();
-
     await relay.relay();
 
     expect(relay.failed[0].status).toBe('pending');
-    expect(relay.failed[0].nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
-      before + 5 * 60_000 - 1_000,
-    );
+    expect(relay.failed[0].delayMs).toBe(5 * 60_000);
   });
 });
 
@@ -340,28 +376,18 @@ describe('AbstractOutboxRelay — Retry-After is clamped, never an Invalid Date'
   it('clamps a huge hint to the maximum', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 0, deliver: 'huge-retry-after' }]);
-    const before = Date.now();
-
     await relay.relay();
 
-    const at = relay.failed[0].nextAttemptAt;
-    expect(Number.isNaN(at.getTime())).toBe(false);
-    expect(at.getTime()).toBeLessThanOrEqual(before + MAX_RETRY_AFTER_MS + 2_000);
-    expect(at.getTime()).toBeGreaterThanOrEqual(before + MAX_RETRY_AFTER_MS - 2_000);
+    expect(relay.failed[0].delayMs).toBe(MAX_RETRY_AFTER_MS);
   });
 
   it('falls back to ordinary backoff for a non-finite hint, and still records the failure', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 0, deliver: 'bad-retry-after' }]);
-    const before = Date.now();
-
     await relay.relay();
 
     expect(relay.failed).toHaveLength(1);
-    const at = relay.failed[0].nextAttemptAt.getTime();
-    expect(Number.isNaN(at)).toBe(false);
-    expect(at).toBeGreaterThanOrEqual(before + 29_000);
-    expect(at).toBeLessThanOrEqual(before + 31_000);
+    expect(relay.failed[0].delayMs).toBe(30_000);
   });
 });
 
@@ -369,15 +395,11 @@ describe('AbstractOutboxRelay — DeferError is not an attempt', () => {
   it('puts the row back to pending and REFUNDS the attempt (the BOUND on deferring belongs to the caller)', async () => {
     const { relay } = make();
     relay.load([{ id: 'a', attempts: 4, deliver: 'defer' }]); // the claim makes it the 5th (the last)
-    const before = Date.now();
-
     await relay.relay();
 
     expect(relay.refunded).toEqual(['a']);
     expect(relay.failed[0]).toMatchObject({ id: 'a', status: 'pending', attempts: 4 });
-    expect(relay.failed[0].nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
-      before + 5 * 60_000 - 1_000,
-    );
+    expect(relay.failed[0].delayMs).toBe(5 * 60_000);
     expect(relay.sent).toEqual([]);
   });
 
@@ -651,5 +673,43 @@ describe('DEAD_LETTER_FIELD', () => {
       `No Terraform under infra/ filters on ${DEAD_LETTER_FIELD}; a relay can exhaust its ` +
         `retries and lose work with nothing alarming, even though the app emits the field.`,
     ).not.toEqual([]);
+  });
+});
+
+describe('outbox_relay_pass_failed_total', () => {
+  function setup() {
+    passFailedAdd.mockClear();
+    const { db, state } = makeFakeDb();
+    return new TestRelay(db, state);
+  }
+
+  it('counts a pass whose CLAIM throws, labelled with the relay, and still rejects', async () => {
+    // The webhook relay's claim threw on every pass and nothing moved: no queue.failures (no row was reached) and no
+    // job metric (relays are not timed). `outbox-relay-failing` needs this series.
+    const relay = setup();
+    relay.selectThrows = new Error('FOR UPDATE must specify unqualified relation names');
+
+    await expect(relay.relay()).rejects.toThrow('unqualified relation names');
+
+    expect(passFailedAdd).toHaveBeenCalledTimes(1);
+    expect(passFailedAdd).toHaveBeenCalledWith(1, { relay: 'TestRelay' });
+  });
+
+  it('counts expired rows (outbox_relay_expired_total) with the relay label, and nothing for zero', () => {
+    // Both counters share the mocked `add`; what matters here is the value and the label.
+    const relay = setup();
+    relay.expose(0);
+    expect(passFailedAdd).not.toHaveBeenCalled();
+    relay.expose(3);
+    expect(passFailedAdd).toHaveBeenCalledWith(3, { relay: 'TestRelay' });
+  });
+
+  it('does not count a clean pass, nor a row that fails to deliver (that is queue.failures)', async () => {
+    const relay = setup();
+    relay.load([{ id: 'a', attempts: 0, deliver: 'fail' }]);
+
+    await relay.relay();
+
+    expect(passFailedAdd).not.toHaveBeenCalled();
   });
 });

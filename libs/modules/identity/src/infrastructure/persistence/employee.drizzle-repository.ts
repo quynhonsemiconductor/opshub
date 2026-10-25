@@ -66,40 +66,6 @@ export class EmployeeDrizzleRepository implements IEmployeeRepository {
     return row ?? null;
   }
 
-  async upsertByEntraOid(
-    oid: string,
-    input: Partial<import('../../domain/employee.types').CreateEmployeeInput> & {
-      email: string;
-      displayName: string;
-    },
-  ): Promise<Employee> {
-    const existing = await this.findByEntraOid(oid);
-    if (existing) {
-      const [updated] = await this.db
-        .update(employees)
-        .set({
-          displayName: input.displayName,
-          email: input.email.toLowerCase(),
-          updatedAt: new Date(),
-        })
-        .where(eq(employees.entraOid, oid))
-        .returning();
-      return updated;
-    }
-
-    const byEmail = await this.findByEmail(input.email.toLowerCase());
-    if (byEmail) {
-      const [linked] = await this.db
-        .update(employees)
-        .set({ entraOid: oid, displayName: input.displayName, updatedAt: new Date() })
-        .where(eq(employees.id, byEmail.id))
-        .returning();
-      return linked;
-    }
-
-    return this.create({ ...input, entraOid: oid, roles: [] });
-  }
-
   async update(id: string, input: UpdateEmployeeInput, tx?: DbExecutor): Promise<Employee> {
     const [updated] = await (tx ?? this.db)
       .update(employees)

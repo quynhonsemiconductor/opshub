@@ -95,9 +95,9 @@ export function assertEveryRouteDeclaresAuthz(discovery: DiscoveryService): void
   // reported success while 43 routes were undeclared.
   //
   // The floor is ZERO, not the real route count. A PARTIAL Nest module is legitimate, and a
-  // count-based floor cannot tell one from a blind scanner — proven in rally, where a
+  // count-based floor cannot tell one from a blind scanner — proven in rova, where a
   // 150-route floor failed an e2e that deliberately builds a 15-controller test module
-  // (QNSC-VN/rally#410). The "does the scanner still see the WHOLE surface" question belongs to
+  // (QNSC-VN/rova#410). The "does the scanner still see the WHOLE surface" question belongs to
   // `test/route-policy.ratchet.spec.ts`, which reads source text and so can assert a real count
   // against every controller in the repo.
   if (routes === 0) {
@@ -115,7 +115,7 @@ export function assertEveryRouteDeclaresAuthz(discovery: DiscoveryService): void
         undeclared.map((r) => `  ${r}`).join('\n') +
         `\n\nEvery route needs exactly one of @RequirePermission(...), @Public(), ` +
         `@SelfScoped(reason) or @AuthorizedInService(reason, pinnedBy). Without one, ` +
-        `JwtAuthGuard proves who the caller is and nothing checks whether they may.`,
+        `SessionAuthGuard proves who the caller is and nothing checks whether they may.`,
     );
   }
 
