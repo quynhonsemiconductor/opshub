@@ -21,6 +21,7 @@ import {
   SkipIdempotency,
 } from '@platform';
 import type { JwtPayload, PagedResult } from '@platform';
+import { AppConfigService } from '@platform';
 import { DoorService } from '../../application/door.service';
 import type { DoorTerminal, DoorCard, UpdateCardInput } from '../../domain/door.types';
 import type { UnknownCardGroup } from '../../domain/ports/card.repository';
@@ -82,7 +83,10 @@ function toUnknownGroupDto(e: UnknownCardGroup): UnknownCardGroupResponseDto {
 @ApiTags('door')
 @Controller('door')
 export class DoorController {
-  constructor(private readonly door: DoorService) {}
+  constructor(
+    private readonly door: DoorService,
+    private readonly config: AppConfigService,
+  ) {}
 
   @Get('terminals')
   @RequirePermission('door.read')
@@ -90,8 +94,15 @@ export class DoorController {
   @ApiOperation({ summary: 'List door terminals' })
   @ApiOkResponse({ type: [DoorTerminalResponseDto] })
   @ApiCommonErrors(401, 403)
-  async listTerminals(): Promise<DoorTerminalResponseDto[]> {
-    return (await this.door.listTerminals()).map(toTerminalDto);
+  async listTerminals() {
+    const threshold = this.config.get('DOOR_LOW_BATTERY_MV');
+    const terminals = await this.door.listTerminals();
+    const enriched = [];
+    for (const t of terminals) {
+      const state = await this.door.batteryState(t.id, threshold);
+      enriched.push({ ...toTerminalDto(t), battery: state });
+    }
+    return enriched;
   }
 
   @Post('terminals')

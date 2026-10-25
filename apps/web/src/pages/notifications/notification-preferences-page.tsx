@@ -83,6 +83,11 @@ const EVENT_GROUPS: EventGroup[] = [
       { type: 'request.approved', label: 'Your request was approved' },
       { type: 'request.rejected', label: 'Your request was rejected' },
       {
+        type: 'door.low_battery',
+        label: 'Door terminal battery is low',
+        hint: 'Sent to door.manage holders when a terminal reports below the threshold.',
+      },
+      {
         type: 'request.sla_breach',
         label: 'A request has breached its SLA',
         hint: 'Sent when a decision is overdue against the target the request type sets.',

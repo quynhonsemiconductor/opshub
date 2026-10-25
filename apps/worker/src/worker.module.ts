@@ -10,9 +10,9 @@ import { GraphModule } from '@modules/graph/graph.module';
 import { SecurityPostureModule } from '@modules/security-posture';
 import { ContractsModule } from '@modules/contracts';
 import { IsmsModule } from '@modules/isms';
-// The door jobs (Healthchecks dead-man's-switch, event retention) live in DoorModule; without this
-// import their @Interval/@Cron never fire — they existed only in the API process, which has no
-// ScheduleModule (SA review 480/B2).
+// The door jobs (Healthchecks dead-man's-switch, event retention, low-battery alerts) live in
+// DoorJobsModule; without this import their @Interval/@Cron never fire — they existed only in the
+// API process, which has no ScheduleModule (SA review 480/B2).
 import { DoorJobsModule } from '@modules/door';
 import { RequestExpiryCron } from './cron/request-expiry.cron';
 import { SlaBreachCron } from './cron/sla-breach.cron';

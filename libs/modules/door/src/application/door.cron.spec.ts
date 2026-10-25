@@ -1,7 +1,7 @@
 /**
  * Unit tests — the door worker jobs (SA review 480/B2).
  *
- * These crons are registered in DoorModule and fired ONLY by the worker's ScheduleModule. Their
+ * These crons are registered in DoorJobsModule and fired ONLY by the worker's ScheduleModule. Their
  * whole safety story is in the negatives: no URL configured → no ping; any terminal stale → no
  * ping; ZERO active terminals → no ping (a dead-man's switch that sings when nobody is watching is
  * worse than none); and the retention purges use the two cutoffs, not one.
@@ -77,11 +77,9 @@ describe('DoorEventCleanupService', () => {
   it('runs the purge through the exclusive lock and reads the retention from config', async () => {
     const run = vi.fn((_n: string, _t: number, fn: () => Promise<void>) => fn());
     // delete() → where() → returning(): the chain the service drives.
-    const deleting = vi
-      .fn()
-      .mockReturnValue({
-        where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }),
-      });
+    const deleting = vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }),
+    });
     const config = { get: vi.fn(() => 730) };
     const service = new DoorEventCleanupService(
       { delete: deleting } as never,

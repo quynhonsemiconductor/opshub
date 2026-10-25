@@ -45,6 +45,7 @@ export const NOTIFICATION_TEMPLATE_NAMES = [
   'request.no_approver',
   'request.approved',
   'request.rejected',
+  'door.low_battery',
 ] as const;
 
 export type NotificationTemplateName = (typeof NOTIFICATION_TEMPLATE_NAMES)[number];
@@ -133,6 +134,12 @@ export interface NotificationTemplateVars {
   'request.approved': {
     requestType: string;
     requestId: string;
+  };
+  /** Fired when a door terminal reports its pack below the configured threshold (or its own flag). */
+  'door.low_battery': {
+    terminalName: string;
+    batteryMv: number;
+    thresholdMv: number;
   };
   'request.rejected': {
     requestType: string;
@@ -244,6 +251,12 @@ const templates: {
     return {
       title: `Your ${v.requestType} request was rejected`,
       body: `Your ${v.requestType} request (${v.requestId}) has been rejected.${extra}`,
+    };
+  },
+  'door.low_battery'(v) {
+    return {
+      title: `Door terminal ${v.terminalName} battery low`,
+      body: `The battery pack reports ${v.batteryMv} mV (threshold ${v.thresholdMv} mV). Replace the batteries before the terminal dies — it syncs every 60 minutes and holds ~1–2 weeks of headroom.`,
     };
   },
 };

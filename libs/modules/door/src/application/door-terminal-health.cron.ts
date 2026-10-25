@@ -9,19 +9,20 @@ const INTERVAL_MS = 5 * MS_PER_MIN;
 /** Under the interval, so a crashed pod cannot block the next check. */
 const LOCK_TTL_MS = 4 * MS_PER_MIN;
 /**
- * The seen-within window (ADR §4). Wider than the terminal's 60 s poll by two orders, narrower
- * than an outage worth paging about: a terminal misses ~10 polls before this fires.
+ * The seen-within window (ADR §4, SA round: 150 min). The terminal syncs every 60 min, so this
+ * tolerates one missed sync plus margin before the dead-man's switch goes quiet.
  */
-const SEEN_WITHIN_MS = 10 * MS_PER_MIN;
+const SEEN_WITHIN_MS = 150 * MS_PER_MIN;
 
 /**
  * Dead-man's-switch for the door terminals (ADR §4): ping Healthchecks.io ONLY while every active
- * terminal was seen within the last 10 minutes. Healthchecks alerts on the ping that never
+ * terminal was seen within the last 150 minutes. Healthchecks alerts on the ping that never
  * arrives — "the door went quiet" — and on recovery. NO alert state lives in opshub.
  *
- * OFF BY DEFAULT: `DOOR_TERMINAL_HEALTHCHECK_URL` unset means this job is a no-op. The URL is a
+ * OFF BY DEFAULT: `DOOR_TERMINAL_HEALTHCHECK_URL` unset means the ping is a no-op. The URL is a
  * secret-ish capability (any holder can forge "all well"), which is why it arrives by env var, not
- * by code.
+ * by code. Low-battery alerts are NOT this job's — they fire from the ingestion path on
+ * transition (door.service).
  */
 @Injectable()
 export class DoorTerminalHealthCron {

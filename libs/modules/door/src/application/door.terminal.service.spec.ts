@@ -43,6 +43,9 @@ function makeService() {
     mockEmployees as never,
     mockAudit as never,
     mockDb as never,
+    { getJson: vi.fn(), setJson: vi.fn() } as never, // cache
+    { get: vi.fn(() => 5000) } as never, // config
+    { schedule: vi.fn() } as never, // scheduler
   );
 }
 
