@@ -30,9 +30,7 @@ overrides:
 pnpmfileChecksum: sha256-JWF1KFI4Zhh11NAkzC9Qb5ZdXTBJMedSdxqE8XzOg08=
 
 patchedDependencies:
-  nestjs-zod@5.5.0:
-    hash: fa2029e87bb600a0b7fa6b0faffefe8cc8c9b2733343113ad1b02d171af1915b
-    path: patches/nestjs-zod@5.5.0.patch
+  nestjs-zod@5.5.0: fa2029e87bb600a0b7fa6b0faffefe8cc8c9b2733343113ad1b02d171af1915b
 
 importers:
 

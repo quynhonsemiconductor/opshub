@@ -159,13 +159,13 @@ overrides:
 # caught and yanked within hours, so not installing anything younger than a day removes most of that exposure.
 #
 # SET EXPLICITLY (1440 minutes = 24 h) because the default is not the same everywhere: pnpm 11 defaults to 24 h, but
-# this repo runs pnpm 10.33.2 (PNPM_VERSION in backend-ci.yml and web-ci.yml, the Dockerfile ARG), where there is NO
-# default, so until this was written third-party packages got no cooldown here at all. Verified on 10.33.2: a <24 h
+# this repo runs pnpm 11.28.6 (packageManager in package.json, PNPM_VERSION in backend-ci.yml and web-ci.yml, the Dockerfile ARG), where there is NO
+# default, so until this was written third-party packages got no cooldown here at all. Verified on 11.28.6: a <24 h
 # third-party version is refused, and with no setting it installs. Written out, the behaviour is the same on 10 and 11.
 #
 # Our own `@quynhonsemiconductor/*` packages are published by this organisation, from app-platform, by a pipeline we
 # control, so the cooldown protects nothing there and costs a day on every release: platform-http 4.3.0 blocked rova's
-# CI for ~22 hours on `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. They are exempt, as a scope pattern (verified on 10.33.2:
+# CI for ~22 hours on `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. They are exempt, as a scope pattern (verified on 11.28.6:
 # a <24 h `@quynhonsemiconductor/*` version is refused without the exclusion and resolves with it).
 #
 # This does NOT exempt a third-party package that a first-party one depends on, and it does not touch Renovate: the

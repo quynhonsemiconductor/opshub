@@ -15,7 +15,7 @@
 
 ARG NODE_VERSION=24
 ARG ALPINE_VERSION=3.22
-ARG PNPM_VERSION=10.33.2
+ARG PNPM_VERSION=11.28.6
 
 # ── deps: all packages (dev+prod) for the builder ────────────────────────────
 FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS deps
