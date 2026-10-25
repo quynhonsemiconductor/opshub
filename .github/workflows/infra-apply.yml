@@ -248,4 +248,3 @@ jobs:
       # outputs are gone in this PR, so it would publish blank ECS_*/PAGES_* vars that
       # the deploy workflows read. The develop deploy pipelines are retired with the
       # stack. See product-docs/platform/runbooks/aws-exit-teardown.md.
-          fi
