@@ -82,19 +82,6 @@ const UNREQUIRED: Record<string, string> = {
   'notifications.manage':
     'describes managing preferences for all users; every preference route is @SelfScoped and no ' +
     'admin route exists. Granted to no role either, so it is dead on both sides',
-
-  // ── staged work: the codes exist before the routes that require them ────────────────────────
-  // The door stack lands as stacked PRs (schema → admin module → terminal routes, ADR
-  // ATTENDANCE-DEVICE.md §6). These two entries exist for the schema PR ONLY, where the codes are
-  // seeded with their grants before any route names them. The module PR (door admin routes) removes
-  // BOTH entries in the same change as the routes; if they are still here with routes merged, this
-  // file is lying about the staging.
-  'door.read':
-    'temporarily unrequired: the door admin routes that require it are the NEXT PR in the stacked ' +
-    'door series (ADR §6); remove this entry there',
-  'door.manage':
-    'temporarily unrequired: the door admin routes that require it are the NEXT PR in the stacked ' +
-    'door series (ADR §6); remove this entry there',
 };
 
 /**
