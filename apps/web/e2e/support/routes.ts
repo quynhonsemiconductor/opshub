@@ -17,6 +17,7 @@ export const SHELL_ROUTES = [
   '/compliance',
   '/contracts',
   '/controls',
+  '/door',
   '/documents',
   '/finops',
   '/incidents',

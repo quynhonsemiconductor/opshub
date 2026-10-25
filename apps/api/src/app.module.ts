@@ -31,6 +31,7 @@ import { IsmsModule } from '@modules/isms';
 import { QmsModule } from '@modules/qms';
 import { AiModule } from '@modules/ai';
 import { SecurityPostureModule } from '@modules/security-posture';
+import { DoorModule } from '@modules/door';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { SecurityPostureModule } from '@modules/security-posture';
     QmsModule,
     AiModule,
     SecurityPostureModule,
+    DoorModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
