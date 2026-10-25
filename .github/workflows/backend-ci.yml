@@ -72,7 +72,7 @@ env:
   # Measured on 24 before bumping: statements 22.27 / branches 18.71 / functions 15.58 /
   # lines 22.35 — every one above its floor and within the 3-point drift tolerance.
   NODE_VERSION: '24'
-  PNPM_VERSION: '10.33.2'
+  PNPM_VERSION: '11.28.6'
 
 jobs:
   # Does this pull request change anything this workflow tests? A change that touches only files the matching DEPLOY workflow ignores
