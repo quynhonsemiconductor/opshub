@@ -3,7 +3,8 @@
 The one Entra app registration opshub uses to call Microsoft Graph with **application** permissions.
 This is its specification; the code that uses it is `libs/modules/graph`.
 
-**Status: specified, not yet created.** opshub has no users and moves on-prem soon, so the app is created
+**Status: specified, not yet created.** The owner steps to create it and switch Graph on are in
+[`runbooks/graph-worker-enable.md`](runbooks/graph-worker-enable.md). opshub has no users and moves on-prem soon, so the app is created
 at the on-prem move (dev first, prod later), with a federated credential and no secret. Until then
 `GRAPH_CLIENT_ID` is unset and every Graph feature skips (see _Off_ below). The sign-in app ("OpsHub Dev"
 and its prod twin) holds **no application permissions**.
