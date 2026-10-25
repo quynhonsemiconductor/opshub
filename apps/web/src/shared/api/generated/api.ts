@@ -7943,6 +7943,7 @@ export interface components {
       label?: string | null;
       /** Format: date-time */
       validFrom?: string;
+      /** Format: date-time */
       validUntil?: string | null;
     };
     UpdateCardDto: {
@@ -7951,6 +7952,7 @@ export interface components {
       status?: 'revoked' | 'lost';
       /** Format: date-time */
       validFrom?: string;
+      /** Format: date-time */
       validUntil?: string | null;
     };
     UnknownCardGroupResponseDto: {
