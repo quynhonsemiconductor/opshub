@@ -1,9 +1,9 @@
 {
   "name": "opshub",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "license": "UNLICENSED",
-  "description": "OpsHub \u2014 internal IT/HR operations platform (Zone B2). Monorepo: apps/{api,worker,web}",
+  "description": "OpsHub — internal IT/HR operations platform (Zone B2). Monorepo: apps/{api,worker,web}",
   "engines": {
     "node": ">=22.0.0",
     "pnpm": ">=9.0.0"
