@@ -616,7 +616,7 @@ describe('EnvSchema: EMAIL_PROVIDER=graph (Microsoft 365 mail)', () => {
       ...graph,
       ENTRA_TENANT_ID: TENANT,
       GRAPH_CLIENT_ID: APP,
-      GRAPH_CLIENT_CERTIFICATE: PEM,
+      AZURE_CLIENT_CERTIFICATE_PATH: '/mnt/secrets/opshub-graph-cert.pem',
     };
     const placeholders: Record<string, string> = {
       MAIL_GRAPH_SENDER: '<OPSHUB_PROD_MAILBOX>',
