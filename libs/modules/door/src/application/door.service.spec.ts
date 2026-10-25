@@ -24,6 +24,8 @@ const mockTerminals = {
   revoke: vi.fn(),
   list: vi.fn(),
   countActive: vi.fn(),
+  countActiveSeenSince: vi.fn(),
+  addDropped: vi.fn(),
 };
 const mockCards = {
   create: vi.fn(),
@@ -32,6 +34,9 @@ const mockCards = {
   update: vi.fn(),
   list: vi.fn(),
   listUnknownCardGroups: vi.fn(),
+  listAllowList: vi.fn(),
+  findCardCandidatesByUids: vi.fn(),
+  insertEvents: vi.fn(),
 };
 const mockEmployees = { assertExist: vi.fn(), getById: vi.fn() };
 const mockAudit = createFakeAudit();

@@ -10,6 +10,10 @@ import { GraphModule } from '@modules/graph/graph.module';
 import { SecurityPostureModule } from '@modules/security-posture';
 import { ContractsModule } from '@modules/contracts';
 import { IsmsModule } from '@modules/isms';
+// The door jobs (Healthchecks dead-man's-switch, event retention) live in DoorModule; without this
+// import their @Interval/@Cron never fire — they existed only in the API process, which has no
+// ScheduleModule (SA review 480/B2).
+import { DoorJobsModule } from '@modules/door';
 import { RequestExpiryCron } from './cron/request-expiry.cron';
 import { SlaBreachCron } from './cron/sla-breach.cron';
 import { DelegationExpiryCron } from './cron/delegation-expiry.cron';
@@ -31,6 +35,7 @@ import { WorkerHeartbeatService } from './heartbeat/worker-heartbeat.service';
     GraphModule,
     ContractsModule,
     IsmsModule,
+    DoorJobsModule,
   ],
   providers: [
     // Writes the beat `make check` reads (apps/worker/src/heartbeat). It proves the worker is alive and connected to the cache.
