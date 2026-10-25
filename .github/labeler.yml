@@ -29,7 +29,3 @@ area/infra:
 area/ci:
   - changed-files:
     - any-glob-to-any-file: ".github/**"
-
-area/contracts:
-  - changed-files:
-    - any-glob-to-any-file: "libs/contracts/**"

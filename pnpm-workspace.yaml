@@ -10,10 +10,31 @@ allowBuilds:
 
 # Overrides live HERE, not in package.json's "pnpm.overrides": pnpm 11 no longer
 # reads that field and ignores it silently, so an advisory pinned there is not
-# pinned at all. Mirrors rally.
+# pinned at all. Mirrors rova.
 overrides:
   # Kept from before: esbuild's dev-server request vulnerability.
   "esbuild@<0.25.0": ">=0.25.0"
+  # GHSA-xcx6-jx8p-x3h5 — msal-node <7.1.0 (auth-code flow parameter disclosure, CVSS 7.5).
+  # SCOPED to @azure/identity: identity 4.13.1 declares msal ^5.1.0, so this is a two-major
+  # jump FORCED under identity 4.13.1 — outside what identity declares, and no identity
+  # release declaring msal >=7.1.0 exists yet (4.14 declares ^6). Accepted because msal's
+  # 6.0.0 and 7.0.0 breaking changes are BOTH on the acquireTokenInteractive /
+  # browser-loopback path (responseMode/form_post/ILoopbackClient), which nothing here uses:
+  # opshub drives only ClientCertificateCredential and WorkloadIdentityCredential
+  # (libs/modules/graph/src/graph-credential.ts), whose client-credentials surface is
+  # unchanged across 5->6->7 (msal changelog 6.0.0/7.0.0). Full suite green on msal 7.1.0.
+  # When @azure/identity ships a release declaring msal >=7.1.0, DROP this override.
+  "@azure/identity>@azure/msal-node": "7.1.0"
+  # GHSA-85x2-q946-cp5h / GHSA-8c8m-p3m8-cjg8 / GHSA-m943-m63m-w62w — nodemailer 10.1.2
+  # (shared-token/IMAP URL handling, CVSS 6.5), fixed 10.1.4 on the 10.x line. In-major: the
+  # only consumer is platform-mail's smtp transport, which declares >=6.9.
+  "nodemailer": "10.1.4"
+  # GHSA-333x-w4r6-6crp + three companions — fast-uri 4.1.5 (protocol confusion / percent
+  # encoding, up to CVSS 6.1), fixed 4.2.3 on the 4.x line. In-major: reached via fastify's
+  # @fastify/ajv-compiler, which declares the 4.x range itself.
+  # GHSA-xjj6-f33q-929c + two companions — undici 8.10.2 (redirect cross-origin data leak,
+  # CVSS 7.5), fixed 8.12.2 on the 8.x line. Same per-major span rule as the undici pins in
+  # rova's file: each consumer stays inside the major it declares.
   # GHSA-rgw5-rvv9-x895 — brace-expansion, vulnerable <5.0.9, fixed 5.0.9. It
   # explicitly BYPASSES the CVE-2026-14257 mitigation, which is what the previous pin
   # here (5.0.8, GHSA-mh99-v99m-4gvg) was for — so 5.0.8 is no longer merely an older
@@ -71,7 +92,7 @@ overrides:
   # binds the resolved version, matching the reasoning above.
   # Bumped from >=4.1.3: GHSA-hrr3-gc8f-f4qj and GHSA-jvvf-x445-j334 are fixed at 4.1.5 on
   # the 4.x line. Capped below 5.0.0 so the floor can never drag the tree onto a new major.
-  "fast-uri": ">=4.1.5 <5.0.0"
+  "fast-uri": ">=4.2.3 <5.0.0"  # RAISED 4.1.5 for GHSA-333x/74x6/wjr9/xhq7 (percent-encoding, up to CVSS 6.1), fixed 4.2.3
   # GHSA-73wf-gq98-2v4g / GHSA-c83g-rgw3-j3cx — browserslist crash / prototype write via
   # untrusted browserslist-stats, CVSS 7.5, fixed 4.28.7. Transitive via the web build
   # toolchain; the tree is on 4.x so a floor forces no major jump.
@@ -82,7 +103,7 @@ overrides:
   # Bumped to 5.12.5 for GHSA-4mh8-r7rc-xpvc (fixed 5.12.5). This key also rewrites the
   # root's exact "fastify" pin, so the floor here — not package.json — is what decides the
   # resolved version: the lockfile sat on 5.12.3 while package.json said 5.12.4.
-  "fastify@5": ">=5.12.5 <6.0.0"
+  "fastify@5": ">=5.12.7 <6.0.0"
   # GHSA-4mjr-xmp4-gh2g / GHSA-x5fp-wj9c-mxmx — qs DoS via attacker-controlled isBuffer,
   # fixed 6.16.0. Scope to the 6.x line (the 3.x `qs` in the tree is an unrelated package).
   "qs@6": ">=6.16.0"
@@ -98,7 +119,7 @@ overrides:
   # which 8.x DELETED — so a single `<8.9.0: >=8.9.0` floor drags jsdom onto 8.9.0 and
   # every jsdom-environment suite dies at worker startup with MODULE_NOT_FOUND before a
   # single test runs. Backend suites (node environment) are unaffected, which is exactly
-  # how that passes locally and fails in CI on the web tests. rally#380 paid for this
+  # how that passes locally and fails in CI on the web tests. rova#380 paid for this
   # lesson; opshub copies the shape, not the debugging.
   #
   # Keep each consumer inside the major it declares:
@@ -114,7 +135,7 @@ overrides:
   # `undici@8` match any request inside that major, and each target is capped below the
   # next one, so the jsdom constraint above still holds.
   "undici@7": ">=7.29.1 <8.0.0"
-  "undici@8": ">=8.10.2 <9.0.0"
+  "undici@8": ">=8.12.2 <9.0.0"  # RAISED 8.10.2 for GHSA-xjj6-f33q-929c + two (redirect cross-origin leak, CVSS 7.5), fixed 8.12.2
   # GHSA-f596-whhp-79r4 / GHSA-m9gg-hp2v-232j — @grpc/grpc-js, fixed 1.14.5 (1.13.6 on
   # the older line). Transitive via the OTel gRPC exporters, @nestjs/terminus and
   # dockerode; all request 1.x, so a floor capped below 2.0.0 forces no major jump.
@@ -154,3 +175,12 @@ overrides:
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - '@quynhonsemiconductor/*'
+patchedDependencies:
+  # nestjs-zod 5.5.0 calls zod's toJSONSchema WITHOUT a target, so zod 4.5+ emits 2020-12
+  # constructs (raw type lists) that are invalid in an OpenAPI 3.0 document. The vendored
+  # patch (rova#793's, unchanged) passes target: "openapi-3.0". Pinned exactly: the patch
+  # names this version's dist files, so a floating range would silently unpatch on bump.
+  # zod itself needs NO patch here: with the openapi-3.0 target zod skips compactTypeUnion's
+  # type-array rewrite on its own (the function is 3.0-excluded), which is why rova#793
+  # abandoned that second patch, and why this one alone keeps the spec byte-stable.
+  nestjs-zod@5.5.0: patches/nestjs-zod@5.5.0.patch

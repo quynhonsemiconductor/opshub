@@ -119,15 +119,7 @@ module "stack" {
   graph_client_certificate_set = true
   graph_client_id              = "328bac47-4848-42b5-9464-bb4ba7b0cb56"
 
-  // qnsc.vn is a verified SES domain identity in this account (rally already sends from
-  // it). A distinct local-part from rally's own noreply@qnsc.vn keeps bounce/reply
-  // routing distinguishable per product, though the domain-level identity would permit
-  // either. SES_CONFIGURATION_SET is NOT set here — it's derived automatically from the
-  // real aws_sesv2_configuration_set.email_feedback resource this module now creates.
-  // (SES stays defined, and its removal is tracked in opshub#405; develop now sends through Graph, which needs no SES sender, so mail_from_email is
-  // empty and the SES send grants are not created.)
-  email_provider  = "graph"
-  mail_from_email = ""
+  email_provider = "graph"
 
   // Cost-leaning: short retention, immediate secret deletion so a destroy+redeploy
   // cycle does not trip "secret scheduled for deletion".
@@ -192,7 +184,7 @@ module "stack" {
   // ── Ingress: no ALB exists any more ─────────────────────────────────────────
   // The shared ALBs in qnsc-infra/live/runtime-{dev,prod} were DELETED once both
   // products moved to Cloudflare Tunnels, so `https_listener_arn` is null and there is
-  // nothing to attach to. Unlike rally (which had to ADOPT two tunnels already created
+  // nothing to attach to. Unlike rova (which had to ADOPT two tunnels already created
   // by hand in the dashboard), opshub has never had one — module.tunnel (the shared
   // cf-tunnel module) creates it, its connector token and its routing rule outright, so
   // turning this on is the only step needed. The alternative is `enable_alb = true` in
@@ -201,7 +193,7 @@ module "stack" {
 
   // ── Graviton ────────────────────────────────────────────────────────────────
   // ARM64 bills ~20% less per vCPU-hour and GB-hour than X86_64 for identical sizing,
-  // with no capability difference. rally has run this since its own build moved; opshub
+  // with no capability difference. rova has run this since its own build moved; opshub
   // was still on the module's X86_64 default, which is drift rather than a decision — it
   // is not recorded in docs/DIVERGENCE.md, and nothing about opshub's workload argues for
   // x86.
@@ -220,7 +212,7 @@ module "stack" {
   cpu_architecture = "ARM64"
 
   // ── Parked between deploys ──────────────────────────────────────────────────
-  // Twice daily, matching rally. Develop is exercised by CI deploys and the occasional
+  // Twice daily, matching rova. Develop is exercised by CI deploys and the occasional
   // manual poke, so the useful default is "down unless something just deployed": the
   // deploy pipeline wakes RDS and restores the desired count, and this puts it back.
   // OFF since 2026-10-14, at the owner's request: develop stays up around the clock for the rest of

@@ -236,7 +236,7 @@ variable "tunnel_enabled" {
     connector owns, and traffic could arrive by two paths with different TLS termination.
 
     The tunnel itself, its connector token and the routing rule are all created and
-    owned BY TERRAFORM (`module.tunnel`, the shared `cf-tunnel` module) — unlike rally,
+    owned BY TERRAFORM (`module.tunnel`, the shared `cf-tunnel` module) — unlike rova,
     which had to ADOPT two tunnels already created by hand in the dashboard, opshub has
     never had one, so there is nothing to preserve and no adopt-then-manage two-step
     needed. Turning this on with `cloudflare_account_id` set is enough on its own.
@@ -551,7 +551,7 @@ variable "api" {
   #
   # A `validation`, so it fails a plan. Both environments already pair floor 0 with autoscaling
   # off, so this changes nothing today — it exists so the broken pairing cannot be introduced
-  # while every plan stays green. Ported from rally, which had it and opshub did not.
+  # while every plan stays green. Ported from rova, which had it and opshub did not.
   validation {
     condition     = !var.api.enable_autoscaling || var.api.min_count >= 1
     error_message = "api.enable_autoscaling = true requires min_count >= 1 (got ${var.api.min_count}). Target tracking scales on CPU and memory, which a service at zero tasks does not publish, so nothing can scale it back out — a floor of at least 1 is what restores capacity. Raise the floor, or set enable_autoscaling = false and let the deploy and idle_schedule own the count."
@@ -580,7 +580,7 @@ variable "worker" {
   #
   # A `validation`, so it fails a plan. Both environments already pair floor 0 with autoscaling
   # off, so this changes nothing today — it exists so the broken pairing cannot be introduced
-  # while every plan stays green. Ported from rally, which had it and opshub did not.
+  # while every plan stays green. Ported from rova, which had it and opshub did not.
   validation {
     condition     = !var.worker.enable_autoscaling || var.worker.min_count >= 1
     error_message = "worker.enable_autoscaling = true requires min_count >= 1 (got ${var.worker.min_count}). Target tracking scales on CPU and memory, which a service at zero tasks does not publish, so nothing can scale it back out — a floor of at least 1 is what restores capacity. Raise the floor, or set enable_autoscaling = false and let the deploy and idle_schedule own the count."
@@ -643,7 +643,7 @@ variable "observability" {
     libs/platform/src/observability/otel.ts builds a ParentBased/TraceIdRatio sampler from it,
     and otel.spec.ts asserts a configured probability changes the decisions. It was inert
     before that — declared here and in the env schema, and ignored by opshub's own OTel
-    bootstrap, which had drifted behind the `@quynhonsemiconductor/observability` package rally uses.
+    bootstrap, which had drifted behind the `@quynhonsemiconductor/observability` package rova uses.
 
     `debug_metrics` is a TEMPORARY DIAGNOSTIC for DEVELOP ONLY (the tf-modules observability-agent
     `debug_metrics`): the collector sidecars also log every metric datapoint, with its timestamp, to
@@ -684,18 +684,18 @@ variable "monitor_ingress" {
 
     That matters because a health check against a hostname with no tasks behind it sits in
     ALARM permanently: it pages for a condition that IS the intended state, and bills every
-    month for that non-signal. rally hit exactly that — its develop had floors of 0, an idle
+    month for that non-signal. rova hit exactly that — its develop had floors of 0, an idle
     schedule taking it to zero tasks nightly and all weekend, and this variable unset, so it
-    paid for a probe that was red most of the week (fixed in quynhonsemiconductor/rally#393, which is
+    paid for a probe that was red most of the week (fixed in quynhonsemiconductor/rova#393, which is
     where this derivation comes from).
 
-    Default true, matching rally, because the idle gate makes true SAFE: it cannot create a
+    Default true, matching rova, because the idle gate makes true SAFE: it cannot create a
     check against an environment that is not serving.
 
     Cost, since this is the one guard here that bills per month rather than per alarm: one
     health check on a non-AWS endpoint, with `measure_latency = false` and no string match,
     so no optional-feature charge — plus one CloudWatch alarm and an SNS topic that costs
-    nothing until it notifies. Worth stating precisely because rally's own comment quotes
+    nothing until it notifies. Worth stating precisely because rova's own comment quotes
     "$0.75 base + $2.00 for the string-match/latency option" while its resource enables
     NEITHER option, so that arithmetic describes something it did not build.
   EOT
@@ -744,7 +744,7 @@ variable "grafana_alerting_auth" {
   description = <<-EOT
     Stack service account token — qnsc-infra/live/observability's
     `alerting_service_account_token` output. A SEPARATE variable from
-    `grafana_alerting` below, same reason as rally's own copy of this
+    `grafana_alerting` below, same reason as rova's own copy of this
     variable: it carries a raw secret value directly through Terraform, and
     `sensitive = true` only masks plan/apply output for a variable as a
     whole — nesting it into the config object would either blunt-hide the
@@ -776,11 +776,11 @@ variable "grafana_alerting" {
 
     `alerts_folder_uid`, `dashboards_folder_uid` and
     `product_dashboards_folder_uid` are THREE DIFFERENT folders in the same
-    shared Grafana stack — do not collapse them, and do not repeat rally's
+    shared Grafana stack — do not collapse them, and do not repeat rova's
     own real bug of reusing `alerts_folder_uid` for the dashboard resource.
     `product_dashboards_folder_uid` is qnsc-infra/live/observability's
     `opshub_dashboards_folder_uid` output — created ONCE, centrally, exactly
-    like rally's own subfolder, not re-derived per environment (rally hit a
+    like rova's own subfolder, not re-derived per environment (rova hit a
     real duplicate-folder bug doing that: develop and prod are separate
     Terraform root modules with separate state, so a `grafana_folder`
     resource created HERE would create two separate "Opshub" folders).
@@ -803,8 +803,7 @@ variable "grafana_alerting" {
 variable "email_provider" {
   description = <<-EOT
     Which transport sends mail: "dev" logs and sends nothing, "graph" sends through Microsoft 365 (Graph
-    `sendMail`) from the product's shared mailbox, "ses" uses this account's SES (being replaced by graph), "resend"
-    is the old third-party transport.
+    `sendMail`) from the product's shared mailbox. SES and Resend were removed (opshub#405).
 
     Defaults to "dev" so applying this module changes nothing about mail until somebody chooses to turn it on.
 
@@ -816,8 +815,8 @@ variable "email_provider" {
   default     = "dev"
 
   validation {
-    condition     = contains(["dev", "graph", "ses", "resend"], var.email_provider)
-    error_message = "email_provider must be dev, graph, ses or resend."
+    condition     = contains(["dev", "graph"], var.email_provider)
+    error_message = "email_provider must be dev or graph."
   }
 
   validation {
@@ -852,31 +851,6 @@ variable "mail_graph_sender" {
     condition     = var.mail_graph_sender == "" || lower(trimspace(var.mail_graph_sender)) == (var.env == "production" ? "noreply-${var.product}@qnsc.vn" : "noreply-${var.product}-dev@qnsc.vn")
     error_message = "mail_graph_sender must be noreply-opshub@qnsc.vn in production and noreply-opshub-dev@qnsc.vn in every other environment (a non-prod environment never sends from the prod mailbox)."
   }
-}
-
-variable "mail_from_email" {
-  description = <<-EOT
-    The verified SES sender address, e.g. no-reply@opshub.example.com. Used by the ses and resend providers ONLY: with
-    "graph" or "dev" leave it empty (Graph sends as `mail_graph_sender`), which also removes the SES send grants.
-
-    NO DEFAULT, deliberately. The app used to default this to a domain a deployment may not own, and
-    the result was not a failure: mail went out failing SPF and DKIM, which is silent non-delivery or
-    delivery to spam. Empty is the honest value when mail is off, and the app refuses to boot with a
-    ses or resend provider and no sender.
-  EOT
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = contains(["dev", "graph"], var.email_provider) || var.mail_from_email != ""
-    error_message = "mail_from_email is required when email_provider is ses or resend."
-  }
-}
-
-variable "mail_from_name" {
-  description = "Display name on outgoing mail."
-  type        = string
-  default     = "OpsHub"
 }
 
 variable "mail_reply_to" {

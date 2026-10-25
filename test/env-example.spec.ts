@@ -58,7 +58,7 @@ const compose = read('docker-compose.dev.yml');
 const composeDoc = parseYaml(compose, { merge: true }) as {
   services: Record<string, { ports?: unknown[]; environment?: Record<string, string> }>;
 };
-const storageInit = read('scripts/garage/init.sh');
+const storageInit = read('scripts/garage/init.mjs');
 const garageInit = composeDoc.services['garage-init']?.environment ?? {};
 const vite = read('apps/web/vite.config.ts');
 
@@ -161,9 +161,23 @@ describe('.env.example boots the API and the worker from one file', () => {
       'DATABASE_WORKER_PASSWORD',
       'SHUTDOWN_TIMEOUT_MS',
       'SHUTDOWN_ENDPOINT_DELAY_MS',
+      // [web] The SPA reads its feature gates from import.meta.env, sourced from this file
+      // (apps/web/src/shared/config/features.ts is the code that knows them).
+      ...[...read('apps/web/src/shared/config/features.ts').matchAll(/VITE_FEATURE_[A-Z_]+/g)].map(
+        (m) => m[0],
+      ),
     ]);
     const unknown = namedKeys(example).filter((k) => !schemaKeys.has(k) && !readElsewhere.has(k));
     expect(unknown).toEqual([]);
+    // And the reverse: every feature the SPA knows is documented in .env.example (commented or
+    // active) — a removed gate line would leave the flag silently undocumented.
+    const named = new Set(namedKeys(example));
+    const undocumented = [
+      ...read('apps/web/src/shared/config/features.ts').matchAll(/VITE_FEATURE_[A-Z_]+/g),
+    ]
+      .map((m) => m[0])
+      .filter((k) => !named.has(k));
+    expect(undocumented, 'feature gates missing from .env.example').toEqual([]);
   });
 });
 
@@ -247,8 +261,8 @@ describe('.env.example agrees with the dev tooling', () => {
     expect(buckets, 'the e2e suite bucket is not created by garage-init').toContain(
       'opshub-files-test',
     );
-    expect(storageInit).toContain('for bucket in $BUCKETS');
-    expect(storageInit).toContain('Access-Control-Request-Method: PUT');
+    expect(storageInit).toContain('BUCKETS.split');
+    expect(storageInit).toContain("'Access-Control-Request-Method': 'PUT'");
   });
 
   it('sends uploads to Garage with its fixed local key, never to the real AWS S3', () => {
@@ -307,7 +321,6 @@ describe('.env.example holds no real secret and no foreign sender', () => {
     'EDGE_CLIENT_IP_SECRET_PREVIOUS',
     'GRAPH_CLIENT_ID',
     'GRAPH_CLIENT_CERTIFICATE',
-    'RESEND_API_KEY',
   ])('%s is left empty: a developer supplies their own', (key) => {
     expect(env[key]).toBe('');
   });
@@ -316,6 +329,9 @@ describe('.env.example holds no real secret and no foreign sender', () => {
     expect(env['EMAIL_PROVIDER']).toBe('smtp');
     expect(env['MAIL_SMTP_HOST']).toBe('localhost');
     expect(env['MAIL_FROM_EMAIL']).toMatch(/@qnsc\.vn$/);
+    // SES and Resend are gone (opshub#410): no key of either may remain.
+    expect(env['RESEND_API_KEY']).toBeUndefined();
+    expect(env['SES_CONFIGURATION_SET']).toBeUndefined();
   });
 });
 

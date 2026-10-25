@@ -3,8 +3,9 @@
 #
 # Triggers:
 #   develop → push to main (auto)
-#   prod    → push a semver tag v*.*.*  (gated by the "production" GitHub
-#             Environment's required reviewer, enforced inside the reusable)
+#   (prod is GONE — destroyed 2026-10-21 with the AWS opshub production stack;
+#    the v*.*.* tag trigger and its "production" Environment gate were removed
+#    with it.)
 #
 # The reusable builds the Vite bundle and publishes it to Cloudflare Pages.
 # VITE_*/PAGES_PROJECT/APP_URL are env-scoped GitHub vars; the Cloudflare creds
@@ -21,7 +22,7 @@ on:
     # config). paths-ignore fires only if EVERY changed file matches — a shared
     # change (root lockfile, package.json) still deploys, so under-deploy is
     # impossible. Release tags always change package.json + manifest (root, never
-    # ignored) → prod never skipped.
+    # ignored).
     #
     # `infra/**` is deliberately NOT ignored, though it once was. Terraform owns the
     # Pages project's environment (`API_ORIGIN`), and a Pages env change only takes
@@ -38,14 +39,10 @@ on:
       - 'Dockerfile'
       - 'nest-cli.json'
       - 'tsconfig.migrator.json'
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'   # semver only — no -rc suffix
 
 concurrency:
-  # Serialize by ENVIRONMENT, not raw ref: all prod (tag) deploys share one
-  # group so prod DB migrations never run concurrently; develop shares another.
-  # prod and develop still run in parallel (different groups).
-  group: deploy-web-${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'develop' }}
+  # Serialize by ENVIRONMENT. develop only now — the prod path is gone.
+  group: deploy-web-develop
   cancel-in-progress: false   # never cancel a running deploy
 
 jobs:
@@ -66,8 +63,7 @@ jobs:
   wait-for-infra:
     name: Wait for infrastructure
     runs-on: ubuntu-latest
-    # Generous: on a tag this waits for apply-prod, which sits behind the
-    # `production` environment's required reviewer. Timing out here is safe — the
+    # Timing out here is safe — the
     # deploy is re-runnable — but it should not fire because an approver stepped
     # away.
     timeout-minutes: 120
@@ -83,13 +79,6 @@ jobs:
       - name: Does this commit change infrastructure?
         id: touched
         run: |
-          # Tags ALWAYS gate. infra-apply's apply-prod job is `if: ref_type ==
-          # 'tag'`, so a tag is the ONLY thing that applies prod infra — and the
-          # prod web deploy fires on the same tag. Path filters are also not
-          # applied to tag pushes, so infra-apply always runs for a tag.
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "infra=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
           # infra/modules/** counts too — `module "stack"` is a LOCAL path module, so a
           # module-only commit changes the plan and triggers infra-apply. Matching only
           # infra/live/ here would let this deploy race ahead of that apply.
@@ -103,14 +92,11 @@ jobs:
         if: steps.touched.outputs.infra == 'true'
         # Shared with backend-deploy and the other repos — see `quynhonsemiconductor/ci`.
         # A rate limit is retried there rather than reported as a failed upstream run.
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           workflow: infra-apply.yml
           label: Infrastructure · Apply
-          # The run on THIS ref: a release commit is pushed twice (main, and the vX.Y.Z tag) and both start an
-          # Infrastructure · Apply on the same sha. Without a branch the gate takes the newest of the two, which on
-          # a tag run can be the develop apply instead of the tag's prod apply it exists to wait for. `ref_name` is
-          # `main` for a push to main and the tag name for a tag push (a run's head branch is the tag name).
+          # The run on THIS ref (push to main). `ref_name` is `main`.
           branch: ${{ github.ref_name }}
           if-missing: warn
           missing-message: >-
@@ -123,9 +109,6 @@ jobs:
   # commit has finished successfully. Keys on the commit sha, so it can never
   # wait on an unrelated run. Mirrors backend-deploy's wait-for-infra gate.
   #
-  #   - tag push → CI does not run on tags (it triggers on push-to-main / PRs),
-  #     and prod is gated by the "production" Environment reviewer inside the
-  #     reusable, so there is nothing to await → proceed at once.
   #   - push to main → wait for Web · CI on this sha; the shared `wait-for-run` action
   #     propagates its conclusion, so a failed/timed-out CI blocks the deploy.
   #
@@ -143,7 +126,7 @@ jobs:
       - name: Wait for Web · CI on this commit
         # Tag deploy: Web · CI does not run on tags, so there is nothing to await (see above).
         if: github.ref_type != 'tag'
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           workflow: web-ci.yml
           branch: main
@@ -161,7 +144,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: quynhonsemiconductor/ci/.github/workflows/web-deploy.yml@v1
+    uses: quynhonsemiconductor/ci/.github/workflows/web-deploy.yml@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
     with:
       product: opshub
       # Monorepo: run wrangler from the web package dir so paths resolve against

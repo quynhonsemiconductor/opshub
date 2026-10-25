@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { like, desc } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB } from '@platform';
 import { complianceFindings } from '../../../../../db/schema';
 
@@ -18,7 +19,6 @@ export class ShadowItFindingsService {
    * `/v1/compliance/findings`, which pages.
    */
   async listShadowItFindings(limit = 50): Promise<(typeof complianceFindings.$inferSelect)[]> {
-    const { like, desc } = await import('drizzle-orm');
     return (
       this.db
         .select()

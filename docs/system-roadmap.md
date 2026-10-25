@@ -343,7 +343,7 @@ whether it lands before or alongside module 1.
 
 ## Uploads: one policy descriptor per surface
 
-Ported from rally, which arrived at this shape after every new upload surface had produced
+Ported from rova, which arrived at this shape after every new upload surface had produced
 another copy of presign/confirm.
 
 - **`RESOURCE_RULES` in `libs/platform/src/storage/storage.types.ts`** is the whole policy: MIME
@@ -359,7 +359,7 @@ another copy of presign/confirm.
   renders inline is stored XSS the moment the bytes come from an origin the app trusts — which is
   exactly what `CDN_FILES_BASE_URL` is.
 - **`Content-Disposition` is STORED object metadata, not a response override.** This is a
-  deliberate deviation from rally, which applies it on its presigned GET. `resolveUrl` here prefers
+  deliberate deviation from rova, which applies it on its presigned GET. `resolveUrl` here prefers
   the CDN whenever one is configured and a plain CDN read carries no overrides, so the override
   alone would silently not apply on the path production uses. The header must therefore be in
   `signableHeaders` AND sent by the client — a header named in the command but unsigned is dropped
@@ -368,7 +368,7 @@ another copy of presign/confirm.
   fails the signature and so does more, and the failure is a 403 with no CORS headers, which a
   browser reports as an opaque network error.
 - **The checksum is advisory.** A presigned PUT cannot require one without the client sending a
-  matching `x-amz-*` header, which the presigner drops — rally proved that the hard way. It is
+  matching `x-amz-*` header, which the presigner drops — rova proved that the hard way. It is
   recorded at presign and compared on confirm where the backend reports one, because size alone
   cannot catch a same-length substitution.
 - **1:1 surfaces keep their key column.** `employees.photo_storage_key` and friends are not

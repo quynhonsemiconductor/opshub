@@ -51,6 +51,7 @@ const SENDABLE = [
   'request.delegation_created',
   'request.step_ready',
   'request.submitted',
+  'request.no_approver',
   'request.approved',
   'request.rejected',
 ];
@@ -162,6 +163,7 @@ function namesFor(type: string): string[] {
     'request.delegation_created': 'Someone delegated their approvals to you',
     'request.step_ready': 'A request has reached your step',
     'request.submitted': 'A request needs your decision',
+    'request.no_approver': 'A request has no one left to approve it',
     'request.approved': 'Your request was approved',
     'request.rejected': 'Your request was rejected',
   };

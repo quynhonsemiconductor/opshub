@@ -7,6 +7,7 @@
  * intercepted identically.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { ActorScope } from '../auth/actor-scope.service';
 import { RequestEngine } from './request-engine.service';
 import type { RequestItem } from './request-engine.types';
@@ -338,7 +339,9 @@ describe('RequestEngine.submit()', () => {
 
       await engine.submit('leave_request', { days: 3 }, REQUESTER);
 
-      const recipients = scheduledNotifications(notifScheduler).map((input) => input.recipientId);
+      const recipients = scheduledNotifications(notifScheduler)
+        .filter((input) => input.type === 'request.submitted')
+        .map((input) => input.recipientId);
       expect(recipients).not.toContain(REQUESTER.sub);
       expect(recipients).toEqual([APPROVER_A, APPROVER_B]);
     });
@@ -360,6 +363,105 @@ describe('RequestEngine.submit()', () => {
       expect(recipients).toEqual(['user-named-approver']);
       // And the reverse lookup is not even attempted — there is nothing to resolve.
       expect(authz.globalHoldersOf).not.toHaveBeenCalled();
+    });
+
+    /*
+     * THE SINGLE-ADMIN TENANT. The only holder of the approval permission is the person who filed the
+     * request, and separation of duties refuses them. Before this, the fan-out was empty and the only
+     * trace was a warn saying nobody held the permission, which was false. Now the log says why, and
+     * the administrators (here, the requester, who is the only one) get a notice that nobody else was told.
+     */
+    it('logs and notifies administrators when the only approver is the requester', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const submittedRow = makeRequest({ id: 'req-only', requesterId: REQUESTER.sub });
+      const { engine, db, authz, notifScheduler } = buildEngine({
+        typeDef: makeTypeDef({ onSubmit: undefined }),
+      });
+      // The requester is the only holder of every permission, administrators included.
+      authz.globalHoldersOf.mockResolvedValue([REQUESTER.sub]);
+      db.insert.mockReturnValue(makeQueryChain([submittedRow]));
+
+      try {
+        await engine.submit('leave_request', { days: 3 }, REQUESTER);
+
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestId: 'req-only',
+            requiredPermission: 'workforce.approve',
+            reason: 'only_holder_is_requester',
+          }),
+          'No approver was notified for this request',
+        );
+        // The log carries ids only, never an address.
+        const logged = JSON.stringify(warn.mock.calls);
+        expect(logged).not.toContain(REQUESTER.email);
+
+        const inputs = scheduledNotifications(notifScheduler);
+        expect(inputs.filter((input) => input.type === 'request.submitted')).toEqual([]);
+        const notices = inputs.filter((input) => input.type === 'request.no_approver');
+        expect(notices.map((input) => input.recipientId)).toEqual([REQUESTER.sub]);
+        expect(notices[0].idempotencyKey).toBe(
+          `request_no_approver:request_submitted:req-only:${REQUESTER.sub}`,
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('leaves the normal multi-approver case unchanged: no warning, no administrator notice', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const submittedRow = makeRequest({ id: 'req-multi-ok', requesterId: REQUESTER.sub });
+      const { engine, db, authz, notifScheduler } = buildEngine({
+        typeDef: makeTypeDef({ onSubmit: undefined }),
+      });
+      authz.globalHoldersOf.mockImplementation((permission: string) =>
+        Promise.resolve(permission === 'rbac.manage' ? [APPROVER_A] : [APPROVER_A, APPROVER_B]),
+      );
+      db.insert.mockReturnValue(makeQueryChain([submittedRow]));
+
+      try {
+        await engine.submit('leave_request', { days: 3 }, REQUESTER);
+
+        const inputs = scheduledNotifications(notifScheduler);
+        expect(inputs.map((input) => [input.type, input.recipientId])).toEqual([
+          ['request.submitted', APPROVER_A],
+          ['request.submitted', APPROVER_B],
+        ]);
+        expect(warn).not.toHaveBeenCalledWith(
+          expect.anything(),
+          'No approver was notified for this request',
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('distinguishes no holder at all from the requester-only case, and still notifies administrators', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const submittedRow = makeRequest({ id: 'req-none', requesterId: REQUESTER.sub });
+      const { engine, db, authz, notifScheduler } = buildEngine({
+        typeDef: makeTypeDef({ onSubmit: undefined }),
+      });
+      authz.globalHoldersOf.mockImplementation((permission: string) =>
+        Promise.resolve(permission === 'rbac.manage' ? [APPROVER_B] : []),
+      );
+      db.insert.mockReturnValue(makeQueryChain([submittedRow]));
+
+      try {
+        await engine.submit('leave_request', { days: 3 }, REQUESTER);
+
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: 'req-none', reason: 'no_holder' }),
+          'No approver was notified for this request',
+        );
+        const inputs = scheduledNotifications(notifScheduler);
+        expect(inputs.filter((input) => input.type === 'request.submitted')).toEqual([]);
+        expect(
+          inputs.filter((input) => input.type === 'request.no_approver').map((i) => i.recipientId),
+        ).toEqual([APPROVER_B]);
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('schedules nothing when no one holds the permission globally', async () => {

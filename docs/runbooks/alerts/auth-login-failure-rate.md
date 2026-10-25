@@ -42,7 +42,8 @@ the only signal that separates "sign-in is broken" from normal traffic.
 - Entra tenant/app registration misconfiguration (consent revoked, the `email` optional claim removed, so
   members have no address to match against `qnsc.vn`)
 - Prod only: `entra_client_id` is empty until the production app registration exists (see
-  `infra/live/prod/variables.tf`), in which case the env schema refuses to boot at all, so this alert is not
+  `infra/live/prod/variables.tf` — that stack was destroyed 2026-10-22 with opshub production),
+  in which case the env schema refuses to boot at all, so this alert is not
   the symptom you would see first
 - A genuine wave of user error (people from another tenant, personal accounts), distinguishable from the above
   by NOT correlating with a deploy or config change

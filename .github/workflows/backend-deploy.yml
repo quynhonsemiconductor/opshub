@@ -1,10 +1,11 @@
 # =============================================================================
 # Backend · Deploy — thin caller of the shared reusable (ci).
 #
-# Triggers:
+# Trigger:
 #   develop → push to main (auto)
-#   prod    → push a semver tag v*.*.*  (gated by the "production" GitHub
-#             Environment's required reviewer, enforced inside the reusable)
+#   (prod is GONE: the AWS opshub production stack was destroyed 2026-10-21 —
+#   owner decision; the v*.*.* tag trigger was removed so no tag can deploy a
+#   prod that no longer exists.)
 #
 # The reusable builds/attests on main, promotes the exact dev image on tag,
 # migrates, then rolls the ECS services. All ECS_*/RDS/APP_URL config is read
@@ -28,7 +29,7 @@ on:
     # SERVICE is never moved onto the revision Terraform registers — this pipeline
     # owns that. With infra ignored here, an infra-only merge registered a new task
     # definition that nothing ever rolled onto, and the change silently did not
-    # take effect. Rally hit exactly that: its develop ran against a DELETED cache
+    # take effect. Rova hit exactly that: its develop ran against a DELETED cache
     # endpoint (`valkey: down` on /v1/readyz) after a cache migration, because the
     # apply succeeded, the new definition was correct, and no deploy ran.
     #
@@ -43,10 +44,7 @@ on:
       - 'docs/**'
       - '.claude/**'
       - 'apps/web/**'
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'   # semver only — no -rc suffix
-
-  # Manual re-run, matching rally. Needed because a deploy can fail for reasons that have
+  # Manual re-run, matching rova. Needed because a deploy can fail for reasons that have
   # nothing to do with the commit — an expired token, a throttled ECS API, a registry
   # hiccup — and without it the only way to retry is an empty commit, which rewrites
   # history to work around an infrastructure problem.
@@ -60,10 +58,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Serialize by ENVIRONMENT, not raw ref: all prod (tag) deploys share one
-  # group so prod DB migrations never run concurrently; develop shares another.
-  # prod and develop still run in parallel (different groups).
-  group: deploy-backend-${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'develop' }}
+  # Serialize by ENVIRONMENT. develop only now — the prod path is gone.
+  group: deploy-backend-develop
   cancel-in-progress: false   # never cancel a running deploy
 
 jobs:
@@ -102,14 +98,6 @@ jobs:
       - name: Does this commit change infrastructure?
         id: touched
         run: |
-          # Tags ALWAYS gate. infra-apply's apply-prod job is `if: ref_type ==
-          # 'tag'`, so a tag is the ONLY thing that applies prod infra — and the
-          # prod deploy fires on the same tag. Path filters are not applied to tag
-          # pushes either, so infra-apply always runs for a tag regardless of what
-          # the commit touched.
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "infra=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
           # infra/modules/** is included ahead of the stack extraction: once the
           # environments call a LOCAL path module, a module-only commit changes both
           # plans, and matching only infra/live/ would let the deploy race the apply.
@@ -125,7 +113,7 @@ jobs:
         # awaited run, live in the shared action — see `quynhonsemiconductor/ci`. This was
         # hand-written here, with `gh run watch --exit-status`, which reports a 403 the same
         # way it reports a failed run: rova lost both deploys on 2026-09-13 to exactly that.
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           workflow: infra-apply.yml
           label: Infrastructure · Apply
@@ -157,7 +145,7 @@ jobs:
   # action's own failure message states ("The commit must be merged to main and deployed to
   # develop before tagging a release").
   #
-  # With no gate the two runs race. This is PORTED FROM RALLY, where prod lost that race
+  # With no gate the two runs race. This is PORTED FROM ROVA, where prod lost that race
   # on v0.7.13 (2026-08-31): a release merge fires both runs on the same commit, the tag
   # run cleared this gate in 3 seconds while the main run sat here for 15m16s waiting on
   # Backend · CI, and prod then exhausted the promote step's poll budget waiting for an
@@ -184,7 +172,7 @@ jobs:
     name: Wait for Backend · CI
     runs-on: ubuntu-latest
     # 45, not 30: the tag branch now awaits the develop deploy, whose own slowest input is
-    # a Docker build that a lockfile change forces to rebuild from scratch. Rally measured
+    # a Docker build that a lockfile change forces to rebuild from scratch. Rova measured
     # 24m24s for that run on the release this fix comes from.
     timeout-minutes: 45
     permissions:
@@ -192,8 +180,7 @@ jobs:
       actions: read
     steps:
       - name: Wait for Backend · CI on this commit
-        if: github.ref_type != 'tag'
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
         with:
           workflow: backend-ci.yml
           # `main` and not the tag ref: Backend · CI only runs on main.
@@ -203,29 +190,6 @@ jobs:
           if-missing: fail
           missing-message: >-
             No Backend · CI run was found for this commit.
-
-      # Prod promotes the image the develop deploy pushed, so this is the tag run's real
-      # precondition. See the block comment above this job for the race it closes.
-      - name: Wait for the develop deploy of this commit
-        if: github.ref_type == 'tag'
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@v1
-        with:
-          workflow: backend-deploy.yml
-          # `main` is what excludes THIS run: the develop deploy's headBranch is `main` while
-          # the tag run's is the tag ref, so the two never match despite sharing a workflow
-          # file and a commit. Without it this would find itself and wait forever.
-          branch: main
-          label: develop Backend · Deploy
-          # Warn, unlike the CI gate above: a hand-cut tag on a docs-only commit produces no
-          # develop run, and the promote step's ECR poll is still the backstop. Blocking would
-          # turn this gate into a new way to make a release un-shippable.
-          if-missing: warn
-          missing-message: >-
-            No develop Backend · Deploy run was found for this commit; the promote step's ECR
-            poll is the backstop.
-          failure-message: >-
-            The develop deploy of this commit did not succeed. Prod promotes the image that run
-            pushes, so there is nothing to promote. Fix develop, then re-run this deploy.
 
   deploy:
     needs: [wait-for-infra, wait-for-ci]
@@ -240,7 +204,7 @@ jobs:
       id-token: write
       attestations: write
       packages: read # build-push-ecr pulls private @quynhonsemiconductor/* from GitHub Packages
-    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@v1
+    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
     with:
       product: opshub
       has_worker: true
@@ -290,12 +254,12 @@ jobs:
       SLACK_DEPLOY_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
 
   # ───────────────────────────────────────────────────────────────────────────
-  # Grafana deploy annotation — ported from rally.
+  # Grafana deploy annotation — ported from rova.
   #
   # WHY THIS IS NOT COSMETIC. opshub's Grafana alert rules fire on symptoms that a
   # deploy is one of the likeliest causes of, and without a deploy marker on the
   # dashboard there is nothing on screen that distinguishes "the service regressed"
-  # from "a task was replaced 40 seconds ago". rally's `http-p99-latency` page on
+  # from "a task was replaced 40 seconds ago". rova's `http-p99-latency` page on
   # 2026-08-31 was exactly that: the slow request was a cold start after a task
   # replacement, and establishing it took reading workflow job timestamps by hand
   # because the latency panel carried no deploy markers to line the spike up against.
@@ -328,7 +292,7 @@ jobs:
         continue-on-error: true
         env:
           GRAFANA_ALERTS_TOKEN: ${{ secrets.GRAFANA_ALERTS_TOKEN }}
-          DEPLOY_ENV: ${{ github.ref_type == 'tag' && 'production' || 'develop' }}
+          DEPLOY_ENV: develop
         run: |
           curl -sf -X POST "https://qnsc.grafana.net/api/annotations" \
             -H "Authorization: Bearer ${GRAFANA_ALERTS_TOKEN}" \

@@ -5,7 +5,7 @@
  * function, and thoroughly. What it cannot test is whether anything CALLS it: the policy is
  * attached by a single `onRequest` hook in `bootstrapApp`, and registering
  * `@fastify/csrf-protection` only decorates `reply.generateCsrf()` and `app.csrfProtection`
- * — it enforces NOTHING until that hook attaches it. rally shipped exactly that defect: the
+ * — it enforces NOTHING until that hook attaches it. rova shipped exactly that defect: the
  * plugin registered, the hook never wired, no token ever issued, and the only thing actually
  * stopping a cross-site request was `SameSite=Strict` on the session cookie. A single
  * control a future cookie tweak could silently remove, with no test failing.
@@ -16,7 +16,7 @@
  * the same `bootstrapApp` as production — a spec that assembled its own Nest app would prove
  * nothing here, because the hook it is testing lives in the part it skipped.
  *
- * opshub differs from rally in where the token comes from: there is no `/v1/bff/me`. The token is minted
+ * opshub differs from rova in where the token comes from: there is no `/v1/bff/me`. The token is minted
  * by `GET /v1/auth/me`, bound to the identity 8 session cookie it was requested with. The cookie is the
  * only credential there is (no Bearer path survives the move to identity 8), so every authenticated
  * state-changing request is subject to the gate; `/api/auth/*` is exempt, because sign-in runs before any
@@ -60,7 +60,7 @@ describe('CSRF protection is enforced', () => {
     expect(me.json<{ csrfToken?: string }>().csrfToken).toBeTruthy();
   });
 
-  // The assertion that would have caught rally's defect: without the hook this is a 204.
+  // The assertion that would have caught rova's defect: without the hook this is a 204.
   it('rejects a cookie-authenticated write with no CSRF token', async () => {
     const session = await login(app, FIXTURE.NO_PERMISSIONS);
     const res = await app.inject({ ...WRITE, headers: { cookie: session.cookieHeader } });

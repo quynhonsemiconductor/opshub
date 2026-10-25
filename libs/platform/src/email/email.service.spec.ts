@@ -15,7 +15,6 @@ import { EMAIL_SEND_TIMEOUT_MS } from './email.provider';
 import { EmailService } from './email.service';
 
 interface SentPayload {
-  from?: string;
   replyTo?: string;
   to: string;
 }
@@ -31,8 +30,6 @@ function makeService(env: Record<string, string | undefined>) {
 }
 
 const CONFIGURED = {
-  MAIL_FROM_NAME: 'OpsHub',
-  MAIL_FROM_EMAIL: 'ops@example.com',
   MAIL_REPLY_TO: 'people@example.com',
 };
 
@@ -80,31 +77,11 @@ describe('EmailService addresses', () => {
   it('sends no reply-to at all when the deployment sets none', async () => {
     // Absent, not empty string: an empty `Reply-To` header is a header, and some receivers treat one as
     // a reply address of nothing rather than as no preference.
-    const { service, sent } = makeService({
-      MAIL_FROM_NAME: 'OpsHub',
-      MAIL_FROM_EMAIL: 'ops@example.com',
-    });
+    const { service, sent } = makeService({});
 
     await send(service);
 
     expect(sent().replyTo).toBeUndefined();
-  });
-
-  it('builds the from address from the name and the email', async () => {
-    const { service, sent } = makeService(CONFIGURED);
-    await send(service);
-    expect(sent()).toMatchObject({ from: 'OpsHub <ops@example.com>' });
-  });
-
-  it('leaves `from` undefined when no sender is configured', async () => {
-    /*
-     * Deliberate, and the provider is what refuses: `MAIL_FROM_EMAIL` lost its default because defaulting
-     * it made a misconfigured production send from a domain it did not own — passing SPF nowhere, so
-     * silent non-delivery. Undefined here reaches the provider, which throws with the variable's name.
-     */
-    const { service, sent } = makeService({ MAIL_FROM_NAME: 'OpsHub' });
-    await send(service);
-    expect(sent().from).toBeUndefined();
   });
 });
 

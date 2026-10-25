@@ -73,6 +73,10 @@ const baseShape = {
   DATABASE_USER: z.string().optional(),
   DATABASE_PASSWORD: z.string().optional(),
   DATABASE_SSLMODE: z.string().default('require'),
+  // Path to the CA bundle database certificates must chain to (RDS global bundle in the
+  // image today, the CNPG ca.crt on-prem). REQUIRED in production: without it the
+  // process refuses to connect (see db/pg-ssl.ts) instead of encrypting unverified.
+  DATABASE_SSL_CA: emptyToUndefined(z.string().optional()),
   DATABASE_POOL_MIN: z.coerce.number().int().positive().default(2),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(20),
 
@@ -103,12 +107,6 @@ const baseShape = {
   AWS_REGION: z.string().default('ap-southeast-1'),
   /** LocalStack/local-dev endpoint for the AWS SDK clients (SES, SQS). Unset in AWS. */
   AWS_ENDPOINT_URL: z.string().optional(),
-  /**
-   * The SQS queue BounceFeedbackService drains for SES bounce/complaint verdicts.
-   * OPTIONAL and the consumer's OFF switch: unset = no consumer starts. Pairs with
-   * SES_CONFIGURATION_SET above — the set tags the send, this is where the verdict lands.
-   */
-  SES_BOUNCE_QUEUE_URL: z.string().default(''),
   /** S3 bucket for all stored files — injected by infra as S3_FILES_BUCKET. Optional in dev (uploads stubbed when unset). */
   S3_FILES_BUCKET: z.string().optional(),
   /** CloudFront base URL for file downloads. When set, overrides presigned S3 GET URLs. */
@@ -173,12 +171,12 @@ const baseShape = {
    * Which transport actually sends.
    *
    * `graph` sends through Microsoft 365 (Graph `sendMail`) from the product's shared mailbox
-   * (HYBRID-INFRA-PLAN §7.4): see `docs/runbooks/mail-graph.md`. `ses` and `resend` are the transports it
-   * replaces and stay only until the cut-over is done (the deployed task definitions still name `ses`).
+   * (HYBRID-INFRA-PLAN §7.4): see `docs/runbooks/mail-graph.md`. SES and Resend were removed
+   * (opshub#410): graph is the only sending transport.
    * `dev` logs to the console and sends nothing, which is the default so that a fresh checkout needs no
    * mail setup at all.
    */
-  EMAIL_PROVIDER: z.enum(['dev', 'graph', 'resend', 'ses', 'smtp']).default('dev'),
+  EMAIL_PROVIDER: z.enum(['dev', 'graph', 'smtp']).default('dev'),
   /** SMTP relay host for EMAIL_PROVIDER=smtp: Mailpit (`localhost` on the host, `mailpit` in a container). Development only. */
   MAIL_SMTP_HOST: emptyToUndefined(z.string().min(1).optional()),
   /** SMTP relay port for EMAIL_PROVIDER=smtp: Mailpit's SMTP port (1025 in the container). */
@@ -189,7 +187,6 @@ const baseShape = {
    * does not apply to it.
    */
   MAIL_GRAPH_SENDER: emptyToUndefined(z.string().email().optional()),
-  MAIL_FROM_NAME: z.string().default('OpsHub'),
   /**
    * NO DEFAULT, deliberately — see the refusal in the `superRefine` below.
    *
@@ -209,16 +206,6 @@ const baseShape = {
   // ENTRA_* fields above already guard against.
   MAIL_FROM_EMAIL: emptyToUndefined(z.string().email().optional()),
   MAIL_REPLY_TO: emptyToUndefined(z.string().email().optional()),
-  RESEND_API_KEY: z.string().optional(),
-  /**
-   * The SES configuration set to tag every send with.
-   *
-   * Optional, and what it buys is attribution rather than delivery: without one, a bounce or
-   * complaint arrives as an event nobody can tie back to the message that caused it. Sends work
-   * either way, which is exactly why this is easy to leave unset and regret later.
-   */
-  SES_CONFIGURATION_SET: z.string().optional(),
-
   // ── Frontend ───────────────────────────────────────────────────────────────
   /** Public base URL used to build links inside notification emails. */
   APP_URL: z.string().url().default('http://localhost:5174'),
@@ -308,7 +295,7 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
     // BEFORE the database early-return below, and that placement is the point. This
     // superRefine returns as soon as a complete DATABASE_URL is present, so anything
     // written after that line is dead in exactly the configuration developers and CI run.
-    // (rally's equivalent storage-pair check sits after its return and is inert there.)
+    // (rova's equivalent storage-pair check sits after its return and is inert there.)
     //
     // Half a credential pair is a misconfiguration, not a partial feature. With only one
     // half set, the S3Client silently omits `credentials` and falls back to the task

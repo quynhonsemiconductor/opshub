@@ -19,7 +19,7 @@ opshub/
 └── Dockerfile               # multi-target: api, worker, migrator
 ```
 
-Workspace model, develop, build, and deploy conventions mirror [`rally`](https://github.com/quynhonsemiconductor/rally): NestJS backend is the pnpm root, `apps/web` is a workspace member; deploy is push-based to ECS via `qnsc-ci`.
+Workspace model, develop, build, and deploy conventions mirror [`rova`](https://github.com/quynhonsemiconductor/rova): NestJS backend is the pnpm root, `apps/web` is a workspace member; deploy is push-based to ECS via `qnsc-ci`.
 
 ## Local stack
 
@@ -34,8 +34,8 @@ grep -qs 'npm.pkg.github.com/:_authToken' ~/.npmrc || echo '//npm.pkg.github.com
 
 export NODE_AUTH_TOKEN="$(gh auth token)"      # per shell; or a PAT with read:packages
 cp .env.example .env                           # every value is already wired, secrets are local placeholders
+pnpm install                                   # FIRST: the bucket setup imports @aws-sdk/client-s3 from node_modules
 docker compose -f docker-compose.dev.yml up -d --wait    # Postgres, Valkey, Garage (S3), Mailpit, OTel collector, and the bucket setup
-pnpm install
 pnpm db:migrate                                # migrations + RBAC catalogue + the demo users (SEED_ON_DEPLOY=true in .env)
 ```
 
@@ -54,7 +54,7 @@ pnpm dev:web            # SPA    → http://localhost:5174   (proxies /v1 and /a
 
 Check it: `curl -s localhost:3001/readyz` answers `{"status":"ok", …, "checks":{"database":"up","cache":"up"}}` (the API's own probe), and `curl -s localhost:5174/v1/healthz` answers `ok` **through the SPA's proxy**, which is what proves Vite and the API agree on the port.
 
-One `.env` serves both processes. Some variables belong to one of them only, and each process **refuses to start** with the other's set (a worker holding the session secret could forge a cookie). `pnpm start:dev:worker` blanks the API-only ones (`BETTER_AUTH_SECRET`, `IDENTITY_TEST_LOGIN`, `ENTRA_CLIENT_SECRET`, `EDGE_CLIENT_IP_SECRET[_PREVIOUS]`) and `pnpm start:dev` blanks the worker-only `GRAPH_*`, so you never edit the file to switch between them. `.env.example` marks every variable `[both]`, `[API]` or `[WORKER]`.
+One `.env` serves both processes. Some variables belong to one of them only, and each process **refuses to start** with the other's set (a worker holding the session secret could forge a cookie). `pnpm start:dev:worker` blanks the API-only ones (`BETTER_AUTH_SECRET`, `IDENTITY_TEST_LOGIN`, `ENTRA_CLIENT_SECRET`, `EDGE_CLIENT_IP_SECRET[_PREVIOUS]`) and `pnpm start:dev` blanks the worker-only `GRAPH_*`, so you never edit the file to switch between them. `.env.example` marks every variable `[both]`, `[API]` or `[WORKER]`. The Vite dev server reads the same file for the SPA's `VITE_*` flags (the `[web]` section in `.env.example`).
 
 ### Sign in
 

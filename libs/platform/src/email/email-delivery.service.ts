@@ -3,12 +3,11 @@
  *
  * Answers "what happened AFTER the provider accepted this email?" for the callers that
  * surface it to a human (an inviter looking at a pending invitation needs to know the
- * link they are waiting on bounced). The write side is BounceFeedbackService in the
- * worker; this service only reads, so the API can depend on it without dragging any
- * queue plumbing along.
+ * link they are waiting on bounced). Nothing writes those verdicts any more (the SES
+ * feedback loop is gone); this service only reads what earlier rows recorded.
  *
  * Matched by IDEMPOTENCY KEY, not message id: callers know the business key they
- * scheduled with (`invitation.id`, `password-reset:<hash>`), while the SES message id
+ * scheduled with (`invitation.id`, `password-reset:<hash>`), while the provider message id
  * is an implementation detail the relay owns. A key's family — `id`, `id:r1`, `id:r2`
  * for resends — is matched with a prefix, and the LATEST row in the family decides,
  * because a resend that delivered supersedes the earlier bounce.

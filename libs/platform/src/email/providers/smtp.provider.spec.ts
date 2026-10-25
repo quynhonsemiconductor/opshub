@@ -6,7 +6,6 @@ import { SmtpEmailProvider } from './smtp.provider';
 
 const payload: EmailPayload = {
   to: 'user@qnsc.vn',
-  from: 'Mini Rova <noreply@qnsc.vn>',
   subject: 'Verify your email',
   html: '<p>Hello</p>',
   text: 'Hello',

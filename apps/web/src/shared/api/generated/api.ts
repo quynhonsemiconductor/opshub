@@ -5095,6 +5095,7 @@ export interface components {
       displayName?: string;
       department?: string | null;
       jobTitle?: string | null;
+      /** Format: uuid */
       managerId?: string | null;
     };
     UpdateStatusDto: {
@@ -5172,6 +5173,7 @@ export interface components {
        */
       scopeType: 'global' | 'self' | 'team' | 'dept' | 'region';
       scopeId?: string | null;
+      /** Format: date-time */
       expiresAt?: string | null;
     };
     CreateDelegationDto: {
@@ -5801,11 +5803,13 @@ export interface components {
     CreateLicenseDto: {
       name: string;
       vendor: string;
+      /** Format: uuid */
       vendorId?: string | null;
       /** @enum {string} */
       licenseType: 'perpetual' | 'subscription' | 'per_seat' | 'concurrent';
       seatCount?: number | null;
       costPerSeatCents?: number | null;
+      /** Format: date */
       renewalDate?: string | null;
       notes?: string | null;
       externalId?: string | null;
@@ -5828,11 +5832,13 @@ export interface components {
     UpdateLicenseDto: {
       name?: string;
       vendor?: string;
+      /** Format: uuid */
       vendorId?: string | null;
       /** @enum {string} */
       licenseType?: 'perpetual' | 'subscription' | 'per_seat' | 'concurrent';
       seatCount?: number | null;
       costPerSeatCents?: number | null;
+      /** Format: date */
       renewalDate?: string | null;
       /** @enum {string} */
       status?: 'active' | 'expiring_soon' | 'expired' | 'cancelled';
@@ -6094,13 +6100,16 @@ export interface components {
     DraftContractDto: {
       /** Format: uuid */
       employeeId: string;
+      /** Format: uuid */
       positionId?: string | null;
       reference: string;
       /** @enum {string} */
       contractType: 'permanent' | 'fixed_term' | 'probation' | 'internship' | 'contractor';
       /** Format: date */
       startDate: string;
+      /** Format: date */
       endDate?: string | null;
+      /** Format: date */
       probationEndDate?: string | null;
       noticePeriodDays?: number;
       compensation?: {
@@ -6109,16 +6118,20 @@ export interface components {
         /** @enum {string} */
         salaryPeriod: 'hourly' | 'monthly' | 'annual';
       } | null;
+      /** Format: uuid */
       documentId?: string | null;
       notes?: string | null;
     };
     UpdateContractDto: {
+      /** Format: uuid */
       positionId?: string | null;
       /** @enum {string} */
       contractType?: 'permanent' | 'fixed_term' | 'probation' | 'internship' | 'contractor';
       /** Format: date */
       startDate?: string;
+      /** Format: date */
       endDate?: string | null;
+      /** Format: date */
       probationEndDate?: string | null;
       noticePeriodDays?: number;
       compensation?: {
@@ -6127,6 +6140,7 @@ export interface components {
         /** @enum {string} */
         salaryPeriod: 'hourly' | 'monthly' | 'annual';
       } | null;
+      /** Format: uuid */
       documentId?: string | null;
       notes?: string | null;
     };
@@ -6346,6 +6360,7 @@ export interface components {
       periodStart: string;
       /** Format: date */
       periodEnd: string;
+      /** Format: date */
       selfAssessmentDue?: string | null;
       /** Format: date */
       reviewDue: string;
@@ -6463,6 +6478,7 @@ export interface components {
       title: string;
       description: string;
       category: string;
+      /** Format: uuid */
       assetId?: string | null;
       /** Format: uuid */
       ownerId: string;
@@ -6470,12 +6486,14 @@ export interface components {
         likelihood: number;
         impact: number;
       };
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     UpdateRiskDto: {
       title?: string;
       description?: string;
       category?: string;
+      /** Format: uuid */
       assetId?: string | null;
       /** Format: uuid */
       ownerId?: string;
@@ -6483,6 +6501,7 @@ export interface components {
         likelihood: number;
         impact: number;
       };
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     AssessRiskDto: {
@@ -6492,6 +6511,7 @@ export interface components {
         likelihood: number;
         impact: number;
       };
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     MarkTreatedDto: {
@@ -6499,10 +6519,12 @@ export interface components {
         likelihood: number;
         impact: number;
       };
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     AcceptRiskDto: {
       justification: string;
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     AcceptRiskResponseDto: {
@@ -6532,15 +6554,18 @@ export interface components {
       description: string;
       /** Format: uuid */
       ownerId: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     UpdateTreatmentDto: {
       description?: string;
       /** Format: uuid */
       ownerId?: string;
+      /** Format: date */
       dueOn?: string | null;
       /** @enum {string} */
       status?: 'planned' | 'in_progress' | 'done' | 'cancelled';
+      /** Format: date */
       completedOn?: string | null;
     };
     SoaRowResponseDto: {
@@ -6624,11 +6649,15 @@ export interface components {
       /** @enum {string} */
       status: 'not_applicable' | 'not_implemented' | 'partially_implemented' | 'implemented';
       implementationNote?: string | null;
+      /** Format: uuid */
       evidenceDocumentId?: string | null;
+      /** Format: uuid */
       ownerId?: string | null;
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     MarkReviewedDto: {
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     ControlResponseDto: {
@@ -6682,7 +6711,9 @@ export interface components {
       severity: 'low' | 'medium' | 'high' | 'critical';
       /** Format: date-time */
       detectedAt: string;
+      /** Format: uuid */
       assetId?: string | null;
+      /** Format: uuid */
       riskId?: string | null;
       personalDataBreach?: boolean;
     };
@@ -6732,7 +6763,9 @@ export interface components {
       severity?: 'low' | 'medium' | 'high' | 'critical';
       /** Format: date-time */
       detectedAt?: string;
+      /** Format: uuid */
       assetId?: string | null;
+      /** Format: uuid */
       riskId?: string | null;
       personalDataBreach?: boolean;
     };
@@ -6864,6 +6897,7 @@ export interface components {
       classificationReason: string;
       /** Format: uuid */
       ownerId: string;
+      /** Format: uuid */
       custodianId?: string | null;
       confidentiality: number;
       integrity: number;
@@ -6871,6 +6905,7 @@ export interface components {
       personalData?: boolean;
       location?: string | null;
       retentionMonths?: number | null;
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     InformationAssetResponseDto: {
@@ -6927,6 +6962,7 @@ export interface components {
         | 'other';
       /** Format: uuid */
       ownerId?: string;
+      /** Format: uuid */
       custodianId?: string | null;
       confidentiality?: number;
       integrity?: number;
@@ -6934,6 +6970,7 @@ export interface components {
       personalData?: boolean;
       location?: string | null;
       retentionMonths?: number | null;
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     ReclassifyDto: {
@@ -6952,6 +6989,7 @@ export interface components {
       changedAt: string;
     };
     MarkAssetReviewedDto: {
+      /** Format: date */
       reviewDueOn?: string | null;
     };
     InformationAssetDeviceResponseDto: {
@@ -7081,9 +7119,12 @@ export interface components {
       /** Format: uuid */
       ownerId: string;
       dataProcessor?: boolean;
+      /** Format: uuid */
       dataProcessingAgreementId?: string | null;
       dataLocation?: string | null;
+      /** Format: date */
       contractStartsOn?: string | null;
+      /** Format: date */
       contractEndsOn?: string | null;
       noticePeriodDays?: number | null;
     };
@@ -7096,9 +7137,12 @@ export interface components {
       /** Format: uuid */
       ownerId?: string;
       dataProcessor?: boolean;
+      /** Format: uuid */
       dataProcessingAgreementId?: string | null;
       dataLocation?: string | null;
+      /** Format: date */
       contractStartsOn?: string | null;
+      /** Format: date */
       contractEndsOn?: string | null;
       noticePeriodDays?: number | null;
     };
@@ -7111,6 +7155,7 @@ export interface components {
       scope: string;
       findings?: string | null;
       conditions?: string | null;
+      /** Format: uuid */
       evidenceDocumentId?: string | null;
       /** Format: date-time */
       assessedAt?: string;
@@ -7225,8 +7270,11 @@ export interface components {
       ownerId: string;
       /** Format: date-time */
       detectedAt?: string;
+      /** Format: uuid */
       incidentId?: string | null;
+      /** Format: uuid */
       internalAuditId?: string | null;
+      /** Format: uuid */
       evidenceDocumentId?: string | null;
     };
     NonconformanceResponseDto: {
@@ -7287,8 +7335,11 @@ export interface components {
       ownerId?: string;
       /** Format: date-time */
       detectedAt?: string;
+      /** Format: uuid */
       incidentId?: string | null;
+      /** Format: uuid */
       internalAuditId?: string | null;
+      /** Format: uuid */
       evidenceDocumentId?: string | null;
     };
     ContainNonconformanceDto: {
@@ -7361,6 +7412,7 @@ export interface components {
       reference: string;
       /** Format: uuid */
       ownerId: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     CapaAnalysisDto: {
@@ -7368,6 +7420,7 @@ export interface components {
       /** @enum {string} */
       rootCauseMethod: 'five_whys' | 'fishbone' | 'fault_tree' | 'pareto' | 'other';
       actionPlan: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     MarkImplementedDto: {
@@ -7426,7 +7479,9 @@ export interface components {
       criteria: string;
       /** Format: uuid */
       leadAuditorId: string;
+      /** Format: date */
       plannedStartOn?: string | null;
+      /** Format: date */
       plannedEndOn?: string | null;
     };
     InternalAuditResponseDto: {
@@ -7461,7 +7516,9 @@ export interface components {
       criteria?: string;
       /** Format: uuid */
       leadAuditorId?: string;
+      /** Format: date */
       plannedStartOn?: string | null;
+      /** Format: date */
       plannedEndOn?: string | null;
     };
     StartAuditDto: {
@@ -7596,6 +7653,7 @@ export interface components {
       period: string;
       /** Format: uuid */
       chairId: string;
+      /** Format: date */
       scheduledFor?: string | null;
     };
     ManagementReviewResponseDto: {
@@ -7629,6 +7687,7 @@ export interface components {
       description?: string;
       /** Format: uuid */
       ownerId?: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     ReviewActionResponseDto: {
@@ -7659,6 +7718,7 @@ export interface components {
       period?: string;
       /** Format: uuid */
       chairId?: string;
+      /** Format: date */
       scheduledFor?: string | null;
     };
     HoldReviewDto: {
@@ -7679,6 +7739,7 @@ export interface components {
       description: string;
       /** Format: uuid */
       ownerId: string;
+      /** Format: date */
       dueOn?: string | null;
     };
     ChatRequestDto: {

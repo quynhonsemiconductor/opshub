@@ -343,28 +343,25 @@ describe('EnvSchema — WEBHOOK_DELIVERY_MAX_AGE_HOURS', () => {
   );
 });
 
-describe('EnvSchema — email sender', () => {
+describe('EnvSchema — email transports', () => {
   /*
-   * `MAIL_FROM_EMAIL` used to default to `no-reply@opshub.app`, so a deployment configured with a real
-   * provider and no sender booted happily and sent from a domain it may not own — which fails SPF and
-   * DKIM at the recipient. That is silent non-delivery, or delivery to spam, and neither shows up in
-   * our logs. The sibling repo added the same refusal after finding both of its environments in
-   * exactly that state.
+   * Graph is the only sending transport. SES and Resend were removed, so a deployment that still names
+   * either one is refused at boot, naming EMAIL_PROVIDER, rather than starting and failing every send.
    */
-  it('refuses to boot a non-dev provider with no sender', () => {
-    const result = EnvSchema.safeParse(env({ EMAIL_PROVIDER: 'resend' }));
+  it.each(['ses', 'resend'])(
+    'refuses EMAIL_PROVIDER=%s: that transport no longer exists',
+    (provider) => {
+      const result = EnvSchema.safeParse(env({ EMAIL_PROVIDER: provider }));
 
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    const issue = result.error.issues.find((i) => i.path[0] === 'MAIL_FROM_EMAIL');
-    expect(issue, 'the refusal did not name the variable at fault').toBeDefined();
-    // The message has to say what to do about it, not just that something is wrong.
-    expect(issue!.message).toContain('SPF');
-  });
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.issues.some((i) => i.path[0] === 'EMAIL_PROVIDER')).toBe(true);
+    },
+  );
 
-  it('accepts a non-dev provider once a sender is set', () => {
+  it('accepts graph once its sender is set', () => {
     const result = EnvSchema.safeParse(
-      env({ EMAIL_PROVIDER: 'resend', MAIL_FROM_EMAIL: 'ops@example.test' }),
+      env({ EMAIL_PROVIDER: 'graph', MAIL_GRAPH_SENDER: 'noreply-opshub@qnsc.vn' }),
     );
     expect(result.success, JSON.stringify(result.success ? {} : result.error.issues)).toBe(true);
   });
@@ -376,14 +373,6 @@ describe('EnvSchema — email sender', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.EMAIL_PROVIDER).toBe('dev');
-    expect(result.data.MAIL_FROM_EMAIL).toBeUndefined();
-  });
-
-  it('does not invent a sender when one is absent', () => {
-    // The default is what made the misconfiguration silent, so its absence is the assertion.
-    const result = EnvSchema.safeParse(env());
-    if (!result.success) throw new Error('expected parse to succeed');
-    expect(result.data.MAIL_FROM_EMAIL).not.toBe('no-reply@opshub.app');
   });
 });
 
