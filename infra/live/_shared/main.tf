@@ -27,16 +27,128 @@ provider "aws" {
 # github_org is declared in variables.tf (with a quynhonsemiconductor default).
 
 # ── Platform remote state (OIDC provider ARN + KMS from qnsc-infra) ───────────
+data "terraform_remote_state" "platform" {
+  backend = "s3"
+  config = {
+    bucket = "qnsc-tofu-state"
+    key    = "platform/bootstrap/terraform.tfstate"
+    region = "ap-southeast-1"
+  }
+}
 
 // ============================================================================
-// AWS EXIT (E1, 2026-10-31): the shared stack is being destroyed.
+// AWS EXIT (E1, 2026-10-31): the shared stack is being destroyed — IN TWO CUTS.
 //
-// ECR repositories (image fallback now lives in GHCR — gitops#33), the GitHub
-// OIDC provider + deploy roles, and the SES bounce pipeline all go. The two
-// deploy_rds_* guard policies die with it; there is no rova-style prod
-// dependency: opshub production was destroyed on 2026-10-22 (#464).
+// THIS PR destroys only the ECR repositories (image fallback lives in GHCR —
+// gitops#33). force_delete is NOT set here, so THE OWNER EMPTIES THE REPOS
+// FIRST (runbook step 4: `aws ecr ... batch-delete-image` per repo, then
+// `list-images` returns empty) — otherwise the apply dies mid-run on
+// RepositoryNotEmpty with no retry.
 //
-// MERGE ORDER: strictly AFTER the develop-stack destroy PR. The develop ECS
-// deploy roles assume from this stack's OIDC provider; CI deploys to develop
-// stop with this merge. Draft until the owner's go.
+// DELIBERATELY KEPT: the GitHub OIDC provider, the deploy/push/infra CI roles
+// and the RDS dev-cost-saver guard policies. This very apply assumes the
+// infra plan/apply roles — destroying them in the same run is self-revocation
+// with no retry. The roles are destroyed LAST, owner-side with admin creds
+// (runbook step 6: tofu destroy -target), after opshub's prod and develop
+// states are confirmed empty.
+//
+// MERGE ORDER: strictly AFTER the develop-stack destroy PR (#488). Draft until
+// the owner's go; merge needs `allow-dns-destroy` (the plan-guard protects the
+// module.iam_oidc roles, so the default guard would refuse this plan).
 // ============================================================================
+# ── GitHub Actions OIDC roles (ECS deploy + ECR push + infra CI) ─────────────
+# Owns ALL opshub AWS deploy roles: API (per-env), ECR push, infra plan/apply.
+# The web SPA deploys to Cloudflare Pages (see web-deploy.yml → wrangler pages
+# deploy), so it needs no AWS deploy role. opshub is a monorepo; subjects use the
+# "opshub" repo (the archived "opshub-api"/"opshub-web" split repos are dead).
+module "iam_oidc" {
+  # iam-oidc-v3.0.0: the major came from a batched cost-posture release across several
+  # modules, not from a change to this one — its variables and role names are identical
+  # to v2.0.1 (verified by diffing both). Taking it now rather than later because these
+  # roles do not exist yet, so there is no trust-policy replacement to sequence.
+  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/iam-oidc?ref=iam-oidc-v3.0.1"
+
+  product           = "opshub"
+  github_org        = var.github_org
+  oidc_provider_arn = data.terraform_remote_state.platform.outputs.oidc_provider_arn
+
+  environments = {
+    develop = {
+      allowed_subjects = [
+        "repo:${var.github_org}/opshub:ref:refs/heads/main",
+        "repo:${var.github_org}/opshub:environment:develop",
+      ]
+    }
+    production = {
+      allowed_subjects = [
+        "repo:${var.github_org}/opshub:ref:refs/heads/main",
+        "repo:${var.github_org}/opshub:ref:refs/tags/v*",
+        "repo:${var.github_org}/opshub:environment:production",
+      ]
+    }
+  }
+
+  app_repo_names         = ["opshub"]
+  infra_repo_name        = "opshub"
+  ecr_repository_pattern = "opshub-*"
+  ecs_passrole_pattern   = "opshub-*"
+
+  tags = { Scope = "shared" }
+
+  # infra_plan_subjects / infra_apply_subjects: opshub's infra-apply jobs run in
+  # the shared/develop/production GitHub Environments (see infra-apply.yml), which
+  # exactly match the module defaults — so no override is needed.
+
+  # Blast-radius guardrail: explicit-Deny on the opshub infra-apply role so a buggy
+  # opshub apply cannot destroy the platform's own foundations (state bucket, lock
+  # table, OIDC provider, CMK) or mint IAM users — all owned by qnsc-infra bootstrap.
+  infra_apply_guardrail = {
+    state_bucket_arn     = "arn:aws:s3:::qnsc-tofu-state"
+    lock_table_arn       = "arn:aws:dynamodb:ap-southeast-1:${data.aws_caller_identity.current.account_id}:table/qnsc-tofu-locks"
+    oidc_provider_arn    = data.terraform_remote_state.platform.outputs.oidc_provider_arn
+    kms_key_arn          = data.terraform_remote_state.platform.outputs.kms_key_arn
+    artifacts_bucket_arn = data.terraform_remote_state.platform.outputs.artifacts_bucket_arn
+  }
+}
+
+# ── RDS dev-cost-saver guard — develop deploy role only ──────────────────────
+# Allows the CI deploy job to detect + start a stopped RDS instance before
+# running migrations. Scoped to develop only; prod RDS is always-on and this
+# permission is intentionally absent from the production deploy role.
+#
+# The ARN is constructed directly (account_id + region + fixed identifier)
+# instead of via a `data "aws_db_instance"` lookup. A data-source lookup
+# fails hard whenever the instance doesn't exist yet or has been torn down
+# (e.g. a fresh deploy, or a full teardown+redeploy cycle) — this stack
+# would then be unable to apply/destroy independently of develop's RDS
+# lifecycle. An ARN string doesn't require the resource to exist.
+data "aws_caller_identity" "current" {}
+
+locals {
+  opshub_develop_rds_arn = "arn:aws:rds:ap-southeast-1:${data.aws_caller_identity.current.account_id}:db:opshub-develop"
+}
+
+resource "aws_iam_role_policy" "deploy_rds_dev_guard" {
+  name = "opshub-deploy-develop-rds-guard"
+  role = split("/", module.iam_oidc.deploy_role_arns["develop"])[1]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "RDSDevGuard"
+        Effect = "Allow"
+        Action = [
+          "rds:DescribeDBInstances",
+          "rds:StartDBInstance",
+        ]
+        Resource = local.opshub_develop_rds_arn
+      }
+    ]
+  })
+}
+
+# NOTE: the former inline patch `deploy_ecs_verify` (ecs:ListTasks on both deploy
+# roles) was removed when this stack adopted iam-oidc-v2.0.1 — the module now grants
+# ecs:ListTasks on the deploy role, so it is once again the single source of truth.
+
