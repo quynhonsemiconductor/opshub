@@ -24,11 +24,19 @@ RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc .pnpmfile.cjs ./
 COPY patches ./patches
+# Registry auth: pnpm 11 ignores `${NODE_AUTH_TOKEN}` in the committed project .npmrc, so the
+# install writes a USER-level npmrc (NPM_CONFIG_USERCONFIG, a fresh mktemp file) holding the same
+# placeholder line. The file never contains the token: pnpm expands it from the NODE_AUTH_TOKEN
+# environment variable, which exists only inside that RUN (read from the BuildKit secret).
+# Same treatment as rova.
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
     --mount=type=secret,id=node_auth_token \
     export NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token 2>/dev/null || true)" && \
     pnpm config set store-dir /root/.local/share/pnpm/store && \
-    HUSKY=0 pnpm install --frozen-lockfile
+    export NPM_CONFIG_USERCONFIG="$(mktemp)" && \
+    printf '%s\n' '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$NPM_CONFIG_USERCONFIG" && \
+    HUSKY=0 pnpm install --frozen-lockfile && \
+    rm -f "$NPM_CONFIG_USERCONFIG"
 
 # ── prod-deps: production-only node_modules for runtime images ────────────────
 FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS rds-ca
@@ -45,7 +53,10 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
     --mount=type=secret,id=node_auth_token \
     export NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token 2>/dev/null || true)" && \
     pnpm config set store-dir /root/.local/share/pnpm/store && \
-    pnpm install --frozen-lockfile --prod --ignore-scripts
+    export NPM_CONFIG_USERCONFIG="$(mktemp)" && \
+    printf '%s\n' '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > "$NPM_CONFIG_USERCONFIG" && \
+    pnpm install --frozen-lockfile --prod --ignore-scripts && \
+    rm -f "$NPM_CONFIG_USERCONFIG"
 
 # ── builder: compile the NestJS monorepo ─────────────────────────────────────
 FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS builder
