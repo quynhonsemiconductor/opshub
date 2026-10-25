@@ -34,8 +34,8 @@ grep -qs 'npm.pkg.github.com/:_authToken' ~/.npmrc || echo '//npm.pkg.github.com
 
 export NODE_AUTH_TOKEN="$(gh auth token)"      # per shell; or a PAT with read:packages
 cp .env.example .env                           # every value is already wired, secrets are local placeholders
+pnpm install                                   # FIRST: the bucket setup imports @aws-sdk/client-s3 from node_modules
 docker compose -f docker-compose.dev.yml up -d --wait    # Postgres, Valkey, Garage (S3), Mailpit, OTel collector, and the bucket setup
-pnpm install
 pnpm db:migrate                                # migrations + RBAC catalogue + the demo users (SEED_ON_DEPLOY=true in .env)
 ```
 
