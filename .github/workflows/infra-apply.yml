@@ -243,41 +243,9 @@ jobs:
           app-id: ${{ vars.QNSC_AUTOMATION_APP_ID }}
           private-key: ${{ secrets.QNSC_AUTOMATION_PRIVATE_KEY }}
 
-      # Sync the infra IDs the deploy workflows read (backend-deploy.yml,
-      # web-deploy.yml) straight from Terraform outputs, so a rebuild that changes
-      # subnet/SG/Pages IDs can never leave the vars stale. Skipped automatically when
-      # no app token could be minted.
-      #
-      # A write can still be rejected — an App installation token needs the
-      # "Variables: read and write" grant, and cannot write to a protected environment
-      # at all. That is surfaced as a visible ::warning:: naming each variable to
-      # reconcile, never a silent green, but it never blocks the apply. This step used
-      # `continue-on-error`, which turned exactly that case into a green run with stale
-      # variables the deploy would then read.
-      - name: Publish infra IDs to develop environment variables
-        if: ${{ steps.app-token.outputs.token != '' }}
-        working-directory: infra/live/develop
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          missed=0
-          set_var() {
-            if gh variable set "$1" --env develop --repo "$REPO" --body "$2"; then
-              echo "  set $1"
-            else
-              echo "::warning title=infra-id publish::could not set '$1' on the develop environment — reconcile manually: gh variable set $1 --env develop --repo $REPO --body '$2'"
-              missed=1
-            fi
-          }
-          set_var ECS_CLUSTER           "$(tofu output -raw ecs_cluster_name)"
-          set_var ECS_API_SERVICE       "$(tofu output -raw ecs_api_service)"
-          set_var ECS_WORKER_SERVICE    "$(tofu output -raw ecs_worker_service)"
-          set_var ECS_MIGRATOR_TASK_DEF "$(tofu output -raw ecs_migrator_task_def)"
-          set_var ECS_MIGRATOR_SUBNET   "$(tofu output -json private_subnet_ids | jq -r 'join(",")')"
-          set_var ECS_MIGRATOR_SG       "$(tofu output -raw sg_app_id)"
-          set_var PAGES_PROJECT         "$(tofu output -raw web_pages_project)"
-          if [[ $missed -ne 0 ]]; then
-            echo "::warning title=infra-id publish::One or more develop infra-ID vars were not auto-published — the deploy reads these, so verify they match Terraform outputs to avoid drift."
+      # The "Publish infra IDs to develop environment variables" step was removed with
+      # the aws-exit destroy (E1): it reads `tofu output` in infra/live/develop, whose
+      # outputs are gone in this PR, so it would publish blank ECS_*/PAGES_* vars that
+      # the deploy workflows read. The develop deploy pipelines are retired with the
+      # stack. See product-docs/platform/runbooks/aws-exit-teardown.md.
           fi
