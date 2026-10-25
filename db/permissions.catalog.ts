@@ -315,6 +315,16 @@ export const PERMISSION = {
   // ── software licences ──────────────────────────────────────────────────────
   LICENSE_READ: 'license.read',
   LICENSE_MANAGE: 'license.manage',
+
+  // ── door attendance terminal ───────────────────────────────────────────────
+  /** View terminals, cards and the unknown-card enrolment list. */
+  DOOR_READ: 'door.read',
+  /**
+   * Register and revoke terminals, and manage cards (add, label, revoke, mark lost, temporary
+   * windows). One manage code for cards and terminals on purpose — HR and IT admins both hold it,
+   * and the audit log shows who did what.
+   */
+  DOOR_MANAGE: 'door.manage',
 } as const;
 
 /** Union of every valid permission code. A typo is a compile error. */
@@ -400,6 +410,8 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   [PERMISSION.DOCUMENTS_PUBLISH]: 'Put an approved document version into force',
   [PERMISSION.LICENSE_READ]: 'View software licenses, seats and utilization',
   [PERMISSION.LICENSE_MANAGE]: 'Create / edit licenses and assign / revoke seats',
+  [PERMISSION.DOOR_READ]: 'View door terminals, cards and the unknown-card list',
+  [PERMISSION.DOOR_MANAGE]: 'Register/revoke terminals; add, edit, revoke and mark cards lost',
 };
 
 /**
@@ -506,6 +518,9 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.DOCUMENTS_READ,
     PERMISSION.LICENSE_READ,
     PERMISSION.LICENSE_MANAGE,
+    // The physical device side of the door: registering terminals and rotating their tokens.
+    PERMISSION.DOOR_READ,
+    PERMISSION.DOOR_MANAGE,
   ],
 
   [ROLE.SECURITY]: [
@@ -578,6 +593,10 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.ONBOARDING_APPROVE,
     PERMISSION.ONBOARDING_COMPLETE,
     PERMISSION.OFFBOARDING_APPROVE,
+    // Cards are an HR act (who may come in), not an IT one; one manage code for cards and
+    // terminals — the audit log tells the two kinds of work apart.
+    PERMISSION.DOOR_READ,
+    PERMISSION.DOOR_MANAGE,
   ],
 
   [ROLE.MANAGER]: [
@@ -635,6 +654,8 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.DOCUMENTS_READ,
     PERMISSION.REPORTS_READ,
     PERMISSION.LICENSE_READ,
+    // Door events are compliance evidence (who entered, when); manage stays with hr/it-admin.
+    PERMISSION.DOOR_READ,
   ],
 
   [ROLE.EMPLOYEE]: [],
