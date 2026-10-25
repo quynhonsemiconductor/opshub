@@ -3,13 +3,17 @@
  * `workforce.attendance_logs` is dropped to leave one attendance store, but nothing owned the
  * table, so nothing can vouch it is empty. The migration therefore RAISEs on a non-empty table
  * (failing loudly instead of losing data) and drops silently only when empty — or when the table
- * never existed. These tests pin both paths against a real database, using scratch tables that
- * mirror what the DO block checks (`to_regclass` + count), so no migration re-run is needed.
+ * never existed. These tests pin all three paths against a real database.
  *
- * Prereqs: `docker compose -f docker-compose.dev.yml up -d`, `pnpm db:migrate`.
+ * Privileges: the e2e role can neither CREATE TABLE in existing schemas nor DROP tables it does
+ * not own. So the DROP branch runs on a TEMP table over ONE dedicated pooled connection (temp
+ * tables are per-session; unqualified names resolve pg_temp first). The RAISE branch needs no
+ * privileges (it fires before any drop) and runs against a real seeded table.
+ *
+ * Prereqs: `docker compose -f docker-compose.dev.yml up -d`, `pnpm db:migrate`, `pnpm db:seed`.
  */
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DRIZZLE, type DrizzleDB } from '@platform';
 import { createTestApp } from './support/harness';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -30,12 +34,10 @@ afterAll(async () => {
  * The DO block from migration 0040, verbatim except that the orphan table name is a parameter.
  * Duplicated ON PURPOSE: the migration is frozen once applied (its text must never change after
  * shipping), so the test pins the SHIPPED logic against regressions rather than importing it.
+ * A DO block cannot take bind parameters (08P01), so callers interpolate the table name raw.
  */
-async function runSelfCheckingDrop(table: string): Promise<void> {
-  // A DO block cannot take bind parameters (08P01), and the table name is test-controlled, so
-  // the whole block is interpolated raw — mirroring the migration's literal text.
-  await db.execute(
-    sql.raw(`
+function doBlock(table: string): string {
+  return `
     DO $$
     DECLARE
       orphan_rows bigint;
@@ -49,45 +51,46 @@ async function runSelfCheckingDrop(table: string): Promise<void> {
         DROP TABLE ${table};
       END IF;
     END $$;
-  `),
-  );
+  `;
 }
 
 describe('migration 0040 self-checking orphan drop', () => {
-  // The `door` schema itself: the CI migrate user CREATED it (migration 0040), so it holds
-  // CREATE there — unlike `public`, which PG15+ locks to the DB owner.
-  const SCRATCH = 'door.door_orphan_scratch';
-
-  beforeEach(async () => {
-    await db.execute(sql`DROP TABLE IF EXISTS ${sql.raw(SCRATCH)}`);
-    await db.execute(
-      sql`CREATE TABLE ${sql.raw(SCRATCH)} (id uuid primary key default gen_random_uuid())`,
-    );
+  it('drops an EMPTY orphan table silently (temp table on one connection)', async () => {
+    const client = await db.$client.connect();
+    try {
+      await client.query(
+        'CREATE TEMP TABLE door_orphan_scratch (id uuid primary key default gen_random_uuid())',
+      );
+      await client.query(doBlock('door_orphan_scratch'));
+      const still = await client.query<{ exists_after: boolean }>(
+        "SELECT to_regclass('door_orphan_scratch') IS NOT NULL AS exists_after",
+      );
+      expect(still.rows[0]?.exists_after).toBe(false);
+    } finally {
+      client.release();
+    }
   });
 
-  it('drops an EMPTY orphan table silently', async () => {
-    await runSelfCheckingDrop(SCRATCH);
-    const exists = await db.execute<{ regclass: string }>(
-      sql`SELECT to_regclass(${sql.raw(`'${SCRATCH}'`)}) IS NOT NULL AS regclass`,
+  it('RAISES on a non-empty orphan table, leaving it intact (real seeded table)', async () => {
+    // authz.permissions is seeded by every run and never empty — the RAISE fires before any
+    // drop, so the seeded table must survive the failed block untouched.
+    const err = (await db
+      .execute(sql.raw(doBlock('authz.permissions')))
+      .catch((e: Error & { cause?: Error }) => e)) as Error & { cause?: Error };
+    expect((err.cause as Error)?.message ?? err.message).toMatch(/holds \d+ row\(s\)/);
+    const still = await db.execute<{ exists_after: boolean }>(
+      sql`SELECT to_regclass('authz.permissions') IS NOT NULL AS exists_after`,
     );
-    expect(exists.rows[0]?.regclass).toBe(false);
-  });
-
-  it('FAILS LOUDLY on a non-empty orphan table, leaving the table intact', async () => {
-    await db.execute(sql`INSERT INTO ${sql.raw(SCRATCH)} DEFAULT VALUES`);
-    // Drizzle wraps the RAISE as "Failed query: …" with the server error on `cause`.
-    const err = (await runSelfCheckingDrop(SCRATCH).catch((e: Error) => e)) as Error & {
-      cause?: Error;
-    };
-    expect((err.cause as Error)?.message ?? err.message).toMatch(/holds 1 row\(s\)/);
-    const exists = await db.execute<{ regclass: string }>(
-      sql`SELECT to_regclass(${sql.raw(`'${SCRATCH}'`)}) IS NOT NULL AS regclass`,
-    );
-    expect(exists.rows[0]?.regclass).toBe(true);
+    expect(still.rows[0]?.exists_after).toBe(true);
   });
 
   it('is a no-op when the orphan table never existed', async () => {
-    await db.execute(sql`DROP TABLE IF EXISTS ${sql.raw(SCRATCH)}`);
-    await expect(runSelfCheckingDrop(SCRATCH)).resolves.toBeUndefined();
+    const client = await db.$client.connect();
+    try {
+      // The DO block returns void; drizzle surfaces it as an empty Result — assert no throw.
+      await client.query(doBlock('door_orphan_never_existed'));
+    } finally {
+      client.release();
+    }
   });
 });
