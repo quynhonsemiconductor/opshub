@@ -71,7 +71,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_door_event_stream_seq" ON "door"."events" 
 CREATE INDEX IF NOT EXISTS "ix_door_event_unknown_recent" ON "door"."events" USING btree ("received_at") WHERE "door"."events"."card_id" IS NULL;--> statement-breakpoint
 -- The 24-month retention purge scans by receive date alone (door-event-cleanup).
 CREATE INDEX IF NOT EXISTS "ix_door_event_received" ON "door"."events" USING btree ("received_at");--> statement-breakpoint
-DROP TABLE IF EXISTS "workforce"."attendance_logs";
+-- SELF-CHECKING DROP. The orphan table had no owner, so nothing can vouch that it is empty.
+-- A non-empty env must fail LOUDLY here instead of silently losing rows: the migration aborts
+-- (everything above rolls back), the env is fixed by emptying or archiving the table, then the
+-- migration re-runs clean.
+DO $$
+DECLARE
+  orphan_rows bigint;
+BEGIN
+  IF to_regclass('"workforce"."attendance_logs"') IS NOT NULL THEN
+    SELECT count(*) INTO orphan_rows FROM "workforce"."attendance_logs";
+    IF orphan_rows > 0 THEN
+      RAISE EXCEPTION 'workforce.attendance_logs holds % row(s); archive or empty it before migrating (door ADR: one attendance store)', orphan_rows
+        USING HINT = 'The table is dropped by migration 0040 and its data is NOT migrated.';
+    END IF;
+    DROP TABLE "workforce"."attendance_logs";
+  END IF;
+END $$;
 --> statement-breakpoint
 
 -- ============================================================================
