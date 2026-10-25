@@ -158,10 +158,10 @@ overrides:
 # pnpm's `minimumReleaseAge` is a cooldown against a hijacked THIRD-PARTY release: a malicious version is usually
 # caught and yanked within hours, so not installing anything younger than a day removes most of that exposure.
 #
-# SET EXPLICITLY (1440 minutes = 24 h) because the default is not the same everywhere: pnpm 11 defaults to 24 h, but
-# this repo runs pnpm 11.28.6 (packageManager in package.json, PNPM_VERSION in backend-ci.yml and web-ci.yml, the Dockerfile ARG), where there is NO
-# default, so until this was written third-party packages got no cooldown here at all. Verified on 11.28.6: a <24 h
-# third-party version is refused, and with no setting it installs. Written out, the behaviour is the same on 10 and 11.
+# SET EXPLICITLY (1440 minutes = 24 h). pnpm 11 already defaults to 24 h; we pin the value anyway
+# so the cooldown survives a future default change, and to document intent next to the exemption
+# below. (Under pnpm 10, which this repo used before the upgrade, there was no default at all and
+# third-party packages got no cooldown.)
 #
 # Our own `@quynhonsemiconductor/*` packages are published by this organisation, from app-platform, by a pipeline we
 # control, so the cooldown protects nothing there and costs a day on every release: platform-http 4.3.0 blocked rova's
