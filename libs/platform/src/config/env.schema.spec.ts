@@ -612,6 +612,29 @@ describe('EnvSchema: EMAIL_PROVIDER=graph (Microsoft 365 mail)', () => {
     }
   });
 
+  it('refuses an unreplaced release-template placeholder for the tenant, the mailbox and the Graph worker app', () => {
+    const complete = {
+      ...graph,
+      ENTRA_TENANT_ID: TENANT,
+      GRAPH_CLIENT_ID: APP,
+      GRAPH_CLIENT_CERTIFICATE: PEM,
+    };
+    const placeholders: Record<string, string> = {
+      MAIL_GRAPH_SENDER: '<OPSHUB_PROD_MAILBOX>',
+      ENTRA_TENANT_ID: '<ENTRA_TENANT_ID>',
+      GRAPH_CLIENT_ID: '<OPSHUB_PROD_SERVICE_APP_ID>',
+    };
+    for (const [key, value] of Object.entries(placeholders)) {
+      const result = WorkerEnvSchema.safeParse(workerEnv({ ...complete, [key]: value }));
+      expect(result.success, key).toBe(false);
+      expect(
+        !result.success &&
+          result.error.issues.some((i) => i.path[0] === key && i.message.includes('placeholder')),
+        key,
+      ).toBe(true);
+    }
+  });
+
   it('a federated token file is a credential too, so the k3s move is adding it', () => {
     const federated = workerEnv({
       ...graph,
