@@ -54,9 +54,9 @@ async function runSelfCheckingDrop(table: string): Promise<void> {
 }
 
 describe('migration 0040 self-checking orphan drop', () => {
-  // `public` only: the CI test DB user cannot CREATE SCHEMA (migrations own the schemas),
-  // and the DO block only needs a scratch table to mirror the orphan's shape.
-  const SCRATCH = 'public.door_orphan_scratch';
+  // The `door` schema itself: the CI migrate user CREATED it (migration 0040), so it holds
+  // CREATE there — unlike `public`, which PG15+ locks to the DB owner.
+  const SCRATCH = 'door.door_orphan_scratch';
 
   beforeEach(async () => {
     await db.execute(sql`DROP TABLE IF EXISTS ${sql.raw(SCRATCH)}`);
