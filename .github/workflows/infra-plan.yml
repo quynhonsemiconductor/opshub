@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   plan:
-    uses: quynhonsemiconductor/ci/.github/workflows/infra-plan.yml@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
+    uses: quynhonsemiconductor/ci/.github/workflows/infra-plan.yml@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
     with:
       product: opshub
       tf_vars_json: |
@@ -63,7 +63,6 @@ jobs:
       # image_tag stays unpassed on purpose. It is only known at release time, so a
       # task-definition revision bump in a prod plan is expected.
     secrets:
-      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
       # Read-only qnsc-repo-reader key: the reusable mints a contents:read token for tf-modules.
       # This workflow runs on pull requests, so it never receives a write-capable key.
       QNSC_REPO_READER_PRIVATE_KEY: ${{ secrets.QNSC_REPO_READER_PRIVATE_KEY }}
