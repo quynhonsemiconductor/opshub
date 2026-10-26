@@ -207,6 +207,15 @@ overrides:
 # packages as soon as they are published. If the org ever adds one, give the `^@quynhonsemiconductor/` rule in that
 # preset `"minimumReleaseAge": null`.
 minimumReleaseAge: 1440
+# pnpm 11.28.x added strict mode (default on): the install wants to auto-approve young lockfile
+# entries by WRITING them into minimumReleaseAgeExclude, which it cannot do under Renovate's
+# artifact updates (--no-save) — every regen died with
+# ERR_PNPM_STRICT_MIN_RELEASE_AGE_REQUIRES_SAVE and Renovate could not regenerate lockfiles at all.
+# Non-strict keeps the gate: since pnpm 11.1.3 every install (including --frozen-lockfile in CI and
+# in the image build) re-checks lockfile entries against minimumReleaseAge and aborts with
+# ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION, as seen on app-platform#271. Only the interactive
+# approve-and-persist flow is off. See minimumReleaseAgeStrict on https://pnpm.io/settings.
+minimumReleaseAgeStrict: false
 minimumReleaseAgeExclude:
   - '@quynhonsemiconductor/*'
 patchedDependencies:
