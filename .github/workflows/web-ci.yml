@@ -96,7 +96,7 @@ jobs:
         # queue's files and could return false — the queue entry must always run it. The
         # skipped step leaves the output empty and the gate's `!= 'false'` branch runs it.
         if: github.event_name == 'pull_request'
-        uses: quynhonsemiconductor/ci/actions/changed-paths@dcdd8dc937aa9d199a4e75e0e187eb52ca520836 # v1.23.1
+        uses: quynhonsemiconductor/ci/actions/changed-paths@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           ignore: |
             **/*.md
@@ -112,7 +112,7 @@ jobs:
             **/*.test.ts
             **/*.test.tsx
       - id: paths
-        uses: quynhonsemiconductor/ci/actions/changed-paths@dcdd8dc937aa9d199a4e75e0e187eb52ca520836 # v1.23.1
+        uses: quynhonsemiconductor/ci/actions/changed-paths@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           ignore: |
             **/*.md
@@ -141,7 +141,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -171,7 +171,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -219,7 +219,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -342,7 +342,7 @@ jobs:
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -473,7 +473,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -595,7 +595,7 @@ jobs:
       #    empty, this branch runs, and the gate fails: it cannot turn "could not decide" into a pass.
       - name: Every job must have succeeded
         if: ${{ needs.changes.outputs.run == 'true' && needs.changes.outputs.quickstart != 'false' }}
-        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           results: ${{ join(needs.*.result, ',') }}
 
@@ -605,19 +605,19 @@ jobs:
       # when the quickstart was skipped.
       - name: Everything but the quickstart must have succeeded
         if: ${{ needs.changes.outputs.run == 'true' && needs.changes.outputs.quickstart == 'false' }}
-        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           results: ${{ needs.changes.result }},${{ needs.quality.result }},${{ needs.test.result }},${{ needs.build.result }},${{ needs.e2e.result }}
 
       - name: The quickstart was skipped by its path filter (and only by that)
         if: ${{ needs.changes.outputs.run == 'true' && needs.changes.outputs.quickstart == 'false' }}
-        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           results: ${{ needs.quickstart.result }}
           allow-skipped: true
 
       - name: Nothing here to test (every changed file is ignorable)
         if: ${{ needs.changes.outputs.run != 'true' }}
-        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
         with:
           results: ${{ needs.changes.result }}
