@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { AppConfigService, CacheService, ExclusiveJob } from '@platform';
 import { MS_PER_MIN } from '@shared-kernel';
-import { DoorService } from './door.service';
+import { DoorAlertsService } from './door-alerts.service';
 import { ITerminalRepository, TERMINAL_REPOSITORY } from '../domain/ports/terminal.repository';
 
 /** Healthchecks.io pings on the check's own cadence; 5 min keeps the two well clear. */
@@ -34,7 +34,7 @@ export class DoorTerminalHealthCron {
     private readonly config: AppConfigService,
     private readonly exclusive: ExclusiveJob,
     private readonly cache: CacheService,
-    private readonly door: DoorService,
+    private readonly alerts: DoorAlertsService,
     @Optional() private readonly fetchFn: typeof fetch = fetch,
   ) {}
 
@@ -87,13 +87,14 @@ export class DoorTerminalHealthCron {
 
     if (stale && marker?.stale !== true) {
       await this.cache.setJson(key, { stale: true }, 7 * 24 * 3600);
-      const holders = await this.door.doorManageHolders();
+      const holders = await this.alerts.doorManageHolders();
       for (const holderId of holders) {
-        await this.door.scheduleNotification(holderId, {
-          type: 'door.terminal_offline',
-          vars: { active, seen, windowMinutes: SEEN_WITHIN_MS / MS_PER_MIN },
-          idempotencyKey: `door.terminal_offline:${new Date().toISOString().slice(0, 10)}`,
-        });
+        await this.alerts.send(
+          holderId,
+          'door.terminal_offline',
+          { active, seen, windowMinutes: SEEN_WITHIN_MS / MS_PER_MIN },
+          `door.terminal_offline:${new Date().toISOString().slice(0, 10)}`,
+        );
       }
       this.logger.warn(
         { active, seen, notified: holders.length },

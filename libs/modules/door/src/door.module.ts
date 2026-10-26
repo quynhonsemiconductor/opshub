@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '@modules/audit';
 import { EmployeesModule } from '@modules/identity';
 import { DoorService } from './application/door.service';
+import { DoorAlertsService } from './application/door-alerts.service';
 import { TERMINAL_REPOSITORY } from './domain/ports/terminal.repository';
 import { CARD_REPOSITORY } from './domain/ports/card.repository';
 import { TerminalDrizzleRepository } from './infrastructure/persistence/terminal.drizzle-repository';
@@ -20,6 +21,7 @@ import { TerminalAuthGuard } from './interface/http/terminal-auth.guard';
   controllers: [DoorController, DoorTerminalController],
   providers: [
     DoorService,
+    DoorAlertsService,
     TerminalAuthGuard,
     { provide: TERMINAL_REPOSITORY, useClass: TerminalDrizzleRepository },
     { provide: CARD_REPOSITORY, useClass: CardDrizzleRepository },

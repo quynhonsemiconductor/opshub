@@ -25,13 +25,11 @@ function makeHealth(over: { url?: string; active?: number; seen?: number } = {})
   const cache = { getJson: vi.fn(), setJson: vi.fn() };
   const door = {
     doorManageHolders: vi.fn().mockResolvedValue(['hr-1', 'it-1']),
-    scheduleNotification:
-      vi.fn<
-        (
-          recipientId: string,
-          input: { type: string; vars: unknown; idempotencyKey: string },
-        ) => Promise<void>
-      >(),
+    send: vi
+      .fn<
+        (recipientId: string, type: string, vars: unknown, idempotencyKey: string) => Promise<void>
+      >()
+      .mockResolvedValue(undefined),
   };
   const cron = new DoorTerminalHealthCron(
     terminals as never,
@@ -86,15 +84,18 @@ describe('DoorTerminalHealthCron', () => {
       { stale: true },
       expect.any(Number),
     );
-    expect(door.scheduleNotification).toHaveBeenCalledTimes(2); // one per holder
-    const first = door.scheduleNotification.mock.calls[0] as [
+    expect(door.send).toHaveBeenCalledTimes(2); // one per holder
+    // send(recipientId, type, vars, idempotencyKey) — positional, matching DoorAlertsService.
+    const [recipient, type, vars, key] = door.send.mock.calls[0] as unknown as [
       string,
-      { type: string; vars: unknown; idempotencyKey: string },
+      string,
+      { active: number; seen: number; windowMinutes: number },
+      string,
     ];
-    expect(first[0]).toBe('hr-1');
-    expect(first[1].type).toBe('door.terminal_offline');
-    expect(first[1].vars).toEqual({ active: 2, seen: 1, windowMinutes: 150 });
-    expect(first[1].idempotencyKey).toMatch(/^door\.terminal_offline:\d{4}-\d{2}-\d{2}$/);
+    expect(recipient).toBe('hr-1');
+    expect(type).toBe('door.terminal_offline');
+    expect(vars).toEqual({ active: 2, seen: 1, windowMinutes: 150 });
+    expect(key).toMatch(/^door\.terminal_offline:\d{4}-\d{2}-\d{2}$/);
   });
 
   it('does NOT repeat while the marker already says stale', async () => {
@@ -105,7 +106,7 @@ describe('DoorTerminalHealthCron', () => {
     });
     cache.getJson.mockResolvedValue({ stale: true });
     await cron.tick();
-    expect(door.scheduleNotification).not.toHaveBeenCalled();
+    expect(door.send).not.toHaveBeenCalled();
   });
 
   it('re-arms when all terminals are seen again', async () => {
@@ -121,7 +122,7 @@ describe('DoorTerminalHealthCron', () => {
       { stale: false },
       expect.any(Number),
     );
-    expect(door.scheduleNotification).not.toHaveBeenCalled();
+    expect(door.send).not.toHaveBeenCalled();
   });
 
   it('withholds the ping when there are ZERO active terminals', async () => {

@@ -41,7 +41,14 @@ const mockCache = {
   setJson: vi.fn().mockResolvedValue(undefined),
 };
 const mockConfig = { get: vi.fn(() => 5000) };
-const mockScheduler = { schedule: vi.fn().mockResolvedValue(undefined) };
+const mockAlerts = {
+  doorManageHolders: vi
+    .fn<(terminals?: unknown) => Promise<string[]>>()
+    .mockResolvedValue(['hr-1']),
+  send: vi
+    .fn<(recipientId: string, type: string, vars: unknown, key: string) => Promise<void>>()
+    .mockResolvedValue(undefined),
+};
 
 function makeService() {
   return new DoorService(
@@ -50,16 +57,15 @@ function makeService() {
     mockEmployees as never,
     mockAudit as never,
     mockDb as never,
-    mockCache as never, // cache (ctor order: db, cache, config, scheduler)
+    mockCache as never, // cache (ctor order: db, cache, config, alerts)
     mockConfig as never,
-    mockScheduler as never,
+    mockAlerts as never,
   );
 }
 
 /** Ingest one batch carrying only battery telemetry (no events) and hand back the service. */
 async function syncBattery(input: { battery_mv?: number; low_battery?: boolean }) {
   const service = makeService();
-  vi.spyOn(service, 'doorManageHolders').mockResolvedValue(['hr-1']);
   // STREAM lives inside the ingestEvents describe; a battery-only batch carries no events, so
   // any valid stream uuid works.
   await service.ingestEvents('term-1', {
@@ -295,29 +301,28 @@ describe('DoorService.ingestEvents()', () => {
 
     it('notifies on the TRANSITION into low (fresh cache)', async () => {
       await syncBattery({ battery_mv: 4900 });
-      expect(mockScheduler.schedule).toHaveBeenCalledTimes(1);
-      expect(mockScheduler.schedule).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          type: 'door.low_battery',
-          recipientId: 'hr-1',
-          vars: { terminalName: 'Main door', batteryMv: 4900, thresholdMv: 5000 },
-        }),
+      expect(mockAlerts.send).toHaveBeenCalledTimes(1);
+      expect(mockAlerts.send).toHaveBeenCalledWith(
+        'hr-1',
+        'door.low_battery',
+        { terminalName: 'Main door', batteryMv: 4900, thresholdMv: 5000 },
+        expect.stringMatching(/^door\.low_battery:term-1:/),
+        'term-1',
       );
     });
 
     it('does NOT repeat while the previous sync was already low', async () => {
       mockCache.getJson.mockResolvedValue({ low: true });
       await syncBattery({ battery_mv: 4800 });
-      expect(mockScheduler.schedule).not.toHaveBeenCalled();
+      expect(mockAlerts.send).not.toHaveBeenCalled();
     });
 
     it('re-arms after a non-low sync: low again notifies again', async () => {
       await syncBattery({ battery_mv: 5500 }); // non-low: clears the state
-      expect(mockScheduler.schedule).not.toHaveBeenCalled();
+      expect(mockAlerts.send).not.toHaveBeenCalled();
       mockCache.getJson.mockResolvedValue({ low: false }); // the non-low sync's write
       await syncBattery({ battery_mv: 4700 });
-      expect(mockScheduler.schedule).toHaveBeenCalledTimes(1);
+      expect(mockAlerts.send).toHaveBeenCalledTimes(1);
     });
 
     it('battery_mv === threshold is NOT low; threshold-1 IS low', async () => {
@@ -327,10 +332,10 @@ describe('DoorService.ingestEvents()', () => {
         expect.objectContaining({ low: false }),
         expect.any(Number),
       );
-      expect(mockScheduler.schedule).not.toHaveBeenCalled();
+      expect(mockAlerts.send).not.toHaveBeenCalled();
 
       await syncBattery({ battery_mv: 4999 });
-      expect(mockScheduler.schedule).toHaveBeenCalledTimes(1);
+      expect(mockAlerts.send).toHaveBeenCalledTimes(1);
     });
 
     it('the device flag alone (no mv) is low and reports mv: null', async () => {
@@ -340,11 +345,12 @@ describe('DoorService.ingestEvents()', () => {
         expect.objectContaining({ mv: null, low: true }),
         expect.any(Number),
       );
-      expect(mockScheduler.schedule).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          vars: { terminalName: 'Main door', batteryMv: null, thresholdMv: 5000 },
-        }),
+      expect(mockAlerts.send).toHaveBeenCalledWith(
+        'hr-1',
+        'door.low_battery',
+        { terminalName: 'Main door', batteryMv: null, thresholdMv: 5000 },
+        expect.any(String),
+        'term-1',
       );
     });
   });
