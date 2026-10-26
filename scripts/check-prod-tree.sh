@@ -64,19 +64,27 @@ for (const dir of fs.readdirSync(pnpmDir).filter((d) => /^better-auth@\d/.test(d
 }
 if (dropped.size === 0) { console.error('better-auth declares no droppable optional peers: the assertion would test nothing'); process.exit(2); }
 const input = JSON.parse(execFileSync('pnpm', ['ls', '--prod', '--depth', 'Infinity', '--json']));
-const present = new Set();
-const walk = (deps) => { for (const [name, d] of Object.entries(deps ?? {})) { present.add(name); walk(d.dependencies); walk(d.optionalDependencies); } };
-for (const project of input) { walk(project.dependencies); walk(project.optionalDependencies); }
-// A dropped peer that a workspace project itself declares as a PROD dependency (apps/web's react)
-// is that project's own dependency, not Better Auth's optional-peer resolution. Everything else
-// that shows up got there THROUGH better-auth, which is the leak.
-const ownProd = new Set();
-for (const manifest of ['package.json', ...fs.readdirSync('apps').map((d) => `apps/${d}/package.json`)]) {
-  try { for (const n of Object.keys(JSON.parse(fs.readFileSync(manifest, 'utf8')).dependencies ?? {})) ownProd.add(n); } catch {}
+const walk = (deps, into) => { for (const [name, d] of Object.entries(deps ?? {})) { into.add(name); walk(d.dependencies, into); walk(d.optionalDependencies, into); } };
+// Per workspace project: a dropped peer that the project itself declares as a PROD dependency
+// (apps/web's react) is its own dependency, not Better Auth's optional-peer resolution. Scoped
+// per project on purpose: a react leak from better-auth into the API tree cannot hide behind
+// apps/web's package.json, and vice versa. Everything else that shows up got there THROUGH
+// better-auth, which is the leak.
+const leaked = [];
+for (const project of input) {
+  const present = new Set();
+  walk(project.dependencies, present);
+  walk(project.optionalDependencies, present);
+  let own = new Set();
+  try {
+    own = new Set(Object.keys(JSON.parse(fs.readFileSync(require('node:path').join(project.path, 'package.json'), 'utf8')).dependencies ?? {}));
+  } catch {}
+  for (const n of dropped) {
+    if (present.has(n) && !own.has(n)) leaked.push(`${n} (in ${project.path})`);
+  }
 }
-const leaked = [...dropped].filter((n) => present.has(n) && !ownProd.has(n));
 if (leaked.length) { console.error(`::error::dropped Better Auth peers in the production tree: ${leaked.join(' ')} (pnpm why: pnpm why ${leaked.join(' ')} --prod)`); process.exit(1); }
-console.log(`ok: none of the ${dropped.size} dropped peers is in \`pnpm ls --prod --depth Infinity\` beyond projects' own prod dependencies`);
+console.log(`ok: none of the ${dropped.size} dropped peers is in \`pnpm ls --prod --depth Infinity\` beyond each project's own prod dependencies`);
 NODE
 
 echo "== restoring the dev install"
