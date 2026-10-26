@@ -11,7 +11,7 @@ on:
 
 jobs:
   comment:
-    uses: quynhonsemiconductor/ci/.github/workflows/release-commenter.yml@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+    uses: quynhonsemiconductor/ci/.github/workflows/release-commenter.yml@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
     permissions:
       contents: read
       pull-requests: write

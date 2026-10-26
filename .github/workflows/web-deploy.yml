@@ -92,7 +92,7 @@ jobs:
         if: steps.touched.outputs.infra == 'true'
         # Shared with backend-deploy and the other repos — see `quynhonsemiconductor/ci`.
         # A rate limit is retried there rather than reported as a failed upstream run.
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
         with:
           workflow: infra-apply.yml
           label: Infrastructure · Apply
@@ -126,7 +126,7 @@ jobs:
       - name: Wait for Web · CI on this commit
         # Tag deploy: Web · CI does not run on tags, so there is nothing to await (see above).
         if: github.ref_type != 'tag'
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
         with:
           workflow: web-ci.yml
           branch: main
@@ -144,7 +144,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    uses: quynhonsemiconductor/ci/.github/workflows/web-deploy.yml@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+    uses: quynhonsemiconductor/ci/.github/workflows/web-deploy.yml@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
     with:
       product: opshub
       # Monorepo: run wrangler from the web package dir so paths resolve against
