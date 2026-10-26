@@ -42,7 +42,11 @@ export class DoorAlertsService {
     return rows.map((r) => r.id);
   }
 
-  /** Schedule one door notification to ONE recipient (deduped by the outbox idempotency key). */
+  /**
+   * Schedule one door notification to ONE recipient. The outbox's unique index is on the key
+   * alone, so the recipient id is appended here: callers pass the base key (per event/day) and
+   * every holder still gets their own row, while a resend to the same holder is deduped.
+   */
   async send<K extends 'door.low_battery' | 'door.terminal_offline'>(
     recipientId: string,
     type: K,
@@ -55,7 +59,7 @@ export class DoorAlertsService {
       recipientId,
       resourceId,
       vars,
-      idempotencyKey,
+      idempotencyKey: `${idempotencyKey}:${recipientId}`,
     });
   }
 }

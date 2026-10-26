@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import {
   AppConfigService,
@@ -103,6 +103,7 @@ export function assertWindow(validFrom: Date, validUntil: Date | null | undefine
  */
 @Injectable()
 export class DoorService {
+  private readonly logger = new Logger(DoorService.name);
   private readonly terminalTrail: ResourceAuditTrail;
   private readonly cardTrail: ResourceAuditTrail;
 
@@ -453,9 +454,26 @@ export class DoorService {
     const deviceLow = input.low_battery === true;
     const serverLow = typeof input.battery_mv === 'number' && input.battery_mv < thresholdMv;
     const low = deviceLow || serverLow;
-    const prev = await this.cache.getJson<{ low: boolean }>(`door:terminal:${terminalId}:battery`);
+    const batteryKey = `door:terminal:${terminalId}:battery`;
+    const prev = await this.cache.getJson<{ low: boolean }>(batteryKey);
+
+    // Notify door.manage holders ON TRANSITION into low (not every sync). The device flag and
+    // the server threshold are OR'd: either saying low means the badge and the alert fire.
+    if (low && prev?.low !== true) {
+      try {
+        await this.notifyLowBattery(terminalId, input.battery_mv, thresholdMv);
+      } catch (err) {
+        // The cache keeps its previous state, so the next sync sees the same transition and retries.
+        this.logger.error(
+          { err, terminalId },
+          'door low-battery alert failed; will retry next sync',
+        );
+        return { ackedThrough, rejected };
+      }
+    }
+
     await this.cache.setJson(
-      `door:terminal:${terminalId}:battery`,
+      batteryKey,
       {
         mv: typeof input.battery_mv === 'number' ? input.battery_mv : null,
         low,
@@ -464,38 +482,30 @@ export class DoorService {
       150 * 60, // seconds — expires at the offline threshold; absent = never reported
     );
 
-    // Notify door.manage holders ON TRANSITION into low (not every sync). The device flag and
-    // the server threshold are OR'd: either saying low means the badge and the alert fire.
-    if (low && prev?.low !== true) {
-      const terminal = await this.terminals.findById(terminalId);
-      const holders = await this.alerts.doorManageHolders();
-      for (const holderId of holders) {
-        // One alert per terminal per day while low — not one per sync.
-        await this.alerts.send(
-          holderId,
-          'door.low_battery',
-          {
-            terminalName: terminal?.name ?? terminalId,
-            batteryMv: typeof input.battery_mv === 'number' ? input.battery_mv : null,
-            thresholdMv,
-          },
-          `door.low_battery:${terminalId}:${new Date().toISOString().slice(0, 10)}`,
-          terminalId,
-        );
-      }
-    }
-
     return { ackedThrough, rejected };
   }
 
-  /**
-   * Schedule a door notification to ONE recipient — the door module's single door into the
-   * notification outbox, so both alerts (low battery here, offline in the health cron) write
-   * through the same path with the same recipients query.
-   */
-  /** Recipients for door alerts — delegated to DoorAlertsService (one holders query, both modules). */
-  async doorManageHolders(): Promise<string[]> {
-    return this.alerts.doorManageHolders();
+  /** One low-battery alert per holder; the daily per-recipient key bounds repeats. */
+  private async notifyLowBattery(
+    terminalId: string,
+    batteryMv: number | undefined,
+    thresholdMv: number,
+  ): Promise<void> {
+    const terminal = await this.terminals.findById(terminalId);
+    const holders = await this.alerts.doorManageHolders();
+    for (const holderId of holders) {
+      await this.alerts.send(
+        holderId,
+        'door.low_battery',
+        {
+          terminalName: terminal?.name ?? terminalId,
+          batteryMv: typeof batteryMv === 'number' ? batteryMv : null,
+          thresholdMv,
+        },
+        `door.low_battery:${terminalId}:${new Date().toISOString().slice(0, 10)}`,
+        terminalId,
+      );
+    }
   }
 
   /**

@@ -6,6 +6,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { assertEdgeClientIpEnv } from '@quynhonsemiconductor/platform-http';
 import { enableHealth } from '@quynhonsemiconductor/platform-runtime';
+import { DOOR_TERMINAL_BODY_LIMIT, isDoorTerminalRoute } from './door-body-limit';
 import {
   AppConfigService,
   SESSION_COOKIE,
@@ -83,9 +84,8 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
   // enforces bodyLimit on the STREAM of received bytes, so chunked or missing Content-Length
   // cannot slip past the way a header pre-check let them. A batch is ≤ 100 events × ~200 bytes;
   // 64 KB is an order of magnitude above honest traffic and far below anything worth parsing.
-  const DOOR_TERMINAL_BODY_LIMIT = 64 * 1024;
   fastify.addHook('onRoute', (route) => {
-    if (typeof route.url === 'string' && route.url.startsWith('/v1/door/terminal')) {
+    if (isDoorTerminalRoute(route.url)) {
       route.bodyLimit = DOOR_TERMINAL_BODY_LIMIT;
     }
   });

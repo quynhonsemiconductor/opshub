@@ -118,10 +118,10 @@ export default defineConfig({
       // Raised 2026-10-24 by the door terminal work (guard, allow-list, ingestion specs): CI measured
       // lines 49.35 / statements 49.18 / branches 40.40 / functions 33+; floors ~0.5 under.
       thresholds: {
-        lines: 48,
-        functions: 32,
-        branches: 39,
-        statements: 48,
+        lines: 49,
+        functions: 33,
+        branches: 40,
+        statements: 49,
       },
     },
   },

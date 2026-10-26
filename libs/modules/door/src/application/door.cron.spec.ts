@@ -125,6 +125,41 @@ describe('DoorTerminalHealthCron', () => {
     expect(door.send).not.toHaveBeenCalled();
   });
 
+  it('a failed holder send leaves the marker UNSET and the tick still completes (a)', async () => {
+    const { cron, cache, door } = makeHealth({
+      url: 'https://hc-ping.example.invalid/ok',
+      active: 2,
+      seen: 1,
+    });
+    cache.getJson.mockResolvedValue(null);
+    door.send.mockRejectedValueOnce(new Error('outbox down'));
+    const logged = vi.spyOn(cron['logger'], 'error').mockImplementation(() => undefined);
+    await expect(cron.tick()).resolves.toBeUndefined();
+    // Marker written AFTER the sends, so a failed send never sets it.
+    expect(cache.setJson).not.toHaveBeenCalledWith(
+      'door:terminal:offline-alert',
+      { stale: true },
+      expect.any(Number),
+    );
+    const [logCtx] = logged.mock.calls[0] as unknown as [{ err: unknown }, string];
+    expect(logCtx.err).toBeInstanceOf(Error);
+  });
+
+  it('a failed send does not stop the healthcheck step: the ping decision still runs (a)', async () => {
+    const { cron, ping, cache, door, terminals } = makeHealth({
+      url: 'https://hc-ping.example.invalid/ok',
+      active: 2,
+      seen: 2,
+    });
+    // All terminals seen, so the ping is due; the transition step fails before reaching the ping.
+    cache.getJson.mockRejectedValueOnce(new Error('cache down'));
+    vi.spyOn(cron['logger'], 'error').mockImplementation(() => undefined);
+    await cron.tick();
+    expect(terminals.countActiveSeenSince).toHaveBeenCalled();
+    expect(door.send).not.toHaveBeenCalled();
+    expect(ping).toHaveBeenCalledWith('https://hc-ping.example.invalid/ok', expect.anything());
+  });
+
   it('withholds the ping when there are ZERO active terminals', async () => {
     const { cron, ping } = makeHealth({
       url: 'https://hc-ping.example.invalid/ok',

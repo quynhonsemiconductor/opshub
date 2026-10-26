@@ -49,7 +49,16 @@ export class DoorTerminalHealthCron {
       // Zero active terminals also stays silent: with nothing watching the door, "all well" is a
       // guess, and a dead-man's switch must not sing on a guess.
       const allSeen = active > 0 && active === seen;
-      await this.notifyOfflineTransition(active, seen);
+      try {
+        await this.notifyOfflineTransition(active, seen);
+      } catch (err) {
+        // The alert is best-effort: a failed send leaves the marker unset, so the next tick retries,
+        // and the ping logic below must still run.
+        this.logger.error(
+          { err },
+          'door terminal offline notification failed; will retry next tick',
+        );
+      }
       if (!allSeen) {
         // Log loudly but DO NOT ping: the ping's absence is the alert.
         this.logger.warn(
@@ -75,10 +84,11 @@ export class DoorTerminalHealthCron {
   /**
    * OFFLINE TRANSITION ALERT. Healthchecks.io says "the door went quiet" to whoever watches that
    * check; this says WHICH terminal and WHEN to the people who can fix it (door.manage holders) —
-   * on the TRANSITION into stale, not every tick. The state marker lives in the cache under the
-   * offline key, so a worker restart mid-alert cannot double-send (a fresh marker is set before
-   * the notifications, and the daily idempotency key bounds a resend anyway); the marker is
-   * CLEARED when every terminal is seen again, re-arming the alert for the next outage.
+   * on the TRANSITION into stale, not every tick. The marker lives in the cache under the offline
+   * key and is written only AFTER every send succeeds: a failed send leaves it unset, so the next
+   * tick retries, and the per-recipient daily idempotency key makes a resend to holders who
+   * already got it a no-op. The marker is CLEARED when every terminal is seen again, re-arming the
+   * alert for the next outage.
    */
   private async notifyOfflineTransition(active: number, seen: number): Promise<void> {
     const key = 'door:terminal:offline-alert';
@@ -86,7 +96,6 @@ export class DoorTerminalHealthCron {
     const marker = await this.cache.getJson<{ stale: boolean }>(key);
 
     if (stale && marker?.stale !== true) {
-      await this.cache.setJson(key, { stale: true }, 7 * 24 * 3600);
       const holders = await this.alerts.doorManageHolders();
       for (const holderId of holders) {
         await this.alerts.send(
@@ -96,6 +105,7 @@ export class DoorTerminalHealthCron {
           `door.terminal_offline:${new Date().toISOString().slice(0, 10)}`,
         );
       }
+      await this.cache.setJson(key, { stale: true }, 7 * 24 * 3600);
       this.logger.warn(
         { active, seen, notified: holders.length },
         'door terminal offline transition: door.manage holders notified',

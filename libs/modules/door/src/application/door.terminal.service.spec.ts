@@ -338,6 +338,27 @@ describe('DoorService.ingestEvents()', () => {
       expect(mockAlerts.send).toHaveBeenCalledTimes(1);
     });
 
+    it('a failed send leaves the cache un-low so the next sync sends again (b)', async () => {
+      mockAlerts.send.mockRejectedValueOnce(new Error('outbox down'));
+      await expect(syncBattery({ battery_mv: 4900 })).resolves.toBeDefined();
+      expect(mockCache.setJson).not.toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ low: true }),
+        expect.any(Number),
+      );
+
+      // The previous state is still "not low" (the cache was never written), so the transition
+      // fires again and the send is retried.
+      mockCache.getJson.mockResolvedValue(null);
+      await syncBattery({ battery_mv: 4900 });
+      expect(mockAlerts.send).toHaveBeenCalledTimes(2);
+      expect(mockCache.setJson).toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ low: true }),
+        expect.any(Number),
+      );
+    });
+
     it('the device flag alone (no mv) is low and reports mv: null', async () => {
       await syncBattery({ low_battery: true });
       expect(mockCache.setJson).toHaveBeenCalledWith(
