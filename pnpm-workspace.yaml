@@ -3,10 +3,15 @@ packages:
 allowBuilds:
   '@scarf/scarf': true
   '@swc/core': true
+  # wrangler (installed by wrangler-action during the Pages deploy) pulls miniflare's
+  # sharp and its own workerd; pnpm 11 fails the install while their build scripts are
+  # unrecorded. sharp downloads prebuilt libvips, workerd the workers-runtime binary.
+  sharp: true
   cpu-features: true
   esbuild: true
   protobufjs: true
   ssh2: true
+  workerd: true
 
 # Overrides live HERE, not in package.json's "pnpm.overrides": pnpm 11 no longer
 # reads that field and ignores it silently, so an advisory pinned there is not
