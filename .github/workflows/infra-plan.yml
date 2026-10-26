@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   plan:
-    uses: quynhonsemiconductor/ci/.github/workflows/infra-plan.yml@691668f7a1bd4f4a3416f9224ae7ff7ebe831a3a # v1.23.0
+    uses: quynhonsemiconductor/ci/.github/workflows/infra-plan.yml@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
     with:
       product: opshub
       tf_vars_json: |
