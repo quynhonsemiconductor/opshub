@@ -109,7 +109,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
         with:
           role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/opshub-github-infra-apply
           aws-region: ${{ env.AWS_REGION }}
@@ -146,7 +146,7 @@ jobs:
       # (piped, never written out): byte for byte the plan the next step applies. See
       # docs/runbooks/infra-destructive-guard.md.
       - name: destructive-guard (tfplan)
-        uses: quynhonsemiconductor/ci/actions/destructive-guard@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+        uses: quynhonsemiconductor/ci/actions/destructive-guard@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
         with:
           working-directory: infra/live/_shared
           plan-file: tfplan
@@ -176,7 +176,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+      - uses: quynhonsemiconductor/ci/actions/setup-tofu-aws@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
         with:
           role-arn: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/opshub-github-infra-apply
           aws-region: ${{ env.AWS_REGION }}
@@ -221,7 +221,7 @@ jobs:
       # (piped, never written out): byte for byte the plan the next step applies. See
       # docs/runbooks/infra-destructive-guard.md.
       - name: destructive-guard (tfplan)
-        uses: quynhonsemiconductor/ci/actions/destructive-guard@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+        uses: quynhonsemiconductor/ci/actions/destructive-guard@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
         with:
           working-directory: infra/live/develop
           plan-file: tfplan

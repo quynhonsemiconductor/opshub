@@ -113,7 +113,7 @@ jobs:
         # awaited run, live in the shared action — see `quynhonsemiconductor/ci`. This was
         # hand-written here, with `gh run watch --exit-status`, which reports a 403 the same
         # way it reports a failed run: rova lost both deploys on 2026-09-13 to exactly that.
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
         with:
           workflow: infra-apply.yml
           label: Infrastructure · Apply
@@ -180,7 +180,7 @@ jobs:
       actions: read
     steps:
       - name: Wait for Backend · CI on this commit
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
         with:
           workflow: backend-ci.yml
           # `main` and not the tag ref: Backend · CI only runs on main.
@@ -204,7 +204,7 @@ jobs:
       id-token: write
       attestations: write
       packages: read # build-push-ecr pulls private @quynhonsemiconductor/* from GitHub Packages
-    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@208f7081f59fdbe5a454d7e836d1b04ac4b04d97 # v1.24.1
+    uses: quynhonsemiconductor/ci/.github/workflows/backend-deploy.yml@de56bff40c5468623aa9e69d1ebe8e638e874bdf # v1.24.2
     with:
       product: opshub
       has_worker: true
