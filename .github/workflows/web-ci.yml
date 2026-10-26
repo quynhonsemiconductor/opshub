@@ -483,16 +483,19 @@ jobs:
           cp .env.example .env
           mkdir -p "$LOGS"
 
-      # `--wait` returns when every healthcheck passes. The bucket setup is a one-shot (garage-init), so its exit status is read
-      # on the next step: 0 means both buckets, their lifecycle and CORS for localhost and 127.0.0.1 are set and each preflight passed.
+      # `--wait` returns when every named service's healthcheck passes. The bucket setup is a one-shot
+      # (garage-init) and is deliberately NOT in the wait set: compose's all-services `--wait` fails
+      # whenever the one-shot container exits (even 0) before the wait completes, which made this gate
+      # race-flaky (run 40265625480). Naming only the long-running services starts and waits on exactly
+      # them; garage-init is not a dependency of any of them, so it stays unstarted until the next step.
       - name: docker compose -f docker-compose.dev.yml up -d --wait
-        run: docker compose -f docker-compose.dev.yml up -d --wait --wait-timeout 240
+        run: docker compose -f docker-compose.dev.yml up -d --wait --wait-timeout 240 postgres valkey mailpit garage otel
 
-      - name: The bucket setup exited 0 (garage-init)
-        run: |
-          code=$(docker inspect -f '{{.State.ExitCode}}' "$(docker compose -f docker-compose.dev.yml ps -aq garage-init)")
-          echo "garage-init exit code: $code"
-          test "$code" = 0 || { docker compose -f docker-compose.dev.yml logs garage-init; exit 1; }
+      # Runs garage-init in the foreground and propagates its exit status: 0 means both buckets, their
+      # lifecycle and CORS for localhost and 127.0.0.1 are set and each preflight passed. depends_on
+      # (garage: service_healthy) still orders it after Garage is up.
+      - name: Run bucket setup, exit code 0 required (garage-init)
+        run: docker compose -f docker-compose.dev.yml run --rm garage-init
 
       - name: pnpm db:migrate
         run: pnpm db:migrate
