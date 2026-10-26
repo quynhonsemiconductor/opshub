@@ -132,11 +132,17 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      # `.pnpmfile.cjs` keeps Better Auth's optional peers (drizzle-kit, vitest, react ...) out of the runtime
-      # image; it is identity's shipped file, copied. A difference after an identity bump means a new peer or a
-      # changed rule: copy the file again and re-run `pnpm install` (the lockfile records its checksum).
-      - name: .pnpmfile.cjs is identity's shipped copy
-        run: cmp .pnpmfile.cjs node_modules/@quynhonsemiconductor/identity/pnpmfile.cjs
+      # The "better-auth>peer": \"-\" overrides in pnpm-workspace.yaml keep Better Auth's optional peers
+      # (drizzle-kit, vitest, react ...) out of the runtime image. A difference after a Better Auth bump
+      # means a new or removed peer: update the override list (and the snippet in identity's README),
+      # then re-run `pnpm install`.
+      - name: better-auth override list matches the installed better-auth
+        run: node scripts/check-better-auth-overrides.mjs
+
+      # The tree-level half of the same guard, running the exact commands the image's prod-deps stage
+      # runs: no dropped Better Auth peer in `pnpm ls --prod` on the committed lockfile.
+      - name: Production tree holds no dev tooling
+        run: ./scripts/check-prod-tree.sh
 
       - name: Typecheck (shipped sources)
         run: npx tsc -p tsconfig.build.json --noEmit

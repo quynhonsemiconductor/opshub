@@ -160,6 +160,35 @@ overrides:
   # css-tree (jsdom) and magicast (coverage); all request 1.x.
   "source-map-js": ">=1.2.2 <2.0.0"
 
+  # Keep Better Auth's optional peers out of the production tree, declaratively (replaces
+  # .pnpmfile.cjs, whose pnpmfileChecksum broke every Renovate lockfile regen; see "Keeping Better
+  # Auth's optional peers out of the runtime image" in identity's README). better-auth declares 18
+  # OPTIONAL peers (its CLI `drizzle-kit`, its test helpers `vitest`, its React/Solid clients, the
+  # databases it can run on ...); pnpm resolves an optional peer against whatever the importing
+  # project has installed, and `pnpm install --prod` follows the resulting optionalDependencies —
+  # the runtime image gains vitest, vite and esbuild (how a Trivy CRITICAL on esbuild once reached
+  # this image). Drop every optional peer — all 16, not only the ones installed today. drizzle-orm
+  # and pg stay: identity uses them. scripts/check-better-auth-overrides.mjs compares this list
+  # against better-auth's installed peerDependenciesMeta and fails on any Better Auth peer change.
+  # pnpm 11 honours these; pnpm 10.33.2 keeps the peers out of the --prod tree too, though it still
+  # records the peer declarations in the lockfile manifest copy (checked 2026-10-26).
+  "better-auth>@lynx-js/react": "-"
+  "better-auth>@prisma/client": "-"
+  "better-auth>@sveltejs/kit": "-"
+  "better-auth>@tanstack/react-start": "-"
+  "better-auth>@tanstack/solid-start": "-"
+  "better-auth>drizzle-kit": "-"
+  "better-auth>mongodb": "-"
+  "better-auth>mysql2": "-"
+  "better-auth>next": "-"
+  "better-auth>prisma": "-"
+  "better-auth>react": "-"
+  "better-auth>react-dom": "-"
+  "better-auth>solid-js": "-"
+  "better-auth>svelte": "-"
+  "better-auth>vitest": "-"
+  "better-auth>vue": "-"
+
 # pnpm's `minimumReleaseAge` is a cooldown against a hijacked THIRD-PARTY release: a malicious version is usually
 # caught and yanked within hours, so not installing anything younger than a day removes most of that exposure.
 #
