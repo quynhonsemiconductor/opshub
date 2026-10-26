@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.4](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.3...v0.4.4) (2026-10-26)
+
+
+### ✨ Features
+
+* **db:** door terminal schema, migration 0040 and permission seeds ([#478](https://github.com/quynhonsemiconductor/opshub/issues/478)) ([153a160](https://github.com/quynhonsemiconductor/opshub/commit/153a1603c491544774b33a75501d94d2b394c9aa))
+* **door:** admin module — terminals, cards and the enrolment UI ([#479](https://github.com/quynhonsemiconductor/opshub/issues/479)) ([c6c309f](https://github.com/quynhonsemiconductor/opshub/commit/c6c309f5ed542fc28ac6238776396430e9f26a96))
+* **door:** battery telemetry, low-battery alerts and the 150-min offline window ([#493](https://github.com/quynhonsemiconductor/opshub/issues/493)) ([85d51eb](https://github.com/quynhonsemiconductor/opshub/commit/85d51eb15fd33b6fb8fa544395947e7e21ce1fc3))
+* **door:** terminal routes — token guard, allow-list ETag, event ingestion, jobs ([#480](https://github.com/quynhonsemiconductor/opshub/issues/480)) ([2942b7a](https://github.com/quynhonsemiconductor/opshub/commit/2942b7a813af87c5edf53073f7705e3a3f3c681e))
+* **email:** refuse unreplaced Graph placeholders in the environment ([#412](https://github.com/quynhonsemiconductor/opshub/issues/412)) ([da8b211](https://github.com/quynhonsemiconductor/opshub/commit/da8b211f1d7363e2a796bc96b6f36871465df488))
+* **graph:** read the certificate from AZURE_CLIENT_CERTIFICATE_PATH ([#449](https://github.com/quynhonsemiconductor/opshub/issues/449)) ([7a05449](https://github.com/quynhonsemiconductor/opshub/commit/7a0544954d49dbea4b871b90aee076d08c3aa160))
+
+
+### 🐛 Bug Fixes
+
+* **ci:** take the one-shot garage-init out of compose's wait set ([#496](https://github.com/quynhonsemiconductor/opshub/issues/496)) ([fcc3ef4](https://github.com/quynhonsemiconductor/opshub/commit/fcc3ef4dfa1a2ee2a8992302a5cb4dd3efd426ac))
+* **config:** use the certificate path in the placeholder-guard spec ([#490](https://github.com/quynhonsemiconductor/opshub/issues/490)) ([fffc9c5](https://github.com/quynhonsemiconductor/opshub/commit/fffc9c55ba8ec9cd64f82df82392b5d67535acb6))
+* **deps:** allow workerd and sharp build scripts for the deploy-time wrangler install ([#495](https://github.com/quynhonsemiconductor/opshub/issues/495)) ([9a4fcc6](https://github.com/quynhonsemiconductor/opshub/commit/9a4fcc634b971044964f4f28aee2ad8f25efea07))
+* **worker:** materialize the injected graph certificate as the file the app reads ([#492](https://github.com/quynhonsemiconductor/opshub/issues/492)) ([e8e350e](https://github.com/quynhonsemiconductor/opshub/commit/e8e350ec1daa7c436f47f2e24f7fc9c81fe47747))
+
 ## [0.4.3](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.2...v0.4.3) (2026-10-25)
 
 
