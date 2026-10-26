@@ -46,6 +46,7 @@ export const NOTIFICATION_TEMPLATE_NAMES = [
   'request.approved',
   'request.rejected',
   'door.low_battery',
+  'door.terminal_offline',
 ] as const;
 
 export type NotificationTemplateName = (typeof NOTIFICATION_TEMPLATE_NAMES)[number];
@@ -138,8 +139,14 @@ export interface NotificationTemplateVars {
   /** Fired when a door terminal reports its pack below the configured threshold (or its own flag). */
   'door.low_battery': {
     terminalName: string;
-    batteryMv: number;
+    batteryMv: number | null;
     thresholdMv: number;
+  };
+  /** Fired when an active terminal crosses the offline window (150 min without a sync). */
+  'door.terminal_offline': {
+    active: number;
+    seen: number;
+    windowMinutes: number;
   };
   'request.rejected': {
     requestType: string;
@@ -254,9 +261,17 @@ const templates: {
     };
   },
   'door.low_battery'(v) {
+    const reading =
+      v.batteryMv === null ? 'no voltage reading (device flag only)' : `${v.batteryMv} mV`;
     return {
       title: `Door terminal ${v.terminalName} battery low`,
-      body: `The battery pack reports ${v.batteryMv} mV (threshold ${v.thresholdMv} mV). Replace the batteries before the terminal dies — it syncs every 60 minutes and holds ~1–2 weeks of headroom.`,
+      body: `The terminal reports ${reading}, at or below the ${v.thresholdMv} mV threshold. Replace the batteries — the terminal syncs every 60 minutes and holds roughly 1–2 weeks of headroom from there.`,
+    };
+  },
+  'door.terminal_offline'(v) {
+    return {
+      title: 'Door terminal offline',
+      body: `${v.active - v.seen} of ${v.active} active door terminal(s) have not synced within ${v.windowMinutes} minutes. The door still opens from its cached list, but events are not arriving.`,
     };
   },
 };

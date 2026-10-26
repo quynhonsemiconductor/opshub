@@ -22,13 +22,26 @@ function makeHealth(over: { url?: string; active?: number; seen?: number } = {})
     countActive: vi.fn().mockResolvedValue(over.active ?? 1),
     countActiveSeenSince: vi.fn().mockResolvedValue(over.seen ?? 1),
   };
+  const cache = { getJson: vi.fn(), setJson: vi.fn() };
+  const door = {
+    doorManageHolders: vi.fn().mockResolvedValue(['hr-1', 'it-1']),
+    scheduleNotification:
+      vi.fn<
+        (
+          recipientId: string,
+          input: { type: string; vars: unknown; idempotencyKey: string },
+        ) => Promise<void>
+      >(),
+  };
   const cron = new DoorTerminalHealthCron(
     terminals as never,
     config as never,
     exclusive as never,
+    cache as never,
+    door as never,
     ping as never,
   );
-  return { cron, ping, terminals };
+  return { cron, ping, terminals, cache, door };
 }
 
 describe('DoorTerminalHealthCron', () => {
@@ -58,6 +71,57 @@ describe('DoorTerminalHealthCron', () => {
     });
     await cron.tick();
     expect(ping).not.toHaveBeenCalled();
+  });
+
+  it('notifies door.manage holders ON the transition to stale, once', async () => {
+    const { cron, cache, door } = makeHealth({
+      url: 'https://hc-ping.example.invalid/ok',
+      active: 2,
+      seen: 1,
+    });
+    cache.getJson.mockResolvedValue(null); // fresh marker: not previously stale
+    await cron.tick();
+    expect(cache.setJson).toHaveBeenCalledWith(
+      'door:terminal:offline-alert',
+      { stale: true },
+      expect.any(Number),
+    );
+    expect(door.scheduleNotification).toHaveBeenCalledTimes(2); // one per holder
+    const first = door.scheduleNotification.mock.calls[0] as [
+      string,
+      { type: string; vars: unknown; idempotencyKey: string },
+    ];
+    expect(first[0]).toBe('hr-1');
+    expect(first[1].type).toBe('door.terminal_offline');
+    expect(first[1].vars).toEqual({ active: 2, seen: 1, windowMinutes: 150 });
+    expect(first[1].idempotencyKey).toMatch(/^door\.terminal_offline:\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('does NOT repeat while the marker already says stale', async () => {
+    const { cron, cache, door } = makeHealth({
+      url: 'https://hc-ping.example.invalid/ok',
+      active: 2,
+      seen: 1,
+    });
+    cache.getJson.mockResolvedValue({ stale: true });
+    await cron.tick();
+    expect(door.scheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it('re-arms when all terminals are seen again', async () => {
+    const { cron, cache, door } = makeHealth({
+      url: 'https://hc-ping.example.invalid/ok',
+      active: 2,
+      seen: 2,
+    });
+    cache.getJson.mockResolvedValue({ stale: true });
+    await cron.tick();
+    expect(cache.setJson).toHaveBeenCalledWith(
+      'door:terminal:offline-alert',
+      { stale: false },
+      expect.any(Number),
+    );
+    expect(door.scheduleNotification).not.toHaveBeenCalled();
   });
 
   it('withholds the ping when there are ZERO active terminals', async () => {

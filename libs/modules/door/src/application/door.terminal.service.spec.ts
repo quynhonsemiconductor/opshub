@@ -35,6 +35,13 @@ const mockCards = {
 const mockEmployees = { assertExist: vi.fn() };
 const mockAudit = createFakeAudit();
 const mockDb = { transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn({})) };
+/** Battery-state cache: getJson returns the PREVIOUS sync's { low } per test. */
+const mockCache = {
+  getJson: vi.fn<() => Promise<{ low: boolean } | null>>().mockResolvedValue(null),
+  setJson: vi.fn().mockResolvedValue(undefined),
+};
+const mockConfig = { get: vi.fn(() => 5000) };
+const mockScheduler = { schedule: vi.fn().mockResolvedValue(undefined) };
 
 function makeService() {
   return new DoorService(
@@ -43,10 +50,25 @@ function makeService() {
     mockEmployees as never,
     mockAudit as never,
     mockDb as never,
-    { getJson: vi.fn(), setJson: vi.fn() } as never, // cache
-    { get: vi.fn(() => 5000) } as never, // config
-    { schedule: vi.fn() } as never, // scheduler
+    mockCache as never, // cache (ctor order: db, cache, config, scheduler)
+    mockConfig as never,
+    mockScheduler as never,
   );
+}
+
+/** Ingest one batch carrying only battery telemetry (no events) and hand back the service. */
+async function syncBattery(input: { battery_mv?: number; low_battery?: boolean }) {
+  const service = makeService();
+  vi.spyOn(service, 'doorManageHolders').mockResolvedValue(['hr-1']);
+  // STREAM lives inside the ingestEvents describe; a battery-only batch carries no events, so
+  // any valid stream uuid works.
+  await service.ingestEvents('term-1', {
+    stream: '6f1a2b3c-0000-4000-8000-0000000000ff',
+    dropped: 0,
+    events: [],
+    ...input,
+  });
+  return service;
 }
 
 const HOUR = 3600_000;
@@ -262,6 +284,69 @@ describe('DoorService.ingestEvents()', () => {
     const calls = mockCards.insertEvents.mock.calls;
     const [late] = calls[calls.length - 1][1] as { cardId: string | null }[];
     expect(late.cardId).toBeNull();
+  });
+
+  describe('battery low transition (SA review #493 item 8)', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockCache.getJson.mockResolvedValue(null);
+      mockTerminals.findById.mockResolvedValue({ id: 'term-1', name: 'Main door' });
+    });
+
+    it('notifies on the TRANSITION into low (fresh cache)', async () => {
+      await syncBattery({ battery_mv: 4900 });
+      expect(mockScheduler.schedule).toHaveBeenCalledTimes(1);
+      expect(mockScheduler.schedule).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          type: 'door.low_battery',
+          recipientId: 'hr-1',
+          vars: { terminalName: 'Main door', batteryMv: 4900, thresholdMv: 5000 },
+        }),
+      );
+    });
+
+    it('does NOT repeat while the previous sync was already low', async () => {
+      mockCache.getJson.mockResolvedValue({ low: true });
+      await syncBattery({ battery_mv: 4800 });
+      expect(mockScheduler.schedule).not.toHaveBeenCalled();
+    });
+
+    it('re-arms after a non-low sync: low again notifies again', async () => {
+      await syncBattery({ battery_mv: 5500 }); // non-low: clears the state
+      expect(mockScheduler.schedule).not.toHaveBeenCalled();
+      mockCache.getJson.mockResolvedValue({ low: false }); // the non-low sync's write
+      await syncBattery({ battery_mv: 4700 });
+      expect(mockScheduler.schedule).toHaveBeenCalledTimes(1);
+    });
+
+    it('battery_mv === threshold is NOT low; threshold-1 IS low', async () => {
+      await syncBattery({ battery_mv: 5000 });
+      expect(mockCache.setJson).toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ low: false }),
+        expect.any(Number),
+      );
+      expect(mockScheduler.schedule).not.toHaveBeenCalled();
+
+      await syncBattery({ battery_mv: 4999 });
+      expect(mockScheduler.schedule).toHaveBeenCalledTimes(1);
+    });
+
+    it('the device flag alone (no mv) is low and reports mv: null', async () => {
+      await syncBattery({ low_battery: true });
+      expect(mockCache.setJson).toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ mv: null, low: true }),
+        expect.any(Number),
+      );
+      expect(mockScheduler.schedule).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          vars: { terminalName: 'Main door', batteryMv: null, thresholdMv: 5000 },
+        }),
+      );
+    });
   });
 
   it('normalises the UID before candidate lookup', async () => {

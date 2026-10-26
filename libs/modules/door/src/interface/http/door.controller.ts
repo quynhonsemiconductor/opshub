@@ -94,13 +94,16 @@ export class DoorController {
   @ApiOperation({ summary: 'List door terminals' })
   @ApiOkResponse({ type: [DoorTerminalResponseDto] })
   @ApiCommonErrors(401, 403)
-  async listTerminals() {
+  async listTerminals(): Promise<DoorTerminalResponseDto[]> {
     const threshold = this.config.get('DOOR_LOW_BATTERY_MV');
     const terminals = await this.door.listTerminals();
-    const enriched = [];
+    const enriched: DoorTerminalResponseDto[] = [];
     for (const t of terminals) {
       const state = await this.door.batteryState(t.id, threshold);
-      enriched.push({ ...toTerminalDto(t), battery: state });
+      enriched.push({
+        ...toTerminalDto(t),
+        battery: { mv: state.mv, low: state.low, reportedAt: state.reportedAt },
+      });
     }
     return enriched;
   }

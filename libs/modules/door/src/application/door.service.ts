@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
-import { and, eq, inArray } from 'drizzle-orm';
-import { employees, roles, userRoleAssignments } from '../../../../../db/schema';
+import { and, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import { employees, rolePermissions, userRoleAssignments } from '../../../../../db/schema';
 import {
   AppConfigService,
   CacheService,
@@ -16,7 +16,10 @@ import {
   type DrizzleDB,
 } from '@platform';
 import { newId, type Actor } from '@shared-kernel';
-import { NotificationSchedulerService } from '@platform/notifications';
+import {
+  NotificationSchedulerService,
+  type NotificationTemplateVars,
+} from '@platform/notifications';
 import {
   AuditService,
   AUDIT_ACTION,
@@ -66,13 +69,6 @@ export function normaliseUid(raw: string): string {
 }
 
 const UID_SHAPE = /^[0-9A-F]{8}([0-9A-F]{6}){0,2}$/;
-
-/**
- * The roles whose holders get door notifications. Mirrors the seeded grants of `door.manage`
- * (db/permissions.catalog.ts ROLE_PERMISSIONS: hr and it-admin) — if a future change grants
- * door.manage to another role, add it HERE too.
- */
-const DOOR_MANAGE_ROLES = ['hr', 'it-admin'] as const;
 
 /** One event as the TERMINAL sends it (snake_case wire names, validated per event). */
 export interface IngestEvent {
@@ -477,20 +473,15 @@ export class DoorService {
     // the server threshold are OR'd: either saying low means the badge and the alert fire.
     if (low && prev?.low !== true) {
       const terminal = await this.terminals.findById(terminalId);
-      const holders = await this.db
-        .selectDistinct({ id: employees.id })
-        .from(employees)
-        .innerJoin(userRoleAssignments, eq(userRoleAssignments.userId, employees.id))
-        .innerJoin(roles, eq(roles.id, userRoleAssignments.roleId))
-        .where(and(inArray(roles.name, [...DOOR_MANAGE_ROLES]), eq(employees.status, 'active')));
-      for (const holder of holders) {
+      const holders = await this.doorManageHolders();
+      for (const holderId of holders) {
         await this.notificationsScheduler.schedule(this.db, {
           type: 'door.low_battery',
-          recipientId: holder.id,
+          recipientId: holderId,
           resourceId: terminalId,
           vars: {
             terminalName: terminal?.name ?? terminalId,
-            batteryMv: typeof input.battery_mv === 'number' ? input.battery_mv : 0,
+            batteryMv: typeof input.battery_mv === 'number' ? input.battery_mv : null,
             thresholdMv,
           },
           // One alert per terminal per day while low — not one per sync.
@@ -503,17 +494,48 @@ export class DoorService {
   }
 
   /**
-   * Active employees holding a role that carries door.manage per the seeded grants (hr,
-   * it-admin). A direct join rather than a general permission-holder resolver: the seeded
-   * catalogue has no implication, so the roles ARE the holders (db/permissions.catalog.ts).
+   * Schedule a door notification to ONE recipient — the door module's single door into the
+   * notification outbox, so both alerts (low battery here, offline in the health cron) write
+   * through the same path with the same recipients query.
+   */
+  async scheduleNotification<K extends 'door.low_battery' | 'door.terminal_offline'>(
+    recipientId: string,
+    input: {
+      type: K;
+      vars: NotificationTemplateVars[K];
+      idempotencyKey: string;
+    },
+  ): Promise<void> {
+    await this.notificationsScheduler.schedule(this.db, {
+      type: input.type,
+      recipientId,
+      resourceId: undefined,
+      vars: input.vars,
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+
+  /**
+   * Active employees whose EFFECTIVE permissions include door.manage: the union of roles granted
+   * `door.manage` and roles holding the `*` wildcard (admin), via authz.role_permissions — NOT by
+   * role display name (roles.name is the human label). Expired assignments are excluded on
+   * user_role_assignments.expires_at, and offboarded employees on employees.status. The one
+   * recipients query for BOTH door alerts: the low-battery transition here, and the offline
+   * transition in DoorTerminalHealthCron.
    */
   async doorManageHolders(): Promise<string[]> {
     const rows = await this.db
       .selectDistinct({ id: employees.id })
       .from(employees)
       .innerJoin(userRoleAssignments, eq(userRoleAssignments.userId, employees.id))
-      .innerJoin(roles, eq(roles.id, userRoleAssignments.roleId))
-      .where(and(inArray(roles.name, [...DOOR_MANAGE_ROLES]), eq(employees.status, 'active')));
+      .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoleAssignments.roleId))
+      .where(
+        and(
+          inArray(rolePermissions.permissionKey, ['door.manage', '*']),
+          eq(employees.status, 'active'),
+          or(isNull(userRoleAssignments.expiresAt), gt(userRoleAssignments.expiresAt, sql`now()`)),
+        ),
+      );
     return rows.map((r) => r.id);
   }
 
@@ -525,18 +547,18 @@ export class DoorService {
     terminalId: string,
     thresholdMv: number,
   ): Promise<{
-    batteryMv: number | null;
-    batteryLow: boolean;
+    mv: number | null;
+    low: boolean;
     reportedAt: string | null;
   }> {
     const state = await this.cache.getJson<{ mv: number | null; low: boolean; at: string }>(
       `door:terminal:${terminalId}:battery`,
     );
-    if (!state) return { batteryMv: null, batteryLow: false, reportedAt: null };
+    if (!state) return { mv: null, low: false, reportedAt: null };
     const serverLow = typeof state.mv === 'number' && state.mv < thresholdMv;
     return {
-      batteryMv: state.mv,
-      batteryLow: state.low || serverLow,
+      mv: state.mv,
+      low: state.low || serverLow,
       reportedAt: state.at,
     };
   }

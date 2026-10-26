@@ -54,6 +54,8 @@ const SENDABLE = [
   'request.no_approver',
   'request.approved',
   'request.rejected',
+  'door.low_battery',
+  'door.terminal_offline',
 ];
 
 /** Toggles are `role="switch"`, two per event (in-app and email), plus two for the global row. */
