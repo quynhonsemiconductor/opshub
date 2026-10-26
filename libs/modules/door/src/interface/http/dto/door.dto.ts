@@ -69,6 +69,15 @@ export class DoorTerminalResponseDto {
   droppedEvents!: number;
   createdAt!: string;
   updatedAt!: string;
+  /**
+   * Battery state from the cache (never-reported terminals omit it). `low` is the device flag OR
+   * the server threshold; `mv` is null when only the flag was sent.
+   */
+  battery?: {
+    mv: number | null;
+    low: boolean;
+    reportedAt: string | null;
+  };
 }
 
 /** The ONLY response that ever carries a token — create and regenerate, never a read. */

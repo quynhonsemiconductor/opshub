@@ -54,6 +54,8 @@ const SENDABLE = [
   'request.no_approver',
   'request.approved',
   'request.rejected',
+  'door.low_battery',
+  'door.terminal_offline',
 ];
 
 /** Toggles are `role="switch"`, two per event (in-app and email), plus two for the global row. */
@@ -166,6 +168,8 @@ function namesFor(type: string): string[] {
     'request.no_approver': 'A request has no one left to approve it',
     'request.approved': 'Your request was approved',
     'request.rejected': 'Your request was rejected',
+    'door.low_battery': 'Door terminal battery is low',
+    'door.terminal_offline': 'Door terminal offline',
   };
   return [map[type] ?? type];
 }

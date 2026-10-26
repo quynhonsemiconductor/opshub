@@ -41,6 +41,9 @@ import { useCards, useTerminals, useUnknownCards, useDoorWrites } from './use-do
  * the two kinds of work apart), so the UI gates per action rather than per person.
  */
 
+/** Mirrors DOOR_LOW_BATTERY_MV's server default — the alert, not the badge, is authoritative. */
+const LOW_BATTERY_MV_FALLBACK = 5000;
+
 const STATUS_FILTERS: SegmentedOption<string>[] = [
   { value: '', label: 'All' },
   ...CARD_STATUS_FILTERS.map((s) => ({ value: s, label: humanizeStatus(s) })),
@@ -112,6 +115,23 @@ export function DoorPage() {
       header: 'Dropped events',
       align: 'right',
       cell: (t) => <span className="tabular-nums">{t.droppedEvents}</span>,
+      hideOnMobile: true,
+    },
+    {
+      key: 'battery',
+      header: 'Battery',
+      cell: (t) => {
+        if (!t.battery || (t.battery.mv === null && !t.battery.low))
+          return orDash('never reported');
+        const low =
+          t.battery.low || (t.battery.mv !== null && t.battery.mv < LOW_BATTERY_MV_FALLBACK);
+        return (
+          <StatusBadge tone={low ? 'red' : 'green'}>
+            {t.battery.mv !== null ? `${(t.battery.mv / 1000).toFixed(2)} V` : 'reported'}
+            {low ? ' · low' : ''}
+          </StatusBadge>
+        );
+      },
       hideOnMobile: true,
     },
     {

@@ -1,6 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  AppConfigService,
+  CacheService,
   ConflictException,
   ErrorCodes,
   InjectDrizzle,
@@ -12,6 +14,7 @@ import {
   type DrizzleDB,
 } from '@platform';
 import { newId, type Actor } from '@shared-kernel';
+import { DoorAlertsService } from './door-alerts.service';
 import {
   AuditService,
   AUDIT_ACTION,
@@ -100,6 +103,7 @@ export function assertWindow(validFrom: Date, validUntil: Date | null | undefine
  */
 @Injectable()
 export class DoorService {
+  private readonly logger = new Logger(DoorService.name);
   private readonly terminalTrail: ResourceAuditTrail;
   private readonly cardTrail: ResourceAuditTrail;
 
@@ -109,6 +113,9 @@ export class DoorService {
     private readonly employees: EmployeeService,
     audit: AuditService,
     @InjectDrizzle() private readonly db: DrizzleDB,
+    private readonly cache: CacheService,
+    private readonly config: AppConfigService,
+    private readonly alerts: DoorAlertsService,
   ) {
     this.terminalTrail = audit.forResource(AUDIT_RESOURCE.DOOR_TERMINAL);
     this.cardTrail = audit.forResource(AUDIT_RESOURCE.DOOR_CARD);
@@ -355,7 +362,13 @@ export class DoorService {
    */
   async ingestEvents(
     terminalId: string,
-    input: { stream: string; dropped: number; events: IngestEvent[] },
+    input: {
+      stream: string;
+      dropped: number;
+      battery_mv?: number;
+      low_battery?: boolean;
+      events: IngestEvent[];
+    },
   ): Promise<{ ackedThrough: number; rejected: number[] }> {
     const now = new Date();
     const rejected: number[] = [];
@@ -435,7 +448,88 @@ export class DoorService {
       await this.terminals.addDropped(terminalId, input.dropped);
     }
 
+    // Battery telemetry rides batch-level (one pack per controller). Held in the cache —
+    // additive to contract v1, no schema change — and served on the terminals list for the badge.
+    const thresholdMv = this.config.get('DOOR_LOW_BATTERY_MV');
+    const deviceLow = input.low_battery === true;
+    const serverLow = typeof input.battery_mv === 'number' && input.battery_mv < thresholdMv;
+    const low = deviceLow || serverLow;
+    const batteryKey = `door:terminal:${terminalId}:battery`;
+    const prev = await this.cache.getJson<{ low: boolean }>(batteryKey);
+
+    // Notify door.manage holders ON TRANSITION into low (not every sync). The device flag and
+    // the server threshold are OR'd: either saying low means the badge and the alert fire.
+    if (low && prev?.low !== true) {
+      try {
+        await this.notifyLowBattery(terminalId, input.battery_mv, thresholdMv);
+      } catch (err) {
+        // The cache keeps its previous state, so the next sync sees the same transition and retries.
+        this.logger.error(
+          { err, terminalId },
+          'door low-battery alert failed; will retry next sync',
+        );
+        return { ackedThrough, rejected };
+      }
+    }
+
+    await this.cache.setJson(
+      batteryKey,
+      {
+        mv: typeof input.battery_mv === 'number' ? input.battery_mv : null,
+        low,
+        at: new Date().toISOString(),
+      },
+      150 * 60, // seconds — expires at the offline threshold; absent = never reported
+    );
+
     return { ackedThrough, rejected };
+  }
+
+  /** One low-battery alert per holder; the daily per-recipient key bounds repeats. */
+  private async notifyLowBattery(
+    terminalId: string,
+    batteryMv: number | undefined,
+    thresholdMv: number,
+  ): Promise<void> {
+    const terminal = await this.terminals.findById(terminalId);
+    const holders = await this.alerts.doorManageHolders();
+    for (const holderId of holders) {
+      await this.alerts.send(
+        holderId,
+        'door.low_battery',
+        {
+          terminalName: terminal?.name ?? terminalId,
+          batteryMv: typeof batteryMv === 'number' ? batteryMv : null,
+          thresholdMv,
+        },
+        `door.low_battery:${terminalId}:${new Date().toISOString().slice(0, 10)}`,
+        terminalId,
+      );
+    }
+  }
+
+  /**
+   * The cached battery state for one terminal, or never-reported. `low` is the device's own flag
+   * OR the server threshold — the badge shows low if either says so.
+   */
+  async batteryState(
+    terminalId: string,
+    thresholdMv: number,
+  ): Promise<{
+    mv: number | null;
+    low: boolean;
+    reportedAt: string | null;
+  }> {
+    const state = await this.cache.getJson<{ mv: number | null; low: boolean; at: string }>(
+      `door:terminal:${terminalId}:battery`,
+    );
+    if (!state) return { mv: null, low: false, reportedAt: null };
+    const serverLow = typeof state.mv === 'number' && state.mv < thresholdMv;
+    return {
+      mv: state.mv,
+      low: state.low || serverLow,
+      reportedAt: state.at,
+    };
   }
 }
 

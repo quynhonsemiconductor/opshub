@@ -13,7 +13,12 @@
  */
 import { randomUUID } from 'node:crypto';
 
-process.loadEnvFile?.('.env');
+// .env is OPTIONAL: the sim runs fine with only --url/--token flags.
+try {
+  process.loadEnvFile?.('.env');
+} catch {
+  /* no .env — flags carry everything */
+}
 
 const args = process.argv.slice(2);
 function arg(name: string): string | undefined {
@@ -87,8 +92,13 @@ async function sendEvent(): Promise<void> {
 }
 
 async function cycle(): Promise<void> {
-  await syncAllowList();
-  await sendEvent();
+  // One network error must not kill the loop — the next tick retries (like the firmware does).
+  try {
+    await syncAllowList();
+    await sendEvent();
+  } catch (err) {
+    process.stderr.write(`cycle failed: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 async function main(): Promise<void> {

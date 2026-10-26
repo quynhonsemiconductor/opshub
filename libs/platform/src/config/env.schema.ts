@@ -169,6 +169,14 @@ const baseShape = {
    */
   DOOR_TERMINAL_HEALTHCHECK_URL: z.string().url().optional(),
 
+  /**
+   * Door terminal low-battery threshold in millivolts. The pack is 4×AA alkaline (~6.0–6.4 V
+   * fresh); 5000 mV ≈ 1.15 V/cell, roughly 1–2 weeks of headroom. To be tuned from real
+   * measurements. The badge shows low if EITHER this threshold OR the device's own computed
+   * low_battery flag says so.
+   */
+  DOOR_LOW_BATTERY_MV: z.coerce.number().int().positive().default(5000),
+
   // ── AI assistant (optional) ────────────────────────────────────────────────
   // When ANTHROPIC_API_KEY is unset the AI module reports itself disabled
   // (AiService.isEnabled()) and the /ai endpoints return 503.

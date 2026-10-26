@@ -134,6 +134,21 @@ const EVENT_GROUPS: EventGroup[] = [
       },
     ],
   },
+  {
+    group: 'Door',
+    events: [
+      {
+        type: 'door.low_battery',
+        label: 'Door terminal battery is low',
+        hint: 'Sent to door.manage holders when a terminal reports below the threshold.',
+      },
+      {
+        type: 'door.terminal_offline',
+        label: 'Door terminal offline',
+        hint: 'Sent to door.manage holders when a terminal crosses the 150-minute offline window.',
+      },
+    ],
+  },
 ];
 
 // ── Toggle switch ─────────────────────────────────────────────────────────────

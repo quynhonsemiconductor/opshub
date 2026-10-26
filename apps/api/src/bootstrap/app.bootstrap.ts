@@ -6,6 +6,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { assertEdgeClientIpEnv } from '@quynhonsemiconductor/platform-http';
 import { enableHealth } from '@quynhonsemiconductor/platform-runtime';
+import { DOOR_TERMINAL_BODY_LIMIT, isDoorTerminalRoute } from './door-body-limit';
 import {
   AppConfigService,
   SESSION_COOKIE,
@@ -79,22 +80,14 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
   // arrival time for exactly the requests worth investigating.
   registerRequestTiming(fastify);
 
-  // The door-terminal listener sits behind a BYPASS Access app on the dev host (ADR §2.2), so its
-  // only pre-auth gate besides the token is size. A batch is ≤ 100 events × ~200 bytes; 64 KB is
-  // an order of magnitude above honest traffic and far below anything worth streaming into the
-  // JSON parser (SA review 480/S5).
-  const DOOR_TERMINAL_BODY_LIMIT = 64 * 1024;
-  fastify.addHook('onRequest', function doorTerminalBodyLimit(req, reply, done) {
-    if (req.url.startsWith('/v1/door/terminal/')) {
-      const len = Number(req.headers['content-length'] ?? 0);
-      if (len > DOOR_TERMINAL_BODY_LIMIT) {
-        void reply
-          .code(413)
-          .send({ statusCode: 413, code: 'PAYLOAD_TOO_LARGE', message: 'Event batch too large' });
-        return;
-      }
+  // Route-level body cap for the door-terminal listener (SA review #493 item 6): Fastify
+  // enforces bodyLimit on the STREAM of received bytes, so chunked or missing Content-Length
+  // cannot slip past the way a header pre-check let them. A batch is ≤ 100 events × ~200 bytes;
+  // 64 KB is an order of magnitude above honest traffic and far below anything worth parsing.
+  fastify.addHook('onRoute', (route) => {
+    if (isDoorTerminalRoute(route.url)) {
+      route.bodyLimit = DOOR_TERMINAL_BODY_LIMIT;
     }
-    done();
   });
 
   fastify.addHook('onRequest', function csrfGate(req, reply, done) {

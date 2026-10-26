@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DoorTerminalHealthCron } from './application/door-terminal-health.cron';
+import { DoorAlertsService } from './application/door-alerts.service';
 import { DoorEventCleanupService } from './application/door-event-cleanup.service';
 import { TERMINAL_REPOSITORY } from './domain/ports/terminal.repository';
 import { TerminalDrizzleRepository } from './infrastructure/persistence/terminal.drizzle-repository';
@@ -16,6 +17,7 @@ import { TerminalDrizzleRepository } from './infrastructure/persistence/terminal
  */
 @Module({
   providers: [
+    DoorAlertsService,
     { provide: TERMINAL_REPOSITORY, useClass: TerminalDrizzleRepository },
     DoorTerminalHealthCron,
     DoorEventCleanupService,

@@ -7948,6 +7948,11 @@ export interface components {
       droppedEvents: number;
       createdAt: string;
       updatedAt: string;
+      battery?: {
+        mv: number | null;
+        low: boolean;
+        reportedAt: string | null;
+      };
     };
     CreateTerminalDto: {
       name: string;

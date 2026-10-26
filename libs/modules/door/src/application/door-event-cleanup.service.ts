@@ -30,7 +30,7 @@ export function retentionCutoffs(
  *   - attendance events (an employee's personal data) at `DOOR_EVENT_RETENTION_DAYS`, default
  *     730. HR may set it shorter; lengthening it is a records decision, not a config edit.
  *
- * Registered by `DoorModule`, but the SCHEDULE only exists where `ScheduleModule` does — the
+ * Registered by `DoorJobsModule`, but the SCHEDULE only exists where `ScheduleModule` does — the
  * worker — so the API process compiles this class and never fires it.
  */
 @Injectable()

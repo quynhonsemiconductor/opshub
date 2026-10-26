@@ -35,6 +35,20 @@ const mockCards = {
 const mockEmployees = { assertExist: vi.fn() };
 const mockAudit = createFakeAudit();
 const mockDb = { transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn({})) };
+/** Battery-state cache: getJson returns the PREVIOUS sync's { low } per test. */
+const mockCache = {
+  getJson: vi.fn<() => Promise<{ low: boolean } | null>>().mockResolvedValue(null),
+  setJson: vi.fn().mockResolvedValue(undefined),
+};
+const mockConfig = { get: vi.fn(() => 5000) };
+const mockAlerts = {
+  doorManageHolders: vi
+    .fn<(terminals?: unknown) => Promise<string[]>>()
+    .mockResolvedValue(['hr-1']),
+  send: vi
+    .fn<(recipientId: string, type: string, vars: unknown, key: string) => Promise<void>>()
+    .mockResolvedValue(undefined),
+};
 
 function makeService() {
   return new DoorService(
@@ -43,7 +57,24 @@ function makeService() {
     mockEmployees as never,
     mockAudit as never,
     mockDb as never,
+    mockCache as never, // cache (ctor order: db, cache, config, alerts)
+    mockConfig as never,
+    mockAlerts as never,
   );
+}
+
+/** Ingest one batch carrying only battery telemetry (no events) and hand back the service. */
+async function syncBattery(input: { battery_mv?: number; low_battery?: boolean }) {
+  const service = makeService();
+  // STREAM lives inside the ingestEvents describe; a battery-only batch carries no events, so
+  // any valid stream uuid works.
+  await service.ingestEvents('term-1', {
+    stream: '6f1a2b3c-0000-4000-8000-0000000000ff',
+    dropped: 0,
+    events: [],
+    ...input,
+  });
+  return service;
 }
 
 const HOUR = 3600_000;
@@ -259,6 +290,90 @@ describe('DoorService.ingestEvents()', () => {
     const calls = mockCards.insertEvents.mock.calls;
     const [late] = calls[calls.length - 1][1] as { cardId: string | null }[];
     expect(late.cardId).toBeNull();
+  });
+
+  describe('battery low transition (SA review #493 item 8)', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockCache.getJson.mockResolvedValue(null);
+      mockTerminals.findById.mockResolvedValue({ id: 'term-1', name: 'Main door' });
+    });
+
+    it('notifies on the TRANSITION into low (fresh cache)', async () => {
+      await syncBattery({ battery_mv: 4900 });
+      expect(mockAlerts.send).toHaveBeenCalledTimes(1);
+      expect(mockAlerts.send).toHaveBeenCalledWith(
+        'hr-1',
+        'door.low_battery',
+        { terminalName: 'Main door', batteryMv: 4900, thresholdMv: 5000 },
+        expect.stringMatching(/^door\.low_battery:term-1:/),
+        'term-1',
+      );
+    });
+
+    it('does NOT repeat while the previous sync was already low', async () => {
+      mockCache.getJson.mockResolvedValue({ low: true });
+      await syncBattery({ battery_mv: 4800 });
+      expect(mockAlerts.send).not.toHaveBeenCalled();
+    });
+
+    it('re-arms after a non-low sync: low again notifies again', async () => {
+      await syncBattery({ battery_mv: 5500 }); // non-low: clears the state
+      expect(mockAlerts.send).not.toHaveBeenCalled();
+      mockCache.getJson.mockResolvedValue({ low: false }); // the non-low sync's write
+      await syncBattery({ battery_mv: 4700 });
+      expect(mockAlerts.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('battery_mv === threshold is NOT low; threshold-1 IS low', async () => {
+      await syncBattery({ battery_mv: 5000 });
+      expect(mockCache.setJson).toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ low: false }),
+        expect.any(Number),
+      );
+      expect(mockAlerts.send).not.toHaveBeenCalled();
+
+      await syncBattery({ battery_mv: 4999 });
+      expect(mockAlerts.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('a failed send leaves the cache un-low so the next sync sends again (b)', async () => {
+      mockAlerts.send.mockRejectedValueOnce(new Error('outbox down'));
+      await expect(syncBattery({ battery_mv: 4900 })).resolves.toBeDefined();
+      expect(mockCache.setJson).not.toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ low: true }),
+        expect.any(Number),
+      );
+
+      // The previous state is still "not low" (the cache was never written), so the transition
+      // fires again and the send is retried.
+      mockCache.getJson.mockResolvedValue(null);
+      await syncBattery({ battery_mv: 4900 });
+      expect(mockAlerts.send).toHaveBeenCalledTimes(2);
+      expect(mockCache.setJson).toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ low: true }),
+        expect.any(Number),
+      );
+    });
+
+    it('the device flag alone (no mv) is low and reports mv: null', async () => {
+      await syncBattery({ low_battery: true });
+      expect(mockCache.setJson).toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ mv: null, low: true }),
+        expect.any(Number),
+      );
+      expect(mockAlerts.send).toHaveBeenCalledWith(
+        'hr-1',
+        'door.low_battery',
+        { terminalName: 'Main door', batteryMv: null, thresholdMv: 5000 },
+        expect.any(String),
+        'term-1',
+      );
+    });
   });
 
   it('normalises the UID before candidate lookup', async () => {

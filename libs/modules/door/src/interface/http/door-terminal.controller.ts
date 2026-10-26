@@ -27,6 +27,10 @@ const EventsEnvelopeSchema = z
   .object({
     stream: z.string().uuid(),
     dropped: z.number().int().min(0).max(100_000).default(0),
+    // Batch-level battery telemetry (one pack per controller). Optional for firmware roll-in;
+    // the service persists the latest reading to the cache for the terminals badge.
+    battery_mv: z.number().int().min(0).max(20_000).optional(),
+    low_battery: z.boolean().optional(),
     events: z.array(z.record(z.string(), z.unknown())).max(100),
   })
   .loose();
@@ -97,6 +101,8 @@ export class DoorTerminalController {
     const envelope = parsed.data as unknown as {
       stream: string;
       dropped: number;
+      battery_mv?: number;
+      low_battery?: boolean;
       events: IngestEvent[];
     };
     return this.door.ingestEvents(terminal.id, envelope).then((r) => ({

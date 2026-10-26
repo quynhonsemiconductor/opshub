@@ -15,8 +15,12 @@ import type { DoorTerminal } from '../../domain/door.types';
 const LAST_SEEN_INTERVAL_MS = 60_000;
 
 export interface DoorTerminalRequest extends FastifyRequest {
-  /** Set by this guard; the controller reads the TERMINAL id from here, never from the body. */
-  doorTerminal?: DoorTerminal;
+  /**
+   * Set by this guard; the controller reads the TERMINAL id from here, never from the body.
+   * Only { id, name }: the request object can surface in traces/logs, and the token hash is a
+   * credential-derived value that belongs in neither (SA review #493 item 7).
+   */
+  doorTerminal?: Pick<DoorTerminal, 'id' | 'name'>;
 }
 
 function sha256(value: string): Buffer {
@@ -86,11 +90,15 @@ export class TerminalAuthGuard implements CanActivate {
     const last = this.lastSeenTouch.get(terminal.id) ?? 0;
     if (now - last >= LAST_SEEN_INTERVAL_MS) {
       this.lastSeenTouch.set(terminal.id, now);
-      // Fire-and-forget on purpose: a slow last_seen write must never sit in the unlock-sync path.
-      void this.terminals.touchLastSeen(terminal.id, new Date()).catch(() => undefined);
+      // Fire-and-forget on purpose: a slow last_seen write must never sit in the unlock-sync
+      // path — but a FAILURE is warned, not swallowed: a terminal whose last_seen_at never
+      // advances would silently fall out of the healthcheck's seen-recently window.
+      void this.terminals.touchLastSeen(terminal.id, new Date()).catch((err: unknown) => {
+        this.logger.warn({ err, terminal_id: terminal.id }, 'last_seen_at update failed');
+      });
     }
 
-    request.doorTerminal = terminal;
+    request.doorTerminal = { id: terminal.id, name: terminal.name };
     this.logger.info({ terminal_id: terminal.id }, 'door terminal authenticated');
     return true;
   }
