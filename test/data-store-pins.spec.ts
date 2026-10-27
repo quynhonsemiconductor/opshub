@@ -30,14 +30,14 @@ function normalise(image: string): string {
   return image.replace(/^docker\.io\/(library\/)?/, '').trim();
 }
 
-/** `postgres:18.6@sha256:...` -> `postgres:18.6`. Digest pins are optional and checked separately. */
-function tagOf(image: string): string {
-  return image.split('@')[0];
-}
+/** A CI service image is either `repo:tag` or `repo:tag@sha256:<64 hex>` — nothing else. */
+const CI_IMAGE_RE = /^(?<tag>[^@]+)(?<digest>@sha256:(?<hex>[a-f0-9]{64}))?$/;
 
-/** All `@sha256:<hex>` digests present in the images, so CI can never run one tag at two digests. */
-function digestsIn(images: string[]): string[] {
-  return images.flatMap((image) => image.match(/@sha256:([a-f0-9]{64})$/)?.[1] ?? []);
+/** Parse a CI image, throwing on anything the regex rejects (typo'd digest, second @, ...). */
+function parseCiImage(image: string): { tag: string; digest: string | null } {
+  const match = CI_IMAGE_RE.exec(image);
+  if (!match?.groups) throw new Error(`malformed CI service image: ${image}`);
+  return { tag: match.groups.tag, digest: match.groups.hex ?? null };
 }
 
 const engines = {
@@ -72,11 +72,16 @@ describe('data-store image pins', () => {
       const pinned = composeImages.find((image) => engines[engine].test(image));
       const inCi = ciImages.filter((image) => engines[engine].test(image));
       expect(inCi.length).toBeGreaterThan(0);
-      for (const image of inCi) expect(tagOf(image)).toBe(pinned);
-      // A digest pin must be well-formed, and one tag may not resolve at two digests.
-      const digests = digestsIn(inCi);
-      for (const digest of digests) expect(digest).toMatch(/^[a-f0-9]{64}$/);
-      expect(new Set(digests).size).toBeLessThanOrEqual(1);
+      const parsed = inCi.map(parseCiImage);
+      // Every CI image is the compose tag, digest-pinned (a bare tag floats and
+      // would silently change bytes between runs), and one tag never resolves at
+      // two digests.
+      const digests = parsed.map((image) => {
+        expect(image.tag).toBe(pinned);
+        expect(image.digest, `${image.tag} is not digest-pinned`).toMatch(/^[a-f0-9]{64}$/);
+        return image.digest as string;
+      });
+      expect(new Set(digests).size).toBe(1);
     },
   );
 });
