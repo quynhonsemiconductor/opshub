@@ -30,6 +30,16 @@ function normalise(image: string): string {
   return image.replace(/^docker\.io\/(library\/)?/, '').trim();
 }
 
+/** `postgres:18.6@sha256:...` -> `postgres:18.6`. Digest pins are optional and checked separately. */
+function tagOf(image: string): string {
+  return image.split('@')[0];
+}
+
+/** All `@sha256:<hex>` digests present in the images, so CI can never run one tag at two digests. */
+function digestsIn(images: string[]): string[] {
+  return images.flatMap((image) => image.match(/@sha256:([a-f0-9]{64})$/)?.[1] ?? []);
+}
+
 const engines = {
   postgres: /^postgres:/,
   valkey: /^valkey\/valkey:/,
@@ -62,7 +72,11 @@ describe('data-store image pins', () => {
       const pinned = composeImages.find((image) => engines[engine].test(image));
       const inCi = ciImages.filter((image) => engines[engine].test(image));
       expect(inCi.length).toBeGreaterThan(0);
-      for (const image of inCi) expect(image).toBe(pinned);
+      for (const image of inCi) expect(tagOf(image)).toBe(pinned);
+      // A digest pin must be well-formed, and one tag may not resolve at two digests.
+      const digests = digestsIn(inCi);
+      for (const digest of digests) expect(digest).toMatch(/^[a-f0-9]{64}$/);
+      expect(new Set(digests).size).toBeLessThanOrEqual(1);
     },
   );
 });
