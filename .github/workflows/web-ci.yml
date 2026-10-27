@@ -196,7 +196,7 @@ jobs:
 
       - name: Upload coverage
         if: always() && steps.detect.outputs.has_tests == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage
           path: coverage/
@@ -228,7 +228,7 @@ jobs:
         run: pnpm --filter opshub-web build
 
       - name: Upload dist artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-${{ github.sha }}
           path: dist/
@@ -260,7 +260,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:18.6
+        image: postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -272,7 +272,7 @@ jobs:
           --health-retries 10
 
       redis:
-        image: valkey/valkey:8.1.10-alpine
+        image: valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
         options: >-
           --health-cmd "valkey-cli ping"
           --health-interval 5s
@@ -432,7 +432,7 @@ jobs:
 
       - name: Upload Playwright artefacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report
           path: apps/web/test-results/
