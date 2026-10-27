@@ -376,9 +376,11 @@ describe('CI runs the same images as the dev stack', () => {
     '%s uses the compose tag for every image both run',
     (file) => {
       const repoOf = (image: string) => image.split(':')[0];
-      const shared = workflowServiceImages(file).filter((image) =>
-        composeImages.some((c) => repoOf(c) === repoOf(image)),
-      );
+      // A digest pin (`tag@sha256:<hex>`) still points at the same tag; compare tags only.
+      const tagOf = (image: string) => image.split('@')[0];
+      const shared = workflowServiceImages(file)
+        .map(tagOf)
+        .filter((image) => composeImages.some((c) => repoOf(c) === repoOf(image)));
       expect(shared.length, `${file} runs no service the compose file also runs`).toBeGreaterThan(
         0,
       );
