@@ -1,6 +1,7 @@
 # =============================================================================
 # CI — fast quality gates on every PR and push to main
-# Gate: lint → typecheck → unit tests → e2e tests → docker build → openapi diff
+# Gate: quality, unit tests, e2e tests, docker build and the openapi diff run
+# in PARALLEL; `Backend CI required` gates on every one of them.
 # Security scans live in the Security · Scan workflow — independently runnable.
 # =============================================================================
 name: Backend · CI
@@ -237,7 +238,9 @@ jobs:
         env:
           PG_TLS_WRONG_CA_BUNDLE: '1'
 
-  # 2. Unit + e2e tests (needs Postgres)
+  # 2. Unit tests + e2e tests (need Postgres). Two PARALLEL jobs, not one job
+  #    running the suites in sequence: `Backend CI required` gates on both, so
+  #    the critical path is the longer suite, not the sum of them.
   # ─────────────────────────────────────────────────────────────────────────
   test:
     name: Tests
@@ -332,6 +335,86 @@ jobs:
       - name: Coverage floors track actual coverage
         run: pnpm check:coverage-floors
 
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+  # 2b. E2E suite — its own job, in PARALLEL with the unit suite above, so the
+  #     critical path is the longer suite rather than the sum of both.
+  e2e:
+    name: E2E tests
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: opshub_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+      # S3, so the upload surfaces are actually exercised rather than mocked.
+      #
+      # `training.e2e.spec.ts` PUTs real bytes to a presigned URL and confirms them, which is the
+      # only way to prove the things that matter about that path: that the signed header set is the
+      # one the client must send, that `Content-Disposition` ends up as STORED object metadata, and
+      # that confirm rejects a size or checksum that does not match. Every one of those is invisible
+      # to a stubbed StorageService — the stub would agree with whatever the code did.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @quynhonsemiconductor/* from GitHub Packages
+
+      - name: Run migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
+
+      # `db:migrate` seeds only the prod-safe RBAC catalogue (permissions, roles, grants).
+      # The e2e suite authenticates as the DEMO EMPLOYEES — one per system role, so a spec
+      # can act as "the caller who holds nothing" and "the caller who holds it globally" —
+      # and those come from `db:seed`. Without this step every e2e `beforeAll` fails at
+      # test-login with a 401 that looks nothing like the missing fixture it is.
+      #
+      # The e2e globalSetup truncates and re-seeds in-process as well, so for the e2e step
+      # this is belt-and-braces. It stays because it fails LOUDLY and by name, where the
+      # same failure inside a vitest globalSetup reads as a broken test file — and because
+      # `E2E_SKIP_RESET=true` turns the in-process reseed off.
+      - name: Seed demo fixtures for e2e
+        run: pnpm db:seed
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opshub_test?sslmode=disable
+
       # Prove the least-privilege grants from migration 0012 are COMPLETE, by running the
       # whole e2e suite as `opshub_app` instead of the owner.
       #
@@ -401,14 +484,6 @@ jobs:
         env:
           DATABASE_URL: postgresql://opshub_app:ci-opshub-app-least-privilege@localhost:5432/opshub_test?sslmode=disable
           VALKEY_URL: redis://localhost:6379
-
-      - name: Upload coverage
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: coverage
-          path: coverage/
-          retention-days: 7
 
   # ─────────────────────────────────────────────────────────────────────────
   # 3. Migration upgrade path — prove a migration applies to a REAL database,
@@ -499,12 +574,18 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────
   # 4. Docker build validation (BuildKit cache, no push)
-  #    Runs after tests to avoid wasting compute on broken code.
+  #    PARALLEL with the test jobs, not after them: `Backend CI required` gates
+  #    on this job too, so a broken image still blocks the PR — it just stops
+  #    paying the build as serialization on top of the suites.
+  #    NOT on a push to main: GHCR · Publish builds and scans the same images
+  #    there (and writes the layer cache this job reads); building them twice
+  #    per merge was pure cost.
   # ─────────────────────────────────────────────────────────────────────────
   build:
     name: Docker build
     runs-on: ubuntu-latest
-    needs: [quality, test]
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' && github.event_name != 'push' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -529,8 +610,13 @@ jobs:
           push: false
           load: true            # the image Trivy scans below; a second build in the security workflow is gone
           tags: opshub-api:scan
-          cache-from: type=gha,scope=api
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=api' || '' }}
+          # Two scopes to read: the legacy `api` one this job used to write from
+          # main, and the `opshub-*-amd64` one GHCR · Publish writes on every
+          # merge (this job no longer runs on push, so THAT is where the cache
+          # comes from now). An empty `cache-to` is "do not export".
+          cache-from: |
+            type=gha,scope=api
+            type=gha,scope=opshub-api-amd64
           secrets: |
             node_auth_token=${{ secrets.GITHUB_TOKEN }}
 
@@ -547,8 +633,9 @@ jobs:
           context: .
           target: migrator
           push: false
-          cache-from: type=gha,scope=migrator
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=migrator' || '' }}
+          cache-from: |
+            type=gha,scope=migrator
+            type=gha,scope=opshub-migrator-amd64
           secrets: |
             node_auth_token=${{ secrets.GITHUB_TOKEN }}
 
@@ -558,8 +645,9 @@ jobs:
           context: .
           target: worker
           push: false
-          cache-from: type=gha,scope=worker
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=worker' || '' }}
+          cache-from: |
+            type=gha,scope=worker
+            type=gha,scope=opshub-worker-amd64
           secrets: |
             node_auth_token=${{ secrets.GITHUB_TOKEN }}
 
@@ -686,19 +774,28 @@ jobs:
   ci-required:
     name: Backend CI required
     if: always()
-    needs: [changes, quality, test, migrations, build, openapi]
+    needs: [changes, quality, test, e2e, migrations, build, openapi]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # No `allow-skipped`, so a renamed or removed job still fails loudly. The two branches are exclusive:
+      # No `allow-skipped`, so a renamed or removed job still fails loudly. The branches are exclusive:
       #  * `changes` said run: every job must be `success`;
       #  * otherwise: only `changes` itself must be `success` (the rest are skipped by design). If `changes` FAILED its output is
       #    empty, this branch runs, and the gate fails: it cannot turn "could not decide" into a pass.
+      #  On a PUSH to main the Docker build job is skipped BY DESIGN (GHCR · Publish
+      #    builds and scans the images there), so its result is asserted only off
+      #    push; the explicit list below mirrors `needs` minus `build`.
       - name: Every job must have succeeded
-        if: ${{ needs.changes.outputs.run == 'true' }}
+        if: ${{ needs.changes.outputs.run == 'true' && github.event_name != 'push' }}
         uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
         with:
           results: ${{ join(needs.*.result, ',') }}
+
+      - name: "Every job but the Docker build must have succeeded (push: GHCR publish is the image build)"
+        if: ${{ needs.changes.outputs.run == 'true' && github.event_name == 'push' }}
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
+        with:
+          results: ${{ needs.changes.result }},${{ needs.quality.result }},${{ needs.test.result }},${{ needs.e2e.result }},${{ needs.migrations.result }},${{ needs.openapi.result }}
 
       - name: Nothing here to test (every changed file is ignorable)
         if: ${{ needs.changes.outputs.run != 'true' }}
