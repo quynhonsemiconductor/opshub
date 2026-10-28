@@ -5120,7 +5120,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The full card allow-list; ETag/304 — the terminal polls every 60 s */
+    /** The full card allow-list; ETag/304 — the terminal polls every 60 min */
     get: operations['DoorTerminalController_allowList'];
     put?: never;
     post?: never;
