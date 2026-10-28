@@ -75,6 +75,26 @@ async function myDays(month: string) {
 }
 
 describe('the month derivation against real events', () => {
+  // The derivation bounds days by EMPLOYMENT (earliest start across the person's contracts), and
+  // other suites leave contracts on this employee that start in 2040. Give them one more
+  // open-ended contract for the duration: `expired` so it never collides with the one-active-per-
+  // person rule, and a null end, which means open-ended whatever the other rows say.
+  const derivationContract = '00000000-0000-4000-8000-0000000000c0';
+
+  beforeAll(async () => {
+    await db.execute(sql`
+      insert into contracts.employment_contracts (id, employee_id, reference, contract_type, start_date, end_date, status, signed_at)
+      values (${derivationContract}, ${FIXTURE.NO_PERMISSIONS.id},
+              'E2E-ATT-0', 'permanent', '2020-01-01', null, 'expired', now())
+      on conflict (id) do nothing`);
+  });
+
+  afterAll(async () => {
+    await db.execute(
+      sql`delete from contracts.employment_contracts where id = ${derivationContract}`,
+    );
+  });
+
   it('December events land in December — the bound rolls the year, not the month number', async () => {
     // The seeded holiday calendar may hold New Year's Day, and a holiday day is not listed; this
     // test is about the month bound, so it removes any holiday on the two dates it asserts.
