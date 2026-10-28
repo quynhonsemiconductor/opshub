@@ -275,6 +275,66 @@ describe('the month close locks decisions through every door', () => {
     expect(cancelledNow.statusCode, cancelledNow.body).toBeLessThan(300);
   });
 
+  it('a closed month refuses a GENERIC /requests cancel of a WFH request too (412)', async () => {
+    // A weekday ~60 days out (inside the 92-day window), tried day by day in case a seeded
+    // holiday makes the window empty.
+    let filed: { statusCode: number; body: string } | null = null;
+    let month = '';
+    for (let offset = 60; offset < 70; offset += 1) {
+      const d = new Date(Date.now() + 7 * 3_600_000 + offset * 86_400_000);
+      if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+      const day = d.toISOString().slice(0, 10);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workforce/wfh',
+        headers: authHeaders(employee),
+        payload: { startDate: day, endDate: day },
+      });
+      if (res.statusCode === 201) {
+        filed = res;
+        month = day.slice(0, 7);
+        break;
+      }
+    }
+    expect(filed, 'a WFH request could be filed').not.toBeNull();
+    const { id } = JSON.parse(filed!.body) as { id: string };
+    const linked = await db.execute(
+      sql`select request_id from workforce.wfh_requests where id = ${id}`,
+    );
+    const requestId = (linked.rows[0] as { request_id: string }).request_id;
+
+    const closed = await app.inject({
+      method: 'POST',
+      url: `/v1/workforce/attendance/months/${month}/close`,
+      headers: authHeaders(hr),
+      payload: {},
+    });
+    expect(closed.statusCode, closed.body).toBe(200);
+
+    const cancelled = await app.inject({
+      method: 'POST',
+      url: `/v1/requests/${requestId}/cancel`,
+      headers: authHeaders(employee),
+      payload: {},
+    });
+    expect(cancelled.statusCode, cancelled.body).toBe(412);
+
+    const reopened = await app.inject({
+      method: 'POST',
+      url: `/v1/workforce/attendance/months/${month}/reopen`,
+      headers: authHeaders(admin),
+      payload: { note: 'e2e: cleanup' },
+    });
+    expect(reopened.statusCode, reopened.body).toBe(200);
+    const cancelledNow = await app.inject({
+      method: 'POST',
+      url: `/v1/requests/${requestId}/cancel`,
+      headers: authHeaders(employee),
+      payload: {},
+    });
+    expect(cancelledNow.statusCode, cancelledNow.body).toBeLessThan(300);
+  });
+
   it('a withdrawn request can no longer be decided — the mismatch guard', async () => {
     const filed = await app.inject({
       method: 'POST',
