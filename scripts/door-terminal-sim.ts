@@ -63,7 +63,9 @@ async function syncAllowList(): Promise<void> {
   }
   saw304 = false;
   etag = res.headers.get('etag') ?? undefined;
-  const body = (await res.json()) as { cards: { uid: string; valid_from: string | null }[] };
+  const body = (await res.json()) as {
+    cards: { uid: string; valid_from: number | null; valid_until: number | null }[];
+  };
   process.stdout.write(`allow-list: ${body.cards.length} card(s) ${JSON.stringify(body.cards)}\n`);
 }
 
