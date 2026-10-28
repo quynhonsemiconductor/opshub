@@ -2,7 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { and, desc, eq, lte, gte, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB, type DbExecutor } from '@platform';
 import { newId } from '@shared-kernel';
-import { timesheets, leaveRequests, overtimeEntries, shiftLogs } from '../../../../../../db/schema';
+import {
+  timesheets,
+  leaveRequests,
+  wfhRequests,
+  overtimeEntries,
+  shiftLogs,
+} from '../../../../../../db/schema';
 import type { IWorkforceRepository } from '../../domain/ports/workforce.repository';
 import type { LeaveWindow } from '../../domain/leave-window';
 import type {
@@ -13,6 +19,10 @@ import type {
   LeaveFilters,
   LeaveRequest,
   LeaveStatus,
+  WfhFilters,
+  WfhRequest,
+  WfhStatus,
+  CreateWfhInput,
   OvertimeEntry,
   OvertimeFilters,
   OvertimeStatus,
@@ -116,8 +126,8 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
   }
 
   // ── Leave ──────────────────────────────────────────────────────────────────
-  async createLeave(input: CreateLeaveInput): Promise<LeaveRequest> {
-    const [row] = await this.db
+  async createLeave(input: CreateLeaveInput, tx?: DbExecutor): Promise<LeaveRequest> {
+    const [row] = await (tx ?? this.db)
       .insert(leaveRequests)
       .values({
         id: newId(),
@@ -215,8 +225,9 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
     employeeId: string,
     startDate: string,
     endDate: string,
+    tx?: DbExecutor,
   ): Promise<LeaveWindow[]> {
-    return this.db
+    return (tx ?? this.db)
       .select({
         startDate: leaveRequests.startDate,
         endDate: leaveRequests.endDate,
@@ -231,6 +242,98 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
           sql`${leaveRequests.status} in ('pending','approved')`,
           lte(leaveRequests.startDate, endDate),
           gte(leaveRequests.endDate, startDate),
+        ),
+      );
+  }
+
+  // ── Work from home ─────────────────────────────────────────────────────────
+  async createWfh(input: CreateWfhInput, tx?: DbExecutor): Promise<WfhRequest> {
+    const [row] = await (tx ?? this.db)
+      .insert(wfhRequests)
+      .values({
+        id: newId(),
+        employeeId: input.employeeId,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        workingDays: input.workingDays,
+        reason: input.reason ?? null,
+      })
+      .returning();
+    return row;
+  }
+
+  async findWfhById(id: string): Promise<WfhRequest | null> {
+    const [row] = await this.db.select().from(wfhRequests).where(eq(wfhRequests.id, id)).limit(1);
+    return row ?? null;
+  }
+
+  async listWfh(
+    filters: WfhFilters,
+    limit: number,
+    offset: number,
+  ): Promise<{ rows: WfhRequest[]; total: number }> {
+    const conditions = [
+      filters.employeeId ? eq(wfhRequests.employeeId, filters.employeeId) : undefined,
+      filters.status ? eq(wfhRequests.status, filters.status) : undefined,
+      // Same shape as listLeave: inclusive bounds on the window's start.
+      filters.dateFrom ? gte(wfhRequests.startDate, filters.dateFrom) : undefined,
+      filters.dateTo ? lte(wfhRequests.startDate, filters.dateTo) : undefined,
+    ].filter(Boolean);
+    const where = conditions.length ? and(...conditions) : undefined;
+
+    const rows = await this.db
+      .select()
+      .from(wfhRequests)
+      .where(where)
+      .orderBy(desc(wfhRequests.startDate), desc(wfhRequests.id))
+      .limit(limit)
+      .offset(offset);
+    const [{ count }] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(wfhRequests)
+      .where(where);
+    return { rows, total: count };
+  }
+
+  async setWfhStatus(
+    id: string,
+    status: WfhStatus,
+    reviewerId: string | null,
+    tx?: DbExecutor,
+  ): Promise<WfhRequest | null> {
+    const reviewed = status === 'approved' || status === 'rejected';
+    const [row] = await (tx ?? this.db)
+      .update(wfhRequests)
+      .set({
+        status,
+        reviewerId: reviewed ? reviewerId : null,
+        reviewedAt: reviewed ? new Date() : null,
+      })
+      .where(eq(wfhRequests.id, id))
+      .returning();
+    return row ?? null;
+  }
+
+  async setWfhRequestId(id: string, requestId: string, tx?: DbExecutor): Promise<void> {
+    await (tx ?? this.db).update(wfhRequests).set({ requestId }).where(eq(wfhRequests.id, id));
+  }
+
+  async overlappingWfhWindows(
+    employeeId: string,
+    startDate: string,
+    endDate: string,
+    tx?: DbExecutor,
+  ): Promise<{ startDate: string; endDate: string }[]> {
+    return (tx ?? this.db)
+      .select({ startDate: wfhRequests.startDate, endDate: wfhRequests.endDate })
+      .from(wfhRequests)
+      .where(
+        and(
+          eq(wfhRequests.employeeId, employeeId),
+          // Only live requests hold days: a rejected or cancelled one released them.
+          sql`${wfhRequests.status} in ('pending','approved')`,
+          lte(wfhRequests.startDate, endDate),
+          gte(wfhRequests.endDate, startDate),
         ),
       );
   }

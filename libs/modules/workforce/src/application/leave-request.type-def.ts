@@ -57,12 +57,29 @@ export class LeaveRequestTypeDef implements RequestTypeDef<LeaveRequestPayload>,
     this.registry.register(this);
   }
 
+  /**
+   * The domain row must still be pending when a decision lands. The engine refuses a decided
+   * request, but the DOMAIN status is this table's to keep in step: without the guard, a cancel
+   * and an approve racing through two doors could both write, and the second one wins silently.
+   */
+  private async assertPending(tx: DbExecutor, id: string): Promise<void> {
+    const [row] = await tx
+      .select({ status: leaveRequests.status })
+      .from(leaveRequests)
+      .where(eq(leaveRequests.id, id))
+      .limit(1);
+    if (!row || row.status !== 'pending') {
+      throw new Error(`leave request ${id} is not pending`);
+    }
+  }
+
   async onApprove(
     payload: LeaveRequestPayload,
     _requestId: string,
     reviewerId: string,
     tx: DbExecutor,
   ): Promise<void> {
+    await this.assertPending(tx, payload.leaveRequestId);
     const now = new Date();
     await tx
       .update(leaveRequests)
@@ -97,6 +114,7 @@ export class LeaveRequestTypeDef implements RequestTypeDef<LeaveRequestPayload>,
     reviewerId: string,
     tx: DbExecutor,
   ): Promise<void> {
+    await this.assertPending(tx, payload.leaveRequestId);
     const now = new Date();
     await tx
       .update(leaveRequests)
@@ -109,6 +127,31 @@ export class LeaveRequestTypeDef implements RequestTypeDef<LeaveRequestPayload>,
       { sub: reviewerId, email: reviewerId },
       tx,
       { before: { status: 'pending' }, after: { status: 'rejected', reviewedAt: now } },
+    );
+  }
+
+  /**
+   * A withdrawal the REQUESTER chose (engine.cancel), distinct from expiry: an actor is named, and
+   * the engine row and this row change in the SAME transaction — the pre-existing bug was the
+   * service writing the domain status alone, leaving the engine item pending forever.
+   */
+  async onCancel(
+    payload: LeaveRequestPayload,
+    _requestId: string,
+    cancelledBy: string,
+    tx: DbExecutor,
+  ): Promise<void> {
+    await this.assertPending(tx, payload.leaveRequestId);
+    await tx
+      .update(leaveRequests)
+      .set({ status: 'cancelled' })
+      .where(eq(leaveRequests.id, payload.leaveRequestId));
+    await this.trail.record(
+      AUDIT_ACTION.LEAVE_CANCELLED,
+      payload.leaveRequestId,
+      { sub: cancelledBy, email: cancelledBy },
+      tx,
+      { before: { status: 'pending' }, after: { status: 'cancelled' } },
     );
   }
 

@@ -42,7 +42,14 @@ export type ScopeSource = 'param' | 'query' | 'body';
  * for routes where the request carries the resource's own id and nothing else.
  */
 export type ScopedResource =
-  'employee' | 'asset' | 'timesheet' | 'leave_request' | 'overtime' | 'door_card' | 'door_terminal';
+  | 'employee'
+  | 'asset'
+  | 'timesheet'
+  | 'leave_request'
+  | 'wfh_request'
+  | 'overtime'
+  | 'door_card'
+  | 'door_terminal';
 
 /**
  * How a route tells the guard which resource it is acting on — DECLARATIVELY, so

@@ -6,6 +6,7 @@ import type {
   overtimeStatusEnum,
   shiftTypeEnum,
   timesheetStatusEnum,
+  wfhStatusEnum,
 } from '../../../../../db/schema';
 
 export type TimesheetStatus = (typeof timesheetStatusEnum.enumValues)[number];
@@ -16,6 +17,7 @@ export type LeaveStatus = (typeof leaveStatusEnum.enumValues)[number];
 /** Which part of a day a leave window's boundary falls on — see `domain/leave-window.ts`. */
 export type LeaveDayPortion = (typeof leaveDayPortionEnum.enumValues)[number];
 export type OvertimeStatus = (typeof overtimeStatusEnum.enumValues)[number];
+export type WfhStatus = (typeof wfhStatusEnum.enumValues)[number];
 export type ShiftType = (typeof shiftTypeEnum.enumValues)[number];
 
 // ── Timesheets ───────────────────────────────────────────────────────────────
@@ -90,6 +92,40 @@ export interface LeaveFilters {
   employeeId?: string;
   status?: LeaveStatus;
   /** Inclusive lower and upper bounds on `startDate`, as YYYY-MM-DD — window BEGINS in range. */
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+// ── Work from home ───────────────────────────────────────────────────────────
+
+export interface WfhRequest {
+  id: string;
+  employeeId: string;
+  startDate: string;
+  endDate: string;
+  /** Working days the window covers, frozen at submit. An integer: WFH is whole days only. */
+  workingDays: number;
+  reason: string | null;
+  status: WfhStatus;
+  reviewerId: string | null;
+  reviewedAt: Date | null;
+  createdAt: Date;
+  /** Link to the universal request engine. */
+  requestId: string | null;
+}
+
+export interface CreateWfhInput {
+  employeeId: string;
+  startDate: string;
+  endDate: string;
+  workingDays: number;
+  reason?: string | null;
+}
+
+export interface WfhFilters {
+  employeeId?: string;
+  status?: WfhStatus;
+  /** Inclusive bounds on `startDate`, as YYYY-MM-DD — window BEGINS in range, same rule as leave. */
   dateFrom?: string;
   dateTo?: string;
 }

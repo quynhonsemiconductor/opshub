@@ -31,6 +31,11 @@ export const REQUEST_TYPE = {
   ONBOARDING: 'onboarding',
   OFFBOARDING: 'offboarding',
   LEAVE_REQUEST: 'leave_request',
+  /**
+   * Work from home, as a manager-approved request. The rules (2026-10-28) make every non-office day
+   * a request on the engine: leave, WFH, or an attendance justification — so WFH is not a self-tick.
+   */
+  WFH_REQUEST: 'wfh_request',
   OVERTIME: 'overtime',
   CATALOG_REQUEST: 'catalog_request',
   DOCUMENT_APPROVAL: 'document_approval',

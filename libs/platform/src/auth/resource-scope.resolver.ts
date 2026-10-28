@@ -4,7 +4,12 @@ import { InjectDrizzle, type DrizzleDB } from '../database/drizzle.provider';
 import { NotFoundException } from '../errors/exceptions';
 import { employees } from '../../../../db/schema/identity';
 import { assets } from '../../../../db/schema/assets';
-import { timesheets, leaveRequests, overtimeEntries } from '../../../../db/schema/workforce';
+import {
+  timesheets,
+  leaveRequests,
+  wfhRequests,
+  overtimeEntries,
+} from '../../../../db/schema/workforce';
 import { cards as doorCards, terminals as doorTerminals } from '../../../../db/schema/door';
 import type { ResourceAttrs, ScopedResource } from './authz.types';
 
@@ -38,6 +43,8 @@ export class ResourceScopeResolver {
         return this.timesheet(id);
       case 'leave_request':
         return this.leaveRequest(id);
+      case 'wfh_request':
+        return this.wfhRequest(id);
       case 'overtime':
         return this.overtime(id);
       case 'door_card':
@@ -125,6 +132,17 @@ export class ResourceScopeResolver {
       .limit(1);
 
     if (!row) throw new NotFoundException('LEAVE_REQUEST_NOT_FOUND', 'Leave request not found');
+    return { ownerId: row.employeeId };
+  }
+
+  private async wfhRequest(id: string): Promise<ResourceAttrs> {
+    const [row] = await this.db
+      .select({ employeeId: wfhRequests.employeeId })
+      .from(wfhRequests)
+      .where(eq(wfhRequests.id, id))
+      .limit(1);
+
+    if (!row) throw new NotFoundException('WFH_REQUEST_NOT_FOUND', 'WFH request not found');
     return { ownerId: row.employeeId };
   }
 
