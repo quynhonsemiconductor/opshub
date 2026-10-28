@@ -60,6 +60,10 @@ const ADMIN_ONLY: Record<string, string> = {
     'signing off effectiveness is withheld from the role that manages the corrective action; the ' +
     'per-row check (capa.ownerId === actor.sub) is a separate, narrower guard',
 
+  'workforce.attendance.reopen':
+    'reopening a closed attendance month is the audited override BY DESIGN: granted to no role so ' +
+    'only the admin wildcard can do it, and the reopen route records who and why',
+
   // ── privilege administration: granting privilege is not a delegable operation ──────────────
   'rbac.manage':
     'defining roles and permissions is the one action that can grant every other one, so it stays ' +

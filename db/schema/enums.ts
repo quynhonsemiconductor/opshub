@@ -111,6 +111,13 @@ export const wfhStatusEnum = pgEnum('wfh_status', [
   'cancelled',
 ]);
 export const shiftTypeEnum = pgEnum('shift_type', ['night', 'on_call', 'weekend']);
+/** What a manager can be asked to sign off to repair an attendance day. */
+export const justificationKindEnum = pgEnum('attendance_justification_kind', [
+  'late',
+  'early',
+  'forgot_card',
+  'missing_checkout',
+]);
 
 // ── Storage ──────────────────────────────────────────────────────────────────
 export const storedFileStatusEnum = pgEnum('stored_file_status', [

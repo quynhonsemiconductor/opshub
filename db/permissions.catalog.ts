@@ -267,6 +267,17 @@ export const PERMISSION = {
    * but not the other is a real delegation (an office manager routing WFH, HR owning leave).
    */
   WORKFORCE_WFH_REVIEW: 'workforce.wfh.review',
+  /** See every employee's derived attendance: statuses, worked minutes, flags. */
+  WORKFORCE_ATTENDANCE_READ: 'workforce.attendance.read',
+  /** Approve or reject attendance justifications (a manager repairing a person's day). */
+  WORKFORCE_ATTENDANCE_REVIEW: 'workforce.attendance.review',
+  /** Close an attendance month, which locks its requests and approvals. */
+  WORKFORCE_ATTENDANCE_CLOSE: 'workforce.attendance.close',
+  /**
+   * REOPEN a closed month — the audited admin override. Granted to NO role on purpose: only the
+   * admin wildcard reaches it, so every reopen is by definition an override, not a routine.
+   */
+  WORKFORCE_ATTENDANCE_REOPEN: 'workforce.attendance.reopen',
 
   // ── onboarding / offboarding workflows ─────────────────────────────────────
   ONBOARDING_APPROVE: 'onboarding.approve',
@@ -398,6 +409,13 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   [PERMISSION.WORKFORCE_LEAVE_REVIEW]: 'Approve or reject leave requests via the approval engine',
   [PERMISSION.WORKFORCE_WFH_REVIEW]:
     'Approve or reject work-from-home requests via the approval engine',
+  [PERMISSION.WORKFORCE_ATTENDANCE_READ]:
+    'Read every employee\'s derived attendance (status, worked minutes, flags)',
+  [PERMISSION.WORKFORCE_ATTENDANCE_REVIEW]:
+    'Approve or reject attendance justifications via the approval engine',
+  [PERMISSION.WORKFORCE_ATTENDANCE_CLOSE]: 'Close an attendance month, locking its requests',
+  [PERMISSION.WORKFORCE_ATTENDANCE_REOPEN]:
+    'Reopen a closed attendance month — the audited administrator override',
   [PERMISSION.WORKFORCE_OVERTIME_REVIEW]:
     'Approve or reject overtime requests via the approval engine',
   [PERMISSION.ONBOARDING_APPROVE]: 'Step-1: Manager approves new employee hire',
@@ -593,6 +611,9 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.WORKFORCE_LEAVE_REVIEW,
     PERMISSION.WORKFORCE_OVERTIME_REVIEW,
     PERMISSION.WORKFORCE_WFH_REVIEW,
+    PERMISSION.WORKFORCE_ATTENDANCE_READ,
+    PERMISSION.WORKFORCE_ATTENDANCE_REVIEW,
+    PERMISSION.WORKFORCE_ATTENDANCE_CLOSE,
     PERMISSION.WORKFORCE_MANAGE,
     PERMISSION.DOCUMENTS_READ,
     PERMISSION.DOCUMENTS_MANAGE,
@@ -621,6 +642,7 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.WORKFORCE_LEAVE_REVIEW,
     PERMISSION.WORKFORCE_OVERTIME_REVIEW,
     PERMISSION.WORKFORCE_WFH_REVIEW,
+    PERMISSION.WORKFORCE_ATTENDANCE_REVIEW,
     PERMISSION.ACCESS_REQUEST_READ,
     PERMISSION.ACCESS_REQUEST_APPROVE,
     PERMISSION.REQUEST_READ,
@@ -666,6 +688,8 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.LICENSE_READ,
     // Door events are compliance evidence (who entered, when); manage stays with hr/it-admin.
     PERMISSION.DOOR_READ,
+    // Attendance is the same evidence, derived into days.
+    PERMISSION.WORKFORCE_ATTENDANCE_READ,
   ],
 
   [ROLE.EMPLOYEE]: [],

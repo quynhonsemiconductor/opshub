@@ -36,6 +36,12 @@ export const REQUEST_TYPE = {
    * a request on the engine: leave, WFH, or an attendance justification — so WFH is not a self-tick.
    */
   WFH_REQUEST: 'wfh_request',
+  /**
+   * A manager's sign-off that repairs an attendance day (late/early/forgot_card/missing_checkout):
+   * an approved one credits the day and clears its flags. Coexists with leave and WFH rather than
+   * competing with them — it explains a day, it does not spend it.
+   */
+  ATTENDANCE_JUSTIFICATION: 'attendance_justification',
   OVERTIME: 'overtime',
   CATALOG_REQUEST: 'catalog_request',
   DOCUMENT_APPROVAL: 'document_approval',

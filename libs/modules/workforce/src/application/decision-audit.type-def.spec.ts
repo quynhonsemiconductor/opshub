@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LeaveRequestTypeDef } from './leave-request.type-def';
 import { OvertimeTypeDef } from './overtime.type-def';
 import { WfhRequestTypeDef } from './wfh-request.type-def';
+import { AttendanceJustificationTypeDef } from './attendance-justification.type-def';
 
 /**
  * A tx whose chains resolve, so a hook can run without a database. `select` answers one pending
@@ -56,6 +57,16 @@ const OVERTIME_PAYLOAD = {
   reason: 'release night',
 };
 
+const JUSTIFICATION_PAYLOAD = {
+  justificationId: 'just-1',
+  employeeId: 'emp-1',
+  startDate: '2026-09-01',
+  endDate: '2026-09-01',
+  kind: 'late' as const,
+  workingDays: 1,
+  reason: 'bus strike',
+};
+
 const WFH_PAYLOAD = {
   wfhRequestId: 'wfh-1',
   employeeId: 'emp-1',
@@ -71,6 +82,7 @@ describe('leave and overtime decisions are audited', () => {
   let leave: LeaveRequestTypeDef;
   let overtime: OvertimeTypeDef;
   let wfh: WfhRequestTypeDef;
+  let justification: AttendanceJustificationTypeDef;
 
   beforeEach(() => {
     trailRecord = vi.fn().mockResolvedValue(undefined);
@@ -82,6 +94,7 @@ describe('leave and overtime decisions are audited', () => {
     leave = new LeaveRequestTypeDef({ register: vi.fn() } as never, audit as never);
     overtime = new OvertimeTypeDef({ register: vi.fn() } as never, audit as never);
     wfh = new WfhRequestTypeDef({ register: vi.fn() } as never, audit as never);
+    justification = new AttendanceJustificationTypeDef({ register: vi.fn() } as never, audit as never);
   });
 
   describe('a reviewer decided', () => {
@@ -148,17 +161,38 @@ describe('leave and overtime decisions are audited', () => {
       expect(changes.after.workingDays).toBe(2);
     });
 
+    it('records an approved justification with what it justified', async () => {
+      const tx = makeTx();
+      await justification.onApprove(JUSTIFICATION_PAYLOAD, 'req-1', 'reviewer-1', tx as never);
+
+      const [action, resourceId, actor, passedTx, changes] = trailRecord.mock.calls[0] as [
+        string,
+        string,
+        { sub: string },
+        unknown,
+        { after: Record<string, unknown> },
+      ];
+      expect(action).toBe('attendance_justification.approved');
+      expect(resourceId).toBe('just-1');
+      expect(actor.sub).toBe('reviewer-1');
+      expect(passedTx, 'the audit entry was written outside the transaction').toBe(tx);
+      // `kind` because that is what the approval asserts: "the late arrival was accepted".
+      expect(changes.after.kind).toBe('late');
+    });
+
     it('records a refusal, and names the reviewer who refused', async () => {
       const tx = makeTx();
       await leave.onReject(LEAVE_PAYLOAD, 'req-1', 'reviewer-2', tx as never);
       await overtime.onReject(OVERTIME_PAYLOAD, 'req-1', 'reviewer-2', tx as never);
 
       await wfh.onReject(WFH_PAYLOAD, 'req-1', 'reviewer-2', tx as never);
+      await justification.onReject(JUSTIFICATION_PAYLOAD, 'req-1', 'reviewer-2', tx as never);
 
       expect(trailRecord.mock.calls.map((c) => c[0] as string)).toEqual([
         'leave.rejected',
         'overtime.rejected',
         'wfh.rejected',
+        'attendance_justification.rejected',
       ]);
       for (const call of trailRecord.mock.calls) {
         expect((call[2] as { sub: string }).sub).toBe('reviewer-2');
@@ -270,6 +304,9 @@ describe('leave and overtime decisions are audited', () => {
       () => wfh.onReject(WFH_PAYLOAD, 'r', 'rev', makeTx() as never),
       () => wfh.onCancel(WFH_PAYLOAD, 'r', 'req', makeTx() as never),
       () => wfh.onExpire(WFH_PAYLOAD, 'r', makeTx() as never),
+      () => justification.onApprove(JUSTIFICATION_PAYLOAD, 'r', 'rev', makeTx() as never),
+      () => justification.onReject(JUSTIFICATION_PAYLOAD, 'r', 'rev', makeTx() as never),
+      () => justification.onExpire(JUSTIFICATION_PAYLOAD, 'r', makeTx() as never),
     ];
 
     for (const hook of hooks) await hook();

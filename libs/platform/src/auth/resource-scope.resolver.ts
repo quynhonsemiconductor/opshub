@@ -9,6 +9,8 @@ import {
   leaveRequests,
   wfhRequests,
   overtimeEntries,
+  attendanceJustifications,
+  attendanceMonthCloses,
 } from '../../../../db/schema/workforce';
 import { cards as doorCards, terminals as doorTerminals } from '../../../../db/schema/door';
 import type { ResourceAttrs, ScopedResource } from './authz.types';
@@ -45,6 +47,10 @@ export class ResourceScopeResolver {
         return this.leaveRequest(id);
       case 'wfh_request':
         return this.wfhRequest(id);
+      case 'attendance_justification':
+        return this.attendanceJustification(id);
+      case 'attendance_month':
+        return this.attendanceMonth(id);
       case 'overtime':
         return this.overtime(id);
       case 'door_card':
@@ -144,6 +150,33 @@ export class ResourceScopeResolver {
 
     if (!row) throw new NotFoundException('WFH_REQUEST_NOT_FOUND', 'WFH request not found');
     return { ownerId: row.employeeId };
+  }
+
+  private async attendanceJustification(id: string): Promise<ResourceAttrs> {
+    const [row] = await this.db
+      .select({ employeeId: attendanceJustifications.employeeId })
+      .from(attendanceJustifications)
+      .where(eq(attendanceJustifications.id, id))
+      .limit(1);
+
+    if (!row)
+      throw new NotFoundException('ATTENDANCE_JUSTIFICATION_NOT_FOUND', 'Justification not found');
+    return { ownerId: row.employeeId };
+  }
+
+  /**
+   * A month close belongs to nobody, like a terminal — no scope attributes to match. The lookup
+   * exists so a bad month key is an honest 404 rather than a silent empty scope.
+   */
+  private async attendanceMonth(id: string): Promise<ResourceAttrs> {
+    const [row] = await this.db
+      .select({ month: attendanceMonthCloses.month })
+      .from(attendanceMonthCloses)
+      .where(eq(attendanceMonthCloses.month, id))
+      .limit(1);
+
+    if (!row) throw new NotFoundException('ATTENDANCE_MONTH_NOT_CLOSED', 'That month is not closed');
+    return {};
   }
 
   private async overtime(id: string): Promise<ResourceAttrs> {
