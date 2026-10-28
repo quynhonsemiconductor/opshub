@@ -55,7 +55,7 @@ export class DoorTerminalController {
 
   @Get('allow-list')
   @Public()
-  @ApiOperation({ summary: 'The full card allow-list; ETag/304 — the terminal polls every 60 s' })
+  @ApiOperation({ summary: 'The full card allow-list; ETag/304 — the terminal polls every 60 min' })
   @ApiCommonErrors(401)
   async allowList(
     @Req() request: DoorTerminalRequest,

@@ -425,6 +425,26 @@ describe('DoorService.ingestEvents()', () => {
       );
     });
 
+    it('battery_mv <= 0 is NO READING: never low, no alert, mv stored null (round-2 item 1)', async () => {
+      // The firmware omits the field when it has no measurement; a sender that reports 0 instead
+      // must not trip the threshold comparison (0 < anything) on every session.
+      await syncBattery({ battery_mv: 0, low_battery: false });
+      expect(mockAlerts.send).not.toHaveBeenCalled();
+      expect(mockCache.setJson).toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ mv: null, low: false }),
+        expect.any(Number),
+      );
+
+      await syncBattery({ battery_mv: -1, low_battery: false });
+      expect(mockAlerts.send).not.toHaveBeenCalled();
+      expect(mockCache.setJson).toHaveBeenLastCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ mv: null, low: false }),
+        expect.any(Number),
+      );
+    });
+
     it('the device flag alone (no mv) is low and reports mv: null', async () => {
       await syncBattery({ low_battery: true });
       expect(mockCache.setJson).toHaveBeenCalledWith(

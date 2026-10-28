@@ -461,9 +461,14 @@ export class DoorService {
 
     // Battery telemetry rides batch-level (one pack per controller). Held in the cache —
     // additive to contract v1, no schema change — and served on the terminals list for the badge.
+    // A reading of 0 or below is NO READING, not a dead pack (round-2 review item 1): the firmware
+    // omits the field when it has no measurement, but a sender that reports 0 must not trip the
+    // low-battery alert on every session — 0 is not a real pack voltage.
     const thresholdMv = this.config.get('DOOR_LOW_BATTERY_MV');
+    const batteryMv =
+      typeof input.battery_mv === 'number' && input.battery_mv > 0 ? input.battery_mv : undefined;
     const deviceLow = input.low_battery === true;
-    const serverLow = typeof input.battery_mv === 'number' && input.battery_mv < thresholdMv;
+    const serverLow = batteryMv !== undefined && batteryMv < thresholdMv;
     const low = deviceLow || serverLow;
     const batteryKey = `door:terminal:${terminalId}:battery`;
     const prev = await this.cache.getJson<{ low: boolean }>(batteryKey);
@@ -472,7 +477,7 @@ export class DoorService {
     // the server threshold are OR'd: either saying low means the badge and the alert fire.
     if (low && prev?.low !== true) {
       try {
-        await this.notifyLowBattery(terminalId, input.battery_mv, thresholdMv);
+        await this.notifyLowBattery(terminalId, batteryMv, thresholdMv);
       } catch (err) {
         // The cache keeps its previous state, so the next sync sees the same transition and retries.
         this.logger.error(
@@ -486,7 +491,7 @@ export class DoorService {
     await this.cache.setJson(
       batteryKey,
       {
-        mv: typeof input.battery_mv === 'number' ? input.battery_mv : null,
+        mv: batteryMv ?? null,
         low,
         at: new Date().toISOString(),
       },
