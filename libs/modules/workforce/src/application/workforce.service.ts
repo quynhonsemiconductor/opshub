@@ -291,6 +291,25 @@ export class WorkforceService {
     // afternoon off on the same date share a date and no time, so refusing the second would be
     // refusing leave the employee can see is free.
     //
+    // What this request COSTS, with weekends, public holidays and part-day ends applied — computed
+    // once here and stored on the row, never recomputed. The holiday calendar is editable, so a
+    // later addition inside a window someone already took would otherwise restate what their
+    // approved leave cost.
+    const workingDays = await this.balances.leaveCostFor(window);
+
+    // Refuse before creating anything. A leave type with no entitlement row is untracked and
+    // passes; a window of nothing but weekends is refused as a mistaken date range.
+    await this.balances.assertSufficientBalance(
+      actor.sub,
+      input.leaveType,
+      Number(input.startDate.slice(0, 4)),
+      workingDays,
+      undefined,
+      // Accrual is judged as of the LAST day of the window: by the time these days are taken, will
+      // they have been earned? Judging it today would refuse every advance booking.
+      input.endDate,
+    );
+
     // BOTH WAYS AND UNDER THE WINDOW LOCK. Leave must also refuse a day already claimed by a live
     // WFH request (a person cannot be on leave and working from home at once), and the check + the
     // insert run in ONE transaction holding a per-employee advisory lock, so two requests filed in
@@ -325,25 +344,6 @@ export class WorkforceService {
       }
       return this.repo.createLeave({ ...input, ...window, employeeId: actor.sub, workingDays }, tx);
     });
-
-    // What this request COSTS, with weekends, public holidays and part-day ends applied — computed
-    // once here and stored on the row, never recomputed. The holiday calendar is editable, so a
-    // later addition inside a window someone already took would otherwise restate what their
-    // approved leave cost.
-    const workingDays = await this.balances.leaveCostFor(window);
-
-    // Refuse before creating anything. A leave type with no entitlement row is untracked and
-    // passes; a window of nothing but weekends is refused as a mistaken date range.
-    await this.balances.assertSufficientBalance(
-      actor.sub,
-      input.leaveType,
-      Number(input.startDate.slice(0, 4)),
-      workingDays,
-      undefined,
-      // Accrual is judged as of the LAST day of the window: by the time these days are taken, will
-      // they have been earned? Judging it today would refuse every advance booking.
-      input.endDate,
-    );
 
     const enginePayload: LeaveRequestPayload = {
       leaveRequestId: leave.id,
@@ -446,12 +446,29 @@ export class WorkforceService {
   async cancelLeave(id: string, actor: Actor): Promise<LeaveRequest> {
     const l = await this.getLeave(id);
     await this.assertOwnerOrApprover(l.employeeId, actor);
-    if (l.requestId) {
-      // THROUGH the engine: the item and the domain row change in ONE transaction, each guarded
-      // pending. Writing the domain status alone (the pre-existing bug) left the engine item
-      // pending forever — still in the approver's queue, still SLA-ticking.
+    if (l.requestId && l.status === 'pending') {
+      // A PENDING withdrawal goes THROUGH the engine: the item and the domain row change in ONE
+      // transaction, each guarded pending. Writing the domain status alone (the pre-existing bug)
+      // left the engine item pending forever — still in the approver's queue, still SLA-ticking.
       await this.engine.cancel(l.requestId, actor);
       return this.getLeave(id);
+    }
+    if (l.requestId && l.status === 'approved') {
+      /*
+       * An APPROVED cancellation is a different act: the engine item is DECIDED, and cancelling it
+       * again would be rewriting history. What changes is the domain side — the days go back to the
+       * balance — so the row is written directly here, audited, and the engine item stays approved
+       * as the record of the decision that was once made.
+       */
+      const updated = await this.db.transaction(async (tx) => {
+        const row = await this.repo.setLeaveStatus(id, 'cancelled', null, tx);
+        await this.leaveTrail.record(AUDIT_ACTION.LEAVE_CANCELLED, id, actor, tx, {
+          before: { status: 'approved' },
+          after: { status: 'cancelled' },
+        });
+        return row!;
+      });
+      return updated;
     }
     if (l.status !== 'pending' && l.status !== 'approved') {
       throw new PreconditionFailedException(
