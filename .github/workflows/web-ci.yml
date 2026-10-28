@@ -205,11 +205,15 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────
   # 3. Vite build — verifies the production bundle compiles cleanly.
   #    Publishes the dist as an artifact for the deploy job to consume.
+  #    PARALLEL with quality and test: `Web CI required` gates on this job too,
+  #    so a broken bundle still blocks the PR without the build serializing
+  #    behind the suites.
   # ─────────────────────────────────────────────────────────────────────────
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [quality, test]
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
     timeout-minutes: 20
     env:
       # Authenticates pnpm against GitHub Packages for @quynhonsemiconductor/* (see .npmrc).
