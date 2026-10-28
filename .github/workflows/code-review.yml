@@ -31,7 +31,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: quynhonsemiconductor/ci/.github/workflows/code-review.yml@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
+    uses: quynhonsemiconductor/ci/.github/workflows/code-review.yml@198c470a4f3ab57bfd74a987592287acd2d249dc # v1.25.0
     with:
       product: opshub
       profiles: typescript,frontend,sql,dockerfile,workflows
