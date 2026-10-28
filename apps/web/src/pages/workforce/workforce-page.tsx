@@ -59,7 +59,7 @@ export function WorkforcePage() {
 
       <Tabs items={WORKFORCE_TABS} value={tab} onChange={setTab} idPrefix="workforce" />
 
-      {/* One panel mounted at a time: all four would fire all four queries on load. */}
+      {/* One panel mounted at a time: every tab would fire its queries on load. */}
       <TabPanel idPrefix="workforce" value={tab}>
         {tab === 'timesheets' && <TimesheetsTab />}
         {tab === 'attendance' && <AttendanceTab />}

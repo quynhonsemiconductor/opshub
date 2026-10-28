@@ -82,7 +82,7 @@ export interface DaySummary {
  * `pendingWfh`, because the manager may still say no and the calendar must not read the day as settled.
  */
 export function summariseDay(iso: string, people: WioPerson[], index: MonthIndex): DaySummary {
-  const away = index.wfh.get(iso);
+  const wfhIds = index.wfh.get(iso);
   const leave = index.pto.get(iso);
   const summary: DaySummary = { wfh: [], pendingWfh: [], office: [], pto: [], partial: new Map() };
   for (const person of people) {
@@ -91,7 +91,7 @@ export function summariseDay(iso: string, people: WioPerson[], index: MonthIndex
       summary.pto.push(person);
       continue;
     }
-    const mark = away?.get(person.id);
+    const mark = wfhIds?.get(person.id);
     if (mark === 'approved') summary.wfh.push(person);
     else if (mark === 'pending') summary.pendingWfh.push(person);
     else summary.office.push(person);
