@@ -111,7 +111,10 @@ overrides:
   "fastify@5": ">=5.12.7 <6.0.0"
   # GHSA-4mjr-xmp4-gh2g / GHSA-x5fp-wj9c-mxmx — qs DoS via attacker-controlled isBuffer,
   # fixed 6.16.0. Scope to the 6.x line (the 3.x `qs` in the tree is an unrelated package).
-  "qs@6": ">=6.16.0"
+  # RAISED >=6.16.0 for GHSA-6pq8-jhm2-2vcw (qs.stringify arrayFormat:'comma' throws an
+  # uncaught TypeError on an element with a non-callable own toString — DoS, CVSS moderate),
+  # fixed 6.16.1. Only consumer is superagent (supertest), dev-only.
+  "qs@6": ">=6.16.1 <7"
   # GHSA-r28c-9q8g-f849 — postcss line-return parsing, fixed 8.5.18. Transitive
   # via the web build toolchain (vite / tailwind).
   "postcss@<8.5.18": ">=8.5.18"
