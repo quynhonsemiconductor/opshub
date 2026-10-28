@@ -10,7 +10,6 @@ import {
   wfhRequests,
   overtimeEntries,
   attendanceJustifications,
-  attendanceMonthCloses,
 } from '../../../../db/schema/workforce';
 import { cards as doorCards, terminals as doorTerminals } from '../../../../db/schema/door';
 import type { ResourceAttrs, ScopedResource } from './authz.types';
@@ -165,17 +164,12 @@ export class ResourceScopeResolver {
   }
 
   /**
-   * A month close belongs to nobody, like a terminal — no scope attributes to match. The lookup
-   * exists so a bad month key is an honest 404 rather than a silent empty scope.
+   * A month is a CALENDAR KEY, not a row: the close route names a month that has no close row YET
+   * (that is what it is about to create), so existence cannot be part of resolving it — a 404 here
+   * meant no month could ever be closed. No scope attributes either, like a terminal: a month
+   * belongs to nobody.
    */
-  private async attendanceMonth(id: string): Promise<ResourceAttrs> {
-    const [row] = await this.db
-      .select({ month: attendanceMonthCloses.month })
-      .from(attendanceMonthCloses)
-      .where(eq(attendanceMonthCloses.month, id))
-      .limit(1);
-
-    if (!row) throw new NotFoundException('ATTENDANCE_MONTH_NOT_CLOSED', 'That month is not closed');
+  private attendanceMonth(_id: string): ResourceAttrs {
     return {};
   }
 

@@ -34,6 +34,7 @@ import {
   MyAttendanceMonthQueryDto,
   ReopenMonthDto,
 } from './dto/attendance.dto';
+import { ReviewDto } from './dto/workforce.dto';
 
 type JustificationRow = {
   id: string;
@@ -113,8 +114,8 @@ export class AttendanceController {
   }
 
   @Get('me')
-  @SelfScoped('the CALLER\'s own month — the employee is actor.sub, never a parameter')
-  @ApiOperation({ summary: 'The caller\'s own derived attendance month' })
+  @SelfScoped("the CALLER's own month — the employee is actor.sub, never a parameter")
+  @ApiOperation({ summary: "The caller's own derived attendance month" })
   @ApiOkResponse({ type: AttendanceMonthResponseDto })
   @ApiCommonErrors(401, 422)
   async getMyMonth(
@@ -126,7 +127,7 @@ export class AttendanceController {
   }
 
   @Get('justifications/preview')
-  @SelfScoped('previews the CALLER\'s own window — no employee parameter exists')
+  @SelfScoped("previews the CALLER's own window — no employee parameter exists")
   @ApiOperation({ summary: 'What a justification window covers, before filing it' })
   @ApiOkResponse({ type: JustificationPreviewResponseDto })
   @ApiCommonErrors(401, 422)
@@ -174,12 +175,16 @@ export class AttendanceController {
   @Post('justifications/:id/review')
   // Row-scoped like the workforce review routes (sibling-agreement ratchet); the engine still
   // checks `workforce.attendance.review` and separation of duties.
-  @RequirePermission('workforce.approve', { resource: 'attendance_justification', from: 'param', field: 'id' })
+  @RequirePermission('workforce.approve', {
+    resource: 'attendance_justification',
+    from: 'param',
+    field: 'id',
+  })
   @ApiOperation({ summary: 'Approve or reject a justification' })
   @ApiCommonErrors(401, 403, 404, 412)
   async reviewJustification(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: { approve: boolean },
+    @Body() dto: ReviewDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<JustificationResponseDto> {
     const row = await this.service.reviewJustification(id, dto.approve, user);
@@ -222,14 +227,23 @@ export class AttendanceController {
     @CurrentUser() user: JwtPayload,
   ) {
     const close = await this.service.closeMonth(params.month, user, dto.note);
-    return { month: close.month, closedBy: close.closedBy, closedAt: close.closedAt.toISOString(), note: close.note };
+    return {
+      month: close.month,
+      closedBy: close.closedBy,
+      closedAt: close.closedAt.toISOString(),
+      note: close.note,
+    };
   }
 
   @Post('months/:month/reopen')
   @HttpCode(HttpStatus.OK)
   // Granted to NO role: only the admin wildcard reaches this route — the override is by definition
   // not routine, and the audit entry carries the mandatory reason.
-  @RequirePermission('workforce.attendance.reopen', { resource: 'attendance_month', from: 'param', field: 'month' })
+  @RequirePermission('workforce.attendance.reopen', {
+    resource: 'attendance_month',
+    from: 'param',
+    field: 'month',
+  })
   @ApiOperation({ summary: 'Reopen a closed month — the audited administrator override' })
   @ApiCommonErrors(401, 403, 404, 412, 422)
   async reopenMonth(

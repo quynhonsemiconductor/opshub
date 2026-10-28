@@ -6047,7 +6047,7 @@ export interface components {
       /** @enum {string} */
       status: 'holiday' | 'leave' | 'wfh' | 'office' | 'absent';
       /** @description The day's unresolved problems; an approved justification clears them. */
-      flags: ('late' | 'early' | 'missing_checkout' | 'absent')[];
+      flags: ('late' | 'early' | 'missing_checkout' | 'absent' | 'unsynced')[];
       date: string;
       workedMinutes: number;
       lateMinutes: number | null;
@@ -12478,7 +12478,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReviewDto'];
+      };
+    };
     responses: {
       201: {
         headers: {

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, lt, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lt, lte, sql } from 'drizzle-orm';
 import {
   AuthzService,
   ErrorCodes,
@@ -28,11 +28,23 @@ import {
   wfhRequests,
 } from '../../../../../db/schema';
 import { cards as doorCards, events as doorEvents } from '../../../../../db/schema/door';
-import { computeAttendanceDay, type AttendanceDay, type DayFlag, type LeavePortion } from '../domain/attendance-day';
+import { employmentContracts } from '../../../../../db/schema/contracts';
+import {
+  computeAttendanceDay,
+  type AttendanceDay,
+  type DayFlag,
+  type LeavePortion,
+} from '../domain/attendance-day';
+import { lockMonthsInTx, monthsOfRange } from '../domain/attendance-month-lock';
+
+export { monthsOfRange };
 import { lastDayOf } from '../domain/wio-day';
 import { portionOn, type PtoWindow } from '../domain/wio-pto';
 import { workingDatesInRange } from '../domain/working-days';
-import { WORKFORCE_REPOSITORY, type IWorkforceRepository } from '../domain/ports/workforce.repository';
+import {
+  WORKFORCE_REPOSITORY,
+  type IWorkforceRepository,
+} from '../domain/ports/workforce.repository';
 import type { AttendanceJustificationPayload } from './attendance-justification.type-def';
 
 /** A month is closed when a row exists. The row IS the lock. */
@@ -66,31 +78,16 @@ export interface AttendanceMonth {
 const HCM_UTC_OFFSET = '+07:00';
 
 /** `[month-01 00:00 HCM, next-month-01 00:00 HCM)` as instants — the window a month's events fall in. */
-function monthInstantBounds(month: string): [Date, Date] {
+export function monthInstantBounds(month: string): [Date, Date] {
+  // The next month through Date arithmetic, NOT String(m + 1): December's "13" is not a month, and
+  // an invalid bound silently matched nothing (no December events ever reached the view).
   const [y, m] = month.split('-').map(Number) as [number, number];
+  const next = new Date(Date.UTC(y, m, 1)); // month is 0-based, so `m` already IS the next month
+  const nextKey = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}`;
   return [
     new Date(`${month}-01T00:00:00${HCM_UTC_OFFSET}`),
-    new Date(`${y}-${String(m + 1).padStart(2, '0')}-01T00:00:00${HCM_UTC_OFFSET}`),
+    new Date(`${nextKey}-01T00:00:00${HCM_UTC_OFFSET}`),
   ];
-}
-
-/** The months the closed range `[startDate, endDate]` falls into. */
-export function monthsOfRange(startDate: string, endDate: string): string[] {
-  const months = new Set<string>();
-  for (const date of [startDate, endDate]) months.add(date.slice(0, 7));
-  // A window can span more than its two endpoints' months only through those endpoints, because a
-  // date range is continuous: the set of first-of-months between them is what a close key would hit.
-  let [y, m] = startDate.split('-').map(Number) as [number, number];
-  const [ey, em] = endDate.split('-').map(Number) as [number, number];
-  while (y < ey || (y === ey && m <= em)) {
-    months.add(`${y}-${String(m).padStart(2, '0')}`);
-    m += 1;
-    if (m > 12) {
-      y += 1;
-      m = 1;
-    }
-  }
-  return [...months].sort();
 }
 
 /**
@@ -128,20 +125,20 @@ export class AttendanceService {
    * `workforce.attendance.read` holder, self + direct reports for anyone else. An explicit
    * `employeeId` outside that set is DENIED rather than quietly narrowed.
    */
-  private async scopedEmployees(actor: Actor, employeeId?: string): Promise<{ id: string; name: string; department: string | null }[]> {
+  private async scopedEmployees(
+    actor: Actor,
+    month: string,
+    employeeId?: string,
+  ): Promise<{ id: string; name: string; department: string | null }[]> {
     const readsAll = await this.authz.check(actor.sub, 'workforce.attendance.read');
     if (readsAll) {
-      const rows = await this.db
-        .select({ id: employees.id, name: employees.displayName, department: employees.department })
-        .from(employees)
-        .where(ne(employees.status, 'offboarded'))
-        .orderBy(asc(employees.displayName), asc(employees.id));
+      const rows = await this.rosterForMonth(month);
       return employeeId ? rows.filter((r) => r.id === employeeId) : rows;
     }
     const team = await this.db
       .select({ id: employees.id, name: employees.displayName, department: employees.department })
       .from(employees)
-      .where(and(eq(employees.managerId, actor.sub), ne(employees.status, 'offboarded')));
+      .where(eq(employees.managerId, actor.sub));
     const mine = await this.db
       .select({ id: employees.id, name: employees.displayName, department: employees.department })
       .from(employees)
@@ -155,10 +152,68 @@ export class AttendanceService {
     return employeeId ? allowed.filter((e) => e.id === employeeId) : allowed;
   }
 
+  /**
+   * Everyone a month must still account for: the employed-now, plus OFFBOARDED people whose
+   * employment overlapped the month (their past attendance did not leave with them — a closed
+   * October must still show somebody who left in November). Employment windows come from the
+   * employment contracts; a person with no contract row is kept unbounded rather than hidden.
+   */
+  private async rosterForMonth(
+    month: string,
+  ): Promise<{ id: string; name: string; department: string | null }[]> {
+    const from = `${month}-01`;
+    const to = lastDayOf(month);
+    const rows = await this.db
+      .select({
+        id: employees.id,
+        name: employees.displayName,
+        department: employees.department,
+        status: employees.status,
+      })
+      .from(employees)
+      .orderBy(asc(employees.displayName), asc(employees.id));
+    const contracts = await this.employmentByEmployee(rows.map((r) => r.id));
+    return rows.filter((r) => {
+      if (r.status !== 'offboarded') return true;
+      const employment = contracts.get(r.id);
+      if (!employment) return false;
+      // Overlap of the employment window with the month.
+      return employment.start <= to && (employment.end ?? '9999-12-31') >= from;
+    });
+  }
+
+  /** Each employee's employment window from their contracts: earliest start, latest end. */
+  private async employmentByEmployee(
+    ids: string[],
+  ): Promise<Map<string, { start: string; end: string | null }>> {
+    if (ids.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        employeeId: employmentContracts.employeeId,
+        startDate: employmentContracts.startDate,
+        endDate: employmentContracts.endDate,
+      })
+      .from(employmentContracts)
+      .where(inArray(employmentContracts.employeeId, ids));
+    const windows = new Map<string, { start: string; end: string | null }>();
+    for (const row of rows) {
+      const w = windows.get(row.employeeId);
+      const start = !w || row.startDate < w.start ? row.startDate : w.start;
+      const end =
+        w?.end && row.endDate
+          ? w.end > row.endDate
+            ? w.end
+            : row.endDate
+          : (w?.end ?? row.endDate);
+      windows.set(row.employeeId, { start, end });
+    }
+    return windows;
+  }
+
   // ── The derived month ───────────────────────────────────────────────────────
 
   async getMonth(month: string, actor: Actor, employeeId?: string): Promise<AttendanceMonth> {
-    const people = await this.scopedEmployees(actor, employeeId);
+    const people = await this.scopedEmployees(actor, month, employeeId);
     const from = `${month}-01`;
     const to = lastDayOf(month);
     const [monthStart, monthEnd] = monthInstantBounds(month);
@@ -219,16 +274,28 @@ export class AttendanceService {
       this.db
         .select({
           employeeId: doorCards.employeeId,
-          date: sql<string>`to_char(${doorEvents.deviceTs} AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`,
-          time: sql<string>`to_char(${doorEvents.deviceTs} AT TIME ZONE 'Asia/Ho_Chi_Minh', 'HH24:MI')`,
+          // The event time is the DEVICE clock when the terminal had one (`time_synced`), and the
+          // server's receive time when it did not — an unsynced terminal's timestamps are fiction,
+          // and `receivedAt` is the honest fallback. A day built on fallback times carries the
+          // `unsynced` flag. The WHERE uses the same CASE, so the month window is judged on the
+          // time the day is built from.
+          date: sql<string>`to_char((case when ${doorEvents.timeSynced} then ${doorEvents.deviceTs} else ${doorEvents.receivedAt} end) AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`,
+          time: sql<string>`to_char((case when ${doorEvents.timeSynced} then ${doorEvents.deviceTs} else ${doorEvents.receivedAt} end) AT TIME ZONE 'Asia/Ho_Chi_Minh', 'HH24:MI')`,
+          timeSynced: doorEvents.timeSynced,
         })
         .from(doorEvents)
         .innerJoin(doorCards, eq(doorEvents.cardId, doorCards.id))
         .where(
           and(
             eq(doorEvents.result, 'allow'),
-            gte(doorEvents.deviceTs, monthStart),
-            lt(doorEvents.deviceTs, monthEnd),
+            gte(
+              sql`case when ${doorEvents.timeSynced} then ${doorEvents.deviceTs} else ${doorEvents.receivedAt} end`,
+              monthStart,
+            ),
+            lt(
+              sql`case when ${doorEvents.timeSynced} then ${doorEvents.deviceTs} else ${doorEvents.receivedAt} end`,
+              monthEnd,
+            ),
           ),
         ),
     ]);
@@ -238,15 +305,24 @@ export class AttendanceService {
     const ids = new Set(people.map((p) => p.id));
 
     // Per employee per date: how many allow swipes, and their first and last times.
-    const swipeIndex = new Map<string, { count: number; first: string; last: string }>();
+    const swipeIndex = new Map<
+      string,
+      { count: number; first: string; last: string; unsynced: boolean }
+    >();
     for (const swipe of swipes) {
       if (!ids.has(swipe.employeeId)) continue;
       const key = `${swipe.employeeId}|${swipe.date}`;
-      const entry = swipeIndex.get(key) ?? { count: 0, first: swipe.time, last: swipe.time };
+      const entry = swipeIndex.get(key) ?? {
+        count: 0,
+        first: swipe.time,
+        last: swipe.time,
+        unsynced: false,
+      };
       entry.count += 1;
       // HH:MM strings compare correctly lexicographically.
       if (swipe.time < entry.first) entry.first = swipe.time;
       if (swipe.time > entry.last) entry.last = swipe.time;
+      if (!swipe.timeSynced) entry.unsynced = true;
       swipeIndex.set(key, entry);
     }
 
@@ -257,7 +333,10 @@ export class AttendanceService {
     for (const person of people) {
       for (const date of workingDays) {
         const key = `${person.id}|${date}`;
-        const leave = coveringLeave(leaveWindows.filter((l) => l.employeeId === person.id), date);
+        const leave = coveringLeave(
+          leaveWindows.filter((l) => l.employeeId === person.id),
+          date,
+        );
         if (leave) leaveDays.set(key, leave);
         if (
           wfhWindows.some(
@@ -272,33 +351,48 @@ export class AttendanceService {
     const pendingJustifiedDays = new Set<string>();
     for (const j of justifications) {
       if (!ids.has(j.employeeId)) continue;
-      for (const date of workingDatesInRange(j.startDate > from ? j.startDate : from, j.endDate < to ? j.endDate : to, holidaySet)) {
+      for (const date of workingDatesInRange(
+        j.startDate > from ? j.startDate : from,
+        j.endDate < to ? j.endDate : to,
+        holidaySet,
+      )) {
         const key = `${j.employeeId}|${date}`;
         // An approved repair wins over a pending one on the same day; both mean "explained", but
         // only the approved one credits.
-          if (j.status === 'approved') justifiedDays.add(key);
-        else if (!justifiedDays.has(key)) pendingJustifiedDays.add(key);
+        // Order-independent: an APPROVED repair outranks a PENDING one on the same day whichever
+        // order the rows came back in; subtracting at the end keeps a decided day from reading
+        // "still waiting".
+        if (j.status === 'approved') justifiedDays.add(key);
+        else pendingJustifiedDays.add(key);
       }
     }
+    for (const key of justifiedDays) pendingJustifiedDays.delete(key);
 
+    const employment = await this.employmentByEmployee(people.map((p) => p.id));
     const employeeMonths: EmployeeAttendanceMonth[] = people.map((person) => {
-      const days = workingDays.map((date) => {
-        const key = `${person.id}|${date}`;
-        const swipes = swipeIndex.get(key);
-        const day = computeAttendanceDay({
-          date,
-          holiday: holidaySet.has(date),
-          leave: leaveDays.get(key) ?? null,
-          // An approved WFH window counts on its working days only: it was costed against this
-          // same calendar at submit, and a holiday added inside it later is not a WFH day.
-          wfh: wfhDays.has(key),
-          justified: justifiedDays.has(key),
-          firstIn: swipes && swipes.count >= 1 ? swipes.first : null,
-          lastOut: swipes && swipes.count >= 2 ? swipes.last : null,
-          swipeCount: swipes?.count ?? 0,
+      // Bound the days by EMPLOYMENT: nobody is absent before they were hired or after their last
+      // contract ended — those days simply did not exist for them.
+      const window = employment.get(person.id);
+      const days = workingDays
+        .filter((date) => !window || (date >= window.start && date <= (window.end ?? '9999-12-31')))
+        .map((date) => {
+          const key = `${person.id}|${date}`;
+          const swipes = swipeIndex.get(key);
+          const day = computeAttendanceDay({
+            date,
+            holiday: holidaySet.has(date),
+            unsynced: swipes?.unsynced ?? false,
+            leave: leaveDays.get(key) ?? null,
+            // An approved WFH window counts on its working days only: it was costed against this
+            // same calendar at submit, and a holiday added inside it later is not a WFH day.
+            wfh: wfhDays.has(key),
+            justified: justifiedDays.has(key),
+            firstIn: swipes && swipes.count >= 1 ? swipes.first : null,
+            lastOut: swipes && swipes.count >= 2 ? swipes.last : null,
+            swipeCount: swipes?.count ?? 0,
+          });
+          return { ...day, pendingJustification: pendingJustifiedDays.has(key) };
         });
-        return { ...day, pendingJustification: pendingJustifiedDays.has(key) };
-      });
       return { id: person.id, name: person.name, department: person.department, days };
     });
 
@@ -334,7 +428,10 @@ export class AttendanceService {
     if (closed.length > 0) {
       throw new PreconditionFailedException(
         ErrorCodes.ATTENDANCE_MONTH_CLOSED,
-        `${what} touches ${closed.map((c) => c.month).sort().join(', ')}, which HR closed — an administrator must reopen the month first`,
+        `${what} touches ${closed
+          .map((c) => c.month)
+          .sort()
+          .join(', ')}, which HR closed — an administrator must reopen the month first`,
       );
     }
   }
@@ -348,13 +445,19 @@ export class AttendanceService {
       );
     }
     const [row] = await this.db.transaction(async (tx) => {
+      // The same advisory lock the type-def hooks take, so a close serializes against every
+      // in-flight decision on the month instead of racing it.
+      await lockMonthsInTx(tx, month);
       const [inserted] = await tx
         .insert(attendanceMonthCloses)
         .values({ month, closedBy: actor.sub, note: note ?? null })
         .onConflictDoNothing()
         .returning();
       if (!inserted) {
-        throw new ConflictException(ErrorCodes.ATTENDANCE_MONTH_CLOSED, `${month} was closed concurrently`);
+        throw new ConflictException(
+          ErrorCodes.ATTENDANCE_MONTH_CLOSED,
+          `${month} was closed concurrently`,
+        );
       }
       await this.monthTrail.record(AUDIT_ACTION.ATTENDANCE_MONTH_CLOSED, month, actor, tx, {
         after: { month, note: note ?? null },
@@ -384,7 +487,10 @@ export class AttendanceService {
 
   // ── Justifications ──────────────────────────────────────────────────────────
 
-  async previewJustification(startDate: string, endDate: string): Promise<{ startDate: string; endDate: string; workingDays: string[] }> {
+  async previewJustification(
+    startDate: string,
+    endDate: string,
+  ): Promise<{ startDate: string; endDate: string; workingDays: string[] }> {
     const holidayRows = await this.db
       .select({ date: holidays.date })
       .from(holidays)
@@ -394,10 +500,16 @@ export class AttendanceService {
   }
 
   async createJustification(
-    input: { startDate: string; endDate: string; kind: 'late' | 'early' | 'forgot_card' | 'missing_checkout'; reason?: string },
+    input: {
+      startDate: string;
+      endDate: string;
+      kind: 'late' | 'early' | 'forgot_card' | 'missing_checkout';
+      reason?: string;
+    },
     actor: Actor,
   ) {
-    const workingDays = (await this.previewJustification(input.startDate, input.endDate)).workingDays;
+    const workingDays = (await this.previewJustification(input.startDate, input.endDate))
+      .workingDays;
     if (workingDays.length === 0) {
       throw new PreconditionFailedException(
         ErrorCodes.WFH_WINDOW_EMPTY,
@@ -443,13 +555,24 @@ export class AttendanceService {
         row.id,
         actor,
         tx,
-        { after: { startDate: row.startDate, endDate: row.endDate, kind: row.kind, workingDays: workingDays.length, engineRequestId: engineItem.id } },
+        {
+          after: {
+            startDate: row.startDate,
+            endDate: row.endDate,
+            kind: row.kind,
+            workingDays: workingDays.length,
+            engineRequestId: engineItem.id,
+          },
+        },
       );
     });
     return { ...row, requestId: engineItem.id };
   }
 
-  async listJustifications(filters: { employeeId?: string; status?: 'pending' | 'approved' | 'rejected' | 'cancelled' }, actor: Actor) {
+  async listJustifications(
+    filters: { employeeId?: string; status?: 'pending' | 'approved' | 'rejected' | 'cancelled' },
+    actor: Actor,
+  ) {
     const narrowed = await this.actorScope.narrowFilter(
       filters,
       'employeeId',
@@ -457,7 +580,9 @@ export class AttendanceService {
       'workforce.attendance.read',
     );
     const conditions = [
-      narrowed.employeeId ? eq(attendanceJustifications.employeeId, narrowed.employeeId) : undefined,
+      narrowed.employeeId
+        ? eq(attendanceJustifications.employeeId, narrowed.employeeId)
+        : undefined,
       narrowed.status ? eq(attendanceJustifications.status, narrowed.status) : undefined,
     ].filter(Boolean);
     return this.db
@@ -474,7 +599,11 @@ export class AttendanceService {
       .from(attendanceJustifications)
       .where(eq(attendanceJustifications.id, id))
       .limit(1);
-    if (!row) throw new NotFoundException(ErrorCodes.ATTENDANCE_JUSTIFICATION_NOT_FOUND, 'Justification not found');
+    if (!row)
+      throw new NotFoundException(
+        ErrorCodes.ATTENDANCE_JUSTIFICATION_NOT_FOUND,
+        'Justification not found',
+      );
     return row;
   }
 
@@ -494,8 +623,15 @@ export class AttendanceService {
 
   async cancelJustification(id: string, actor: Actor) {
     const row = await this.getJustification(id);
-    if (row.employeeId !== actor.sub && !(await this.authz.check(actor.sub, 'workforce.attendance.review'))) {
-      throw new PermissionDeniedException('Only the requester may withdraw a justification');
+    /*
+     * THE REQUESTER ONLY. A reviewer withdrawing somebody's explanation is a decision wearing a
+     * withdrawal's clothes — reject exists for that. (An administrator still can, through the
+     * engine's own admin-cancel on `rbac.manage`, which audits them as the actor.)
+     */
+    if (row.employeeId !== actor.sub) {
+      throw new PermissionDeniedException(
+        'Only the requester may withdraw their own justification',
+      );
     }
     if (row.status !== 'pending') {
       throw new PreconditionFailedException(
@@ -503,24 +639,28 @@ export class AttendanceService {
         'Only a pending justification can be withdrawn',
       );
     }
+    if (!row.requestId) {
+      throw new PreconditionFailedException(
+        ErrorCodes.ATTENDANCE_JUSTIFICATION_NOT_PENDING,
+        'This justification has no approval item; it cannot be withdrawn',
+      );
+    }
     await this.assertMonthsOpen(row.startDate, row.endDate, 'Withdrawing a justification');
-    await this.db.transaction(async (tx) => {
-      await tx
-        .update(attendanceJustifications)
-        .set({ status: 'cancelled' })
-        .where(eq(attendanceJustifications.id, id));
-      await this.justificationTrail.record(AUDIT_ACTION.ATTENDANCE_JUSTIFICATION_CANCELLED, id, actor, tx, {
-        before: { status: 'pending' },
-        after: { status: 'cancelled' },
-      });
-    });
+    // Through the engine: the item and the row change in ONE transaction, the onCancel hook
+    // guarding both pending — the same pairing leave and WFH withdrawals use.
+    await this.engine.cancel(row.requestId, actor);
     return this.getJustification(id);
   }
 }
 
 /** Which part of `date` an approved leave window takes, if any. */
 function coveringLeave(
-  windows: { startDate: string; endDate: string; startPortion: 'full_day' | 'morning' | 'afternoon'; endPortion: 'full_day' | 'morning' | 'afternoon' }[],
+  windows: {
+    startDate: string;
+    endDate: string;
+    startPortion: 'full_day' | 'morning' | 'afternoon';
+    endPortion: 'full_day' | 'morning' | 'afternoon';
+  }[],
   date: string,
 ): LeavePortion | null {
   let widest: LeavePortion | null = null;

@@ -410,7 +410,7 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   [PERMISSION.WORKFORCE_WFH_REVIEW]:
     'Approve or reject work-from-home requests via the approval engine',
   [PERMISSION.WORKFORCE_ATTENDANCE_READ]:
-    'Read every employee\'s derived attendance (status, worked minutes, flags)',
+    "Read every employee's derived attendance (status, worked minutes, flags)",
   [PERMISSION.WORKFORCE_ATTENDANCE_REVIEW]:
     'Approve or reject attendance justifications via the approval engine',
   [PERMISSION.WORKFORCE_ATTENDANCE_CLOSE]: 'Close an attendance month, locking its requests',

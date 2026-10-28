@@ -29,13 +29,19 @@ export type AttendanceStatus = 'holiday' | 'leave' | 'wfh' | 'office' | 'absent'
 export type JustificationKind = 'late' | 'early' | 'forgot_card' | 'missing_checkout';
 
 /** The unresolved problems of a day, in the order a reader meets them. */
-export type DayFlag = 'late' | 'early' | 'missing_checkout' | 'absent';
+export type DayFlag = 'late' | 'early' | 'missing_checkout' | 'absent' | 'unsynced';
 
 /** Which half of the day approved leave takes, if any. */
 export type LeavePortion = 'full_day' | 'morning' | 'afternoon';
 
 export interface AttendanceDayInputs {
   date: string;
+  /**
+   * The day's swipes carried no device clock, so their times are the server's receive times —
+   * honest, but not what the terminal read. An informational flag: the minutes stand, the
+   * asterisk travels with them.
+   */
+  unsynced?: boolean;
   /** A public holiday. Wins over everything — nobody is expected in. */
   holiday: boolean;
   /** Approved leave covering this date, and which part of the day it takes. */
@@ -83,15 +89,36 @@ function overlapMinutes(aStart: number, aEnd: number, bStart: number, bEnd: numb
  */
 export function computeAttendanceDay(input: AttendanceDayInputs): AttendanceDay {
   if (input.holiday) {
-    return { date: input.date, status: 'holiday', workedMinutes: 0, lateMinutes: null, earlyMinutes: null, flags: [] };
+    return {
+      date: input.date,
+      status: 'holiday',
+      workedMinutes: 0,
+      lateMinutes: null,
+      earlyMinutes: null,
+      flags: [],
+    };
   }
   if (input.leave === 'full_day') {
     // Leave hours belong to the leave module; attendance credits 0 and expects nobody.
-    return { date: input.date, status: 'leave', workedMinutes: 0, lateMinutes: null, earlyMinutes: null, flags: [] };
+    return {
+      date: input.date,
+      status: 'leave',
+      workedMinutes: 0,
+      lateMinutes: null,
+      earlyMinutes: null,
+      flags: [],
+    };
   }
   if (input.wfh) {
     // WFH is approved home work: a full day, no swipes expected, nothing to flag.
-    return { date: input.date, status: 'wfh', workedMinutes: FULL_DAY_MINUTES, lateMinutes: null, earlyMinutes: null, flags: [] };
+    return {
+      date: input.date,
+      status: 'wfh',
+      workedMinutes: FULL_DAY_MINUTES,
+      lateMinutes: null,
+      earlyMinutes: null,
+      flags: [],
+    };
   }
 
   // An office day (whole, or the working half of a half-day-leave day).
@@ -103,13 +130,15 @@ export function computeAttendanceDay(input: AttendanceDayInputs): AttendanceDay 
 
   if (input.swipeCount === 0) {
     // No swipes, no request: "vắng không phép". A justified day is the one a `forgot_card` covers.
+    const noSwipeFlags: DayFlag[] = input.justified ? [] : ['absent'];
+    if (input.unsynced) noSwipeFlags.push('unsynced');
     return {
       date: input.date,
       status: input.justified ? 'office' : 'absent',
       workedMinutes: input.justified ? cap : 0,
       lateMinutes: null,
       earlyMinutes: null,
-      flags: input.justified ? [] : ['absent'],
+      flags: noSwipeFlags,
     };
   }
 
@@ -118,13 +147,15 @@ export function computeAttendanceDay(input: AttendanceDayInputs): AttendanceDay 
     // Worked stays 0 until a second swipe or an approved justification says otherwise: crediting a
     // span nobody measured is how a day becomes 8 h by default.
     const late = input.firstIn !== null && minutesOf(input.firstIn) > startThreshold;
+    const flags: DayFlag[] = input.justified ? [] : ['missing_checkout'];
+    if (input.unsynced) flags.push('unsynced');
     return {
       date: input.date,
       status: 'office',
       workedMinutes: input.justified ? cap : 0,
       lateMinutes: late ? minutesOf(input.firstIn!) - startThreshold : null,
       earlyMinutes: null,
-      flags: input.justified ? [] : ['missing_checkout'],
+      flags,
     };
   }
 
@@ -132,7 +163,12 @@ export function computeAttendanceDay(input: AttendanceDayInputs): AttendanceDay 
   const lastOut = minutesOf(input.lastOut ?? DAY_END);
   // The span between the swipes, minus whatever of lunch it straddles. Capped at the day's length:
   // extra time is what overtime requests are for, not what attendance quietly credits.
-  const span = Math.max(0, lastOut - firstIn - overlapMinutes(firstIn, lastOut, minutesOf(LUNCH_START), minutesOf(LUNCH_END)));
+  const span = Math.max(
+    0,
+    lastOut -
+      firstIn -
+      overlapMinutes(firstIn, lastOut, minutesOf(LUNCH_START), minutesOf(LUNCH_END)),
+  );
   // An approved justification credits the full worked part of the day and clears every flag —
   // "the manager accepted the explanation"; anything else is measured time, never assumed.
   const workedMinutes = input.justified ? cap : Math.min(cap, span);
@@ -142,6 +178,8 @@ export function computeAttendanceDay(input: AttendanceDayInputs): AttendanceDay 
   const flags: DayFlag[] = [];
   if (lateMinutes !== null) flags.push('late');
   if (earlyMinutes !== null) flags.push('early');
+  // Kept even when justified: a justification explains the person, not the terminal's clock.
+  if (input.unsynced) flags.push('unsynced');
 
   return {
     date: input.date,
@@ -149,6 +187,6 @@ export function computeAttendanceDay(input: AttendanceDayInputs): AttendanceDay 
     workedMinutes,
     lateMinutes,
     earlyMinutes,
-    flags: input.justified ? [] : flags,
+    flags: input.justified ? (input.unsynced ? ['unsynced'] : []) : flags,
   };
 }

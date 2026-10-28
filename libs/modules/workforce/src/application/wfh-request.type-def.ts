@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { type DbExecutor, RequestRegistry, RequestTypeDef } from '@platform';
 import { AUDIT_ACTION, AUDIT_RESOURCE, AuditService } from '@modules/audit';
 import { REQUEST_TYPE } from '@shared-kernel';
+import { assertMonthsOpenInTx } from '../domain/attendance-month-lock';
 import { wfhRequests } from '../../../../../db/schema';
 
 export interface WfhRequestPayload extends Record<string, unknown> {
@@ -66,6 +67,8 @@ export class WfhRequestTypeDef implements RequestTypeDef<WfhRequestPayload>, OnM
     tx: DbExecutor,
   ): Promise<void> {
     await this.assertPending(tx, payload.wfhRequestId);
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Withdrawing a request');
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Deciding a WFH request');
     const now = new Date();
     await tx
       .update(wfhRequests)
@@ -93,6 +96,7 @@ export class WfhRequestTypeDef implements RequestTypeDef<WfhRequestPayload>, OnM
     tx: DbExecutor,
   ): Promise<void> {
     await this.assertPending(tx, payload.wfhRequestId);
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Deciding a WFH request');
     const now = new Date();
     await tx
       .update(wfhRequests)

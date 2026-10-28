@@ -82,7 +82,20 @@ describe('the month-close lock', () => {
 
 describe('justification list narrowing', () => {
   const rows = [
-    { id: 'j1', employeeId: SELF.sub, startDate: '2026-10-01', endDate: '2026-10-01', kind: 'late' as const, reason: null, workingDays: '1', status: 'pending' as const, reviewerId: null, reviewedAt: null, createdAt: new Date(), requestId: 'r1' },
+    {
+      id: 'j1',
+      employeeId: SELF.sub,
+      startDate: '2026-10-01',
+      endDate: '2026-10-01',
+      kind: 'late' as const,
+      reason: null,
+      workingDays: '1',
+      status: 'pending' as const,
+      reviewerId: null,
+      reviewedAt: null,
+      createdAt: new Date(),
+      requestId: 'r1',
+    },
   ];
 
   it('passes the filter through for a workforce.attendance.read holder', async () => {

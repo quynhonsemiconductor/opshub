@@ -29,8 +29,8 @@ export class AttendanceDayDto {
   lateMinutes!: number | null;
   earlyMinutes!: number | null;
   /** The day's unresolved problems; an approved justification clears them. */
-  @ApiProperty({ enum: ['late', 'early', 'missing_checkout', 'absent'], isArray: true })
-  flags!: ('late' | 'early' | 'missing_checkout' | 'absent')[];
+  @ApiProperty({ enum: ['late', 'early', 'missing_checkout', 'absent', 'unsynced'], isArray: true })
+  flags!: ('late' | 'early' | 'missing_checkout' | 'absent' | 'unsynced')[];
   /** A justification has been filed for this day but not decided yet. */
   pendingJustification!: boolean;
 }
@@ -116,8 +116,6 @@ export class CloseMonthDto extends createZodDto(
 ) {}
 
 /** Reopen is an override: the reason is REQUIRED, and it lands in the audit trail. */
-export class ReopenMonthDto extends createZodDto(
-  z.object({ note: z.string().min(1).max(500) }),
-) {}
+export class ReopenMonthDto extends createZodDto(z.object({ note: z.string().min(1).max(500) })) {}
 
 export class MonthCloseParamDto extends createZodDto(z.object({ month: monthStr })) {}

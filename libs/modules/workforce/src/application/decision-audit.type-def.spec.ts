@@ -34,7 +34,12 @@ function makeTx(selectResult: { status: string } | null = { status: 'pending' })
   selectChain.from.mockReturnValue(selectChain);
   selectChain.where.mockReturnValue(selectChain);
   selectChain.limit.mockResolvedValue(selectResult ? [selectResult] : []);
-  return { update: vi.fn().mockReturnValue(chain), select: vi.fn().mockReturnValue(selectChain) };
+  // execute answers the month-lock's advisory lock and close-row probe: no close rows.
+  return {
+    update: vi.fn().mockReturnValue(chain),
+    select: vi.fn().mockReturnValue(selectChain),
+    execute: vi.fn().mockResolvedValue({ rows: [] }),
+  };
 }
 
 const LEAVE_PAYLOAD = {
@@ -94,7 +99,10 @@ describe('leave and overtime decisions are audited', () => {
     leave = new LeaveRequestTypeDef({ register: vi.fn() } as never, audit as never);
     overtime = new OvertimeTypeDef({ register: vi.fn() } as never, audit as never);
     wfh = new WfhRequestTypeDef({ register: vi.fn() } as never, audit as never);
-    justification = new AttendanceJustificationTypeDef({ register: vi.fn() } as never, audit as never);
+    justification = new AttendanceJustificationTypeDef(
+      { register: vi.fn() } as never,
+      audit as never,
+    );
   });
 
   describe('a reviewer decided', () => {

@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { type DbExecutor, RequestRegistry, RequestTypeDef } from '@platform';
 import { AUDIT_ACTION, AUDIT_RESOURCE, AuditService } from '@modules/audit';
 import { REQUEST_TYPE } from '@shared-kernel';
+import { assertMonthsOpenInTx } from '../domain/attendance-month-lock';
 import { attendanceJustifications } from '../../../../../db/schema';
 
 export interface AttendanceJustificationPayload extends Record<string, unknown> {
@@ -50,12 +51,26 @@ export class AttendanceJustificationTypeDef
     this.registry.register(this);
   }
 
+  /** The domain row must still be pending when a decision lands — see LeaveRequestTypeDef. */
+  private async assertPending(tx: DbExecutor, id: string): Promise<void> {
+    const [row] = await tx
+      .select({ status: attendanceJustifications.status })
+      .from(attendanceJustifications)
+      .where(eq(attendanceJustifications.id, id))
+      .limit(1);
+    if (!row || row.status !== 'pending') {
+      throw new Error(`justification ${id} is not pending`);
+    }
+  }
+
   async onApprove(
     payload: AttendanceJustificationPayload,
     _requestId: string,
     reviewerId: string,
     tx: DbExecutor,
   ): Promise<void> {
+    await this.assertPending(tx, payload.justificationId);
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Deciding a justification');
     const now = new Date();
     await tx
       .update(attendanceJustifications)
@@ -71,7 +86,12 @@ export class AttendanceJustificationTypeDef
       tx,
       {
         before: { status: 'pending' },
-        after: { status: 'approved', reviewedAt: now, kind: payload.kind, workingDays: payload.workingDays },
+        after: {
+          status: 'approved',
+          reviewedAt: now,
+          kind: payload.kind,
+          workingDays: payload.workingDays,
+        },
       },
     );
   }
@@ -82,6 +102,8 @@ export class AttendanceJustificationTypeDef
     reviewerId: string,
     tx: DbExecutor,
   ): Promise<void> {
+    await this.assertPending(tx, payload.justificationId);
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Deciding a justification');
     const now = new Date();
     await tx
       .update(attendanceJustifications)
@@ -94,6 +116,33 @@ export class AttendanceJustificationTypeDef
       { sub: reviewerId, email: reviewerId },
       tx,
       { before: { status: 'pending' }, after: { status: 'rejected', reviewedAt: now } },
+    );
+  }
+
+  /** The requester's own withdrawal, in the engine's transaction — guarded pending, month-open. */
+  async onCancel(
+    payload: AttendanceJustificationPayload,
+    _requestId: string,
+    cancelledBy: string,
+    tx: DbExecutor,
+  ): Promise<void> {
+    await this.assertPending(tx, payload.justificationId);
+    await assertMonthsOpenInTx(
+      tx,
+      payload.startDate,
+      payload.endDate,
+      'Withdrawing a justification',
+    );
+    await tx
+      .update(attendanceJustifications)
+      .set({ status: 'cancelled' })
+      .where(eq(attendanceJustifications.id, payload.justificationId));
+    await this.trail.record(
+      AUDIT_ACTION.ATTENDANCE_JUSTIFICATION_CANCELLED,
+      payload.justificationId,
+      { sub: cancelledBy, email: cancelledBy },
+      tx,
+      { before: { status: 'pending' }, after: { status: 'cancelled' } },
     );
   }
 
