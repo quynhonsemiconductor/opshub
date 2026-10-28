@@ -6,6 +6,7 @@ import { LeaveBalanceService } from './application/leave-balance.service';
 import { WorkforceService } from './application/workforce.service';
 import { WioCalendarService } from './application/wio-calendar.service';
 import { LeaveRequestTypeDef } from './application/leave-request.type-def';
+import { WfhRequestTypeDef } from './application/wfh-request.type-def';
 import { OvertimeTypeDef } from './application/overtime.type-def';
 import { OnboardingTypeDef } from './application/onboarding.type-def';
 import { OffboardingTypeDef } from './application/offboarding.type-def';
@@ -22,6 +23,7 @@ import { WORKFORCE_REPOSITORY } from './domain/ports/workforce.repository';
     WioCalendarService,
     LeaveBalanceService,
     LeaveRequestTypeDef,
+    WfhRequestTypeDef,
     OvertimeTypeDef,
     OnboardingTypeDef,
     OffboardingTypeDef,

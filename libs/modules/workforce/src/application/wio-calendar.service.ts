@@ -1,52 +1,50 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, gte, lte, ne } from 'drizzle-orm';
-import { ErrorCodes, InjectDrizzle, PreconditionFailedException, type DrizzleDB } from '@platform';
-import {
-  AuditService,
-  AUDIT_ACTION,
-  AUDIT_RESOURCE,
-  type ResourceAuditTrail,
-} from '@modules/audit';
-import type { Actor } from '@shared-kernel';
-import { lastDayOf, wioDayProblem } from '../domain/wio-day';
-import { ptoMarksInRange, type PtoMark } from '../domain/wio-pto';
-import { employees, leaveRequests, wfhDays } from '../../../../../db/schema';
+import { and, asc, eq, gte, lte, ne, sql } from 'drizzle-orm';
+import { InjectDrizzle, type DrizzleDB } from '@platform';
+import type { PtoMark } from '../domain/wio-pto';
+import { ptoMarksInRange } from '../domain/wio-pto';
+import { lastDayOf } from '../domain/wio-day';
+import { workingDatesInRange } from '../domain/working-days';
+import { employees, holidays, leaveRequests, wfhRequests } from '../../../../../db/schema';
+
+/** A WFH day on the calendar: whose, when, and whether a manager has signed off on it yet. */
+export interface WfhMark {
+  employeeId: string;
+  date: string;
+  status: 'approved' | 'pending';
+}
 
 export interface WioMonth {
   month: string;
   people: { id: string; name: string; department: string | null }[];
-  wfh: { employeeId: string; date: string }[];
+  wfh: WfhMark[];
   pto: PtoMark[];
+  /** The month's public holidays, so the calendar can say WHY a day has nobody in. */
+  holidays: { date: string; name: string }[];
 }
 
 /**
  * The WIO ("working in office") calendar.
  *
- * The stored fact is only "this person works from home on this date". Being in the office is the
- * absence of that fact, so nothing here ever has to fill the future in or reconcile a joiner.
- *
  * WHO CAN SEE WHAT. `getMonth` is the one deliberately company-wide read in the workforce module:
  * the point of the calendar is that everybody sees where everybody is. It returns a name, a
  * department and a date — no hours, no leave reasons — and the controller declares it `shared-read`
- * so that choice is visible in the route audit rather than implied by a missing decorator. Writes
- * are `self-scoped`: the employee is always the caller, never a parameter.
+ * so that choice is visible in the route audit rather than implied by a missing decorator.
+ *
+ * WFH comes from REQUESTS, not self-ticks (owner rules 2026-10-28): a day counts as WFH only when a
+ * request covering it stands approved, and a pending one is shown as pending — the manager may
+ * still say no, and the calendar says so rather than reading the day as settled. Being in the
+ * office remains the default: no request, no mark.
  */
 @Injectable()
 export class WioCalendarService {
-  private readonly trail: ResourceAuditTrail;
-
-  constructor(
-    audit: AuditService,
-    @InjectDrizzle() private readonly db: DrizzleDB,
-  ) {
-    this.trail = audit.forResource(AUDIT_RESOURCE.WFH_DAY);
-  }
+  constructor(@InjectDrizzle() private readonly db: DrizzleDB) {}
 
   async getMonth(month: string): Promise<WioMonth> {
     const from = `${month}-01`;
     const to = lastDayOf(month);
 
-    const [people, marks, leave] = await Promise.all([
+    const [people, wfhWindows, leave, monthHolidays] = await Promise.all([
       this.db
         .select({ id: employees.id, name: employees.displayName, department: employees.department })
         .from(employees)
@@ -56,9 +54,21 @@ export class WioCalendarService {
         // `id` breaks ties between two people with the same display name, so the order is stable.
         .orderBy(asc(employees.displayName), asc(employees.id)),
       this.db
-        .select({ employeeId: wfhDays.employeeId, date: wfhDays.workDate })
-        .from(wfhDays)
-        .where(and(gte(wfhDays.workDate, from), lte(wfhDays.workDate, to))),
+        .select({
+          employeeId: wfhRequests.employeeId,
+          startDate: wfhRequests.startDate,
+          endDate: wfhRequests.endDate,
+          status: wfhRequests.status,
+        })
+        .from(wfhRequests)
+        .where(
+          and(
+            // Rejected and cancelled requests released their days back to the office.
+            sql`${wfhRequests.status} in ('pending','approved')`,
+            lte(wfhRequests.startDate, to),
+            gte(wfhRequests.endDate, from),
+          ),
+        ),
       // APPROVED ONLY. A pending request is not a decision yet, and showing it would announce leave the
       // manager may still refuse. The window overlaps the month when it starts before the month ends and
       // ends after the month starts.
@@ -78,59 +88,69 @@ export class WioCalendarService {
             gte(leaveRequests.endDate, from),
           ),
         ),
+      this.db
+        .select({ date: holidays.date, name: holidays.name })
+        .from(holidays)
+        .where(and(gte(holidays.date, from), lte(holidays.date, to))),
     ]);
 
     // Only people the calendar accounts for: a mark left by somebody who has since left the company, or an
     // id with no employee row, would otherwise ride along for nothing.
     const known = new Set(people.map((p) => p.id));
+    const holidayDates = new Set(monthHolidays.map((h) => h.date));
     return {
       month,
       people,
-      wfh: marks.filter((m) => known.has(m.employeeId)),
+      wfh: wfhMarksInRange(
+        wfhWindows.filter((w) => known.has(w.employeeId)),
+        from,
+        to,
+        holidayDates,
+      ),
       pto: ptoMarksInRange(
         leave.filter((l) => known.has(l.employeeId)),
         from,
         to,
       ),
+      holidays: monthHolidays,
     };
   }
+}
 
-  /**
-   * Set whether the CALLER works from home on `date`. Idempotent: setting a day to the state it is
-   * already in changes nothing and writes no audit entry.
-   */
-  async setDay(date: string, wfh: boolean, actor: Actor): Promise<{ date: string; wfh: boolean }> {
-    const problem = wioDayProblem(date);
-    if (problem) throw new PreconditionFailedException(ErrorCodes.WFH_DAY_NOT_EDITABLE, problem);
-
-    await this.db.transaction(async (tx) => {
-      if (wfh) {
-        const inserted = await tx
-          .insert(wfhDays)
-          .values({ employeeId: actor.sub, workDate: date })
-          // The unique (employee, date) index makes a repeat a no-op instead of an error.
-          .onConflictDoNothing()
-          .returning({ id: wfhDays.id });
-        const [row] = inserted;
-        if (row) {
-          await this.trail.record(AUDIT_ACTION.WFH_MARKED, row.id, actor, tx, {
-            after: { date },
-          });
-        }
-        return;
+/**
+ * One mark per person per working day of `[from, to]` that a live WFH window covers.
+ *
+ * The same expansion `createWfh` froze on the request — weekends and the month's holidays skipped —
+ * so a holiday declared after a request was approved cannot make a WFH mark appear on a day nobody
+ * works. When a pending and an approved window somehow cover one day (submit refuses it; this is
+ * defence), the approved one wins: the settled answer outranks the question.
+ */
+function wfhMarksInRange(
+  windows: {
+    employeeId: string;
+    startDate: string;
+    endDate: string;
+    status: string;
+  }[],
+  from: string,
+  to: string,
+  holidayDates: ReadonlySet<string>,
+): WfhMark[] {
+  const marks = new Map<string, WfhMark>();
+  for (const window of windows) {
+    // The SQL already filters to live rows; this guard is what narrows the type to the two
+    // values a mark can carry, without a cast.
+    if (window.status !== 'approved' && window.status !== 'pending') continue;
+    const start = window.startDate > from ? window.startDate : from;
+    const end = window.endDate < to ? window.endDate : to;
+    if (end < start) continue;
+    for (const date of workingDatesInRange(start, end, holidayDates)) {
+      const key = `${window.employeeId}|${date}`;
+      const existing = marks.get(key);
+      if (!existing || (window.status === 'approved' && existing.status === 'pending')) {
+        marks.set(key, { employeeId: window.employeeId, date, status: window.status });
       }
-      const removed = await tx
-        .delete(wfhDays)
-        .where(and(eq(wfhDays.employeeId, actor.sub), eq(wfhDays.workDate, date)))
-        .returning({ id: wfhDays.id });
-      const [row] = removed;
-      if (row) {
-        await this.trail.record(AUDIT_ACTION.WFH_CLEARED, row.id, actor, tx, {
-          before: { date },
-        });
-      }
-    });
-
-    return { date, wfh };
+    }
   }
+  return [...marks.values()];
 }

@@ -1,32 +1,30 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
-import { apiErrorMessage } from '@/shared/api/errors';
 import { useCurrentUser } from '@/shared/hooks/use-current-user';
 import { cn } from '@/shared/lib/utils';
-import { Button, Checkbox, PanelState } from '@/shared/ui';
+import { Button, PanelState } from '@/shared/ui';
 import { MONTHS, WEEKDAYS, dayName, monthCells, parseIso, toIso } from '@/shared/ui/date-grid';
 import {
   indexMonth,
-  isEditable,
   isWorkday,
   monthKey,
   shiftMonth,
   summariseDay,
-  withMark,
   type MonthIndex,
   type PtoPortion,
-  type WioMonth,
   type WioPerson,
 } from './wio-calendar-model';
+import { RequestWfhModal } from './request-wfh-modal';
 
 /**
  * WIO calendar — who is in the office, who works from home, day by day.
  *
- * One flag per person per day, set by that person. A day nobody marked is a day everybody is in the
- * office, so there is nothing to fill in: ticking a box means "I'm working from home".
+ * WFH is a manager-approved request now (owner rules 2026-10-28), not a self-tick: the calendar draws
+ * a day as WFH only when a request covering it is approved, and shows a pending request as pending —
+ * the manager may still say no. Filing one is the button in the header; approving one happens in the
+ * requests inbox like leave.
  *
  * The month is fetched whole for everyone (one request per month shown) and each day's lists are derived
  * from it, so changing the selected day costs nothing.
@@ -40,9 +38,7 @@ export function WioCalendarTab() {
     return { y: t.y, m: t.m - 1 };
   });
   const [selected, setSelected] = useState(todayIso);
-  // Days with a request in flight. A second click on the same day would send a second PUT that can reach the
-  // server out of order, and a failure of one would roll back over the other's optimistic change.
-  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const [wfhModal, setWfhModal] = useState<{ open: boolean; date?: string }>({ open: false });
 
   const month = monthKey(view);
   const queryKey = ['workforce', 'wio-calendar', month] as const;
@@ -55,36 +51,6 @@ export function WioCalendarTab() {
       });
       if (error || !data) throw new Error('Failed to load the WIO calendar');
       return data;
-    },
-  });
-
-  const setDay = useMutation({
-    mutationFn: async ({ iso, wfh }: { iso: string; wfh: boolean }) => {
-      const { error } = await api.PUT('/v1/workforce/wio-calendar/{date}', {
-        params: { path: { date: iso } },
-        body: { wfh },
-      });
-      if (error) throw error;
-    },
-    // Optimistic: the box must answer the click now, and the server only ever agrees or refuses.
-    onMutate: async ({ iso, wfh }) => {
-      setBusy((b) => new Set(b).add(iso));
-      await qc.cancelQueries({ queryKey });
-      const previous = qc.getQueryData<WioMonth>(queryKey);
-      if (previous && me.data) qc.setQueryData(queryKey, withMark(previous, iso, me.data.sub, wfh));
-      return { previous };
-    },
-    onError: (error, _vars, context) => {
-      if (context?.previous) qc.setQueryData(queryKey, context.previous);
-      toast.error(apiErrorMessage(error, 'Could not update that day.'));
-    },
-    onSettled: (_data, _error, { iso }) => {
-      setBusy((b) => {
-        const next = new Set(b);
-        next.delete(iso);
-        return next;
-      });
-      return qc.invalidateQueries({ queryKey });
     },
   });
 
@@ -128,10 +94,19 @@ export function WioCalendarTab() {
             Today
           </Button>
         </div>
-        <p className="text-xs text-fg-subtle">
-          Everyone is in the office unless they tick <span className="font-medium">WFH</span> or
-          have approved leave (PTO).
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-fg-subtle">
+            Everyone is in the office unless they have an approved{' '}
+            <span className="font-medium">WFH</span> request or approved leave (PTO).
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setWfhModal({ open: true, date: selected })}
+          >
+            Request WFH
+          </Button>
+        </div>
       </div>
 
       <PanelState
@@ -162,10 +137,7 @@ export function WioCalendarTab() {
                 isSelected={iso === selected}
                 people={people}
                 index={index}
-                myId={myId}
-                editable={isEditable(iso, todayIso) && !busy.has(iso)}
                 onSelect={() => setSelected(iso)}
-                onToggle={(wfh) => setDay.mutate({ iso, wfh })}
               />
             ))}
           </div>
@@ -176,6 +148,20 @@ export function WioCalendarTab() {
             <p className="text-xs text-fg-subtle">Select a day to see who is in the office.</p>
           )}
         </>
+      )}
+
+      {/* Conditionally mounted, so each open starts from the selected day: the modal holds the date
+          range in state, and a second open would otherwise keep the previous open's range. */}
+      {wfhModal.open && (
+        <RequestWfhModal
+          open={wfhModal.open}
+          initialDate={wfhModal.date}
+          onClose={() => setWfhModal({ open: false })}
+          onSuccess={() => {
+            // A new request shows up as a pending mark for every month it touches, not just this one.
+            void qc.invalidateQueries({ queryKey: ['workforce', 'wio-calendar'] });
+          }}
+        />
       )}
     </div>
   );
@@ -194,10 +180,7 @@ function DayCell({
   isSelected,
   people,
   index,
-  myId,
-  editable,
   onSelect,
-  onToggle,
 }: {
   iso: string;
   inMonth: boolean;
@@ -205,15 +188,13 @@ function DayCell({
   isSelected: boolean;
   people: WioPerson[];
   index: MonthIndex;
-  myId: string | undefined;
-  editable: boolean;
   onSelect: () => void;
-  onToggle: (wfh: boolean) => void;
 }) {
   const dayNumber = Number(iso.slice(8));
+  const holiday = index.holidays.get(iso);
 
   // Days of the neighbouring months fill the grid but their marks are not loaded, so they say nothing.
-  // Weekends are not working days: nobody is expected in, so no counts and no box.
+  // Weekends are not working days: nobody is expected in, so no counts.
   if (!inMonth || !isWorkday(iso)) {
     return (
       <div className="min-h-28 rounded-md bg-surface-muted/50 p-2 text-xs text-fg-subtle/70">
@@ -222,57 +203,61 @@ function DayCell({
     );
   }
 
-  const { wfh, office, pto } = summariseDay(iso, people, index);
-  // On leave all day: a WFH tick would mean nothing, so the box is off and shows unticked.
-  const onPto = myId !== undefined && index.pto.get(iso)?.get(myId) === 'full_day';
-  const mine = !onPto && myId !== undefined && index.wfh.get(iso)?.has(myId) === true;
+  // A holiday has nobody expected in, whatever the requests say — the ladder the API applies too.
+  if (holiday) {
+    return (
+      <div
+        className={cn(
+          'flex min-h-28 flex-col justify-between gap-1.5 rounded-md border border-dashed border-border bg-surface-muted/50 p-2',
+          isSelected && 'ring-1 ring-accent',
+        )}
+      >
+        <span
+          className={cn(
+            'text-xs font-semibold',
+            isToday ? 'rounded-full bg-accent px-1.5 text-accent-fg' : 'text-fg-subtle',
+          )}
+        >
+          {dayNumber}
+        </span>
+        <span className="text-xs text-accent" title={holiday}>
+          {holiday}
+        </span>
+      </div>
+    );
+  }
+
+  const { wfh, pendingWfh, office, pto } = summariseDay(iso, people, index);
 
   return (
     <div
       className={cn(
         'flex min-h-28 flex-col justify-between gap-1.5 rounded-md border bg-surface p-2',
         isSelected ? 'border-accent ring-1 ring-accent' : 'border-border',
-        mine && 'bg-accent-muted',
       )}
     >
       <Button
         variant="ghost"
         onClick={onSelect}
         aria-pressed={isSelected}
-        aria-label={`${dayName(iso)}: ${office.length} in the office, ${wfh.length} working from home, ${pto.length} on PTO`}
+        aria-label={`${dayName(iso)}: ${office.length} in the office, ${wfh.length} working from home, ${pendingWfh.length} WFH pending, ${pto.length} on PTO`}
         className="h-auto flex-col items-start justify-start gap-0.5 p-0.5 text-left hover:bg-transparent"
       >
         <span
           className={cn(
             'text-xs font-semibold',
-            isToday
-              ? 'rounded-full bg-accent px-1.5 text-accent-fg'
-              : editable
-                ? 'text-fg'
-                : 'text-fg-subtle',
+            isToday ? 'rounded-full bg-accent px-1.5 text-accent-fg' : 'text-fg',
           )}
         >
           {dayNumber}
         </span>
         <span className="text-xs text-success">{office.length} in office</span>
         <span className="text-xs text-warning">{wfh.length} WFH</span>
+        {pendingWfh.length > 0 && (
+          <span className="text-xs text-fg-subtle">{pendingWfh.length} WFH pending</span>
+        )}
         <span className="text-xs text-accent">{pto.length} PTO</span>
       </Button>
-      <Checkbox
-        size="sm"
-        checked={mine}
-        disabled={!editable || myId === undefined || onPto}
-        onChange={(checked) => onToggle(checked)}
-        label={
-          // The visible word is hidden from assistive tech and a full phrase stands in for it: twenty-odd
-          // boxes all named "WFH" are indistinguishable by ear, and "WFH" + a trailing span glued into
-          // "WFHon 23 October" because name computation trims each piece's edge space.
-          <>
-            <span aria-hidden="true">WFH</span>
-            <span className="sr-only">WFH on {dayName(iso)}</span>
-          </>
-        }
-      />
     </div>
   );
 }
@@ -288,6 +273,15 @@ function DayDetail({
   index: MonthIndex;
   myId: string | undefined;
 }) {
+  const holiday = index.holidays.get(iso);
+  if (holiday) {
+    return (
+      <p className="text-xs text-fg-subtle">
+        {dayName(iso)} is <span className="text-accent">{holiday}</span> — a public holiday, so
+        nobody is expected in the office.
+      </p>
+    );
+  }
   if (!isWorkday(iso)) {
     return (
       <p className="text-xs text-fg-subtle">
@@ -295,11 +289,11 @@ function DayDetail({
       </p>
     );
   }
-  const { wfh, office, pto, partial } = summariseDay(iso, people, index);
+  const { wfh, pendingWfh, office, pto, partial } = summariseDay(iso, people, index);
   return (
     <section
       aria-label={`Who is where on ${dayName(iso)}`}
-      className="grid gap-4 rounded-lg border border-border bg-surface p-4 sm:grid-cols-3"
+      className="grid gap-4 rounded-lg border border-border bg-surface p-4 sm:grid-cols-4"
     >
       <PeopleList
         title="In the office"
@@ -313,6 +307,12 @@ function DayDetail({
         tone="text-warning"
         people={wfh}
         partial={partial}
+        myId={myId}
+      />
+      <PeopleList
+        title="WFH, awaiting approval"
+        tone="text-fg-subtle"
+        people={pendingWfh}
         myId={myId}
       />
       <PeopleList title="On PTO" tone="text-accent" people={pto} myId={myId} />
@@ -340,7 +340,7 @@ function PeopleList({
   title: string;
   tone: string;
   people: WioPerson[];
-  /** Half-day leave by person id, shown as a muted note; absent for the PTO list itself. */
+  /** Half-day leave by person id, shown as a muted note; absent for the pending and PTO lists. */
   partial?: Map<string, Exclude<PtoPortion, 'full_day'>>;
   myId: string | undefined;
 }) {

@@ -1,28 +1,31 @@
 // @vitest-environment jsdom
 /**
- * THE WIO CALENDAR — what a person sees and what ticking a box does.
+ * THE WIO CALENDAR — what a person sees, and what filing a WFH request does.
  *
  * The API is replaced by a tiny fake server that keeps the marks in memory, because the interesting
- * behaviour is a round trip: tick → the count moves at once → the server agrees (or refuses) → the
- * screen settles on the server's answer. A static GET mock cannot show that, it would snap every
- * optimistic change straight back on the refetch.
+ * behaviour is a round trip: request → the server answers (or refuses) → the calendar refetches and
+ * settles on the server's answer.
  *
- * "Today" is fixed to Wednesday 21 Oct 2026 for the same reason `leave-tab.spec.tsx` fixes it: which
- * days are editable depends on the date, and the grid depends on the month.
+ * "Today" is fixed to Wednesday 21 Oct 2026 for the same reason `leave-tab.spec.tsx` fixes it: the
+ * grid depends on the month, and the request modal's date floor depends on the date.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const GET = vi.fn();
-const PUT = vi.fn();
+const POST = vi.fn();
 const toastError = vi.fn();
+const toastSuccess = vi.fn();
 
 vi.mock('@/shared/api/client', () => ({
-  api: { GET: (...a: unknown[]) => GET(...a), PUT: (...a: unknown[]) => PUT(...a) },
+  api: { GET: (...a: unknown[]) => GET(...a), POST: (...a: unknown[]) => POST(...a) },
 }));
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: (...a: unknown[]) => toastError(...a) },
+  toast: {
+    success: (...a: unknown[]) => toastSuccess(...a),
+    error: (...a: unknown[]) => toastError(...a),
+  },
 }));
 vi.mock('@/shared/hooks/use-current-user', () => ({
   useCurrentUser: () => ({ data: { sub: 'me' } }),
@@ -38,26 +41,68 @@ const PEOPLE = [
   { id: 'binh', name: 'Binh', department: null },
 ];
 
-let marks: { employeeId: string; date: string }[];
+interface Mark {
+  employeeId: string;
+  date: string;
+  status: 'approved' | 'pending';
+}
+
+let marks: Mark[];
 let pto: { employeeId: string; date: string; portion: string }[];
+let holidays: { date: string; name: string }[];
 
 beforeEach(() => {
   vi.clearAllMocks();
-  marks = [{ employeeId: 'binh', date: '2026-10-22' }];
+  marks = [{ employeeId: 'binh', date: '2026-10-22', status: 'approved' }];
   pto = [];
-  GET.mockImplementation(async (_path: string, init: { params: { query: { month: string } } }) => ({
-    data: {
-      month: init.params.query.month,
-      people: PEOPLE,
-      wfh: marks.filter((m) => m.date.startsWith(init.params.query.month)),
-      pto: pto.filter((m) => m.date.startsWith(init.params.query.month)),
+  holidays = [];
+  GET.mockImplementation(
+    async (
+      path: string,
+      init: {
+        params: { query: { month?: string; startDate?: string; endDate?: string } };
+      },
+    ) => {
+      if (path === '/v1/workforce/wfh/preview') {
+        // The same arithmetic the server does, for the ranges these tests file.
+        const days: string[] = [];
+        for (
+          let d = new Date(init.params.query.startDate!);
+          d <= new Date(init.params.query.endDate!);
+          d.setDate(d.getDate() + 1)
+        ) {
+          const iso = d.toISOString().slice(0, 10);
+          const weekday = d.getUTCDay();
+          if (weekday !== 0 && weekday !== 6) days.push(iso);
+        }
+        return {
+          data: {
+            startDate: init.params.query.startDate!,
+            endDate: init.params.query.endDate!,
+            workingDays: days,
+          },
+        };
+      }
+      const month = init.params.query.month!;
+      return {
+        data: {
+          month,
+          people: PEOPLE,
+          wfh: marks.filter((m) => m.date.startsWith(month)),
+          pto: pto.filter((m) => m.date.startsWith(month)),
+          holidays: holidays.filter((m) => m.date.startsWith(month)),
+        },
+      };
     },
-  }));
-  PUT.mockImplementation(
-    async (_path: string, init: { params: { path: { date: string } }; body: { wfh: boolean } }) => {
-      const date = init.params.path.date;
-      marks = marks.filter((m) => !(m.employeeId === 'me' && m.date === date));
-      if (init.body.wfh) marks.push({ employeeId: 'me', date });
+  );
+  POST.mockImplementation(
+    async (_path: string, init: { body: { startDate: string; endDate: string } }) => {
+      const { startDate, endDate } = init.body;
+      for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
+        const date = d.toISOString().slice(0, 10);
+        marks = marks.filter((m) => !(m.employeeId === 'me' && m.date === date));
+        marks.push({ employeeId: 'me', date, status: 'pending' });
+      }
       return {};
     },
   );
@@ -76,17 +121,15 @@ function renderTab() {
 // ReDoS risk, and a plain string comparison says the same thing without one.
 const day = (name: string) =>
   screen.findByRole('button', { name: (accessible) => accessible.startsWith(`${name}:`) });
-const box = (name: string) =>
-  screen.findByRole('checkbox', { name: (accessible) => accessible === `WFH on ${name}` });
 
 describe('WIO calendar', () => {
-  it('counts a day as in the office for everyone nobody marked, and WFH for those who did', async () => {
+  it('counts a day as in the office for everyone nobody asked about, WFH for approved marks', async () => {
     renderTab();
     expect(await day('21 October 2026')).toHaveAccessibleName(
-      '21 October 2026: 3 in the office, 0 working from home, 0 on PTO',
+      '21 October 2026: 3 in the office, 0 working from home, 0 WFH pending, 0 on PTO',
     );
     expect(await day('22 October 2026')).toHaveAccessibleName(
-      '22 October 2026: 2 in the office, 1 working from home, 0 on PTO',
+      '22 October 2026: 2 in the office, 1 working from home, 0 WFH pending, 0 on PTO',
     );
   });
 
@@ -99,116 +142,104 @@ describe('WIO calendar', () => {
     expect(section).toHaveTextContent('Binh');
   });
 
-  it('offers a box only on today and later working days', async () => {
+  it('keeps a PENDING mark out of both lists, in its own awaiting-approval group', async () => {
+    marks = [
+      { employeeId: 'binh', date: '2026-10-22', status: 'approved' },
+      { employeeId: 'an', date: '2026-10-22', status: 'pending' },
+    ];
     renderTab();
-    expect(await box('21 October 2026')).toBeEnabled(); // today
-    expect(await box('23 October 2026')).toBeEnabled(); // Friday
-    expect(await box('20 October 2026')).toBeDisabled(); // yesterday
-    // Saturday 24th has no box at all: nobody is expected in on a weekend.
-    expect(screen.queryByRole('checkbox', { name: /24 October 2026/ })).toBeNull();
+    expect(await day('22 October 2026')).toHaveAccessibleName(
+      '22 October 2026: 1 in the office, 1 working from home, 1 WFH pending, 0 on PTO',
+    );
+    fireEvent.click(await day('22 October 2026'));
+    const section = await screen.findByRole('region', { name: /22 October 2026/ });
+    expect(section).toHaveTextContent('WFH, awaiting approval (1)');
+    expect(section).toHaveTextContent('An');
   });
 
-  it('ticking WFH moves the person at once and sends the day to the server', async () => {
+  it('filing a WFH request posts the window and refetches the month', async () => {
     renderTab();
-    fireEvent.click(await box('23 October 2026'));
+    fireEvent.click(await day('23 October 2026'));
+    fireEvent.click(screen.getByRole('button', { name: 'Request WFH' }));
+    // The modal's range starts on the selected day; submit it as that single day.
+    fireEvent.click(await screen.findByRole('button', { name: 'Request' }));
 
     await waitFor(() =>
-      expect(PUT).toHaveBeenCalledWith('/v1/workforce/wio-calendar/{date}', {
-        params: { path: { date: '2026-10-23' } },
-        body: { wfh: true },
+      expect(POST).toHaveBeenCalledWith('/v1/workforce/wfh', {
+        body: { startDate: '2026-10-23', endDate: '2026-10-23' },
       }),
     );
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('WFH request submitted'));
+    // The new mark arrives as PENDING, so the day reads one pending and nobody moved out of the office.
     expect(await day('23 October 2026')).toHaveAccessibleName(
-      '23 October 2026: 2 in the office, 1 working from home, 0 on PTO',
+      '23 October 2026: 2 in the office, 0 working from home, 1 WFH pending, 0 on PTO',
     );
-    expect(await box('23 October 2026')).toBeChecked();
   });
 
-  it('unticking sends wfh: false and puts the person back in the office', async () => {
-    marks.push({ employeeId: 'me', date: '2026-10-23' });
+  it('shows the working-day count from the preview before submit', async () => {
     renderTab();
-    const checkbox = await box('23 October 2026');
-    await waitFor(() => expect(checkbox).toBeChecked());
-    fireEvent.click(checkbox);
-
-    await waitFor(() =>
-      expect(PUT).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ body: { wfh: false } }),
-      ),
-    );
-    expect(await day('23 October 2026')).toHaveAccessibleName(
-      '23 October 2026: 3 in the office, 0 working from home, 0 on PTO',
-    );
+    // The default range is the selected day, Friday 23 Oct: one working day.
+    fireEvent.click(await day('23 October 2026'));
+    fireEvent.click(screen.getByRole('button', { name: 'Request WFH' }));
+    expect(await screen.findByText(/Covers 1 working day/)).toBeInTheDocument();
   });
 
-  it('locks that day while its request is in flight, so a fast second click cannot race the first', async () => {
-    let finish!: () => void;
-    PUT.mockImplementationOnce(() => new Promise((resolve) => (finish = () => resolve({}))));
-    renderTab();
-    const checkbox = await box('23 October 2026');
-    fireEvent.click(checkbox);
-
-    await waitFor(() => expect(checkbox).toBeDisabled());
-    // Another day is unaffected.
-    expect(await box('22 October 2026')).toBeEnabled();
-
-    finish();
-    await waitFor(() => expect(checkbox).toBeEnabled());
-    expect(PUT).toHaveBeenCalledTimes(1);
-  });
-
-  it('puts the box back and says why when the server refuses', async () => {
-    PUT.mockResolvedValueOnce({
+  it('says why when the server refuses the request', async () => {
+    POST.mockResolvedValueOnce({
       error: {
         error: {
-          code: 'WFH_DAY_NOT_EDITABLE',
-          message: 'A day that has already passed cannot be changed',
+          code: 'WFH_OVERLAPPING',
+          message: 'You already have a leave or WFH request covering part of that window',
         },
       },
     });
     renderTab();
-    fireEvent.click(await box('23 October 2026'));
+    fireEvent.click(await day('23 October 2026'));
+    fireEvent.click(screen.getByRole('button', { name: 'Request WFH' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Request' }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
-    expect(await box('23 October 2026')).not.toBeChecked();
     expect(await day('23 October 2026')).toHaveAccessibleName(
-      '23 October 2026: 3 in the office, 0 working from home, 0 on PTO',
+      '23 October 2026: 3 in the office, 0 working from home, 0 WFH pending, 0 on PTO',
     );
+  });
+
+  it('renders a holiday day with its name and nobody expected in', async () => {
+    holidays = [{ date: '2026-10-26', name: 'Tết Dương Lịch' }];
+    renderTab();
+    // The day is not a button any more: it says the holiday name instead of counts.
+    expect(await screen.findByText('Tết Dương Lịch')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: (a: string) => a.startsWith('26 October 2026:') }),
+    ).toBeNull();
+    fireEvent.click(await day('27 October 2026'));
+    expect(await screen.findByRole('region', { name: /27 October 2026/ })).toBeInTheDocument();
   });
 
   it('counts and lists people on leave in their own PTO column', async () => {
     pto = [
-      { employeeId: 'an', date: '2026-10-26', portion: 'full_day' },
-      { employeeId: 'binh', date: '2026-10-26', portion: 'full_day' },
-      { employeeId: 'me', date: '2026-10-27', portion: 'morning' },
+      { employeeId: 'an', date: '2026-10-27', portion: 'full_day' },
+      { employeeId: 'binh', date: '2026-10-27', portion: 'full_day' },
+      { employeeId: 'me', date: '2026-10-28', portion: 'morning' },
     ];
     renderTab();
-    expect(await day('26 October 2026')).toHaveAccessibleName(
-      '26 October 2026: 1 in the office, 0 working from home, 2 on PTO',
+    expect(await day('27 October 2026')).toHaveAccessibleName(
+      '27 October 2026: 1 in the office, 0 working from home, 0 WFH pending, 2 on PTO',
     );
-    fireEvent.click(await day('26 October 2026'));
-    const section = await screen.findByRole('region', { name: /26 October 2026/ });
+    fireEvent.click(await day('27 October 2026'));
+    const section = await screen.findByRole('region', { name: /27 October 2026/ });
     expect(section).toHaveTextContent('On PTO (2)');
     expect(section).toHaveTextContent('In the office (1)');
   });
 
   it('keeps somebody on half-day leave in the office list and says which half', async () => {
-    pto = [{ employeeId: 'an', date: '2026-10-27', portion: 'morning' }];
+    pto = [{ employeeId: 'an', date: '2026-10-28', portion: 'morning' }];
     renderTab();
-    fireEvent.click(await day('27 October 2026'));
-    const section = await screen.findByRole('region', { name: /27 October 2026/ });
+    fireEvent.click(await day('28 October 2026'));
+    const section = await screen.findByRole('region', { name: /28 October 2026/ });
     expect(section).toHaveTextContent('In the office (3)');
     expect(section).toHaveTextContent('off this morning');
     expect(section).toHaveTextContent('On PTO (0)');
-  });
-
-  it('switches the WFH box off for a day you are on leave all day', async () => {
-    pto = [{ employeeId: 'me', date: '2026-10-26', portion: 'full_day' }];
-    renderTab();
-    expect(await box('26 October 2026')).toBeDisabled();
-    expect(await box('26 October 2026')).not.toBeChecked();
-    expect(await box('27 October 2026')).toBeEnabled();
   });
 
   it('asks for the next month when you page forward', async () => {

@@ -52,6 +52,11 @@ import {
   CreateLeaveDto,
   ListLeaveQueryDto,
   LeaveResponseDto,
+  CreateWfhDto,
+  ListWfhQueryDto,
+  WfhResponseDto,
+  WfhPreviewQueryDto,
+  WfhPreviewResponseDto,
   CreateOvertimeDto,
   ListOvertimeQueryDto,
   OvertimeResponseDto,
@@ -68,6 +73,7 @@ import {
 } from './dto/workforce.dto';
 import type {
   LeaveRequest,
+  WfhRequest,
   OvertimeEntry,
   ShiftLog,
   Timesheet,
@@ -104,6 +110,22 @@ function toLeaveDto(l: LeaveRequest): LeaveResponseDto {
     reviewerId: l.reviewerId,
     reviewedAt: l.reviewedAt ? l.reviewedAt.toISOString() : null,
     createdAt: l.createdAt.toISOString(),
+  };
+}
+
+function toWfhDto(w: WfhRequest): WfhResponseDto {
+  return {
+    id: w.id,
+    employeeId: w.employeeId,
+    startDate: w.startDate,
+    endDate: w.endDate,
+    reason: w.reason,
+    // numeric(5,2) arrives from the driver as a string; the API contract is a number.
+    workingDays: Number(w.workingDays),
+    status: w.status,
+    reviewerId: w.reviewerId,
+    reviewedAt: w.reviewedAt ? w.reviewedAt.toISOString() : null,
+    createdAt: w.createdAt.toISOString(),
   };
 }
 
@@ -244,7 +266,7 @@ export class WorkforceController {
   }
 
   @Post('timesheets/:id/review')
-  @RequirePermission('workforce.approve')
+  @RequirePermission('workforce.approve', { resource: 'timesheet', from: 'param', field: 'id' })
   @ApiOperation({ summary: 'Approve or reject a timesheet' })
   @ApiCommonErrors(401, 403, 404, 412)
   async reviewTimesheet(
@@ -311,7 +333,7 @@ export class WorkforceController {
   }
 
   @Post('leave/:id/review')
-  @RequirePermission('workforce.approve')
+  @RequirePermission('workforce.approve', { resource: 'leave_request', from: 'param', field: 'id' })
   @ApiOperation({ summary: 'Approve or reject a leave request' })
   @ApiCommonErrors(401, 403, 404, 412)
   async reviewLeave(
@@ -348,6 +370,106 @@ export class WorkforceController {
       resourceId: id,
     });
     return toLeaveDto(leave);
+  }
+
+  // ── Work from home ─────────────────────────────────────────────────────────
+  @Get('wfh/preview')
+  @SelfScoped("previews the CALLER's own window — no employee parameter exists")
+  @ApiOperation({
+    summary: 'What a WFH window covers, before filing it',
+    description:
+      'The working days in `[startDate, endDate]`: weekends and public holidays skipped. ' +
+      'Shown beside the date pickers so the employee asks for the days they think they are asking for.',
+  })
+  @ApiOkResponse({ type: WfhPreviewResponseDto })
+  @ApiCommonErrors(401, 422)
+  async previewWfh(@Query() query: WfhPreviewQueryDto): Promise<WfhPreviewResponseDto> {
+    return this.service.previewWfh(query.startDate, query.endDate);
+  }
+
+  @Get('wfh')
+  @AuthorizedInService(
+    'optional employeeId filter — see narrowToActor',
+    'workforce-access-narrowing.spec.ts',
+  )
+  @ApiOperation({
+    summary: 'List WFH requests',
+    description:
+      'Narrowed to the caller unless they hold `workforce.read` globally. Requesting ' +
+      "another employee's records without it is a 403, not an empty page.",
+  })
+  @ApiPagedResponse(WfhResponseDto)
+  @ApiCommonErrors(401, 403)
+  async listWfh(
+    @Query() query: ListWfhQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PagedResult<WfhResponseDto>> {
+    const { rows, total } = await this.service.listWfh(
+      {
+        employeeId: query.employeeId,
+        status: query.status,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+      },
+      query.limit,
+      query.offset,
+      user,
+    );
+    return buildPageResult(rows.map(toWfhDto), total, query.limit, query.offset);
+  }
+
+  @Post('wfh')
+  @SelfScoped('files WFH FOR the caller — employeeId is actor.sub')
+  @ApiOperation({
+    summary: 'Request work from home for the current user',
+    description:
+      'A date range expanded to working days: weekends and public holidays cost nothing, and a ' +
+      'window covering no working day is refused (412 `WFH_WINDOW_EMPTY`). Refused with 409 ' +
+      "`WFH_OVERLAPPING` when it overlaps the caller's live leave or WFH — a day can only be " +
+      'asked for once. Approved or rejected as a whole by a holder of `workforce.wfh.review`.',
+  })
+  @ApiCreatedResponse({ type: WfhResponseDto })
+  @ApiCommonErrors(401, 409, 412, 422)
+  async createWfh(
+    @Body() dto: CreateWfhDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<WfhResponseDto> {
+    const wfh = await this.service.createWfh(dto, user);
+    return toWfhDto(wfh);
+  }
+
+  @Post('wfh/:id/review')
+  @RequirePermission('workforce.approve', { resource: 'wfh_request', from: 'param', field: 'id' })
+  @ApiOperation({ summary: 'Approve or reject a WFH request' })
+  @ApiCommonErrors(401, 403, 404, 412)
+  async reviewWfh(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReviewDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<WfhResponseDto> {
+    const wfh = await this.service.reviewWfh(id, dto.approve, user);
+    return toWfhDto(wfh);
+  }
+
+  @Post('wfh/:id/cancel')
+  @AuthorizedInService(
+    'assertOwnerOrApprover: the owner, or a holder of workforce.approve',
+    'workforce-access-narrowing.spec.ts',
+  )
+  @ApiOperation({
+    summary: 'Withdraw a pending WFH request',
+    description:
+      'The requester withdraws their own still-pending request. An APPROVED request cannot be ' +
+      'cancelled — it answers "where is this person" for everyone else\'s planning, so changing ' +
+      'it means a new request.',
+  })
+  @ApiCommonErrors(401, 403, 404, 412)
+  async cancelWfh(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<WfhResponseDto> {
+    const wfh = await this.service.cancelWfh(id, user);
+    return toWfhDto(wfh);
   }
 
   // ── Overtime ───────────────────────────────────────────────────────────────
@@ -403,7 +525,7 @@ export class WorkforceController {
   }
 
   @Post('overtime/:id/review')
-  @RequirePermission('workforce.approve')
+  @RequirePermission('workforce.approve', { resource: 'overtime', from: 'param', field: 'id' })
   @ApiOperation({ summary: 'Approve or reject an overtime entry' })
   @ApiCommonErrors(401, 403, 404, 412)
   async reviewOvertime(

@@ -99,6 +99,17 @@ export const leaveStatusEnum = pgEnum('leave_status', [
   'cancelled',
 ]);
 export const overtimeStatusEnum = pgEnum('overtime_status', ['pending', 'approved', 'rejected']);
+/**
+ * Same values as `leave_status`: a WFH request that expires unreviewed is CANCELLED — the person
+ * asked and nobody answered, which is not a refusal — while overtime expiry writes `rejected`
+ * because work already done unpaid reads differently. The lists share the vocabulary either way.
+ */
+export const wfhStatusEnum = pgEnum('wfh_status', [
+  'pending',
+  'approved',
+  'rejected',
+  'cancelled',
+]);
 export const shiftTypeEnum = pgEnum('shift_type', ['night', 'on_call', 'weekend']);
 
 // ── Storage ──────────────────────────────────────────────────────────────────

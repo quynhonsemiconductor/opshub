@@ -962,6 +962,87 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/workforce/wfh/preview': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * What a WFH window covers, before filing it
+     * @description The working days in `[startDate, endDate]`: weekends and public holidays skipped. Shown beside the date pickers so the employee asks for the days they think they are asking for.
+     */
+    get: operations['WorkforceController_previewWfh'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/wfh': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List WFH requests
+     * @description Narrowed to the caller unless they hold `workforce.read` globally. Requesting another employee's records without it is a 403, not an empty page.
+     */
+    get: operations['WorkforceController_listWfh'];
+    put?: never;
+    /**
+     * Request work from home for the current user
+     * @description A date range expanded to working days: weekends and public holidays cost nothing, and a window covering no working day is refused (412 `WFH_WINDOW_EMPTY`). Refused with 409 `WFH_OVERLAPPING` when it overlaps the caller's live leave or WFH — a day can only be asked for once. Approved or rejected as a whole by a holder of `workforce.wfh.review`.
+     */
+    post: operations['WorkforceController_createWfh'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/wfh/{id}/review': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Approve or reject a WFH request */
+    post: operations['WorkforceController_reviewWfh'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/wfh/{id}/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Withdraw a pending WFH request
+     * @description The requester withdraws their own still-pending request. An APPROVED request cannot be cancelled — it answers "where is this person" for everyone else's planning, so changing it means a new request.
+     */
+    post: operations['WorkforceController_cancelWfh'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/workforce/overtime': {
     parameters: {
       query?: never;
@@ -1233,30 +1314,10 @@ export interface paths {
     };
     /**
      * Who works from home, for one month
-     * @description Returns everyone the calendar accounts for and the work-from-home marks in the month. A day with no mark is a day in the office.
+     * @description Returns everyone the calendar accounts for, the month's work-from-home marks (from live requests, pending shown as pending), the month's approved leave on working days, and the month's public holidays. A day with no mark is a day in the office.
      */
     get: operations['WioCalendarController_getMonth'];
     put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/workforce/wio-calendar/{date}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * Mark a day as work-from-home, or back to the office, for the current user
-     * @description Idempotent. Refused for a day that has already passed and for a weekend.
-     */
-    put: operations['WioCalendarController_setDay'];
     post?: never;
     delete?: never;
     options?: never;
@@ -5606,6 +5667,33 @@ export interface components {
       endPortion?: 'full_day' | 'morning' | 'afternoon';
       reason?: string;
     };
+    WfhPreviewResponseDto: {
+      startDate: string;
+      endDate: string;
+      /** @description The working days in `[startDate, endDate]` — weekends and public holidays skipped. */
+      workingDays: string[];
+    };
+    WfhResponseDto: {
+      /** @enum {string} */
+      status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+      id: string;
+      employeeId: string;
+      startDate: string;
+      endDate: string;
+      reason: string | null;
+      /** @description Working days the window covers — always a whole number. numeric arrives as a string; the API contract is a number. */
+      workingDays: number;
+      reviewerId: string | null;
+      reviewedAt: string | null;
+      createdAt: string;
+    };
+    CreateWfhDto: {
+      /** Format: date */
+      startDate: string;
+      /** Format: date */
+      endDate: string;
+      reason?: string;
+    };
     OvertimeResponseDto: {
       /** @enum {string} */
       status: 'pending' | 'approved' | 'rejected';
@@ -5766,9 +5854,15 @@ export interface components {
       name: string;
       department: string | null;
     };
-    WioMarkDto: {
+    WioWfhDto: {
       employeeId: string;
       date: string;
+      /**
+       * @description `approved` = a manager signed off; `pending` = asked, not yet answered. A rejected or cancelled
+       *     request leaves no mark at all.
+       * @enum {string}
+       */
+      status: 'pending' | 'approved';
     };
     WioPtoDto: {
       /**
@@ -5779,24 +5873,23 @@ export interface components {
       employeeId: string;
       date: string;
     };
+    WioHolidayDto: {
+      date: string;
+      name: string;
+    };
     WioMonthResponseDto: {
       month: string;
       /** @description Everyone the calendar accounts for — a day's office list is these people minus that day's marks. */
       people: components['schemas']['WioPersonDto'][];
-      /** @description Only the work-from-home days. Absence is the default, so a day with no mark means in the office. */
-      wfh: components['schemas']['WioMarkDto'][];
+      /** @description Only work-from-home days, from live requests. Absence is the default, so a day with no mark means in the office. */
+      wfh: components['schemas']['WioWfhDto'][];
       /**
        * @description Approved leave on working days, any type. The TYPE and the reason are deliberately absent: the calendar
        *     says someone is away, never why (sick and parental leave are nobody else's business).
        */
       pto: components['schemas']['WioPtoDto'][];
-    };
-    SetWioDayDto: {
-      wfh: boolean;
-    };
-    WioDayResponseDto: {
-      date: string;
-      wfh: boolean;
+      /** @description The month's public holidays, name included, so the calendar can say why a day has nobody in. */
+      holidays: components['schemas']['WioHolidayDto'][];
     };
     RequestApprovalResponseDto: {
       id: string;
@@ -8115,7 +8208,7 @@ export interface operations {
           | 'leave_document'
           | 'leave_entitlement'
           | 'holiday'
-          | 'wfh_day'
+          | 'wfh_request'
           | 'document'
           | 'document_version'
           | 'position'
@@ -10946,6 +11039,244 @@ export interface operations {
       };
     };
   };
+  WorkforceController_previewWfh: {
+    parameters: {
+      query: {
+        startDate: string;
+        endDate: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WfhPreviewResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  WorkforceController_listWfh: {
+    parameters: {
+      query?: {
+        employeeId?: string;
+        status?: 'pending' | 'approved' | 'rejected' | 'cancelled';
+        dateFrom?: string;
+        dateTo?: string;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data?: components['schemas']['WfhResponseDto'][];
+            pageInfo?: {
+              total: number;
+              limit: number;
+              offset: number;
+              hasNextPage: boolean;
+            };
+          };
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  WorkforceController_createWfh: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateWfhDto'];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WfhResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Conflict — duplicate record or state conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  WorkforceController_reviewWfh: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReviewDto'];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WfhResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  WorkforceController_cancelWfh: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WfhResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   WorkforceController_listOvertime: {
     parameters: {
       query?: {
@@ -11715,52 +12046,6 @@ export interface operations {
       };
       /** @description Unauthorized — missing or invalid authentication */
       401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unprocessable — business rule violation */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  WioCalendarController_setDay: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        date: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['SetWioDayDto'];
-      };
-    };
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['WioDayResponseDto'];
-        };
-      };
-      /** @description Unauthorized — missing or invalid authentication */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Precondition Failed */
-      412: {
         headers: {
           [name: string]: unknown;
         };

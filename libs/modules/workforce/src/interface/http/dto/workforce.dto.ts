@@ -7,6 +7,7 @@ import {
   leaveDayPortionEnum,
   leaveTypeEnum,
   leaveStatusEnum,
+  wfhStatusEnum,
   overtimeStatusEnum,
   shiftTypeEnum,
 } from '@db/schema/enums';
@@ -193,6 +194,65 @@ export class LeaveResponseDto {
   reviewerId!: string | null;
   reviewedAt!: string | null;
   createdAt!: string;
+}
+
+// ── Work from home ───────────────────────────────────────────────────────────
+export const CreateWfhSchema = z
+  .object({
+    startDate: dateStr,
+    endDate: dateStr,
+    reason: z.string().max(1000).optional(),
+  })
+  .refine((v) => v.startDate <= v.endDate, {
+    message: 'startDate must be on or before endDate',
+    path: ['endDate'],
+  });
+export class CreateWfhDto extends createZodDto(CreateWfhSchema) {}
+
+export const ListWfhQuerySchema = z
+  .object({
+    employeeId: z.string().uuid().optional(),
+    status: z.enum(wfhStatusEnum.enumValues).optional(),
+    /** Inclusive bounds on `startDate` — same rule as the leave list. */
+    dateFrom: dateStr.optional(),
+    dateTo: dateStr.optional(),
+  })
+  .merge(PaginationQuerySchema)
+  .refine((v) => !v.dateFrom || !v.dateTo || v.dateFrom <= v.dateTo, {
+    message: 'dateFrom must be on or before dateTo',
+    path: ['dateTo'],
+  });
+export class ListWfhQueryDto extends createZodDto(ListWfhQuerySchema) {}
+
+export class WfhResponseDto {
+  id!: string;
+  employeeId!: string;
+  startDate!: string;
+  endDate!: string;
+  reason!: string | null;
+  /** Working days the window covers — always a whole number. numeric arrives as a string; the API contract is a number. */
+  workingDays!: number;
+  @ApiProperty({ enum: wfhStatusEnum.enumValues })
+  status!: (typeof wfhStatusEnum.enumValues)[number];
+  reviewerId!: string | null;
+  reviewedAt!: string | null;
+  createdAt!: string;
+}
+
+/** What a window covers, before the request is filed: the working days themselves. */
+export const WfhPreviewQuerySchema = z
+  .object({ startDate: dateStr, endDate: dateStr })
+  .refine((v) => v.startDate <= v.endDate, {
+    message: 'startDate must be on or before endDate',
+    path: ['endDate'],
+  });
+export class WfhPreviewQueryDto extends createZodDto(WfhPreviewQuerySchema) {}
+
+export class WfhPreviewResponseDto {
+  startDate!: string;
+  endDate!: string;
+  /** The working days in `[startDate, endDate]` — weekends and public holidays skipped. */
+  workingDays!: string[];
 }
 
 // ── Overtime ─────────────────────────────────────────────────────────────────

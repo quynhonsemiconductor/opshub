@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   indexMonth,
-  isEditable,
   isWorkday,
   monthKey,
   shiftMonth,
   summariseDay,
-  withMark,
   type WioMonth,
 } from './wio-calendar-model';
 
@@ -19,11 +17,12 @@ const MONTH: WioMonth = {
   month: '2026-10',
   people: PEOPLE,
   wfh: [
-    { employeeId: 'b', date: '2026-10-22' },
-    { employeeId: 'c', date: '2026-10-22' },
-    { employeeId: 'a', date: '2026-10-23' },
+    { employeeId: 'b', date: '2026-10-22', status: 'approved' },
+    { employeeId: 'c', date: '2026-10-22', status: 'pending' },
+    { employeeId: 'a', date: '2026-10-23', status: 'approved' },
   ],
   pto: [],
+  holidays: [{ date: '2026-10-20', name: 'Lễ' }],
 };
 
 describe('month navigation', () => {
@@ -37,36 +36,51 @@ describe('month navigation', () => {
   });
 });
 
-describe('who can mark what', () => {
+describe('working days and holidays', () => {
   it('treats Monday to Friday as working days', () => {
     expect(isWorkday('2026-10-23')).toBe(true); // Fri
     expect(isWorkday('2026-10-24')).toBe(false); // Sat
     expect(isWorkday('2026-10-25')).toBe(false); // Sun
     expect(isWorkday('not-a-date')).toBe(false);
   });
-  it('allows today and later working days only', () => {
-    expect(isEditable('2026-10-21', '2026-10-21')).toBe(true);
-    expect(isEditable('2026-10-20', '2026-10-21')).toBe(false); // past
-    expect(isEditable('2026-10-24', '2026-10-21')).toBe(false); // weekend
+  it('indexes the month public holidays by date', () => {
+    expect(indexMonth(MONTH).holidays.get('2026-10-20')).toBe('Lễ');
+    expect(indexMonth(MONTH).holidays.has('2026-10-21')).toBe(false);
   });
 });
 
 describe('summariseDay', () => {
   const index = indexMonth(MONTH);
-  it('lists marked people as WFH and everyone else as in the office', () => {
+  it('counts only APPROVED marks as WFH; a pending one is its own list, not the office', () => {
     const day = summariseDay('2026-10-22', PEOPLE, index);
-    expect(day.wfh.map((p) => p.name)).toEqual(['Binh', 'Chi']);
+    expect(day.wfh.map((p) => p.name)).toEqual(['Binh']);
+    expect(day.pendingWfh.map((p) => p.name)).toEqual(['Chi']);
     expect(day.office.map((p) => p.name)).toEqual(['An']);
     expect(day.pto).toEqual([]);
   });
-  it('puts everyone in the office on a day nobody marked — the default', () => {
+  it('puts everyone in the office on a day nobody asked about — the default', () => {
     const day = summariseDay('2026-10-26', PEOPLE, index);
     expect(day.wfh).toEqual([]);
+    expect(day.pendingWfh).toEqual([]);
     expect(day.office).toHaveLength(3);
+  });
+  it('prefers an approved mark over a pending one for the same person and day', () => {
+    const both = indexMonth({
+      ...MONTH,
+      wfh: [
+        ...MONTH.wfh,
+        { employeeId: 'b', date: '2026-10-23', status: 'pending' },
+        { employeeId: 'b', date: '2026-10-23', status: 'approved' },
+      ],
+    });
+    const day = summariseDay('2026-10-23', PEOPLE, both);
+    expect(day.wfh.map((p) => p.name)).toEqual(['An', 'Binh']);
+    expect(day.pendingWfh).toEqual([]);
   });
   it('copes with a month that has not loaded yet', () => {
     expect(summariseDay('2026-10-22', [], indexMonth(undefined))).toEqual({
       wfh: [],
+      pendingWfh: [],
       office: [],
       pto: [],
       partial: new Map(),
@@ -79,17 +93,18 @@ describe('summariseDay with leave', () => {
     ...MONTH,
     pto: [
       { employeeId: 'a', date: '2026-10-22', portion: 'full_day' },
-      { employeeId: 'b', date: '2026-10-22', portion: 'full_day' }, // also ticked WFH that day
+      { employeeId: 'b', date: '2026-10-22', portion: 'full_day' }, // also approved WFH that day
       { employeeId: 'c', date: '2026-10-23', portion: 'morning' },
     ],
   });
   it('takes somebody on leave all day out of the office and WFH lists', () => {
     const day = summariseDay('2026-10-22', PEOPLE, withLeave);
     expect(day.pto.map((p) => p.name)).toEqual(['An', 'Binh']);
-    expect(day.wfh.map((p) => p.name)).toEqual(['Chi']);
+    expect(day.wfh.map((p) => p.name)).toEqual([]);
     expect(day.office).toEqual([]);
+    expect(day.pendingWfh.map((p) => p.name)).toEqual(['Chi']);
   });
-  it('lets leave win over a WFH tick, because somebody on leave is not working from home', () => {
+  it('lets leave win over an approved WFH mark, because somebody on leave is not working from home', () => {
     const day = summariseDay('2026-10-22', PEOPLE, withLeave);
     expect(day.wfh.map((p) => p.id)).not.toContain('b');
   });
@@ -98,26 +113,7 @@ describe('summariseDay with leave', () => {
     expect(day.pto).toEqual([]);
     expect(day.office.map((p) => p.name)).toContain('Chi');
     expect(day.partial.get('c')).toBe('morning');
-    // An's own WFH tick that day is unaffected.
+    // An's approved WFH that day is unaffected.
     expect(day.wfh.map((p) => p.name)).toEqual(['An']);
-  });
-});
-
-describe('withMark', () => {
-  it('adds a mark, and a second add does not duplicate it', () => {
-    const once = withMark(MONTH, '2026-10-26', 'a', true);
-    const twice = withMark(once, '2026-10-26', 'a', true);
-    expect(twice.wfh.filter((m) => m.date === '2026-10-26')).toHaveLength(1);
-  });
-  it('clears only that person on that day', () => {
-    const cleared = withMark(MONTH, '2026-10-22', 'b', false);
-    expect(cleared.wfh).toContainEqual({ employeeId: 'c', date: '2026-10-22' });
-    expect(cleared.wfh).not.toContainEqual({ employeeId: 'b', date: '2026-10-22' });
-    expect(cleared.wfh).toHaveLength(2);
-  });
-  it('does not mutate the month it was given', () => {
-    const before = JSON.stringify(MONTH);
-    withMark(MONTH, '2026-10-22', 'b', false);
-    expect(JSON.stringify(MONTH)).toBe(before);
   });
 });

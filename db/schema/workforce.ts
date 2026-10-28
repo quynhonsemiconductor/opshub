@@ -21,6 +21,7 @@ import {
   overtimeStatusEnum,
   shiftTypeEnum,
   timesheetStatusEnum,
+  wfhStatusEnum,
 } from './enums';
 import { requestItems } from './requests';
 
@@ -234,26 +235,35 @@ export const leavePolicies = workforceSchema.table('leave_policies', {
 });
 
 /**
- * One row per (employee, day) on which the employee works from home.
+ * One work-from-home REQUEST: a date range, costed in working days, approved as a whole.
  *
- * ABSENCE IS THE DEFAULT, NOT A STATUS. A day with no row is a day in the office; there is no
- * `wio` value to store, so "everyone is in the office until they say otherwise" needs no seeding,
- * no backfill when somebody joins, and no job that has to keep the future filled in. Setting a day
- * back to the office deletes its row.
+ * Mirrors `leave_requests` on purpose — the WIO calendar, the overlap rules and the review flow ask
+ * the same questions of both, so a second spelling of "a dated request somebody approves" would
+ * drift from the first. No portions (WFH is whole days) and no entitlement (WFH costs no allowance).
  *
- * `(employee_id, work_date)` is unique so a double click, or two tabs, cannot mark the same day twice.
+ * The stored fact is a REQUEST, not a day: being in the office is still the default, but a day now
+ * counts as WFH only when a request covering it is approved — a manager signs off, nobody ticks
+ * their own box. `working_days` is frozen at submit for the same reason leave's is: the holiday
+ * calendar is editable, and recomputing would restate what an approved request covers.
  */
-export const wfhDays = workforceSchema.table(
-  'wfh_days',
+export const wfhRequests = workforceSchema.table(
+  'wfh_requests',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     employeeId: uuid('employee_id').notNull(),
-    workDate: date('work_date').notNull(),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    /** Working days the window covers, computed at submit and then frozen. Always a whole number. */
+    workingDays: numeric('working_days', { precision: 5, scale: 2 }).notNull(),
+    reason: text('reason'),
+    status: wfhStatusEnum('status').notNull().default('pending'),
+    reviewerId: uuid('reviewer_id'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    requestId: uuid('request_id').references(() => requestItems.id, { onDelete: 'set null' }),
   },
   (t) => ({
-    employeeDateIdx: uniqueIndex('uq_wfh_employee_date').on(t.employeeId, t.workDate),
-    // The calendar reads a whole month for everyone: the date is the leading filter, not the employee.
-    dateIdx: index('ix_wfh_date').on(t.workDate),
+    employeeIdx: index('ix_wfh_employee').on(t.employeeId, t.startDate),
+    statusIdx: index('ix_wfh_status').on(t.status),
   }),
 );

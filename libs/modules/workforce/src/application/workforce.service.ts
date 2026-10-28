@@ -28,11 +28,14 @@ import {
 import type {
   LeaveType,
   CreateLeaveInput,
+  CreateWfhInput,
   CreateOvertimeInput,
   CreateShiftLogInput,
   CreateTimesheetInput,
   LeaveFilters,
   LeaveRequest,
+  WfhFilters,
+  WfhRequest,
   OvertimeEntry,
   OvertimeFilters,
   ShiftLog,
@@ -45,7 +48,9 @@ import {
   leaveWindowsOverlap,
   type LeaveWindow,
 } from '../domain/leave-window';
+import { workingDatesInRange } from '../domain/working-days';
 import type { LeaveRequestPayload } from './leave-request.type-def';
+import type { WfhRequestPayload } from './wfh-request.type-def';
 import type { OvertimePayload } from './overtime.type-def';
 import type { OnboardingPayload } from './onboarding.type-def';
 import type { OffboardingPayload } from './offboarding.type-def';
@@ -64,6 +69,7 @@ import type { OffboardingPayload } from './offboarding.type-def';
 export class WorkforceService {
   private readonly timesheetTrail: ResourceAuditTrail;
   private readonly leaveTrail: ResourceAuditTrail;
+  private readonly wfhTrail: ResourceAuditTrail;
   private readonly overtimeTrail: ResourceAuditTrail;
   private readonly employeeTrail: ResourceAuditTrail;
   private readonly entitlementTrail: ResourceAuditTrail;
@@ -81,6 +87,7 @@ export class WorkforceService {
   ) {
     this.timesheetTrail = audit.forResource(AUDIT_RESOURCE.TIMESHEET);
     this.leaveTrail = audit.forResource(AUDIT_RESOURCE.LEAVE_REQUEST);
+    this.wfhTrail = audit.forResource(AUDIT_RESOURCE.WFH_REQUEST);
     this.overtimeTrail = audit.forResource(AUDIT_RESOURCE.OVERTIME_ENTRY);
     this.employeeTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE);
     this.entitlementTrail = audit.forResource(AUDIT_RESOURCE.LEAVE_ENTITLEMENT);
@@ -429,6 +436,163 @@ export class WorkforceService {
     }
     const updated = await this.repo.setLeaveStatus(id, 'cancelled', null);
     return updated!;
+  }
+
+  // ── Work from home ─────────────────────────────────────────────────────────
+
+  /** The holiday set `workingDatesInRange` wants, from the same calendar leave costs against. */
+  private async holidaySet(startDate: string, endDate: string): Promise<Set<string>> {
+    return new Set(await this.balances.holidaysBetween(startDate, endDate));
+  }
+
+  /**
+   * What a WFH window would cover, before anybody commits to it: the working days themselves,
+   * weekends and public holidays skipped — the same arithmetic `createWfh` freezes on the row.
+   *
+   * The UI shows this count beside the date pickers, so the employee asks for what they think they
+   * are asking for and the manager approves a number, not a pair of dates.
+   */
+  async previewWfh(
+    startDate: string,
+    endDate: string,
+  ): Promise<{ startDate: string; endDate: string; workingDays: string[] }> {
+    return {
+      startDate,
+      endDate,
+      workingDays: workingDatesInRange(
+        startDate,
+        endDate,
+        await this.holidaySet(startDate, endDate),
+      ),
+    };
+  }
+
+  async createWfh(
+    input: Omit<CreateWfhInput, 'employeeId' | 'workingDays'>,
+    actor: Actor,
+  ): Promise<WfhRequest> {
+    // What the window actually covers, weekends and holidays skipped — computed once here and
+    // frozen on the row, for the same reason leave's cost is frozen: the holiday calendar is
+    // editable, and a later declaration inside an approved window would otherwise quietly
+    // restate what the manager approved.
+    const workingDays = workingDatesInRange(
+      input.startDate,
+      input.endDate,
+      await this.holidaySet(input.startDate, input.endDate),
+    );
+    if (workingDays.length === 0) {
+      // A window of nothing but weekends and holidays is a mistaken date range, not a request.
+      throw new PreconditionFailedException(
+        ErrorCodes.WFH_WINDOW_EMPTY,
+        'That window covers no working day',
+      );
+    }
+
+    // LEAVE AND WFH CANNOT COVER THE SAME DAY: a person cannot be on leave and working from home
+    // at once, so either request touching the other's days is refused. The range test is the whole
+    // verdict for WFH (whole days, no portions) — and for the leave side too, because a leave
+    // window that costs anything always covers a working day (`LEAVE_WINDOW_EMPTY`-equivalent is
+    // refused at its own submit), so any date-range touch is a day both would claim.
+    const [leaveCandidates, wfhWindows] = await Promise.all([
+      this.repo.overlappingLeaveCandidates(actor.sub, input.startDate, input.endDate),
+      this.repo.overlappingWfhWindows(actor.sub, input.startDate, input.endDate),
+    ]);
+    if (leaveCandidates.length > 0 || wfhWindows.length > 0) {
+      throw new ConflictException(
+        ErrorCodes.WFH_OVERLAPPING,
+        'You already have a leave or WFH request covering part of that window',
+      );
+    }
+
+    // Domain row first, then the engine — same order as leave, so the hooks always have a row to
+    // act on and a crash between the two leaves at most an orphan pending row, never a decided
+    // request with no domain record.
+    const request = await this.repo.createWfh({
+      ...input,
+      employeeId: actor.sub,
+      workingDays: workingDays.length,
+    });
+
+    const enginePayload: WfhRequestPayload = {
+      wfhRequestId: request.id,
+      employeeId: actor.sub,
+      startDate: request.startDate,
+      endDate: request.endDate,
+      workingDays: workingDays.length,
+      reason: request.reason,
+    };
+    const engineItem = await this.engine.submit('wfh_request', enginePayload, actor, {
+      expiresAt: new Date(Date.now() + 72 * MS_PER_HOUR), // 3-day review window
+    });
+
+    await this.db.transaction(async (tx) => {
+      await this.repo.setWfhRequestId(request.id, engineItem.id, tx);
+      await this.wfhTrail.record(AUDIT_ACTION.WFH_REQUESTED, request.id, actor, tx, {
+        after: {
+          startDate: request.startDate,
+          endDate: request.endDate,
+          workingDays: workingDays.length,
+          engineRequestId: engineItem.id,
+        },
+      });
+    });
+    return { ...request, requestId: engineItem.id };
+  }
+
+  async getWfh(id: string): Promise<WfhRequest> {
+    const w = await this.repo.findWfhById(id);
+    if (!w) throw new NotFoundException(ErrorCodes.WFH_REQUEST_NOT_FOUND, 'WFH request not found');
+    return w;
+  }
+
+  async listWfh(
+    filters: WfhFilters,
+    limit: number,
+    offset: number,
+    actor: Actor,
+  ): Promise<{ rows: WfhRequest[]; total: number }> {
+    return this.repo.listWfh(await this.narrowToActor(filters, actor), limit, offset);
+  }
+
+  async reviewWfh(id: string, approve: boolean, actor: Actor): Promise<WfhRequest> {
+    const w = await this.getWfh(id);
+    if (w.status !== 'pending') {
+      throw new PreconditionFailedException(
+        ErrorCodes.WFH_REQUEST_NOT_PENDING,
+        'Only pending WFH requests can be reviewed',
+      );
+    }
+    if (approve) {
+      await this.engine.approve(w.requestId!, null, actor);
+    } else {
+      await this.engine.reject(w.requestId!, null, actor);
+    }
+    return this.getWfh(id);
+  }
+
+  /**
+   * The requester withdraws their own still-pending WFH. Unlike leave there is no cancelling an
+   * APPROVED request: an approved WFH day answers "where is this person" for everyone else's
+   * planning, so changing it means a new request, which the overlap rule keeps honest.
+   */
+  async cancelWfh(id: string, actor: Actor): Promise<WfhRequest> {
+    const w = await this.getWfh(id);
+    await this.assertOwnerOrApprover(w.employeeId, actor);
+    if (w.status !== 'pending') {
+      throw new PreconditionFailedException(
+        ErrorCodes.WFH_REQUEST_NOT_PENDING,
+        'Only a pending WFH request can be withdrawn; file a new one instead',
+      );
+    }
+    const updated = await this.db.transaction(async (tx) => {
+      const row = await this.repo.setWfhStatus(id, 'cancelled', null, tx);
+      await this.wfhTrail.record(AUDIT_ACTION.WFH_CANCELLED, id, actor, tx, {
+        before: { status: 'pending' },
+        after: { status: 'cancelled' },
+      });
+      return row!;
+    });
+    return updated;
   }
 
   // ── Overtime ───────────────────────────────────────────────────────────────

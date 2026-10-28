@@ -17,26 +17,20 @@ export const WioMonthQuerySchema = z.object({
 });
 export class WioMonthQueryDto extends createZodDto(WioMonthQuerySchema) {}
 
-export const WioDayParamSchema = z.object({
-  date: z.string().date(),
-});
-export class WioDayParamDto extends createZodDto(WioDayParamSchema) {}
-
-export const SetWioDaySchema = z.object({
-  /** True = working from home that day; false = back to the office, which is the default. */
-  wfh: z.boolean(),
-});
-export class SetWioDayDto extends createZodDto(SetWioDaySchema) {}
-
 export class WioPersonDto {
   id!: string;
   name!: string;
   department!: string | null;
 }
 
-export class WioMarkDto {
+export class WioWfhDto {
   employeeId!: string;
   date!: string;
+  /**
+   * `approved` = a manager signed off; `pending` = asked, not yet answered. A rejected or cancelled
+   * request leaves no mark at all.
+   */
+  status!: 'approved' | 'pending';
 }
 
 export class WioPtoDto {
@@ -47,20 +41,22 @@ export class WioPtoDto {
   portion!: (typeof leaveDayPortionEnum.enumValues)[number];
 }
 
+export class WioHolidayDto {
+  date!: string;
+  name!: string;
+}
+
 export class WioMonthResponseDto {
   month!: string;
   /** Everyone the calendar accounts for — a day's office list is these people minus that day's marks. */
   people!: WioPersonDto[];
-  /** Only the work-from-home days. Absence is the default, so a day with no mark means in the office. */
-  wfh!: WioMarkDto[];
+  /** Only work-from-home days, from live requests. Absence is the default, so a day with no mark means in the office. */
+  wfh!: WioWfhDto[];
   /**
    * Approved leave on working days, any type. The TYPE and the reason are deliberately absent: the calendar
    * says someone is away, never why (sick and parental leave are nobody else's business).
    */
   pto!: WioPtoDto[];
-}
-
-export class WioDayResponseDto {
-  date!: string;
-  wfh!: boolean;
+  /** The month's public holidays, name included, so the calendar can say why a day has nobody in. */
+  holidays!: WioHolidayDto[];
 }

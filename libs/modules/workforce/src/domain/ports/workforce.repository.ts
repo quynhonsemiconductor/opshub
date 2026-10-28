@@ -7,6 +7,10 @@ import type {
   LeaveFilters,
   LeaveRequest,
   LeaveStatus,
+  WfhFilters,
+  WfhRequest,
+  WfhStatus,
+  CreateWfhInput,
   OvertimeEntry,
   OvertimeFilters,
   OvertimeStatus,
@@ -78,6 +82,33 @@ export interface IWorkforceRepository {
     startDate: string,
     endDate: string,
   ): Promise<LeaveWindow[]>;
+
+  // Work from home
+  createWfh(input: CreateWfhInput): Promise<WfhRequest>;
+  findWfhById(id: string): Promise<WfhRequest | null>;
+  listWfh(
+    filters: WfhFilters,
+    limit: number,
+    offset: number,
+  ): Promise<{ rows: WfhRequest[]; total: number }>;
+  setWfhStatus(
+    id: string,
+    status: WfhStatus,
+    reviewerId: string | null,
+    tx?: DbExecutor,
+  ): Promise<WfhRequest | null>;
+  /** Backlink the engine request_items id into the domain row. */
+  setWfhRequestId(id: string, requestId: string, tx?: DbExecutor): Promise<void>;
+  /**
+   * This employee's live (pending or approved) WFH windows whose DATE RANGE touches
+   * `[startDate, endDate]`. WFH is whole days, so the range test is the whole verdict — no
+   * portion arithmetic to finish in the caller, unlike `overlappingLeaveCandidates`.
+   */
+  overlappingWfhWindows(
+    employeeId: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<{ startDate: string; endDate: string }[]>;
 
   // Overtime
   createOvertime(input: CreateOvertimeInput): Promise<OvertimeEntry>;

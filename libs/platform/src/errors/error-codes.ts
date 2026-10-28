@@ -48,8 +48,12 @@ export const ErrorCodes = {
   // Workforce
   TIMESHEET_NOT_FOUND: 'TIMESHEET_NOT_FOUND',
   TIMESHEET_NOT_EDITABLE: 'TIMESHEET_NOT_EDITABLE',
-  /** A WIO-calendar day that is already past, or is not a working day (a weekend). */
-  WFH_DAY_NOT_EDITABLE: 'WFH_DAY_NOT_EDITABLE',
+  /** The window overlaps this employee's live leave or WFH — a day can only be asked for once. */
+  WFH_REQUEST_NOT_FOUND: 'WFH_REQUEST_NOT_FOUND',
+  WFH_REQUEST_NOT_PENDING: 'WFH_REQUEST_NOT_PENDING',
+  WFH_OVERLAPPING: 'WFH_OVERLAPPING',
+  /** A WFH window that covers no working day — nothing to ask the manager to approve. */
+  WFH_WINDOW_EMPTY: 'WFH_WINDOW_EMPTY',
   LEAVE_REQUEST_NOT_FOUND: 'LEAVE_REQUEST_NOT_FOUND',
   LEAVE_REQUEST_NOT_PENDING: 'LEAVE_REQUEST_NOT_PENDING',
   LEAVE_OVERLAPPING: 'LEAVE_OVERLAPPING',

@@ -8,8 +8,10 @@ export type PtoPortion = components['schemas']['WioPtoDto']['portion'];
 /**
  * Pure helpers behind the WIO calendar — no React, no dates read from the clock, so a test fixes "today".
  *
- * The data model is "who works from home"; being in the office is the ABSENCE of a mark. So a day's
- * office list is never stored or fetched, it is everyone minus that day's marks.
+ * The data model is "who works from home"; being in the office is the ABSENCE of a mark. Since WFH
+ * became a manager-approved request (rules 2026-10-28), a mark carries a status: `approved` counts,
+ * `pending` is shown as asked-for-but-not-answered. Public holidays are marks of a different kind —
+ * a day nobody is expected in.
  */
 
 /** `YYYY-MM` for a calendar month; `m` is zero-based like `Date`. */
@@ -31,25 +33,24 @@ export function isWorkday(iso: string): boolean {
   return weekday !== 0 && weekday !== 6;
 }
 
-/** Whether the signed-in person may change `iso`: a working day that is today or later. */
-export function isEditable(iso: string, todayIso: string): boolean {
-  return isWorkday(iso) && iso >= todayIso;
-}
-
 /** A month's marks, indexed by date so each of the ~30 day cells reads its people without rescanning. */
 export interface MonthIndex {
-  /** date → ids working from home */
-  wfh: Map<string, Set<string>>;
+  /** date → id → whether the WFH request covering that day is approved or still pending */
+  wfh: Map<string, Map<string, 'approved' | 'pending'>>;
   /** date → id → how much of that day is approved leave */
   pto: Map<string, Map<string, PtoPortion>>;
+  /** date → holiday name. A holiday day has nobody expected in, whatever the marks say. */
+  holidays: Map<string, string>;
 }
 
 export function indexMonth(month: WioMonth | undefined): MonthIndex {
-  const wfh = new Map<string, Set<string>>();
+  const wfh = new Map<string, Map<string, 'approved' | 'pending'>>();
   for (const mark of month?.wfh ?? []) {
-    const ids = wfh.get(mark.date) ?? new Set<string>();
-    ids.add(mark.employeeId);
-    wfh.set(mark.date, ids);
+    const byId = wfh.get(mark.date) ?? new Map<string, 'approved' | 'pending'>();
+    // An approved request outranks a pending one on the same day (submit refuses the overlap; this
+    // is the same defence the API applies, kept in step here).
+    if (byId.get(mark.employeeId) !== 'approved') byId.set(mark.employeeId, mark.status);
+    wfh.set(mark.date, byId);
   }
   const pto = new Map<string, Map<string, PtoPortion>>();
   for (const mark of month?.pto ?? []) {
@@ -57,41 +58,44 @@ export function indexMonth(month: WioMonth | undefined): MonthIndex {
     byId.set(mark.employeeId, mark.portion);
     pto.set(mark.date, byId);
   }
-  return { wfh, pto };
+  const holidays = new Map<string, string>();
+  for (const holiday of month?.holidays ?? []) holidays.set(holiday.date, holiday.name);
+  return { wfh, pto, holidays };
 }
 
 export interface DaySummary {
+  /** WFH the manager signed off. */
   wfh: WioPerson[];
+  /** WFH asked for but not answered yet. */
+  pendingWfh: WioPerson[];
   office: WioPerson[];
-  /** On leave for the WHOLE day. A half-day of leave leaves the person in `wfh` or `office` instead. */
+  /** On leave for the WHOLE day. A half-day of leave leaves the person in `wfh`, `pendingWfh` or `office` instead. */
   pto: WioPerson[];
-  /** People who are away for half of the day and so still appear in `wfh` or `office`. */
+  /** People who are away for half of the day and so still appear in `wfh`, `pendingWfh` or `office`. */
   partial: Map<string, Exclude<PtoPortion, 'full_day'>>;
 }
 
 /**
- * Where everyone is on `iso`. A day of approved leave wins over a WFH mark: somebody on leave is not
- * working from home. Half a day of leave does not remove the person from the office or WFH list, since
- * they are working the other half; it is reported in `partial` so the list can say which half is off.
+ * Where everyone is on `iso`. Precedence, the same ladder the API applies: an approved full day of
+ * leave wins over a WFH mark (somebody on leave is not working from home); a WFH mark wins over the
+ * office default. A PENDING WFH mark is not a WFH day yet — the person sits in neither list, but in
+ * `pendingWfh`, because the manager may still say no and the calendar must not read the day as settled.
  */
 export function summariseDay(iso: string, people: WioPerson[], index: MonthIndex): DaySummary {
   const away = index.wfh.get(iso);
   const leave = index.pto.get(iso);
-  const summary: DaySummary = { wfh: [], office: [], pto: [], partial: new Map() };
+  const summary: DaySummary = { wfh: [], pendingWfh: [], office: [], pto: [], partial: new Map() };
   for (const person of people) {
     const portion = leave?.get(person.id);
     if (portion === 'full_day') {
       summary.pto.push(person);
       continue;
     }
-    (away?.has(person.id) ? summary.wfh : summary.office).push(person);
+    const mark = away?.get(person.id);
+    if (mark === 'approved') summary.wfh.push(person);
+    else if (mark === 'pending') summary.pendingWfh.push(person);
+    else summary.office.push(person);
     if (portion) summary.partial.set(person.id, portion);
   }
   return summary;
-}
-
-/** The same month with `employeeId`'s mark on `iso` set or cleared — what an optimistic update writes. */
-export function withMark(month: WioMonth, iso: string, employeeId: string, wfh: boolean): WioMonth {
-  const others = month.wfh.filter((m) => !(m.date === iso && m.employeeId === employeeId));
-  return { ...month, wfh: wfh ? [...others, { employeeId, date: iso }] : others };
 }
