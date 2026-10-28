@@ -6,6 +6,7 @@ import { OvertimeTab } from './overtime-tab';
 import { ShiftsTab } from './shifts-tab';
 import { LeaveAdminTab } from './leave-admin-tab';
 import { WioCalendarTab } from './wio-calendar-tab';
+import { AttendanceTab } from './attendance-tab';
 
 /*
  * WHAT THIS SCREEN NO LONGER CARRIES
@@ -22,11 +23,14 @@ import { WioCalendarTab } from './wio-calendar-tab';
  * `new Date('2026-03-04')` was rendering as the 3rd for anybody behind UTC.
  */
 
-type WorkforceTab = 'timesheets' | 'wio' | 'leave' | 'balances' | 'overtime' | 'shifts';
+type WorkforceTab =
+  'timesheets' | 'attendance' | 'wio' | 'leave' | 'balances' | 'overtime' | 'shifts';
 
 const WORKFORCE_TABS: { value: WorkforceTab; label: string }[] = [
   { value: 'timesheets', label: 'Timesheets' },
-  // Beside Timesheets: both answer "where is everyone working", this one for the days ahead.
+  // Beside Timesheets: the door swipes timesheets are hand-entered from, derived into days.
+  { value: 'attendance', label: 'Chấm công' },
+  // Both answer "where is everyone working"; this one for the days ahead.
   { value: 'wio', label: 'WIO Calendar' },
   { value: 'leave', label: 'Leave' },
   // Next to Leave, not at the end: "how many days do I have" is the question somebody asks on the way to
@@ -58,6 +62,7 @@ export function WorkforcePage() {
       {/* One panel mounted at a time: all four would fire all four queries on load. */}
       <TabPanel idPrefix="workforce" value={tab}>
         {tab === 'timesheets' && <TimesheetsTab />}
+        {tab === 'attendance' && <AttendanceTab />}
         {tab === 'wio' && <WioCalendarTab />}
         {tab === 'leave' && <LeaveTab />}
         {tab === 'balances' && <LeaveAdminTab />}

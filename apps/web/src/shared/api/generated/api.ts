@@ -1362,6 +1362,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/workforce/attendance/summary.csv': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The monthly summary CSV, one row per employee
+     * @description office_days, wfh_days, leave days by type, unpaid, unexcused absences, late/early counts, total hours — derived from the same month view, never stored.
+     */
+    get: operations['AttendanceController_summaryCsv'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/attendance/days.csv': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The per-day CSV, one row per employee per working day */
+    get: operations['AttendanceController_daysCsv'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/workforce/attendance/justifications/preview': {
     parameters: {
       query?: never;
@@ -6048,12 +6085,19 @@ export interface components {
       status: 'holiday' | 'leave' | 'wfh' | 'office' | 'absent';
       /** @description The day's unresolved problems; an approved justification clears them. */
       flags: ('late' | 'early' | 'missing_checkout' | 'absent' | 'unsynced')[];
+      /**
+       * @description Which part of the day approved leave takes, when any — halves count 0.5 in the sheets.
+       * @enum {string|null}
+       */
+      leavePortion: 'full_day' | 'morning' | 'afternoon' | null;
       date: string;
       workedMinutes: number;
       lateMinutes: number | null;
       earlyMinutes: number | null;
       /** @description A justification has been filed for this day but not decided yet. */
       pendingJustification: boolean;
+      /** @description The approved leave type covering the day, when the status is `leave`. */
+      leaveType: string | null;
     };
     EmployeeAttendanceMonthDto: {
       id: string;
@@ -12350,6 +12394,48 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  AttendanceController_summaryCsv: {
+    parameters: {
+      query: {
+        month: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': string;
+        };
+      };
+    };
+  };
+  AttendanceController_daysCsv: {
+    parameters: {
+      query: {
+        month: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': string;
+        };
       };
     };
   };
