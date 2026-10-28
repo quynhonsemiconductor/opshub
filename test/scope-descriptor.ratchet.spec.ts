@@ -49,7 +49,14 @@ const ROOT = join(__dirname, '..');
  * descriptor, not to edit this line — a new route acting on one row is exactly the case this is here
  * to stop accumulating.
  */
-const MAX_UNSCOPED_ROW_ROUTES = 154;
+/*
+ * 151 after the four workforce review routes (timesheet, leave, WFH, overtime) got descriptors in
+ * the WFH-request PR: a new `:id/review` sibling either matches its siblings or the
+ * sibling-agreement assertion fails, so the new route closed the whole group. The routes now honour
+ * a scoped `workforce.approve` grant instead of failing closed for its holder; the engine's own
+ * separation-of-duties check still refuses a requester approving their own request.
+ */
+const MAX_UNSCOPED_ROW_ROUTES = 151;
 
 /** Sanity floor: if the scanner stops finding routes, fail loudly rather than silently. */
 const MIN_ROW_ROUTES_FOUND = 120;

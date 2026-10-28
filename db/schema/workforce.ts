@@ -21,6 +21,7 @@ import {
   overtimeStatusEnum,
   shiftTypeEnum,
   timesheetStatusEnum,
+  wfhStatusEnum,
 } from './enums';
 import { requestItems } from './requests';
 
@@ -232,3 +233,37 @@ export const leavePolicies = workforceSchema.table('leave_policies', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * One work-from-home REQUEST: a date range, costed in working days, approved as a whole.
+ *
+ * Mirrors `leave_requests` on purpose — the WIO calendar, the overlap rules and the review flow ask
+ * the same questions of both, so a second spelling of "a dated request somebody approves" would
+ * drift from the first. No portions (WFH is whole days) and no entitlement (WFH costs no allowance).
+ *
+ * The stored fact is a REQUEST, not a day: being in the office is still the default, but a day now
+ * counts as WFH only when a request covering it is approved — a manager signs off, nobody ticks
+ * their own box. `working_days` is frozen at submit for the same reason leave's is: the holiday
+ * calendar is editable, and recomputing would restate what an approved request covers.
+ */
+export const wfhRequests = workforceSchema.table(
+  'wfh_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    employeeId: uuid('employee_id').notNull(),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    /** Working days the window covers, computed at submit and then frozen. Whole days only. */
+    workingDays: integer('working_days').notNull(),
+    reason: text('reason'),
+    status: wfhStatusEnum('status').notNull().default('pending'),
+    reviewerId: uuid('reviewer_id'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    requestId: uuid('request_id').references(() => requestItems.id, { onDelete: 'set null' }),
+  },
+  (t) => ({
+    employeeIdx: index('ix_wfh_employee').on(t.employeeId, t.startDate),
+    statusIdx: index('ix_wfh_status').on(t.status),
+  }),
+);

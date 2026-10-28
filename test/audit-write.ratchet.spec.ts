@@ -77,7 +77,7 @@ const CONTROLLER_AUDIT_SITES = new Set<string>([
  * MAY ONLY FALL. Every one is a mutation that can commit with no audit entry. Reaching 0
  * means every audit write shares its mutation's transaction.
  */
-const FIRE_AND_FORGET_BASELINE = 18;
+const FIRE_AND_FORGET_BASELINE = 17;
 
 function sourceFiles(): string[] {
   return (

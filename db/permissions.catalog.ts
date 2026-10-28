@@ -261,6 +261,12 @@ export const PERMISSION = {
   WORKFORCE_APPROVE: 'workforce.approve',
   WORKFORCE_LEAVE_REVIEW: 'workforce.leave.review',
   WORKFORCE_OVERTIME_REVIEW: 'workforce.overtime.review',
+  /**
+   * Approve or reject work-from-home requests. A distinct code from leave review because the acts
+   * differ: leave spends an allowance, WFH only moves a chair, and a role that should sign off one
+   * but not the other is a real delegation (an office manager routing WFH, HR owning leave).
+   */
+  WORKFORCE_WFH_REVIEW: 'workforce.wfh.review',
 
   // ── onboarding / offboarding workflows ─────────────────────────────────────
   ONBOARDING_APPROVE: 'onboarding.approve',
@@ -390,6 +396,8 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   [PERMISSION.WORKFORCE_MANAGE]: 'Manage the holiday calendar and annual leave entitlements',
   [PERMISSION.WORKFORCE_APPROVE]: 'Approve or reject workforce requests (legacy)',
   [PERMISSION.WORKFORCE_LEAVE_REVIEW]: 'Approve or reject leave requests via the approval engine',
+  [PERMISSION.WORKFORCE_WFH_REVIEW]:
+    'Approve or reject work-from-home requests via the approval engine',
   [PERMISSION.WORKFORCE_OVERTIME_REVIEW]:
     'Approve or reject overtime requests via the approval engine',
   [PERMISSION.ONBOARDING_APPROVE]: 'Step-1: Manager approves new employee hire',
@@ -584,6 +592,7 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.WORKFORCE_APPROVE,
     PERMISSION.WORKFORCE_LEAVE_REVIEW,
     PERMISSION.WORKFORCE_OVERTIME_REVIEW,
+    PERMISSION.WORKFORCE_WFH_REVIEW,
     PERMISSION.WORKFORCE_MANAGE,
     PERMISSION.DOCUMENTS_READ,
     PERMISSION.DOCUMENTS_MANAGE,
@@ -611,6 +620,7 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.WORKFORCE_APPROVE,
     PERMISSION.WORKFORCE_LEAVE_REVIEW,
     PERMISSION.WORKFORCE_OVERTIME_REVIEW,
+    PERMISSION.WORKFORCE_WFH_REVIEW,
     PERMISSION.ACCESS_REQUEST_READ,
     PERMISSION.ACCESS_REQUEST_APPROVE,
     PERMISSION.REQUEST_READ,

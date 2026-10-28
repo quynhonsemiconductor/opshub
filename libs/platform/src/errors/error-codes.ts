@@ -48,6 +48,15 @@ export const ErrorCodes = {
   // Workforce
   TIMESHEET_NOT_FOUND: 'TIMESHEET_NOT_FOUND',
   TIMESHEET_NOT_EDITABLE: 'TIMESHEET_NOT_EDITABLE',
+  /** The window overlaps this employee's live leave or WFH — a day can only be asked for once. */
+  WFH_REQUEST_NOT_FOUND: 'WFH_REQUEST_NOT_FOUND',
+  WFH_REQUEST_NOT_PENDING: 'WFH_REQUEST_NOT_PENDING',
+  WFH_OVERLAPPING: 'WFH_OVERLAPPING',
+  /** A WFH window that covers no working day — nothing to ask the manager to approve. */
+  WFH_WINDOW_EMPTY: 'WFH_WINDOW_EMPTY',
+  /** A WFH window starting before today — justifications explain the past, WFH plans it. */
+  WFH_WINDOW_PAST: 'WFH_WINDOW_PAST',
+  WFH_WINDOW_TOO_LONG: 'WFH_WINDOW_TOO_LONG',
   LEAVE_REQUEST_NOT_FOUND: 'LEAVE_REQUEST_NOT_FOUND',
   LEAVE_REQUEST_NOT_PENDING: 'LEAVE_REQUEST_NOT_PENDING',
   LEAVE_OVERLAPPING: 'LEAVE_OVERLAPPING',

@@ -1,4 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { eq, sql } from 'drizzle-orm';
+import { employees } from '../../../../../db/schema';
 import {
   AuthzService,
   ConflictException,
@@ -28,11 +30,14 @@ import {
 import type {
   LeaveType,
   CreateLeaveInput,
+  CreateWfhInput,
   CreateOvertimeInput,
   CreateShiftLogInput,
   CreateTimesheetInput,
   LeaveFilters,
   LeaveRequest,
+  WfhFilters,
+  WfhRequest,
   OvertimeEntry,
   OvertimeFilters,
   ShiftLog,
@@ -45,7 +50,9 @@ import {
   leaveWindowsOverlap,
   type LeaveWindow,
 } from '../domain/leave-window';
+import { workingDatesInRange } from '../domain/working-days';
 import type { LeaveRequestPayload } from './leave-request.type-def';
+import type { WfhRequestPayload } from './wfh-request.type-def';
 import type { OvertimePayload } from './overtime.type-def';
 import type { OnboardingPayload } from './onboarding.type-def';
 import type { OffboardingPayload } from './offboarding.type-def';
@@ -64,6 +71,7 @@ import type { OffboardingPayload } from './offboarding.type-def';
 export class WorkforceService {
   private readonly timesheetTrail: ResourceAuditTrail;
   private readonly leaveTrail: ResourceAuditTrail;
+  private readonly wfhTrail: ResourceAuditTrail;
   private readonly overtimeTrail: ResourceAuditTrail;
   private readonly employeeTrail: ResourceAuditTrail;
   private readonly entitlementTrail: ResourceAuditTrail;
@@ -81,6 +89,7 @@ export class WorkforceService {
   ) {
     this.timesheetTrail = audit.forResource(AUDIT_RESOURCE.TIMESHEET);
     this.leaveTrail = audit.forResource(AUDIT_RESOURCE.LEAVE_REQUEST);
+    this.wfhTrail = audit.forResource(AUDIT_RESOURCE.WFH_REQUEST);
     this.overtimeTrail = audit.forResource(AUDIT_RESOURCE.OVERTIME_ENTRY);
     this.employeeTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE);
     this.entitlementTrail = audit.forResource(AUDIT_RESOURCE.LEAVE_ENTITLEMENT);
@@ -281,17 +290,41 @@ export class WorkforceService {
     // The date-range test finds the CANDIDATES in SQL; the portions decide. A morning off and an
     // afternoon off on the same date share a date and no time, so refusing the second would be
     // refusing leave the employee can see is free.
-    const candidates = await this.repo.overlappingLeaveCandidates(
-      actor.sub,
-      input.startDate,
-      input.endDate,
-    );
-    if (candidates.some((existing) => leaveWindowsOverlap(window, existing))) {
-      throw new ConflictException(
-        ErrorCodes.LEAVE_OVERLAPPING,
-        'You already have a leave request covering part of that window',
+    //
+    // BOTH WAYS AND UNDER THE WINDOW LOCK. Leave must also refuse a day already claimed by a live
+    // WFH request (a person cannot be on leave and working from home at once), and the check + the
+    // insert run in ONE transaction holding a per-employee advisory lock, so two requests filed in
+    // the same instant serialize instead of both passing the other's absent row.
+    const leave = await this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`workforce_window:${actor.sub}`}))`,
       );
-    }
+      const candidates = await this.repo.overlappingLeaveCandidates(
+        actor.sub,
+        input.startDate,
+        input.endDate,
+        tx,
+      );
+      if (candidates.some((existing) => leaveWindowsOverlap(window, existing))) {
+        throw new ConflictException(
+          ErrorCodes.LEAVE_OVERLAPPING,
+          'You already have a leave request covering part of that window',
+        );
+      }
+      const wfhWindows = await this.repo.overlappingWfhWindows(
+        actor.sub,
+        input.startDate,
+        input.endDate,
+        tx,
+      );
+      if (wfhWindows.length > 0) {
+        throw new ConflictException(
+          ErrorCodes.LEAVE_OVERLAPPING,
+          'You already have a WFH request covering part of that window',
+        );
+      }
+      return this.repo.createLeave({ ...input, ...window, employeeId: actor.sub, workingDays }, tx);
+    });
 
     // What this request COSTS, with weekends, public holidays and part-day ends applied — computed
     // once here and stored on the row, never recomputed. The holiday calendar is editable, so a
@@ -311,14 +344,6 @@ export class WorkforceService {
       // they have been earned? Judging it today would refuse every advance booking.
       input.endDate,
     );
-
-    // Create domain row first, then submit to engine
-    const leave = await this.repo.createLeave({
-      ...input,
-      ...window,
-      employeeId: actor.sub,
-      workingDays,
-    });
 
     const enginePayload: LeaveRequestPayload = {
       leaveRequestId: leave.id,
@@ -421,6 +446,13 @@ export class WorkforceService {
   async cancelLeave(id: string, actor: Actor): Promise<LeaveRequest> {
     const l = await this.getLeave(id);
     await this.assertOwnerOrApprover(l.employeeId, actor);
+    if (l.requestId) {
+      // THROUGH the engine: the item and the domain row change in ONE transaction, each guarded
+      // pending. Writing the domain status alone (the pre-existing bug) left the engine item
+      // pending forever — still in the approver's queue, still SLA-ticking.
+      await this.engine.cancel(l.requestId, actor);
+      return this.getLeave(id);
+    }
     if (l.status !== 'pending' && l.status !== 'approved') {
       throw new PreconditionFailedException(
         ErrorCodes.LEAVE_REQUEST_NOT_PENDING,
@@ -429,6 +461,232 @@ export class WorkforceService {
     }
     const updated = await this.repo.setLeaveStatus(id, 'cancelled', null);
     return updated!;
+  }
+
+  // ── Work from home ─────────────────────────────────────────────────────────
+
+  /**
+   * WFH plans ahead: the window starts today or later (judged in Asia/Ho_Chi_Minh, fixed UTC+7),
+   * and spans at most 92 days — a bound against both mistake input and an unbounded expansion.
+   */
+  private assertWfhWindowShape(startDate: string, endDate: string): void {
+    const today = new Date(Date.now() + 7 * 3_600_000).toISOString().slice(0, 10);
+    if (startDate < today) {
+      throw new PreconditionFailedException(
+        ErrorCodes.WFH_WINDOW_PAST,
+        'A WFH request cannot start in the past',
+      );
+    }
+    const spanMs =
+      new Date(`${endDate}T00:00:00Z`).getTime() - new Date(`${startDate}T00:00:00Z`).getTime();
+    if (spanMs > 92 * 86_400_000) {
+      throw new PreconditionFailedException(
+        ErrorCodes.WFH_WINDOW_TOO_LONG,
+        'A WFH request cannot span more than 92 days',
+      );
+    }
+  }
+
+  /**
+   * The employee's manager, or null when there is none (or the "manager" is the person themself —
+   * a self-assigned manager would collide with the engine's separation-of-duties refusal and stall
+   * the request forever). Null leaves the request unassigned: any holder decides, which is the
+   * HR/admin fallback the rules name.
+   */
+  private async managerOf(employeeId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ managerId: employees.managerId })
+      .from(employees)
+      .where(eq(employees.id, employeeId))
+      .limit(1);
+    const managerId = row?.managerId ?? null;
+    return managerId && managerId !== employeeId ? managerId : null;
+  }
+
+  /** The holiday set `workingDatesInRange` wants, from the same calendar leave costs against. */
+  private async holidaySet(startDate: string, endDate: string): Promise<Set<string>> {
+    return new Set(await this.balances.holidaysBetween(startDate, endDate));
+  }
+
+  /**
+   * What a WFH window would cover, before anybody commits to it: the working days themselves,
+   * weekends and public holidays skipped — the same arithmetic `createWfh` freezes on the row.
+   *
+   * The UI shows this count beside the date pickers, so the employee asks for what they think they
+   * are asking for and the manager approves a number, not a pair of dates.
+   */
+  async previewWfh(
+    startDate: string,
+    endDate: string,
+  ): Promise<{ startDate: string; endDate: string; workingDays: string[] }> {
+    return {
+      startDate,
+      endDate,
+      workingDays: workingDatesInRange(
+        startDate,
+        endDate,
+        await this.holidaySet(startDate, endDate),
+      ),
+    };
+  }
+
+  async createWfh(
+    input: Omit<CreateWfhInput, 'employeeId' | 'workingDays'>,
+    actor: Actor,
+  ): Promise<WfhRequest> {
+    // What the window actually covers, weekends and holidays skipped — computed once here and
+    // frozen on the row, for the same reason leave's cost is frozen: the holiday calendar is
+    // editable, and a later declaration inside an approved window would otherwise quietly
+    // restate what the manager approved.
+    this.assertWfhWindowShape(input.startDate, input.endDate);
+    const workingDays = workingDatesInRange(
+      input.startDate,
+      input.endDate,
+      await this.holidaySet(input.startDate, input.endDate),
+    );
+    if (workingDays.length === 0) {
+      // A window of nothing but weekends and holidays is a mistaken date range, not a request.
+      throw new PreconditionFailedException(
+        ErrorCodes.WFH_WINDOW_EMPTY,
+        'That window covers no working day',
+      );
+    }
+
+    // LEAVE AND WFH CANNOT COVER THE SAME DAY: a person cannot be on leave and working from home
+    // at once, so either request touching the other's days is refused. The range test is the whole
+    // verdict for WFH (whole days, no portions) — and for the leave side too, because a leave
+    // window that costs anything always covers a working day (`LEAVE_WINDOW_EMPTY`-equivalent is
+    // refused at its own submit), so any date-range touch is a day both would claim.
+    // LEAVE AND WFH CANNOT COVER THE SAME DAY, checked BOTH ways under the same per-employee
+    // window lock `createLeave` takes, in one transaction with the insert — see there for why the
+    // lock; here for the other direction of the same rule.
+    const request = await this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`workforce_window:${actor.sub}`}))`,
+      );
+      const leaveCandidates = await this.repo.overlappingLeaveCandidates(
+        actor.sub,
+        input.startDate,
+        input.endDate,
+        tx,
+      );
+      const wfhWindows = await this.repo.overlappingWfhWindows(
+        actor.sub,
+        input.startDate,
+        input.endDate,
+        tx,
+      );
+      if (leaveCandidates.length > 0 || wfhWindows.length > 0) {
+        throw new ConflictException(
+          ErrorCodes.WFH_OVERLAPPING,
+          'You already have a leave or WFH request covering part of that window',
+        );
+      }
+      return this.repo.createWfh(
+        { ...input, employeeId: actor.sub, workingDays: workingDays.length },
+        tx,
+      );
+    });
+
+    const enginePayload: WfhRequestPayload = {
+      wfhRequestId: request.id,
+      employeeId: actor.sub,
+      startDate: request.startDate,
+      endDate: request.endDate,
+      workingDays: workingDays.length,
+      reason: request.reason,
+    };
+    // The decision is WAITING ON the requester's manager when there is one: the engine refuses any
+    // other holder of the permission while an assignee is set, so "any manager approves anyone" is
+    // over. No manager leaves it unassigned, which hands it to any holder — the HR/admin fallback.
+    const engineItem = await this.engine.submit('wfh_request', enginePayload, actor, {
+      expiresAt: new Date(Date.now() + 72 * MS_PER_HOUR), // 3-day review window
+      assigneeId: (await this.managerOf(actor.sub)) ?? undefined,
+    });
+
+    await this.db.transaction(async (tx) => {
+      await this.repo.setWfhRequestId(request.id, engineItem.id, tx);
+      await this.wfhTrail.record(AUDIT_ACTION.WFH_REQUESTED, request.id, actor, tx, {
+        after: {
+          startDate: request.startDate,
+          endDate: request.endDate,
+          workingDays: workingDays.length,
+          engineRequestId: engineItem.id,
+        },
+      });
+    });
+    return { ...request, requestId: engineItem.id };
+  }
+
+  async getWfh(id: string): Promise<WfhRequest> {
+    const w = await this.repo.findWfhById(id);
+    if (!w) throw new NotFoundException(ErrorCodes.WFH_REQUEST_NOT_FOUND, 'WFH request not found');
+    return w;
+  }
+
+  async listWfh(
+    filters: WfhFilters,
+    limit: number,
+    offset: number,
+    actor: Actor,
+  ): Promise<{ rows: WfhRequest[]; total: number }> {
+    return this.repo.listWfh(await this.narrowToActor(filters, actor), limit, offset);
+  }
+
+  async reviewWfh(id: string, approve: boolean, actor: Actor): Promise<WfhRequest> {
+    const w = await this.getWfh(id);
+    if (w.status !== 'pending') {
+      throw new PreconditionFailedException(
+        ErrorCodes.WFH_REQUEST_NOT_PENDING,
+        'Only pending WFH requests can be reviewed',
+      );
+    }
+    // A pending row with no engine item is an orphan (a crash between the two writes at submit).
+    // It cannot be decided by anyone, only withdrawn; refusing here beats a null request id
+    // reaching the engine and answering 500.
+    if (!w.requestId) {
+      throw new PreconditionFailedException(
+        ErrorCodes.WFH_REQUEST_NOT_PENDING,
+        'This request has no approval item; withdraw it and file a new one',
+      );
+    }
+    if (approve) {
+      await this.engine.approve(w.requestId, null, actor);
+    } else {
+      await this.engine.reject(w.requestId, null, actor);
+    }
+    return this.getWfh(id);
+  }
+
+  /**
+   * The requester withdraws their own still-pending WFH. Unlike leave there is no cancelling an
+   * APPROVED request: an approved WFH day answers "where is this person" for everyone else's
+   * planning, so changing it means a new request, which the overlap rule keeps honest.
+   */
+  async cancelWfh(id: string, actor: Actor): Promise<WfhRequest> {
+    const w = await this.getWfh(id);
+    await this.assertOwnerOrApprover(w.employeeId, actor);
+    if (w.requestId) {
+      // Same transaction-pairing as cancelLeave: engine.cancel runs the onCancel hook, which
+      // guards the domain row pending and writes both statuses together.
+      await this.engine.cancel(w.requestId, actor);
+      return this.getWfh(id);
+    }
+    if (w.status !== 'pending') {
+      throw new PreconditionFailedException(
+        ErrorCodes.WFH_REQUEST_NOT_PENDING,
+        'Only a pending WFH request can be withdrawn; file a new one instead',
+      );
+    }
+    const updated = await this.db.transaction(async (tx) => {
+      const row = await this.repo.setWfhStatus(id, 'cancelled', null, tx);
+      await this.wfhTrail.record(AUDIT_ACTION.WFH_CANCELLED, id, actor, tx, {
+        before: { status: 'pending' },
+        after: { status: 'cancelled' },
+      });
+      return row!;
+    });
+    return updated;
   }
 
   // ── Overtime ───────────────────────────────────────────────────────────────

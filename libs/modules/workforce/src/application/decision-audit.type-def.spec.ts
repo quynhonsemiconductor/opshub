@@ -18,13 +18,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LeaveRequestTypeDef } from './leave-request.type-def';
 import { OvertimeTypeDef } from './overtime.type-def';
+import { WfhRequestTypeDef } from './wfh-request.type-def';
 
-/** A tx whose update chain resolves, so a hook can run without a database. */
-function makeTx() {
+/**
+ * A tx whose chains resolve, so a hook can run without a database. `select` answers one pending
+ * row by default (the guard's happy path); a test overrides `selectResult` to simulate a decided
+ * row and prove the guard refuses.
+ */
+function makeTx(selectResult: { status: string } | null = { status: 'pending' }) {
   const chain = { set: vi.fn(), where: vi.fn() };
   chain.set.mockReturnValue(chain);
   chain.where.mockResolvedValue(undefined);
-  return { update: vi.fn().mockReturnValue(chain) };
+  const selectChain = { from: vi.fn(), where: vi.fn(), limit: vi.fn() };
+  selectChain.from.mockReturnValue(selectChain);
+  selectChain.where.mockReturnValue(selectChain);
+  selectChain.limit.mockResolvedValue(selectResult ? [selectResult] : []);
+  return { update: vi.fn().mockReturnValue(chain), select: vi.fn().mockReturnValue(selectChain) };
 }
 
 const LEAVE_PAYLOAD = {
@@ -47,11 +56,21 @@ const OVERTIME_PAYLOAD = {
   reason: 'release night',
 };
 
+const WFH_PAYLOAD = {
+  wfhRequestId: 'wfh-1',
+  employeeId: 'emp-1',
+  startDate: '2026-09-01',
+  endDate: '2026-09-02',
+  workingDays: 2,
+  reason: null,
+};
+
 describe('leave and overtime decisions are audited', () => {
   let trailRecord: ReturnType<typeof vi.fn>;
   let rawRecord: ReturnType<typeof vi.fn>;
   let leave: LeaveRequestTypeDef;
   let overtime: OvertimeTypeDef;
+  let wfh: WfhRequestTypeDef;
 
   beforeEach(() => {
     trailRecord = vi.fn().mockResolvedValue(undefined);
@@ -62,6 +81,7 @@ describe('leave and overtime decisions are audited', () => {
     };
     leave = new LeaveRequestTypeDef({ register: vi.fn() } as never, audit as never);
     overtime = new OvertimeTypeDef({ register: vi.fn() } as never, audit as never);
+    wfh = new WfhRequestTypeDef({ register: vi.fn() } as never, audit as never);
   });
 
   describe('a reviewer decided', () => {
@@ -109,14 +129,36 @@ describe('leave and overtime decisions are audited', () => {
       expect(changes.after.hours).toBe(3);
     });
 
+    it('records an approved WFH request with the working days it covers', async () => {
+      const tx = makeTx();
+      await wfh.onApprove(WFH_PAYLOAD, 'req-1', 'reviewer-1', tx as never);
+
+      const [action, resourceId, actor, passedTx, changes] = trailRecord.mock.calls[0] as [
+        string,
+        string,
+        { sub: string },
+        unknown,
+        { after: Record<string, unknown> },
+      ];
+      expect(action).toBe('wfh.approved');
+      expect(resourceId).toBe('wfh-1');
+      expect(actor.sub).toBe('reviewer-1');
+      expect(passedTx, 'the audit entry was written outside the transaction').toBe(tx);
+      // Same reason as leave: the dates alone do not say how much of the week this covers.
+      expect(changes.after.workingDays).toBe(2);
+    });
+
     it('records a refusal, and names the reviewer who refused', async () => {
       const tx = makeTx();
       await leave.onReject(LEAVE_PAYLOAD, 'req-1', 'reviewer-2', tx as never);
       await overtime.onReject(OVERTIME_PAYLOAD, 'req-1', 'reviewer-2', tx as never);
 
+      await wfh.onReject(WFH_PAYLOAD, 'req-1', 'reviewer-2', tx as never);
+
       expect(trailRecord.mock.calls.map((c) => c[0] as string)).toEqual([
         'leave.rejected',
         'overtime.rejected',
+        'wfh.rejected',
       ]);
       for (const call of trailRecord.mock.calls) {
         expect((call[2] as { sub: string }).sub).toBe('reviewer-2');
@@ -166,6 +208,51 @@ describe('leave and overtime decisions are audited', () => {
       expect(entry.action).toBe('overtime.rejected');
       expect(entry.changes.after.reason).toContain('expired');
     });
+
+    it('expires a WFH request as CANCELLED, not refused', async () => {
+      const tx = makeTx();
+      await wfh.onExpire(WFH_PAYLOAD, 'req-1', tx as never);
+
+      const [entry] = rawRecord.mock.calls[0] as [
+        { actorId: null; action: string; changes: { after: Record<string, unknown> } },
+      ];
+      expect(entry.actorId).toBeNull();
+      /*
+       * A DIFFERENT STATUS FROM OVERTIME'S, deliberately. Overtime asks permission for work already
+       * done, so an unanswered request still reads as a refusal to pay it. WFH asks permission to NOT
+       * come in, so nobody answering means "you are expected in the office" — a withdrawal, not a
+       * refusal. `cancelled` is leave's word for the same situation, and `wfh.cancelled` matches it.
+       */
+      expect(entry.action).toBe('wfh.cancelled');
+      expect(entry.changes.after.reason).toContain('expired');
+    });
+  });
+
+  describe('a withdrawal the requester chose', () => {
+    it('cancels leave and WFH through the engine hook, naming the requester', async () => {
+      const tx = makeTx();
+      await leave.onCancel(LEAVE_PAYLOAD, 'req-1', 'requester-1', tx as never);
+      await wfh.onCancel(WFH_PAYLOAD, 'req-1', 'requester-1', tx as never);
+
+      expect(trailRecord.mock.calls.map((c) => c[0] as string)).toEqual([
+        'leave.cancelled',
+        'wfh.cancelled',
+      ]);
+      for (const call of trailRecord.mock.calls) {
+        expect((call[2] as { sub: string }).sub).toBe('requester-1');
+      }
+    });
+
+    it('refuses to decide or withdraw a row that is no longer pending — the mismatch guard', async () => {
+      const decided = makeTx({ status: 'approved' });
+      await expect(
+        wfh.onCancel(WFH_PAYLOAD, 'req-1', 'requester-1', decided as never),
+      ).rejects.toThrow(/not pending/);
+      await expect(
+        leave.onApprove(LEAVE_PAYLOAD, 'req-1', 'reviewer-1', decided as never),
+      ).rejects.toThrow(/not pending/);
+      expect(trailRecord).not.toHaveBeenCalled();
+    });
   });
 
   it('writes the status change and the entry for every hook, never one without the other', async () => {
@@ -174,10 +261,15 @@ describe('leave and overtime decisions are audited', () => {
     const hooks: Array<() => Promise<void>> = [
       () => leave.onApprove(LEAVE_PAYLOAD, 'r', 'rev', makeTx() as never),
       () => leave.onReject(LEAVE_PAYLOAD, 'r', 'rev', makeTx() as never),
+      () => leave.onCancel(LEAVE_PAYLOAD, 'r', 'req', makeTx() as never),
       () => leave.onExpire(LEAVE_PAYLOAD, 'r', makeTx() as never),
       () => overtime.onApprove(OVERTIME_PAYLOAD, 'r', 'rev', makeTx() as never),
       () => overtime.onReject(OVERTIME_PAYLOAD, 'r', 'rev', makeTx() as never),
       () => overtime.onExpire(OVERTIME_PAYLOAD, 'r', makeTx() as never),
+      () => wfh.onApprove(WFH_PAYLOAD, 'r', 'rev', makeTx() as never),
+      () => wfh.onReject(WFH_PAYLOAD, 'r', 'rev', makeTx() as never),
+      () => wfh.onCancel(WFH_PAYLOAD, 'r', 'req', makeTx() as never),
+      () => wfh.onExpire(WFH_PAYLOAD, 'r', makeTx() as never),
     ];
 
     for (const hook of hooks) await hook();

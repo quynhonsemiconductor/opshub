@@ -149,6 +149,31 @@ export class RequestEngine {
 
   // ── Approve ────────────────────────────────────────────────────────────────
 
+  /**
+   * An ASSIGNED request is decided by its assignee, not by every holder of the permission.
+   *
+   * `assigneeId` is set at submit by types that resolve a named approver (WFH and attendance
+   * justifications: the requester's manager, falling back to unassigned when there is none, which
+   * leaves the decision to any holder — HR/admin). Before this check the assignee was a display
+   * fact only: ANY manager could approve ANYONE's WFH, and the person the request was actually
+   * waiting on never had to be the one who answered it.
+   *
+   * A delegate of the assignee passes too — the delegation union semantics above, applied to the
+   * assignee instead of the permission.
+   */
+  private assertAssigneeMayDecide(
+    request: RequestItem,
+    actor: Actor,
+    activeDelegation: { fromUserId: string } | null,
+  ): void {
+    if (request.assigneeId === null) return;
+    if (request.assigneeId === actor.sub) return;
+    if (activeDelegation && activeDelegation.fromUserId === request.assigneeId) return;
+    throw new PermissionDeniedException(
+      `This request is waiting on ${request.assigneeId}; only they (or their delegate) may decide it`,
+    );
+  }
+
   async approve(requestId: string, note: string | null, actor: Actor): Promise<RequestItem> {
     const request = await this.getOrFail(requestId);
     this.assertApprovable(request.status);
@@ -186,6 +211,8 @@ export class RequestEngine {
         `Missing permission for step ${currentStep}: ${requiredPermission}`,
       );
     }
+    this.assertAssigneeMayDecide(request, actor, activeDelegation);
+    this.assertAssigneeMayDecide(request, actor, activeDelegation);
 
     const now = new Date();
     const updated = await this.db.transaction(async (tx) => {
