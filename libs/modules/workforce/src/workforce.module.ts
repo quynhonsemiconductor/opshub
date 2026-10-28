@@ -34,6 +34,6 @@ import { WORKFORCE_REPOSITORY } from './domain/ports/workforce.repository';
     OffboardingTypeDef,
     { provide: WORKFORCE_REPOSITORY, useClass: WorkforceDrizzleRepository },
   ],
-  exports: [WorkforceService, LeaveBalanceService],
+  exports: [WorkforceService, LeaveBalanceService, AttendanceService],
 })
 export class WorkforceModule {}
