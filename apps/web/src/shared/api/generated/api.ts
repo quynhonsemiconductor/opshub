@@ -5681,7 +5681,7 @@ export interface components {
       startDate: string;
       endDate: string;
       reason: string | null;
-      /** @description Working days the window covers — always a whole number. numeric arrives as a string; the API contract is a number. */
+      /** @description Working days the window covers — a whole number; WFH has no part-days. */
       workingDays: number;
       reviewerId: string | null;
       reviewedAt: string | null;
