@@ -39,6 +39,9 @@ import type {
  * TypeDef hooks are called INSIDE the transaction so domain side-effects
  * (e.g. creating access_grants, updating leave status) are atomic.
  */
+/** Who may decide a request whose assignee is unavailable: hr + admin only (managers lack it). */
+const ASSIGNEE_FALLBACK_PERMISSION = 'workforce.manage';
+
 @Injectable()
 export class RequestEngine {
   /** Above this many approvers for one step, the fan-out is logged as a signal, never trimmed. */
@@ -151,8 +154,8 @@ export class RequestEngine {
    * A delegate of the assignee passes too — the delegation union semantics, applied to the assignee.
    *
    * FALLBACK, so a request is never stuck on someone who cannot act: when the assignee has since been
-   * offboarded, or no longer holds the step's permission, any other holder of that permission (the
-   * caller has already passed the permission check) may decide. The returned `fallbackFor` names the
+   * offboarded, or no longer holds the step's permission, HR or an administrator (and only they: see
+   * `ASSIGNEE_FALLBACK_PERMISSION`; the caller has also passed the step permission check) may decide. The returned `fallbackFor` names the
    * unavailable assignee; callers record it on the approval row and it is logged.
    */
   private async resolveAssigneeGate(
@@ -166,6 +169,18 @@ export class RequestEngine {
     if (activeDelegation && activeDelegation.fromUserId === assigneeId)
       return { fallbackFor: null };
     if (await this.assigneeUnavailable(assigneeId, requiredPermission)) {
+      // HR/ADMIN ONLY. Holding the step's permission is not enough: managers hold the review
+      // permission too, and a manager of another team must not decide someone else's report's request
+      // just because the assignee left. `workforce.manage` is granted to hr (admin by wildcard) only.
+      const mayOverride =
+        (await this.authz.check(actor.sub, ASSIGNEE_FALLBACK_PERMISSION)) ||
+        (activeDelegation !== null &&
+          (await this.authz.check(activeDelegation.fromUserId, ASSIGNEE_FALLBACK_PERMISSION)));
+      if (!mayOverride) {
+        throw new PermissionDeniedException(
+          `This request is waiting on ${assigneeId}, who is unavailable; only HR or an administrator may decide it`,
+        );
+      }
       this.logger.warn(
         { requestId: request.id, assigneeId, actorId: actor.sub },
         'Assignee unavailable (offboarded or lacks permission); HR/admin fallback decision',
@@ -883,7 +898,10 @@ export class RequestEngine {
       isNull(requestItems.assigneeId),
       eq(requestItems.assigneeId, actorId),
       delegation ? eq(requestItems.assigneeId, delegation.fromUserId) : undefined,
-      sql`${requestItems.assigneeId} in (select ${employees.id} from ${employees} where ${employees.status} = 'offboarded')`,
+      // An offboarded assignee opens the fallback for HR/admin only.
+      (await this.authz.check(actorId, ASSIGNEE_FALLBACK_PERMISSION))
+        ? sql`${requestItems.assigneeId} in (select ${employees.id} from ${employees} where ${employees.status} = 'offboarded')`
+        : undefined,
     );
 
     const decidablePairs = or(
@@ -976,7 +994,10 @@ export class RequestEngine {
         row.assigneeId !== null &&
         row.assigneeId !== actorId &&
         row.assigneeId !== activeDelegation?.fromUserId &&
-        !(await this.assigneeUnavailable(row.assigneeId, required))
+        !(
+          (await this.assigneeUnavailable(row.assigneeId, required)) &&
+          (await mayUse(ASSIGNEE_FALLBACK_PERMISSION))
+        )
       ) {
         may = false;
       }

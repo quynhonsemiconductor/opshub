@@ -48,9 +48,14 @@ export class WioCalendarService {
     const from = `${month}-01`;
     const to = lastDayOf(month);
 
-    const [people, wfhWindows, leave, monthHolidays] = await Promise.all([
+    const [roster, wfhWindows, leave, monthHolidays] = await Promise.all([
       this.db
-        .select({ id: employees.id, name: employees.displayName, department: employees.department })
+        .select({
+          id: employees.id,
+          name: employees.displayName,
+          department: employees.department,
+          managerId: employees.managerId,
+        })
         .from(employees)
         // `on_leave` stays: they are still somebody the calendar should account for. Only people who
         // have left drop out.
@@ -100,6 +105,7 @@ export class WioCalendarService {
 
     // Only people the calendar accounts for: a mark left by somebody who has since left the company, or an
     // id with no employee row, would otherwise ride along for nothing.
+    const people = roster.map(({ id, name, department }) => ({ id, name, department }));
     const known = new Set(people.map((p) => p.id));
     const holidayDates = new Set(monthHolidays.map((h) => h.date));
     const marks = wfhMarksInRange(
@@ -111,11 +117,11 @@ export class WioCalendarService {
     // WHO SEES A PENDING MARK. Approved WFH is a settled fact about where somebody works, so
     // everybody sees it; a PENDING request is not settled — the manager may still say no, and the
     // plans it would disturb are the person's own and their manager's. Pending shows to the
-    // requester, their manager and HR (a global workforce.read holder); everyone else — and any
+    // requester, their manager and HR (a workforce.manage holder); everyone else — and any
     // caller that names no viewer — sees the person as simply in the office. Leave stays
     // APPROVED-only for everyone, with no type: "away", never why.
     // `undefined` = no viewer (nobody sees pending); `null` = everybody (HR); a Set = those ids.
-    const pendingVisibleTo = viewer ? await this.pendingVisibleTo(viewer) : undefined;
+    const pendingVisibleTo = viewer ? await this.pendingVisibleTo(viewer, roster) : undefined;
     return {
       month,
       people,
@@ -136,15 +142,18 @@ export class WioCalendarService {
 
   /**
    * The ids whose PENDING marks `viewer` may see: themself, their direct reports, and — as null,
-   * meaning "everybody" — a global `workforce.read` holder (HR).
+   * meaning "everybody" — HR, i.e. a `workforce.manage` holder. NOT `workforce.read`: managers
+   * hold that too, and a manager must see only their own reports' pending requests.
    */
-  private async pendingVisibleTo(viewer: Actor): Promise<Set<string> | null> {
-    if (await this.authz.check(viewer.sub, 'workforce.read')) return null;
-    const reports = await this.db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(eq(employees.managerId, viewer.sub));
-    return new Set([viewer.sub, ...reports.map((r) => r.id)]);
+  private async pendingVisibleTo(
+    viewer: Actor,
+    roster: { id: string; managerId: string | null }[],
+  ): Promise<Set<string> | null> {
+    if (await this.authz.check(viewer.sub, 'workforce.manage')) return null;
+    return new Set([
+      viewer.sub,
+      ...roster.filter((p) => p.managerId === viewer.sub).map((p) => p.id),
+    ]);
   }
 }
 

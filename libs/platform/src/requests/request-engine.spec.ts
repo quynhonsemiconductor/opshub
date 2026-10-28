@@ -855,27 +855,57 @@ describe('RequestEngine assignee guard', () => {
     await expect(a.engine.reject('req-1', null, OTHER)).resolves.toBeDefined();
   });
 
-  it('falls back to any permission holder when the assignee is offboarded, and records it', async () => {
-    const { engine, db } = engineWithAssignee('offboarded');
+  /** Everyone holds the step permission; only `override` callers hold the HR/admin one. */
+  function holdersOf(
+    authz: {
+      check: { mockImplementation(fn: (u: string, p: string) => Promise<boolean>): unknown };
+    },
+    hrUsers: string[],
+  ) {
+    const answer = (userId: string, permission: string): Promise<boolean> =>
+      Promise.resolve(
+        permission === 'workforce.manage' ? hrUsers.includes(userId) : userId !== 'user-manager',
+      );
+    authz.check.mockImplementation(answer);
+  }
+  const HR_USER = { sub: 'user-hr', email: 'hr@test.com' };
+
+  it('an offboarded assignee: HR may decide and it is recorded; another team manager is refused', async () => {
+    const refused = engineWithAssignee('offboarded');
+    holdersOf(refused.authz, ['user-hr']);
+    await expect(refused.engine.reject('req-1', null, OTHER)).rejects.toThrow(
+      PermissionDeniedException,
+    );
+    const refusedApprove = engineWithAssignee('offboarded');
+    holdersOf(refusedApprove.authz, ['user-hr']);
+    await expect(refusedApprove.engine.approve('req-1', null, OTHER)).rejects.toThrow(
+      PermissionDeniedException,
+    );
+
+    const { engine, db, authz } = engineWithAssignee('offboarded');
+    holdersOf(authz, ['user-hr']);
     const insertChain = makeQueryChain([{ id: 'approval-1' }]);
     db.insert.mockReturnValue(insertChain);
     db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'rejected' })]));
-    await engine.reject('req-1', 'no', OTHER);
+    await engine.reject('req-1', 'no', HR_USER);
     const values = insertChain['values'] as ReturnType<typeof vi.fn>;
     const inserted = values.mock.calls[0][0] as { note: string };
     expect(inserted.note).toContain('fallback decision: assignee user-manager unavailable');
   });
 
-  it('falls back when the assignee row is gone, and when they lost the permission', async () => {
-    const gone = engineWithAssignee(null);
-    gone.db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'approved' })]));
-    await expect(gone.engine.approve('req-1', null, OTHER)).resolves.toBeDefined();
-
-    const lost = engineWithAssignee('active');
-    lost.db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'approved' })]));
-    // actor holds it, the assignee (second check) does not
-    lost.authz.check.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-    await expect(lost.engine.approve('req-1', null, OTHER)).resolves.toBeDefined();
+  it('the assignee row gone, or the assignee lost the permission: HR yes, other manager no', async () => {
+    for (const status of [null, 'active'] as const) {
+      const no = engineWithAssignee(status);
+      holdersOf(no.authz, ['user-hr']);
+      // an assignee that is `active` but lacks the step permission
+      await expect(no.engine.approve('req-1', null, OTHER)).rejects.toThrow(
+        PermissionDeniedException,
+      );
+      const yes = engineWithAssignee(status);
+      holdersOf(yes.authz, ['user-hr']);
+      yes.db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'approved' })]));
+      await expect(yes.engine.approve('req-1', null, HR_USER)).resolves.toBeDefined();
+    }
   });
 
   it('the fallback still needs the permission: a non-holder is refused even if the assignee left', async () => {
