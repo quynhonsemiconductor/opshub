@@ -335,17 +335,22 @@ export class DoorService {
    * The allow-list, COMPUTED AT REQUEST TIME (ADR §2.4). The response shape is the contract:
    * `valid_from` is sent only while it is in the future (else null) — the terminal enforces the
    * window offline, so a temporary card expires even when opshub is unreachable.
+   *
+   * WINDOWS ARE EPOCH SECONDS (bench E2E review item 3): the firmware parser reads uint epoch
+   * seconds or null — an ISO string makes its whole list malformed (one windowed card revokes the
+   * frozen list), and 256 ISO windows (28.7 KB) would overflow its 24 KiB response buffer where
+   * epoch seconds stay at 20.5 KB even with 20-char UIDs.
    */
   async allowList(): Promise<
-    { uid: string; valid_from: string | null; valid_until: string | null }[]
+    { uid: string; valid_from: number | null; valid_until: number | null }[]
   > {
     const rows = await this.cards.listAllowList();
     const now = Date.now();
     // WIRE NAMES: the contract is snake_case (ADR §2.4) — the firmware never sees camelCase.
     return rows.map((r) => ({
       uid: r.uid,
-      valid_from: r.validFrom.getTime() > now ? r.validFrom.toISOString() : null,
-      valid_until: r.validUntil ? r.validUntil.toISOString() : null,
+      valid_from: r.validFrom.getTime() > now ? epochSeconds(r.validFrom) : null,
+      valid_until: r.validUntil ? epochSeconds(r.validUntil) : null,
     }));
   }
 
@@ -355,6 +360,11 @@ export class DoorService {
    * malformed row can never block the queue. `card_id` is resolved BY EVENT TIME: the card whose
    * uid matches and whose window covered the swipe, so a buffered event uploaded after a UID was
    * reissued is credited to the person who held the card when they swiped.
+   *
+   * UNSYNCED events (time_synced=false, uptime-stamped device_ts) are ACCEPTED, not rejected
+   * (bench E2E review item 4): the range check applies to synced stamps only. A genuinely invalid
+   * event is still named in `rejected` — but ALSO acked, because the terminal deletes through
+   * `acked_through` and an un-acked bad event would jam its queue forever (resent, backoff, loop).
    *
    * NOT wrapped in one transaction on purpose: the upsert is idempotent (`ON CONFLICT DO NOTHING`
    * on the event key), so a partial application retried by the terminal is harmless — and a
@@ -384,7 +394,8 @@ export class DoorService {
           : null;
 
       const uid = normaliseUid(typeof event?.['uid'] === 'string' ? event['uid'] : '');
-      const deviceTs = parseDeviceTs(event?.['device_ts']);
+      const timeSynced = event?.['time_synced'] === true;
+      const deviceTs = parseDeviceTs(event?.['device_ts'], timeSynced);
       const reader = event?.['reader'];
       const result = event?.['result'];
       const ok =
@@ -413,7 +424,7 @@ export class DoorService {
         result,
         cardId: null, // resolved below, by event time
         deviceTs,
-        timeSynced: event?.['time_synced'] === true,
+        timeSynced,
       });
     }
 
@@ -543,18 +554,28 @@ function cardEnd(card: { revokedAt: Date | null; validUntil: Date | null }): num
 }
 
 /**
- * STRICT device timestamp (SA review 480/S1): ISO-8601 UTC ending in `Z`, between 2020-01-01 and
- * tomorrow — a wrong-but-parseable date ("2001-01-01", epoch millis as a number-as-string) is a
- * rejected event, not silently-rewritten history.
+ * STRICT device timestamp (SA review 480/S1): ISO-8601 UTC ending in `Z`. A SYNCED event
+ * (`time_synced=true`) must fall between 2020-01-01 and tomorrow — a wrong-but-parseable date
+ * ("2001-01-01", epoch millis as a number-as-string) is a rejected event, not silently-rewritten
+ * history. An UNSYNCED event skips that range check (bench E2E review item 4): its `device_ts` is
+ * an uptime stamp near 1970 BY DESIGN, and rejecting it while acking it made the firmware delete
+ * real attendance. The stamp is stored as sent and flagged `time_synced=false`; card resolution
+ * uses `received_at` (below). The SHAPE check still applies — unsynced is untrusted, not unshaped.
  */
-function parseDeviceTs(value: unknown): Date | null {
+function parseDeviceTs(value: unknown, timeSynced: boolean): Date | null {
   if (typeof value !== 'string') return null;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(value)) return null;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return null;
+  if (!timeSynced) return d;
   const LOW = Date.UTC(2020, 0, 1);
   const HIGH = Date.now() + 24 * 3600_000;
   return d.getTime() >= LOW && d.getTime() <= HIGH ? d : null;
+}
+
+/** Whole seconds since the Unix epoch, UTC — the unit the terminal's clock and parser work in. */
+function epochSeconds(d: Date): number {
+  return Math.floor(d.getTime() / 1000);
 }
 
 /** True when `err` is Postgres 23505 on the named constraint (Drizzle surfaces both fields). */

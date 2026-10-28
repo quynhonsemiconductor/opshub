@@ -19,7 +19,7 @@ import { randomUUID } from 'node:crypto';
 const ROOT = join(__dirname, '../..');
 const FIXTURES = join(ROOT, 'docs/contracts/door-terminal-v1');
 interface AllowListFixture {
-  cards: { uid: string; valid_from: string | null; valid_until: string | null }[];
+  cards: { uid: string; valid_from: number | null; valid_until: number | null }[];
 }
 interface EventsRequestFixture {
   stream: string;
@@ -163,7 +163,7 @@ describe('door terminal contract v1', () => {
     expect(etag, 'the response must carry an ETag').toBeTruthy();
 
     const body = JSON.parse(first.body) as {
-      cards: { uid: string; valid_from: string | null; valid_until: string | null }[];
+      cards: { uid: string; valid_from: number | null; valid_until: number | null }[];
     };
     const ours = body.cards.find((c) => c.uid === uidA);
     // The card is PERMANENT (window defaulted to now, no valid_until): the fixture entry, up to
@@ -191,14 +191,18 @@ describe('door terminal contract v1', () => {
     expect(weak.statusCode).toBe(304);
   });
 
-  it('includes a future-window card with BOTH windows, and expires it from the list', async () => {
-    const future = new Date(Date.now() + 3600_000).toISOString();
-    const close = new Date(Date.now() + 2 * 3600_000).toISOString();
-    const past = new Date(Date.now() - 1000).toISOString();
-    await enrolCard(randomUid(), { validFrom: future, validUntil: close });
+  it('includes a future-window card with BOTH windows as epoch seconds, and expires it from the list', async () => {
+    const future = new Date(Date.now() + 3600_000);
+    const close = new Date(Date.now() + 2 * 3600_000);
+    const past = new Date(Date.now() - 1000);
+    const uidWindow = randomUid();
+    await enrolCard(uidWindow, {
+      validFrom: future.toISOString(),
+      validUntil: close.toISOString(),
+    });
     await enrolCard(randomUid(), {
       validFrom: new Date(Date.now() - 2 * 3600_000).toISOString(),
-      validUntil: past,
+      validUntil: past.toISOString(),
     }); // already expired: not on the list at all
 
     const res = await app.inject({
@@ -207,13 +211,15 @@ describe('door terminal contract v1', () => {
       headers: bearer(),
     });
     const body = JSON.parse(res.body) as {
-      cards: { uid: string; valid_from: string | null; valid_until: string | null }[];
+      cards: { uid: string; valid_from: number | null; valid_until: number | null }[];
     };
-    const temp = body.cards.find((c) => c.valid_from === future);
-    // A temporary card fails closed offline: BOTH windows travel (ADR §2.4).
-    expect(temp?.valid_from).toBe(future);
-    expect(temp?.valid_until).toBe(close);
-    expect(body.cards.some((c) => c.valid_until === past)).toBe(false);
+    const temp = body.cards.find((c) => c.uid === uidWindow);
+    // A temporary card fails closed offline: BOTH windows travel (ADR §2.4) — as INTEGER EPOCH
+    // SECONDS (bench E2E review item 3): the firmware parser reads uint epoch or null, and an ISO
+    // string makes its whole list malformed.
+    expect(temp?.valid_from).toBe(Math.floor(future.getTime() / 1000));
+    expect(temp?.valid_until).toBe(Math.floor(close.getTime() / 1000));
+    expect(body.cards.some((c) => c.valid_until === Math.floor(past.getTime() / 1000))).toBe(false);
   });
 
   it('accepts a batch matching the fixture, rejects the bad event, and is idempotent on resend', async () => {
@@ -328,6 +334,63 @@ describe('door terminal contract v1', () => {
     const bySeq = new Map(rows.rows.map((r) => [Number(r.seq), r.card_id]));
     expect(bySeq.get(900)).toBeNull();
     expect(bySeq.get(901)).toBeTruthy();
+  });
+
+  it('accepts an UNSYNCED uptime-stamped event and credits the card by received_at (bench E2E item 4)', async () => {
+    // Card valid now; the terminal had no clock when the swipe happened, so device_ts is an
+    // uptime stamp near 1970. Before the fix this FAILED the synced range check yet was acked
+    // through — the firmware deleted real attendance.
+    const uidUnsynced = randomUid();
+    const cardId = await enrolCard(uidUnsynced);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/door/terminal/events',
+      headers: { ...bearer(), 'content-type': 'application/json' },
+      payload: {
+        stream,
+        dropped: 0,
+        events: [
+          {
+            seq: 950,
+            reader: 'in',
+            uid: uidUnsynced,
+            result: 'allow',
+            device_ts: '1970-01-01T00:00:05Z',
+            time_synced: false,
+          },
+          {
+            seq: 951,
+            reader: 'out',
+            uid: uidUnsynced,
+            result: 'allow',
+            device_ts: 'not-an-iso-stamp',
+            time_synced: false,
+          },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    // The uptime stamp is ACCEPTED (range check is for synced stamps); the shapeless stamp is
+    // rejected AND acked — never silently dropped, never left to jam the queue.
+    expect(JSON.parse(res.body)).toEqual({ acked_through: 951, rejected: [951] });
+
+    const rows = await db.execute<{
+      seq: number;
+      card_id: string | null;
+      time_synced: boolean;
+      device_ts: string;
+    }>(
+      sql`SELECT seq, card_id, time_synced, device_ts FROM "door"."events" WHERE terminal_id = ${terminalId} AND seq IN (950, 951)`,
+    );
+    const bySeq = new Map(rows.rows.map((r) => [Number(r.seq), r]));
+    const stored = bySeq.get(950);
+    expect(stored?.time_synced).toBe(false);
+    // The uptime stamp is stored AS SENT (reported as unverified, not rewritten).
+    expect(new Date(stored?.device_ts as unknown as string).getTime()).toBe(5000);
+    // Credited by RECEIVED time: the card covers now, so the swipe lands on the holder.
+    expect(stored?.card_id).toBe(cardId);
+    expect(bySeq.get(951)).toBeUndefined();
   });
 
   it('refuses an oversized terminal payload with 413 before parsing (480/S5)', async () => {

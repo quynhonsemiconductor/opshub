@@ -1,8 +1,9 @@
 /**
  * Unit tests — DoorService terminal side (allow-list shaping + event ingestion, ADR §2.4).
  *
- * What earns assertions here: the allow-list sends `valid_from` only while it is in the FUTURE
- * (the terminal enforces windows offline, so a temporary card must expire without opshub);
+ * What earns assertions here: the allow-list sends `valid_from` only while it is in the FUTURE,
+ * as INTEGER EPOCH SECONDS (the firmware parser reads uint epoch or null — never ISO strings; the
+ * terminal enforces windows offline, so a temporary card must expire without opshub);
  * `acked_through` covers the whole batch even when events are rejected (the terminal deletes
  * through it, so the queue never blocks); `card_id` resolves BY EVENT TIME; resends change nothing.
  */
@@ -83,13 +84,11 @@ describe('DoorService.allowList()', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('nulls valid_from once it is past and keeps a future window on the list', async () => {
+    const from = new Date(Date.now() + HOUR);
+    const until = new Date(Date.now() + 2 * HOUR);
     mockCards.listAllowList.mockResolvedValue([
       { uid: '04A1B2C3', validFrom: new Date(Date.now() - HOUR), validUntil: null },
-      {
-        uid: '04B2C3D4',
-        validFrom: new Date(Date.now() + HOUR),
-        validUntil: new Date(Date.now() + 2 * HOUR),
-      },
+      { uid: '04B2C3D4', validFrom: from, validUntil: until },
     ]);
 
     const cards = await makeService().allowList();
@@ -97,8 +96,36 @@ describe('DoorService.allowList()', () => {
     // Permanent card: both fields null. Temporary card not yet valid: BOTH windows travel, because
     // the terminal must refuse it offline until valid_from and after valid_until.
     expect(cards[0]).toEqual({ uid: '04A1B2C3', valid_from: null, valid_until: null });
-    expect(cards[1].valid_from).not.toBeNull();
-    expect(cards[1].valid_until).not.toBeNull();
+    // Windows are INTEGER EPOCH SECONDS (bench E2E review item 3): the firmware parser reads uint
+    // epoch or null; an ISO string makes its whole list malformed.
+    expect(cards[1]).toEqual({
+      uid: '04B2C3D4',
+      valid_from: Math.floor(from.getTime() / 1000),
+      valid_until: Math.floor(until.getTime() / 1000),
+    });
+    expect(Number.isInteger(cards[1].valid_from)).toBe(true);
+  });
+
+  it('keeps a 256-card body with worst-case UIDs under the firmware 24 KiB response cap', async () => {
+    // Bench E2E review item 3: 256 windowed cards as ISO strings serialize to 28.7 KB — past the
+    // terminal's 24 KiB (RESP_CAP) buffer. Epoch seconds must stay under it (measured 20.5 KB).
+    // The response body is exactly JSON.stringify of this array's wrapper (the controller
+    // serializes the service output).
+    mockCards.listAllowList.mockResolvedValue(
+      Array.from({ length: 256 }, (_, i) => ({
+        uid: (i.toString(16).toUpperCase().padStart(20, '0') + 'A1B2C3D4E5').slice(0, 20),
+        validFrom: new Date(Date.now() + HOUR),
+        validUntil: new Date(Date.now() + 2 * HOUR),
+      })),
+    );
+    const cards = await makeService().allowList();
+    const body = JSON.stringify({ cards });
+    expect(body.length).toBeLessThan(24 * 1024);
+    // Every field the parser reads is an integer or null — no string anywhere it does not expect.
+    for (const c of cards) {
+      expect(c.valid_from === null || Number.isInteger(c.valid_from)).toBe(true);
+      expect(c.valid_until === null || Number.isInteger(c.valid_until)).toBe(true);
+    }
   });
 
   it('orders by uid — the stable body is what makes the ETag mean "the list changed"', async () => {
@@ -204,6 +231,45 @@ describe('DoorService.ingestEvents()', () => {
     });
     const [row] = mockCards.insertEvents.mock.calls[0][1] as { cardId: string | null }[];
     expect(row.cardId).toBeNull();
+  });
+
+  it('ACCEPTS an unsynced uptime stamp (~1970) — rejecting it lost attendance (bench E2E item 4)', async () => {
+    // Before the fix, device_ts below 2020 failed the synced range check, the event went to
+    // `rejected` yet was still acked through — the firmware deleted real attendance forever.
+    const r = await makeService().ingestEvents('term-1', {
+      stream: STREAM,
+      dropped: 0,
+      events: [
+        event({ seq: 20, device_ts: '1970-01-01T00:00:05Z', time_synced: false }),
+        event({ seq: 21, device_ts: '1970-01-01T00:42:00Z', time_synced: false }),
+      ],
+    });
+    expect(r).toEqual({ ackedThrough: 21, rejected: [] });
+    const rows = mockCards.insertEvents.mock.calls[0][1] as {
+      deviceTs: Date;
+      timeSynced: boolean;
+      cardId: string;
+    }[];
+    // Stored AS SENT (uptime stamp kept for the "unverified" report flag), card credited by
+    // received_at — the card covers now, so both land on the holder.
+    expect(rows.map((x) => x.timeSynced)).toEqual([false, false]);
+    expect(rows[0].deviceTs.getTime()).toBe(5000);
+    expect(rows.every((x) => x.cardId === CARD.id)).toBe(true);
+  });
+
+  it('still rejects an unsynced event whose device_ts is not a Z-stamped ISO shape', async () => {
+    // Unsynced skips the RANGE check, never the SHAPE check — and the rejection is named AND
+    // acked: the terminal deletes through acked_through, so a silent no-ack would jam its queue.
+    const r = await makeService().ingestEvents('term-1', {
+      stream: STREAM,
+      dropped: 0,
+      events: [
+        event({ seq: 30, device_ts: 'not-a-date', time_synced: false }),
+        event({ seq: 31, device_ts: 'uptime:42s', time_synced: false }),
+      ],
+    });
+    expect(r).toEqual({ ackedThrough: 31, rejected: [30, 31] });
+    expect(mockCards.insertEvents).not.toHaveBeenCalled();
   });
 
   it('counts the reported drops ONCE — only on the batch that inserted rows', async () => {

@@ -1,5 +1,6 @@
 {
   "cards": [
-    { "uid": "04A1B2C3", "valid_from": null, "valid_until": null }
+    { "uid": "04A1B2C3", "valid_from": null, "valid_until": null },
+    { "uid": "04B2C3D4", "valid_from": 1795713600, "valid_until": 1795724400 }
   ]
 }
