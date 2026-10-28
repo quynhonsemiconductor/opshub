@@ -8,7 +8,7 @@
 import { createFakeAudit } from '../../../audit/src/testing/audit.fake';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActorScope } from '@platform';
-import { AttendanceService } from './attendance.service';
+import { AttendanceService, csvField } from './attendance.service';
 
 const mockRepo = {} as never;
 const mockAudit = createFakeAudit();
@@ -110,6 +110,48 @@ describe('summaryCsv', () => {
     expect(csv).toContain("'=SUM(A1:A9)");
     expect(csv).toContain("'@cmd");
     expect(csv).not.toMatch(/[^']=SUM/);
+  });
+
+  it('a leave type the sheet has no column for counts as other, never NaN', async () => {
+    const csv = await service({
+      month: '2026-10',
+      employees: [
+        {
+          ...AN,
+          days: [dayRow({ status: 'office', leaveType: 'sabbatical', leavePortion: 'morning' })],
+        },
+      ],
+    }).summaryCsv('2026-10', HR);
+    expect(csv).not.toContain('NaN');
+    expect(csv.trim().split('\r\n')[1].split(',')[8]).toBe('0.5'); // leave_other
+  });
+});
+
+describe('csvField', () => {
+  it.each([
+    ['=', '=1+1'],
+    ['+', '+1'],
+    ['-', '-1'],
+    ['@', '@SUM(A1)'],
+    ['tab', '\tcmd'],
+  ])('guards a leading %s with an apostrophe', (_name, value) => {
+    expect(csvField(value)).toBe(`'${value}`);
+  });
+
+  it('guards a leading CR, inside the quotes the CR forces', () => {
+    expect(csvField('\rcmd')).toBe('"\'\rcmd"');
+  });
+
+  it('puts the apostrophe INSIDE the quotes when the value also needs quoting', () => {
+    expect(csvField('=HYPERLINK("x","y"),z')).toBe('"\'=HYPERLINK(""x"",""y""),z"');
+  });
+
+  it('leaves ordinary values alone, quotes commas, and maps null to empty', () => {
+    expect(csvField('An')).toBe('An');
+    expect(csvField('Nguyen, An')).toBe('"Nguyen, An"');
+    expect(csvField('say "hi"')).toBe('"say ""hi"""');
+    expect(csvField(null)).toBe('');
+    expect(csvField('a-b')).toBe('a-b'); // only a LEADING guard character matters
   });
 });
 

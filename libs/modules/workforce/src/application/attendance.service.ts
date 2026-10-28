@@ -481,7 +481,12 @@ export class AttendanceService {
         if (day.status === 'wfh') counts.wfh += whole;
         else if (day.status === 'absent') counts.absences += whole;
         else if (day.status === 'office') counts.office += whole;
-        if (day.leaveType) counts[day.leaveType as keyof typeof counts] += whole;
+        if (day.leaveType) {
+          // A leave type the sheet has no column for (a new enum value) is counted as `other`,
+          // never `undefined + 0.5` = NaN in the file.
+          counts[LEAVE_COLUMNS.has(day.leaveType) ? (day.leaveType as LeaveColumn) : 'other'] +=
+            whole;
+        }
         if (day.flags.includes('late')) counts.late += 1;
         if (day.flags.includes('early')) counts.early += 1;
         counts.minutes += day.workedMinutes;
@@ -534,11 +539,6 @@ export class AttendanceService {
   // ── The morning sweep ───────────────────────────────────────────────────────
 
   /**
-   * Every employee with unresolved flags on `date` (a working day), for the morning notification:
-   * the person themselves, so yesterday's problems are in front of them while a justification can
-   * still be filed. Empty when `date` is not a working day.
-   */
-  /**
    * Every CURRENTLY-EMPLOYED person with unresolved flags on `date` (a working day), for the
    * morning notification: the person themselves, so yesterday's problems are in front of them
    * while a justification can still be filed. A day with a PENDING justification is skipped —
@@ -590,7 +590,9 @@ export class AttendanceService {
       if (!holiday) return date;
     }
     return date;
-  } // ── Month close ─────────────────────────────────────────────────────────────
+  }
+
+  // ── Month close ─────────────────────────────────────────────────────────────
 
   async getMonthClose(month: string): Promise<MonthClose | null> {
     const [row] = await this.db
@@ -840,15 +842,27 @@ export class AttendanceService {
   }
 }
 
+/** The leave columns the summary sheet has. Anything else is counted under `other`. */
+type LeaveColumn = 'annual' | 'sick' | 'unpaid' | 'parental' | 'other';
+const LEAVE_COLUMNS: ReadonlySet<string> = new Set<LeaveColumn>([
+  'annual',
+  'sick',
+  'unpaid',
+  'parental',
+  'other',
+]);
+
 /**
- * A CSV field: quoted when it contains a comma, quote or newline, with quotes doubled — and a
- * leading `=`, `+`, `-`, `@`, tab or CR is neutralised with a leading apostrophe, because those
- * are the characters a spreadsheet turns into a FORMULA. A name is data, never code.
+ * A CSV field: a leading `=`, `+`, `-`, `@`, tab or CR is neutralised with a leading apostrophe,
+ * because those are the characters a spreadsheet turns into a FORMULA — a name is data, never
+ * code. The apostrophe goes INSIDE the quotes: it must be part of the cell's value, not a stray
+ * character in front of the opening quote (which would make the quote itself literal).
+ * Then the field is quoted when it contains a comma, quote or newline, with quotes doubled.
  */
-function csvField(value: string | null): string {
+export function csvField(value: string | null): string {
   if (value === null) return '';
-  const guard = /^[=+@\t\r-]/.test(value) ? "'" : '';
-  return guard + (/[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value);
+  const safe = /^[=+@\t\r-]/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
 /** Fold contract rows into one window per employee. See `employmentByEmployee` for the rule. */
