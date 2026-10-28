@@ -158,6 +158,8 @@ export const AUDIT_RESOURCE_TYPES = [
   'door_terminal',
   'door_card',
   'wfh_request',
+  'attendance_justification',
+  'attendance_month',
 ] as const satisfies readonly AuditResourceType[];
 
 /** Compile-time exhaustiveness: a catalogue value absent from the list above fails here. */

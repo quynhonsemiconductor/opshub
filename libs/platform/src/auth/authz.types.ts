@@ -48,6 +48,8 @@ export type ScopedResource =
   | 'leave_request'
   | 'wfh_request'
   | 'overtime'
+  | 'attendance_justification'
+  | 'attendance_month'
   | 'door_card'
   | 'door_terminal';
 

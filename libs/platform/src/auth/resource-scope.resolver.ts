@@ -9,6 +9,7 @@ import {
   leaveRequests,
   wfhRequests,
   overtimeEntries,
+  attendanceJustifications,
 } from '../../../../db/schema/workforce';
 import { cards as doorCards, terminals as doorTerminals } from '../../../../db/schema/door';
 import type { ResourceAttrs, ScopedResource } from './authz.types';
@@ -45,6 +46,10 @@ export class ResourceScopeResolver {
         return this.leaveRequest(id);
       case 'wfh_request':
         return this.wfhRequest(id);
+      case 'attendance_justification':
+        return this.attendanceJustification(id);
+      case 'attendance_month':
+        return this.attendanceMonth(id);
       case 'overtime':
         return this.overtime(id);
       case 'door_card':
@@ -144,6 +149,28 @@ export class ResourceScopeResolver {
 
     if (!row) throw new NotFoundException('WFH_REQUEST_NOT_FOUND', 'WFH request not found');
     return { ownerId: row.employeeId };
+  }
+
+  private async attendanceJustification(id: string): Promise<ResourceAttrs> {
+    const [row] = await this.db
+      .select({ employeeId: attendanceJustifications.employeeId })
+      .from(attendanceJustifications)
+      .where(eq(attendanceJustifications.id, id))
+      .limit(1);
+
+    if (!row)
+      throw new NotFoundException('ATTENDANCE_JUSTIFICATION_NOT_FOUND', 'Justification not found');
+    return { ownerId: row.employeeId };
+  }
+
+  /**
+   * A month is a CALENDAR KEY, not a row: the close route names a month that has no close row YET
+   * (that is what it is about to create), so existence cannot be part of resolving it — a 404 here
+   * meant no month could ever be closed. No scope attributes either, like a terminal: a month
+   * belongs to nobody.
+   */
+  private attendanceMonth(_id: string): ResourceAttrs {
+    return {};
   }
 
   private async overtime(id: string): Promise<ResourceAttrs> {

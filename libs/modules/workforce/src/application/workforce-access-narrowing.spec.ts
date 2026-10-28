@@ -54,6 +54,9 @@ function service(): WorkforceService {
     // LeaveBalanceService is unused by the narrowing paths under test; a stub keeps this spec
     // about scoping rather than about leave arithmetic, which has its own suite.
     {} as never,
+    // AttendanceService: only its month-close lock is in these paths, and none of the narrowing
+    // tests reach a closed month; a stub keeps this spec about scoping.
+    { assertMonthsOpen: vi.fn().mockResolvedValue(undefined) } as never,
     // db: createTimesheetsBulk is the one narrowing-adjacent path that opens a transaction (so its
     // batch and the batch's audit trail commit together) — the callback just runs against a stub
     // executor, since the repo and audit fake underneath are mocked either way.

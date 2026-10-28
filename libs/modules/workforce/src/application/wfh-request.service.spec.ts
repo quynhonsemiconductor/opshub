@@ -86,6 +86,7 @@ function service(): WorkforceService {
     mockAuthz as never,
     new ActorScope(mockAuthz as never),
     mockBalances as never,
+    { assertMonthsOpen: vi.fn().mockResolvedValue(undefined) } as never,
     mockDb as never,
   );
 }

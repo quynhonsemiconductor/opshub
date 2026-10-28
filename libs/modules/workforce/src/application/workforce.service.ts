@@ -22,6 +22,7 @@ import {
   type ResourceAuditTrail,
 } from '@modules/audit';
 import { LeaveBalanceService, type LeaveBalance } from './leave-balance.service';
+import { AttendanceService } from './attendance.service';
 import { MS_PER_HOUR, type Actor } from '@shared-kernel';
 import {
   WORKFORCE_REPOSITORY,
@@ -85,6 +86,7 @@ export class WorkforceService {
     private readonly authz: AuthzService,
     private readonly actorScope: ActorScope,
     private readonly balances: LeaveBalanceService,
+    private readonly attendance: AttendanceService,
     @InjectDrizzle() private readonly db: DrizzleDB,
   ) {
     this.timesheetTrail = audit.forResource(AUDIT_RESOURCE.TIMESHEET);
@@ -282,6 +284,9 @@ export class WorkforceService {
     // Every one of these is also a CHECK on the table. Restated here because a raw constraint
     // violation reaches the caller as a 500 with no code, and "morning to afternoon" is a mistake
     // somebody will make — it reads like a whole day, and the whole day is what `full_day` is for.
+    // A closed month accepts no new requests touching it — reopening is the admin override.
+    await this.attendance.assertMonthsOpen(input.startDate, input.endDate, 'A leave request');
+
     const violation = leaveWindowViolation(window);
     if (violation) {
       throw new PreconditionFailedException(ErrorCodes.LEAVE_INVALID_WINDOW, violation);
@@ -397,6 +402,7 @@ export class WorkforceService {
 
   async reviewLeave(id: string, approve: boolean, actor: Actor): Promise<LeaveRequest> {
     const l = await this.getLeave(id);
+    await this.attendance.assertMonthsOpen(l.startDate, l.endDate, 'Deciding a leave request');
     if (l.status !== 'pending') {
       throw new PreconditionFailedException(
         ErrorCodes.LEAVE_REQUEST_NOT_PENDING,
@@ -446,6 +452,7 @@ export class WorkforceService {
   async cancelLeave(id: string, actor: Actor): Promise<LeaveRequest> {
     const l = await this.getLeave(id);
     await this.assertOwnerOrApprover(l.employeeId, actor);
+    await this.attendance.assertMonthsOpen(l.startDate, l.endDate, 'Cancelling a leave request');
     if (l.requestId && l.status === 'pending') {
       // A PENDING withdrawal goes THROUGH the engine: the item and the domain row change in ONE
       // transaction, each guarded pending. Writing the domain status alone (the pre-existing bug)
@@ -560,6 +567,7 @@ export class WorkforceService {
     input: Omit<CreateWfhInput, 'employeeId' | 'workingDays'>,
     actor: Actor,
   ): Promise<WfhRequest> {
+    await this.attendance.assertMonthsOpen(input.startDate, input.endDate, 'A WFH request');
     // What the window actually covers, weekends and holidays skipped — computed once here and
     // frozen on the row, for the same reason leave's cost is frozen: the holiday calendar is
     // editable, and a later declaration inside an approved window would otherwise quietly
@@ -656,6 +664,7 @@ export class WorkforceService {
 
   async reviewWfh(id: string, approve: boolean, actor: Actor): Promise<WfhRequest> {
     const w = await this.getWfh(id);
+    await this.attendance.assertMonthsOpen(w.startDate, w.endDate, 'Deciding a WFH request');
     if (w.status !== 'pending') {
       throw new PreconditionFailedException(
         ErrorCodes.WFH_REQUEST_NOT_PENDING,
@@ -687,6 +696,7 @@ export class WorkforceService {
   async cancelWfh(id: string, actor: Actor): Promise<WfhRequest> {
     const w = await this.getWfh(id);
     await this.assertOwnerOrApprover(w.employeeId, actor);
+    await this.attendance.assertMonthsOpen(w.startDate, w.endDate, 'Cancelling a WFH request');
     if (w.requestId) {
       // Same transaction-pairing as cancelLeave: engine.cancel runs the onCancel hook, which
       // guards the domain row pending and writes both statuses together.

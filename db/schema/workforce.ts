@@ -14,6 +14,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import {
+  justificationKindEnum,
   leaveAccrualMethodEnum,
   leaveDayPortionEnum,
   leaveStatusEnum,
@@ -267,3 +268,50 @@ export const wfhRequests = workforceSchema.table(
     statusIdx: index('ix_wfh_status').on(t.status),
   }),
 );
+
+/**
+ * One attendance JUSTIFICATION request: a manager's sign-off that repairs working days.
+ *
+ * A justification does not spend a day, it EXPLAINS one (`late`/`early`/`forgot_card`/
+ * `missing_checkout`), so it coexists with leave and WFH instead of competing with them: an
+ * approved row credits its working days (8 h each, per the rules) and clears their flags; a
+ * rejected or unanswered one leaves the measured day standing. `working_days` is frozen at submit
+ * like leave's and WFH's.
+ *
+ * Status reuses `wfh_status` deliberately: same four engine-driven values, and expiry is
+ * `cancelled` for the same reason WFH's is — nobody answering is not a refusal.
+ */
+export const attendanceJustifications = workforceSchema.table(
+  'attendance_justifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    employeeId: uuid('employee_id').notNull(),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    /** Working days the window covers, computed at submit and then frozen. */
+    workingDays: numeric('working_days', { precision: 5, scale: 2 }).notNull(),
+    kind: justificationKindEnum('kind').notNull(),
+    reason: text('reason'),
+    status: wfhStatusEnum('status').notNull().default('pending'),
+    reviewerId: uuid('reviewer_id'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    requestId: uuid('request_id').references(() => requestItems.id, { onDelete: 'set null' }),
+  },
+  (t) => ({
+    employeeIdx: index('ix_attendance_just_employee').on(t.employeeId, t.startDate),
+    statusIdx: index('ix_attendance_just_status').on(t.status),
+  }),
+);
+
+/**
+ * A closed attendance month. ONE ROW PER MONTH and the row IS the lock — no status column to keep
+ * in agreement with the row's presence. HR closes; reopening is the audited admin override (the
+ * `workforce.attendance.reopen` permission is granted to no role, so only the wildcard reaches it).
+ */
+export const attendanceMonthCloses = workforceSchema.table('attendance_month_closes', {
+  month: varchar('month', { length: 7 }).primaryKey(),
+  closedBy: uuid('closed_by').notNull(),
+  closedAt: timestamp('closed_at', { withTimezone: true }).notNull().defaultNow(),
+  note: text('note'),
+});

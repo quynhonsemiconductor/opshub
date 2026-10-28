@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { type DbExecutor, RequestRegistry, RequestTypeDef } from '@platform';
 import { AUDIT_ACTION, AUDIT_RESOURCE, AuditService } from '@modules/audit';
 import { REQUEST_TYPE } from '@shared-kernel';
+import { assertMonthsOpenInTx } from '../domain/attendance-month-lock';
 import { leaveRequests } from '../../../../../db/schema';
 import type { LeaveDayPortion } from '../domain/workforce.types';
 
@@ -80,6 +81,7 @@ export class LeaveRequestTypeDef implements RequestTypeDef<LeaveRequestPayload>,
     tx: DbExecutor,
   ): Promise<void> {
     await this.assertPending(tx, payload.leaveRequestId);
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Deciding a leave request');
     const now = new Date();
     await tx
       .update(leaveRequests)
@@ -115,6 +117,7 @@ export class LeaveRequestTypeDef implements RequestTypeDef<LeaveRequestPayload>,
     tx: DbExecutor,
   ): Promise<void> {
     await this.assertPending(tx, payload.leaveRequestId);
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Deciding a leave request');
     const now = new Date();
     await tx
       .update(leaveRequests)
@@ -142,6 +145,7 @@ export class LeaveRequestTypeDef implements RequestTypeDef<LeaveRequestPayload>,
     tx: DbExecutor,
   ): Promise<void> {
     await this.assertPending(tx, payload.leaveRequestId);
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Withdrawing a request');
     await tx
       .update(leaveRequests)
       .set({ status: 'cancelled' })

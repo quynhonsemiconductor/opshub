@@ -1325,6 +1325,152 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/workforce/attendance': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The derived attendance month
+     * @description Status, worked minutes and flags per WORKING day, computed from the door swipes plus the live leave, WFH and justification requests — never stored. Ladder: holiday > full-day leave > approved WFH > office swipes > absent.
+     */
+    get: operations['AttendanceController_getMonth'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/attendance/me': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The caller's own derived attendance month */
+    get: operations['AttendanceController_getMyMonth'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/attendance/justifications/preview': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** What a justification window covers, before filing it */
+    get: operations['AttendanceController_preview'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/attendance/justifications': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List attendance justifications */
+    get: operations['AttendanceController_listJustifications'];
+    put?: never;
+    /**
+     * File an attendance justification for the current user
+     * @description A date range expanded to working days, approved or rejected as a whole. No overlap rule: a justification explains days (late/early/forgot_card/missing_checkout), it does not spend them. Refused with 412 ATTENDANCE_MONTH_CLOSED when the month has been closed.
+     */
+    post: operations['AttendanceController_createJustification'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/attendance/justifications/{id}/review': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Approve or reject a justification */
+    post: operations['AttendanceController_reviewJustification'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/attendance/justifications/{id}/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Withdraw a pending justification */
+    post: operations['AttendanceController_cancelJustification'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/attendance/months/{month}/close': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Close an attendance month
+     * @description Locks the month: no new leave, WFH or justification whose window touches it, no decision on a pending one, no cancellation. Reopening is the audited administrator override.
+     */
+    post: operations['AttendanceController_closeMonth'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/workforce/attendance/months/{month}/reopen': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Reopen a closed month — the audited administrator override */
+    post: operations['AttendanceController_reopenMonth'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/requests': {
     parameters: {
       query?: never;
@@ -5891,6 +6037,73 @@ export interface components {
       /** @description The month's public holidays, name included, so the calendar can say why a day has nobody in. */
       holidays: components['schemas']['WioHolidayDto'][];
     };
+    MonthCloseDto: {
+      month: string;
+      closedBy: string;
+      closedAt: string;
+      note: string | null;
+    };
+    AttendanceDayDto: {
+      /** @enum {string} */
+      status: 'holiday' | 'leave' | 'wfh' | 'office' | 'absent';
+      /** @description The day's unresolved problems; an approved justification clears them. */
+      flags: ('late' | 'early' | 'missing_checkout' | 'absent' | 'unsynced')[];
+      date: string;
+      workedMinutes: number;
+      lateMinutes: number | null;
+      earlyMinutes: number | null;
+      /** @description A justification has been filed for this day but not decided yet. */
+      pendingJustification: boolean;
+    };
+    EmployeeAttendanceMonthDto: {
+      id: string;
+      name: string;
+      department: string | null;
+      /** @description Only working days: Mon–Fri minus the public holidays. */
+      days: components['schemas']['AttendanceDayDto'][];
+    };
+    AttendanceMonthResponseDto: {
+      month: string;
+      close: components['schemas']['MonthCloseDto'] | null;
+      employees: components['schemas']['EmployeeAttendanceMonthDto'][];
+    };
+    JustificationPreviewResponseDto: {
+      startDate: string;
+      endDate: string;
+      /** @description The working days in `[startDate, endDate]` — weekends and public holidays skipped. */
+      workingDays: string[];
+    };
+    JustificationResponseDto: {
+      /** @enum {string} */
+      kind: 'late' | 'early' | 'forgot_card' | 'missing_checkout';
+      /** @enum {string} */
+      status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+      id: string;
+      employeeId: string;
+      startDate: string;
+      endDate: string;
+      reason: string | null;
+      /** @description Working days the window covers — always a whole number. */
+      workingDays: number;
+      reviewerId: string | null;
+      reviewedAt: string | null;
+      createdAt: string;
+    };
+    CreateJustificationDto: {
+      /** Format: date */
+      startDate: string;
+      /** Format: date */
+      endDate: string;
+      /** @enum {string} */
+      kind: 'late' | 'early' | 'forgot_card' | 'missing_checkout';
+      reason?: string;
+    };
+    CloseMonthDto: {
+      note?: string;
+    };
+    ReopenMonthDto: {
+      note: string;
+    };
     RequestApprovalResponseDto: {
       id: string;
       requestId: string;
@@ -8209,6 +8422,8 @@ export interface operations {
           | 'leave_entitlement'
           | 'holiday'
           | 'wfh_request'
+          | 'attendance_justification'
+          | 'attendance_month'
           | 'document'
           | 'document_version'
           | 'position'
@@ -12046,6 +12261,413 @@ export interface operations {
       };
       /** @description Unauthorized — missing or invalid authentication */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AttendanceController_getMonth: {
+    parameters: {
+      query: {
+        month: string;
+        employeeId?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttendanceMonthResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AttendanceController_getMyMonth: {
+    parameters: {
+      query: {
+        month: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttendanceMonthResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AttendanceController_preview: {
+    parameters: {
+      query: {
+        startDate: string;
+        endDate: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JustificationPreviewResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AttendanceController_listJustifications: {
+    parameters: {
+      query?: {
+        employeeId?: string;
+        status?: 'pending' | 'approved' | 'rejected' | 'cancelled';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JustificationResponseDto'][];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AttendanceController_createJustification: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateJustificationDto'];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JustificationResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AttendanceController_reviewJustification: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReviewDto'];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JustificationResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AttendanceController_cancelJustification: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JustificationResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AttendanceController_closeMonth: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        month: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CloseMonthDto'];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttendanceMonthResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Conflict — duplicate record or state conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AttendanceController_reopenMonth: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        month: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReopenMonthDto'];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Precondition Failed */
+      412: {
         headers: {
           [name: string]: unknown;
         };
