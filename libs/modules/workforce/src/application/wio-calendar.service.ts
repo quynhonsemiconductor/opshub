@@ -114,12 +114,16 @@ export class WioCalendarService {
     // requester, their manager and HR (a global workforce.read holder); everyone else — and any
     // caller that names no viewer — sees the person as simply in the office. Leave stays
     // APPROVED-only for everyone, with no type: "away", never why.
-    const pendingVisibleTo = viewer ? await this.pendingVisibleTo(viewer) : null;
+    // `undefined` = no viewer (nobody sees pending); `null` = everybody (HR); a Set = those ids.
+    const pendingVisibleTo = viewer ? await this.pendingVisibleTo(viewer) : undefined;
     return {
       month,
       people,
       wfh: marks.filter(
-        (m) => m.status === 'approved' || (pendingVisibleTo?.has(m.employeeId) ?? false),
+        (m) =>
+          m.status === 'approved' ||
+          pendingVisibleTo === null ||
+          (pendingVisibleTo?.has(m.employeeId) ?? false),
       ),
       pto: ptoMarksInRange(
         leave.filter((l) => known.has(l.employeeId)),

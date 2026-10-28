@@ -63,12 +63,16 @@ const mockDb = {
     cb({ execute: vi.fn().mockResolvedValue({ rows: [] }) }),
   ),
   select: vi.fn().mockReturnValue({
-    from: vi
-      .fn()
-      .mockReturnValue({
-        where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
-      }),
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
+    }),
   }),
+};
+
+const mockBalances = {
+  holidaysBetween: vi.fn().mockResolvedValue(new Set()),
+  leaveCostFor: vi.fn().mockResolvedValue(2),
+  assertSufficientBalance: vi.fn().mockResolvedValue(undefined),
 };
 
 const SELF = { sub: 'emp-1', email: 'emp1@test.com' };
@@ -81,11 +85,7 @@ function service(): WorkforceService {
     mockStorage as never,
     mockAuthz as never,
     new ActorScope(mockAuthz as never),
-    {
-      holidaysBetween: vi.fn().mockResolvedValue(new Set()),
-      leaveCostFor: vi.fn(),
-      assertSufficientBalance: vi.fn(),
-    } as never,
+    mockBalances as never,
     mockDb as never,
   );
 }
@@ -98,7 +98,10 @@ const FUTURE = () => {
 };
 
 describe('createWfh', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuthz.check.mockResolvedValue(false);
+  });
 
   it('refuses a window overlapping live LEAVE, and live WFH — the rule runs both ways', async () => {
     mockRepo.overlappingLeaveCandidates.mockResolvedValueOnce([
@@ -123,7 +126,9 @@ describe('createWfh', () => {
       }),
     });
     mockEngine.submit.mockResolvedValue({ id: 'req-1' });
+    mockAuthz.check.mockResolvedValueOnce(true); // the manager holds workforce.wfh.review
     await service().createWfh(FUTURE(), SELF);
+    expect(mockAuthz.check).toHaveBeenCalledWith('mgr-1', 'workforce.wfh.review');
     expect(mockEngine.submit).toHaveBeenCalledWith(
       'wfh_request',
       expect.objectContaining({ employeeId: SELF.sub }),
@@ -145,6 +150,42 @@ describe('createWfh', () => {
     const opts = (mockEngine.submit as ReturnType<typeof vi.fn>).mock.calls[0][3] as {
       assigneeId?: string;
     };
+    expect(opts.assigneeId).toBeUndefined();
+  });
+
+  it('falls back to unassigned (HR/admin) when the manager is offboarded', async () => {
+    mockDb.select = vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi
+            .fn()
+            .mockResolvedValueOnce([{ managerId: 'mgr-1' }])
+            .mockResolvedValueOnce([{ status: 'offboarded' }]),
+        }),
+      }),
+    });
+    mockEngine.submit.mockResolvedValue({ id: 'req-1' });
+    mockAuthz.check.mockResolvedValue(true);
+    await service().createWfh(FUTURE(), SELF);
+    const opts = mockEngine.submit.mock.calls[0][3] as { assigneeId?: string };
+    expect(opts.assigneeId).toBeUndefined();
+  });
+
+  it('falls back to unassigned (HR/admin) when the manager lacks the review permission', async () => {
+    mockDb.select = vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi
+            .fn()
+            .mockResolvedValueOnce([{ managerId: 'mgr-1' }])
+            .mockResolvedValueOnce([{ status: 'active' }]),
+        }),
+      }),
+    });
+    mockEngine.submit.mockResolvedValue({ id: 'req-1' });
+    mockAuthz.check.mockResolvedValue(false);
+    await service().createWfh(FUTURE(), SELF);
+    const opts = mockEngine.submit.mock.calls[0][3] as { assigneeId?: string };
     expect(opts.assigneeId).toBeUndefined();
   });
 
@@ -232,5 +273,63 @@ describe('withdrawals go through the engine', () => {
       PreconditionFailedException,
     );
     expect(mockEngine.approve).not.toHaveBeenCalled();
+  });
+});
+
+describe('createLeave checks the balance BEFORE inserting', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('an insufficient balance refuses before any row is written or lock taken', async () => {
+    const w = FUTURE();
+    mockBalances.leaveCostFor.mockResolvedValue(2);
+    mockBalances.assertSufficientBalance.mockRejectedValueOnce(
+      new PreconditionFailedException('LEAVE_INSUFFICIENT_BALANCE', 'not enough'),
+    );
+    await expect(
+      service().createLeave(
+        { leaveType: 'annual', startDate: w.startDate, endDate: w.endDate },
+        SELF,
+      ),
+    ).rejects.toBeInstanceOf(PreconditionFailedException);
+    expect(mockRepo.createLeave).not.toHaveBeenCalled();
+    expect(mockDb.transaction).not.toHaveBeenCalled();
+  });
+
+  it('on success the balance is asked for first, then the row is inserted', async () => {
+    const w = FUTURE();
+    mockBalances.leaveCostFor.mockResolvedValue(2);
+    mockEngine.submit.mockResolvedValue({ id: 'req-1' });
+    const order: string[] = [];
+    mockBalances.assertSufficientBalance.mockImplementationOnce(() => {
+      order.push('balance');
+      return Promise.resolve();
+    });
+    mockRepo.createLeave.mockImplementationOnce(() => {
+      order.push('insert');
+      return Promise.resolve({ id: 'leave-1', startDate: w.startDate, endDate: w.endDate });
+    });
+    await service()
+      .createLeave({ leaveType: 'annual', startDate: w.startDate, endDate: w.endDate }, SELF)
+      .catch(() => undefined);
+    expect(order).toEqual(['balance', 'insert']);
+  });
+});
+
+describe('previewWfh', () => {
+  it('lists the working days of the window, skipping weekends and public holidays', async () => {
+    // Fri 2026-11-06 .. Tue 2026-11-10: Fri, [Sat, Sun], Mon, Tue; Monday is a declared holiday.
+    mockBalances.holidaysBetween.mockResolvedValueOnce(new Set(['2026-11-09']));
+    const out = await service().previewWfh('2026-11-06', '2026-11-10');
+    expect(out).toEqual({
+      startDate: '2026-11-06',
+      endDate: '2026-11-10',
+      workingDays: ['2026-11-06', '2026-11-10'],
+    });
+  });
+
+  it('a weekend-only window previews as no working day', async () => {
+    mockBalances.holidaysBetween.mockResolvedValueOnce(new Set());
+    const out = await service().previewWfh('2026-11-07', '2026-11-08');
+    expect(out.workingDays).toEqual([]);
   });
 });

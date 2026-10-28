@@ -505,19 +505,28 @@ export class WorkforceService {
   }
 
   /**
-   * The employee's manager, or null when there is none (or the "manager" is the person themself —
-   * a self-assigned manager would collide with the engine's separation-of-duties refusal and stall
-   * the request forever). Null leaves the request unassigned: any holder decides, which is the
-   * HR/admin fallback the rules name.
+   * The employee's manager, or null when there is none — or when the "manager" cannot decide: they
+   * are the person themself (would collide with the engine's separation-of-duties refusal), they
+   * are offboarded, or they lack `permission`. Null leaves the request unassigned, which hands it
+   * to any holder of the permission: the HR/admin fallback the rules name, so a request is never
+   * parked on someone who cannot answer it. (The engine applies the same fallback at decision time
+   * if the manager leaves or loses the permission AFTER submit.)
    */
-  private async managerOf(employeeId: string): Promise<string | null> {
+  private async managerOf(employeeId: string, permission: string): Promise<string | null> {
     const [row] = await this.db
       .select({ managerId: employees.managerId })
       .from(employees)
       .where(eq(employees.id, employeeId))
       .limit(1);
     const managerId = row?.managerId ?? null;
-    return managerId && managerId !== employeeId ? managerId : null;
+    if (!managerId || managerId === employeeId) return null;
+    const [mgr] = await this.db
+      .select({ status: employees.status })
+      .from(employees)
+      .where(eq(employees.id, managerId))
+      .limit(1);
+    if (!mgr || mgr.status === 'offboarded') return null;
+    return (await this.authz.check(managerId, permission)) ? managerId : null;
   }
 
   /** The holiday set `workingDatesInRange` wants, from the same calendar leave costs against. */
@@ -569,11 +578,6 @@ export class WorkforceService {
       );
     }
 
-    // LEAVE AND WFH CANNOT COVER THE SAME DAY: a person cannot be on leave and working from home
-    // at once, so either request touching the other's days is refused. The range test is the whole
-    // verdict for WFH (whole days, no portions) — and for the leave side too, because a leave
-    // window that costs anything always covers a working day (`LEAVE_WINDOW_EMPTY`-equivalent is
-    // refused at its own submit), so any date-range touch is a day both would claim.
     // LEAVE AND WFH CANNOT COVER THE SAME DAY, checked BOTH ways under the same per-employee
     // window lock `createLeave` takes, in one transaction with the insert — see there for why the
     // lock; here for the other direction of the same rule.
@@ -613,12 +617,12 @@ export class WorkforceService {
       workingDays: workingDays.length,
       reason: request.reason,
     };
-    // The decision is WAITING ON the requester's manager when there is one: the engine refuses any
-    // other holder of the permission while an assignee is set, so "any manager approves anyone" is
-    // over. No manager leaves it unassigned, which hands it to any holder — the HR/admin fallback.
+    // The decision is WAITING ON the requester's manager when there is a usable one (active, holds
+    // the review permission): the engine refuses any other holder while an assignee is set. No
+    // usable manager leaves it unassigned, which hands it to any holder — the HR/admin fallback.
     const engineItem = await this.engine.submit('wfh_request', enginePayload, actor, {
       expiresAt: new Date(Date.now() + 72 * MS_PER_HOUR), // 3-day review window
-      assigneeId: (await this.managerOf(actor.sub)) ?? undefined,
+      assigneeId: (await this.managerOf(actor.sub, 'workforce.wfh.review')) ?? undefined,
     });
 
     await this.db.transaction(async (tx) => {

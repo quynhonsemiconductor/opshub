@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { MS_PER_HOUR, newId, type Actor, type RequestType } from '@shared-kernel';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '../database/drizzle.provider';
 import { AuthzService } from '../auth/authz.service';
@@ -11,7 +11,7 @@ import {
 } from '../errors/exceptions';
 import { ErrorCodes } from '../errors/error-codes';
 import { WebhookEnqueueService } from '../webhooks/webhook-enqueue.service';
-import { requestItems, requestApprovals, requestComments } from '../../../../db/schema';
+import { employees, requestItems, requestApprovals, requestComments } from '../../../../db/schema';
 import { RequestRegistry } from './request-registry';
 import { nameOf, resolveEmployeeNames } from '../directory/employee-names';
 import { DelegationService } from '../authz/delegation.service';
@@ -111,20 +111,12 @@ export class RequestEngine {
       /*
        * TELL WHOEVER CAN DECIDE IT.
        *
-       * This was `if (row.assigneeId)` and nothing else, and `assigneeId` is set by no production
-       * path: no `RequestTypeDef` defines a `resolverFn`, and no caller of `submit` passes
-       * `opts.assigneeId`. Measured on a seeded database: 71 request rows, one assignee, and that one
-       * written by a test. So raising a request notified NOBODY, and an approver had to think to go
-       * and look. `request.step_ready` has the same shape and had never been delivered once.
-       *
-       * Assigning a request to a person is a product decision nobody has made, and this does not make
-       * it. It notifies the people who could already act: `RequestApprovalStep.resolverFn` documents
-       * `null` as "any holder of requiredPermission can approve", so the approvers ARE whoever holds
-       * the permission, and `decidableByPredicate` builds "My queue" from that same fact. Queue and
-       * prompt therefore cannot disagree — which is why the queue stopped depending on `assigneeId`.
-       *
-       * An explicit assignee still wins: naming one is a decision, and fanning out past it would be
-       * second-guessing the caller.
+       * A request with a named assignee (`opts.assigneeId`: WFH and attendance justifications set the
+       * requester's manager) notifies that one person, and `approve()`/`reject()` hold everyone else
+       * out. An UNASSIGNED request (`assigneeId` null, e.g. types with no resolved approver) is
+       * decidable by any holder of the step's permission, so the prompt goes to each holder and the
+       * "My queue" predicate (`decidableByPredicate`) is built from that same fact: queue and prompt
+       * cannot disagree.
        */
       const firstStepPermission =
         def.approvalSteps?.[0]?.requiredPermission ?? def.requiredApprovalPermission;
@@ -152,26 +144,54 @@ export class RequestEngine {
   /**
    * An ASSIGNED request is decided by its assignee, not by every holder of the permission.
    *
-   * `assigneeId` is set at submit by types that resolve a named approver (WFH and attendance
-   * justifications: the requester's manager, falling back to unassigned when there is none, which
-   * leaves the decision to any holder — HR/admin). Before this check the assignee was a display
-   * fact only: ANY manager could approve ANYONE's WFH, and the person the request was actually
-   * waiting on never had to be the one who answered it.
+   * `assigneeId` is set at submit by types that resolve a named approver (WFH: the requester's active
+   * manager who holds the review permission). Before this check the assignee was a display fact
+   * only: ANY manager could approve ANYONE's WFH. Both `approve()` and `reject()` call this.
    *
-   * A delegate of the assignee passes too — the delegation union semantics above, applied to the
-   * assignee instead of the permission.
+   * A delegate of the assignee passes too — the delegation union semantics, applied to the assignee.
+   *
+   * FALLBACK, so a request is never stuck on someone who cannot act: when the assignee has since been
+   * offboarded, or no longer holds the step's permission, any other holder of that permission (the
+   * caller has already passed the permission check) may decide. The returned `fallbackFor` names the
+   * unavailable assignee; callers record it on the approval row and it is logged.
    */
-  private assertAssigneeMayDecide(
+  private async resolveAssigneeGate(
     request: RequestItem,
     actor: Actor,
     activeDelegation: { fromUserId: string } | null,
-  ): void {
-    if (request.assigneeId === null) return;
-    if (request.assigneeId === actor.sub) return;
-    if (activeDelegation && activeDelegation.fromUserId === request.assigneeId) return;
+    requiredPermission: string,
+  ): Promise<{ fallbackFor: string | null }> {
+    const assigneeId = request.assigneeId;
+    if (assigneeId === null || assigneeId === actor.sub) return { fallbackFor: null };
+    if (activeDelegation && activeDelegation.fromUserId === assigneeId)
+      return { fallbackFor: null };
+    if (await this.assigneeUnavailable(assigneeId, requiredPermission)) {
+      this.logger.warn(
+        { requestId: request.id, assigneeId, actorId: actor.sub },
+        'Assignee unavailable (offboarded or lacks permission); HR/admin fallback decision',
+      );
+      return { fallbackFor: assigneeId };
+    }
     throw new PermissionDeniedException(
-      `This request is waiting on ${request.assigneeId}; only they (or their delegate) may decide it`,
+      `This request is waiting on ${assigneeId}; only they (or their delegate) may decide it`,
     );
+  }
+
+  private async assigneeUnavailable(assigneeId: string, permission: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ status: employees.status })
+      .from(employees)
+      .where(eq(employees.id, assigneeId))
+      .limit(1);
+    if (!row || row.status === 'offboarded') return true;
+    return !(await this.authz.check(assigneeId, permission));
+  }
+
+  /** The approval note, tagged when the decision was a fallback so the audit trail shows why. */
+  private fallbackNote(note: string | null, fallbackFor: string | null): string | null {
+    if (!fallbackFor) return note;
+    const tag = `[fallback decision: assignee ${fallbackFor} unavailable]`;
+    return note ? `${tag} ${note}` : tag;
   }
 
   async approve(requestId: string, note: string | null, actor: Actor): Promise<RequestItem> {
@@ -211,8 +231,12 @@ export class RequestEngine {
         `Missing permission for step ${currentStep}: ${requiredPermission}`,
       );
     }
-    this.assertAssigneeMayDecide(request, actor, activeDelegation);
-    this.assertAssigneeMayDecide(request, actor, activeDelegation);
+    const { fallbackFor } = await this.resolveAssigneeGate(
+      request,
+      actor,
+      activeDelegation,
+      requiredPermission,
+    );
 
     const now = new Date();
     const updated = await this.db.transaction(async (tx) => {
@@ -246,7 +270,7 @@ export class RequestEngine {
         step: currentStep,
         approverId: actor.sub,
         decision: 'approved',
-        note,
+        note: this.fallbackNote(note, fallbackFor),
         delegatedFromId: activeDelegation?.fromUserId ?? null,
       });
 
@@ -277,10 +301,9 @@ export class RequestEngine {
         }
 
         /*
-         * Whoever can decide the NEXT step, for the same reason as at submit. `nextAssigneeId` comes
-         * from a `resolverFn` no type defines, so this branch never ran: `request.step_ready` had zero
-         * deliveries on a database with 71 requests. A half-approved request is the one most needing
-         * attention, and it was the one nobody heard about.
+         * Whoever can decide the NEXT step, for the same reason as at submit: `nextAssigneeId` when a
+         * step's `resolverFn` (or the carried-over assignee) names one, otherwise every holder of the
+         * step's permission. A half-approved request is the one most needing attention.
          *
          * The requester is excluded, as at submit — separation of duties refuses their own approval,
          * so telling them it is ready to decide would be an invitation to a 403.
@@ -370,6 +393,12 @@ export class RequestEngine {
         `Missing permission for step ${currentStep}: ${requiredPermission}`,
       );
     }
+    const { fallbackFor } = await this.resolveAssigneeGate(
+      request,
+      actor,
+      activeDelegation,
+      requiredPermission,
+    );
 
     const now = new Date();
     const updated = await this.db.transaction(async (tx) => {
@@ -385,7 +414,7 @@ export class RequestEngine {
         step: currentStep,
         approverId: actor.sub,
         decision: 'rejected',
-        note,
+        note: this.fallbackNote(note, fallbackFor),
         delegatedFromId: activeDelegation?.fromUserId ?? null,
       });
 
@@ -691,7 +720,7 @@ export class RequestEngine {
    *
    * ONE RECIPIENT IF SOMEBODY WAS NAMED, otherwise everyone the permission admits. `assigneeId` is
    * honoured first because naming an approver is a decision the caller made; the fan-out is what
-   * happens in its absence, which — since no `resolverFn` exists — is every request in production.
+   * happens in its absence (unassigned requests).
    *
    * THE REQUESTER IS EXCLUDED. `approve()` refuses self-approval, so a prompt to decide your own
    * request is a prompt to collect a 403. An approver who raises a request still sees it in the
@@ -809,21 +838,15 @@ export class RequestEngine {
   /**
    * The rows this actor may actually decide, as a SQL predicate — what "My queue" ought to mean.
    *
-   * WHAT IT USED TO MEAN, and why that was not a queue. The filter was
-   * `assigneeId = me OR (assigneeId IS NULL AND status = 'pending')`, and `assigneeId` is never
-   * populated by anything: no `RequestTypeDef` defines a `resolverFn`, and no caller of `submit`
-   * passes `opts.assigneeId`. So the first half never matched, and the second made "My queue" mean
-   * *every unassigned pending request in the tenant* — byte-identical to the Pending tab beside it for
-   * anybody holding `request.read`. For a caller without it, the narrowing collapsed the whole thing
-   * to their OWN pending requests, listed under the caption "Nothing awaiting your decision", every
-   * one of them a separation-of-duties refusal waiting to happen. And a request at step 2 vanished
-   * from it entirely, because advancing sets `in_review` and the predicate demanded `pending` — the
-   * half-approved requests, the ones most needing attention, were the ones it hid.
-   *
-   * WHAT IT MEANS NOW: open, not mine, and I hold the permission its current step requires. Derived
-   * from the same type definitions `approve()` reads, so the queue and the refusal cannot disagree —
-   * which is the whole reason this is expressible without inventing an assignment policy. Assigning
-   * requests to people is a product decision nobody has made; being able to decide one is a fact.
+   * WHAT IT MEANS: open, not mine, I hold the permission its current step requires, AND the request
+   * is mine to decide given its assignee — unassigned, assigned to me, assigned to someone who
+   * delegated to me, or assigned to an offboarded employee (the fallback `approve()` allows). The
+   * assignee clause mirrors `resolveAssigneeGate`, so the queue and the refusal cannot disagree. (An
+   * assignee who merely lost the permission also opens the fallback in `approve()`; that is a
+   * per-assignee authz fact not expressible here, so such rows show in the queue only via
+   * `viewerMayDecide`. Submit-time resolution avoids assigning to such people in the first place.)
+   * It also fixes the old failure modes: a request at step 2 (`in_review`) stays visible, and the
+   * caller's own requests are excluded.
    *
    * Expressed as `(type, currentStep)` pairs rather than a permission lookup per row, because the
    * pairs are few and known up front: one per step of each registered type.
@@ -854,6 +877,15 @@ export class RequestEngine {
     // unfiltered. `or()` of an empty list would drop the condition and show everything.
     if (pairs.length === 0) return sql`false`;
 
+    // The assignee clause — see `resolveAssigneeGate` for the rule this mirrors.
+    const delegation = await this.delegation.findActiveDelegationTo(actorId);
+    const assigneeMayBe = or(
+      isNull(requestItems.assigneeId),
+      eq(requestItems.assigneeId, actorId),
+      delegation ? eq(requestItems.assigneeId, delegation.fromUserId) : undefined,
+      sql`${requestItems.assigneeId} in (select ${employees.id} from ${employees} where ${employees.status} = 'offboarded')`,
+    );
+
     const decidablePairs = or(
       ...pairs.map((pair) =>
         and(eq(requestItems.type, pair.type), eq(requestItems.currentStep, pair.step)),
@@ -865,6 +897,7 @@ export class RequestEngine {
       // next approver's queue is for, and the old predicate excluded it.
       or(eq(requestItems.status, 'pending'), eq(requestItems.status, 'in_review')),
       decidablePairs,
+      assigneeMayBe,
       // Separation of duties, unless the type allows self-approval. Without this the queue would list
       // requests whose only possible outcome is a refusal.
       selfApprovable.length > 0
@@ -935,7 +968,18 @@ export class RequestEngine {
       }
       const stepDef = def.approvalSteps?.find((step) => step.step === row.currentStep) ?? null;
       const required = stepDef?.requiredPermission ?? def.requiredApprovalPermission;
-      const may = await mayUse(required);
+      let may = await mayUse(required);
+      // An assigned request is the assignee's (or their delegate's) to decide; offboarded or
+      // permission-less assignees open the HR/admin fallback. Reads as "not yours to decide".
+      if (
+        may &&
+        row.assigneeId !== null &&
+        row.assigneeId !== actorId &&
+        row.assigneeId !== activeDelegation?.fromUserId &&
+        !(await this.assigneeUnavailable(row.assigneeId, required))
+      ) {
+        may = false;
+      }
       out.set(row.id, { may, reason: may ? null : 'missing_permission' });
     }
 

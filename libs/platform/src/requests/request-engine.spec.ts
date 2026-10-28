@@ -809,6 +809,85 @@ describe('RequestEngine.reject()', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// assignee guard — approve() and reject() alike (the generic /requests routes)
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe('RequestEngine assignee guard', () => {
+  const OTHER = { sub: 'user-other-manager', email: 'other@test.com' };
+
+  /** The assignee is a live employee who holds the permission, unless a case says otherwise. */
+  function engineWithAssignee(assigneeStatus: 'active' | 'offboarded' | null = 'active') {
+    const built = buildEngine({ requestRow: makeRequest({ assigneeId: 'user-manager' }) });
+    // First select = getOrFail (the request row); later selects = the assignee's employee row.
+    const requestChain = makeQueryChain([makeRequest({ assigneeId: 'user-manager' })]);
+    const employeeChain = makeQueryChain(assigneeStatus ? [{ status: assigneeStatus }] : []);
+    built.db.select.mockReturnValueOnce(requestChain).mockReturnValue(employeeChain);
+    return built;
+  }
+
+  it('a non-assignee holder cannot APPROVE an assigned request', async () => {
+    const { engine } = engineWithAssignee();
+    await expect(engine.approve('req-1', null, OTHER)).rejects.toThrow(PermissionDeniedException);
+  });
+
+  it('a non-assignee holder cannot REJECT an assigned request', async () => {
+    const { engine, db } = engineWithAssignee();
+    await expect(engine.reject('req-1', null, OTHER)).rejects.toThrow(PermissionDeniedException);
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it('the assignee may approve and reject', async () => {
+    const mgr = { sub: 'user-manager', email: 'm@test.com' };
+    const a = engineWithAssignee();
+    a.db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'approved' })]));
+    await expect(a.engine.approve('req-1', null, mgr)).resolves.toBeDefined();
+    const r = engineWithAssignee();
+    r.db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'rejected' })]));
+    await expect(r.engine.reject('req-1', null, mgr)).resolves.toBeDefined();
+  });
+
+  it('a delegate of the assignee may decide', async () => {
+    const a = buildEngine({
+      requestRow: makeRequest({ assigneeId: 'user-manager' }),
+      activeDelegation: { fromUserId: 'user-manager' },
+    });
+    a.db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'rejected' })]));
+    await expect(a.engine.reject('req-1', null, OTHER)).resolves.toBeDefined();
+  });
+
+  it('falls back to any permission holder when the assignee is offboarded, and records it', async () => {
+    const { engine, db } = engineWithAssignee('offboarded');
+    const insertChain = makeQueryChain([{ id: 'approval-1' }]);
+    db.insert.mockReturnValue(insertChain);
+    db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'rejected' })]));
+    await engine.reject('req-1', 'no', OTHER);
+    const values = insertChain['values'] as ReturnType<typeof vi.fn>;
+    const inserted = values.mock.calls[0][0] as { note: string };
+    expect(inserted.note).toContain('fallback decision: assignee user-manager unavailable');
+  });
+
+  it('falls back when the assignee row is gone, and when they lost the permission', async () => {
+    const gone = engineWithAssignee(null);
+    gone.db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'approved' })]));
+    await expect(gone.engine.approve('req-1', null, OTHER)).resolves.toBeDefined();
+
+    const lost = engineWithAssignee('active');
+    lost.db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'approved' })]));
+    // actor holds it, the assignee (second check) does not
+    lost.authz.check.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    await expect(lost.engine.approve('req-1', null, OTHER)).resolves.toBeDefined();
+  });
+
+  it('the fallback still needs the permission: a non-holder is refused even if the assignee left', async () => {
+    const { engine } = buildEngine({
+      requestRow: makeRequest({ assigneeId: 'user-manager' }),
+      actorHasPermission: false,
+    });
+    await expect(engine.reject('req-1', null, OTHER)).rejects.toThrow(PermissionDeniedException);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // cancel()
 // ═════════════════════════════════════════════════════════════════════════════
 
