@@ -182,7 +182,12 @@ export class AttendanceService {
     });
   }
 
-  /** Each employee's employment window from their contracts: earliest start, latest end. */
+  /**
+   * Each employee's employment window from their contracts: earliest start, and the latest end —
+   * where ANY null end means open-ended (an indefinite contract, e.g. the renewal after a
+   * fixed-term one) and wins over every dated end regardless of row order. Only contracts that
+   * were ever in force count (`active`, `expired`, `terminated`); a `draft` never started.
+   */
   private async employmentByEmployee(
     ids: string[],
   ): Promise<Map<string, { start: string; end: string | null }>> {
@@ -194,20 +199,13 @@ export class AttendanceService {
         endDate: employmentContracts.endDate,
       })
       .from(employmentContracts)
-      .where(inArray(employmentContracts.employeeId, ids));
-    const windows = new Map<string, { start: string; end: string | null }>();
-    for (const row of rows) {
-      const w = windows.get(row.employeeId);
-      const start = !w || row.startDate < w.start ? row.startDate : w.start;
-      const end =
-        w?.end && row.endDate
-          ? w.end > row.endDate
-            ? w.end
-            : row.endDate
-          : (w?.end ?? row.endDate);
-      windows.set(row.employeeId, { start, end });
-    }
-    return windows;
+      .where(
+        and(
+          inArray(employmentContracts.employeeId, ids),
+          inArray(employmentContracts.status, ['active', 'expired', 'terminated']),
+        ),
+      );
+    return employmentWindows(rows);
   }
 
   // ── The derived month ───────────────────────────────────────────────────────
@@ -651,6 +649,25 @@ export class AttendanceService {
     await this.engine.cancel(row.requestId, actor);
     return this.getJustification(id);
   }
+}
+
+/** Fold contract rows into one window per employee. See `employmentByEmployee` for the rule. */
+export function employmentWindows(
+  rows: { employeeId: string; startDate: string; endDate: string | null }[],
+): Map<string, { start: string; end: string | null }> {
+  const windows = new Map<string, { start: string; end: string | null }>();
+  for (const row of rows) {
+    const w = windows.get(row.employeeId);
+    if (!w) {
+      windows.set(row.employeeId, { start: row.startDate, end: row.endDate });
+      continue;
+    }
+    const start = row.startDate < w.start ? row.startDate : w.start;
+    const end =
+      w.end === null || row.endDate === null ? null : w.end > row.endDate ? w.end : row.endDate;
+    windows.set(row.employeeId, { start, end });
+  }
+  return windows;
 }
 
 /** Which part of `date` an approved leave window takes, if any. */

@@ -76,7 +76,12 @@ async function myDays(month: string) {
 
 describe('the month derivation against real events', () => {
   it('December events land in December — the bound rolls the year, not the month number', async () => {
-    // 2030-12-31T16:00Z is 23:00 the same day in HCM; 2030-12-31T17:30Z is 2027-01-01 00:30.
+    // The seeded holiday calendar may hold New Year's Day, and a holiday day is not listed; this
+    // test is about the month bound, so it removes any holiday on the two dates it asserts.
+    await db.execute(
+      sql`delete from workforce.holidays where date in ('2030-12-31', '2031-01-01')`,
+    );
+    // 2030-12-31T16:00Z is 23:00 the same day in HCM; 2030-12-31T17:30Z is 2031-01-01 00:30.
     await swipe({ deviceTs: '2030-12-31T16:00:00Z', timeSynced: true, seq: 101 });
     await swipe({ deviceTs: '2030-12-31T17:30:00Z', timeSynced: true, seq: 102 });
 
@@ -84,9 +89,7 @@ describe('the month derivation against real events', () => {
     const january = await myDays('2031-01');
     expect(december.some((d) => d.date === '2030-12-31')).toBe(true);
     expect(january.some((d) => d.date === '2031-01-01')).toBe(true);
-    // The 17:30Z swipe belongs to January alone — December's day has one swipe of its own plus
-    // this one? No: it belongs to January, so December 31 shows a single swipe only if the 16:00
-    // one is alone. Pin the split itself:
+    // The 17:30Z swipe belongs to January alone, so December 31 holds only the 16:00 one.
     expect(december.find((d) => d.date === '2030-12-31')?.flags).toContain('missing_checkout');
   });
 
@@ -136,7 +139,7 @@ describe('employment windows bound the days', () => {
     const days = (JSON.parse(res.body) as { employees: { days: { date: string }[] }[] })
       .employees[0]?.days;
     expect(days?.length, 'October days after the 15th exist').toBeGreaterThan(0);
-    expect(days!.every((d) => d.date >= '2026-10-15')).toBe(true);
+    expect(days.every((d) => d.date >= '2026-10-15')).toBe(true);
 
     await db.execute(
       sql`delete from contracts.employment_contracts where id = '00000000-0000-4000-8000-0000000000c1'`,
@@ -182,7 +185,9 @@ describe('the month close locks decisions through every door', () => {
       payload: {},
     });
     expect(approved.statusCode, approved.body).toBe(412);
-    expect(JSON.parse(approved.body).error?.code).toBe('ATTENDANCE_MONTH_CLOSED');
+    expect((JSON.parse(approved.body) as { error?: { code?: string } }).error?.code).toBe(
+      'ATTENDANCE_MONTH_CLOSED',
+    );
 
     // The audited admin override unlocks it, and the same approve then lands.
     const reopened = await app.inject({
@@ -199,6 +204,55 @@ describe('the month close locks decisions through every door', () => {
       payload: {},
     });
     expect(approvedNow.statusCode, approvedNow.body).toBeLessThan(300);
+  });
+
+  it('a closed month refuses a GENERIC /requests cancel too (412), and reopen unlocks it', async () => {
+    const filed = await app.inject({
+      method: 'POST',
+      url: '/v1/workforce/leave',
+      headers: authHeaders(employee),
+      payload: { leaveType: 'annual', startDate: '2027-05-04', endDate: '2027-05-05' },
+    });
+    expect(filed.statusCode, filed.body).toBe(201);
+    const { id: leaveId } = JSON.parse(filed.body) as { id: string };
+    const linked = await db.execute(
+      sql`select request_id from workforce.leave_requests where id = ${leaveId}`,
+    );
+    const requestId = (linked.rows[0] as { request_id: string }).request_id;
+
+    const closed = await app.inject({
+      method: 'POST',
+      url: '/v1/workforce/attendance/months/2027-05/close',
+      headers: authHeaders(hr),
+      payload: {},
+    });
+    expect(closed.statusCode, closed.body).toBe(200);
+
+    const cancelled = await app.inject({
+      method: 'POST',
+      url: `/v1/requests/${requestId}/cancel`,
+      headers: authHeaders(employee),
+      payload: {},
+    });
+    expect(cancelled.statusCode, cancelled.body).toBe(412);
+    expect((JSON.parse(cancelled.body) as { error?: { code?: string } }).error?.code).toBe(
+      'ATTENDANCE_MONTH_CLOSED',
+    );
+
+    const reopened = await app.inject({
+      method: 'POST',
+      url: '/v1/workforce/attendance/months/2027-05/reopen',
+      headers: authHeaders(admin),
+      payload: { note: 'e2e: cleanup' },
+    });
+    expect(reopened.statusCode, reopened.body).toBe(200);
+    const cancelledNow = await app.inject({
+      method: 'POST',
+      url: `/v1/requests/${requestId}/cancel`,
+      headers: authHeaders(employee),
+      payload: {},
+    });
+    expect(cancelledNow.statusCode, cancelledNow.body).toBeLessThan(300);
   });
 
   it('a withdrawn request can no longer be decided — the mismatch guard', async () => {

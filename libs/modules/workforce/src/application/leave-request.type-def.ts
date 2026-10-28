@@ -81,7 +81,6 @@ export class LeaveRequestTypeDef implements RequestTypeDef<LeaveRequestPayload>,
     tx: DbExecutor,
   ): Promise<void> {
     await this.assertPending(tx, payload.leaveRequestId);
-    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Withdrawing a request');
     await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Deciding a leave request');
     const now = new Date();
     await tx
@@ -146,6 +145,7 @@ export class LeaveRequestTypeDef implements RequestTypeDef<LeaveRequestPayload>,
     tx: DbExecutor,
   ): Promise<void> {
     await this.assertPending(tx, payload.leaveRequestId);
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Withdrawing a request');
     await tx
       .update(leaveRequests)
       .set({ status: 'cancelled' })

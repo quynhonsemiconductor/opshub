@@ -67,7 +67,6 @@ export class WfhRequestTypeDef implements RequestTypeDef<WfhRequestPayload>, OnM
     tx: DbExecutor,
   ): Promise<void> {
     await this.assertPending(tx, payload.wfhRequestId);
-    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Withdrawing a request');
     await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Deciding a WFH request');
     const now = new Date();
     await tx
@@ -120,6 +119,7 @@ export class WfhRequestTypeDef implements RequestTypeDef<WfhRequestPayload>, OnM
     tx: DbExecutor,
   ): Promise<void> {
     await this.assertPending(tx, payload.wfhRequestId);
+    await assertMonthsOpenInTx(tx, payload.startDate, payload.endDate, 'Withdrawing a request');
     await tx
       .update(wfhRequests)
       .set({ status: 'cancelled' })

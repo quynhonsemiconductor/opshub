@@ -9,7 +9,7 @@
 import { createFakeAudit } from '../../../audit/src/testing/audit.fake';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActorScope, PermissionDeniedException, PreconditionFailedException } from '@platform';
-import { AttendanceService, monthsOfRange } from './attendance.service';
+import { AttendanceService, employmentWindows, monthsOfRange } from './attendance.service';
 
 /** A drizzle-ish chain whose every terminal resolves — the queries' shape, not their SQL. */
 function selectReturning(rows: unknown[]) {
@@ -138,5 +138,62 @@ describe('scope decisions read the right permission', () => {
     await service(nobody).getMonth('2026-10', SELF);
     // Both asked the same question; the answer came from the permission, not the caller's shape.
     expect(calls.filter((c) => c === 'workforce.attendance.read')).toHaveLength(2);
+  });
+});
+
+describe('employmentWindows', () => {
+  it('a fixed-term contract renewed as INDEFINITE is open-ended, whichever row comes first', () => {
+    const fixed = { employeeId: 'e', startDate: '2024-01-01', endDate: '2025-01-01' };
+    const indefinite = { employeeId: 'e', startDate: '2025-01-02', endDate: null };
+    expect(employmentWindows([fixed, indefinite]).get('e')).toEqual({
+      start: '2024-01-01',
+      end: null,
+    });
+    expect(employmentWindows([indefinite, fixed]).get('e')).toEqual({
+      start: '2024-01-01',
+      end: null,
+    });
+  });
+
+  it('takes the latest dated end and the earliest start across dated contracts', () => {
+    const rows = [
+      { employeeId: 'e', startDate: '2025-01-01', endDate: '2025-12-31' },
+      { employeeId: 'e', startDate: '2024-01-01', endDate: '2024-12-31' },
+    ];
+    expect(employmentWindows(rows).get('e')).toEqual({ start: '2024-01-01', end: '2025-12-31' });
+  });
+});
+
+describe('the month roster keeps people who left, for the months they worked', () => {
+  type Roster = { rosterForMonth(month: string): Promise<{ id: string }[]> };
+
+  /** Two selects, in order: the employees, then their contracts. */
+  function rosterService(people: unknown[], contracts: unknown[]) {
+    const answers = [people, contracts];
+    const db = {
+      select: vi.fn().mockImplementation((): unknown => selectReturning(answers.shift() ?? [])()),
+    };
+    return service(db) as unknown as Roster;
+  }
+
+  const leaver = { id: 'gone', name: 'Gone', department: null, status: 'offboarded' as const };
+  const stayer = { id: 'here', name: 'Here', department: null, status: 'active' as const };
+
+  it('an offboarded employee still appears for a month inside their employment', async () => {
+    const svc = rosterService(
+      [leaver, stayer],
+      [{ employeeId: 'gone', startDate: '2026-01-05', endDate: '2026-11-20' }],
+    );
+    expect((await svc.rosterForMonth('2026-10')).map((r) => r.id)).toEqual(['gone', 'here']);
+  });
+
+  it('and drops out for months after they left, or when they have no contract at all', async () => {
+    const svc = rosterService(
+      [leaver, stayer],
+      [{ employeeId: 'gone', startDate: '2026-01-05', endDate: '2026-11-20' }],
+    );
+    expect((await svc.rosterForMonth('2026-12')).map((r) => r.id)).toEqual(['here']);
+    const none = rosterService([leaver, stayer], []);
+    expect((await none.rosterForMonth('2026-10')).map((r) => r.id)).toEqual(['here']);
   });
 });
