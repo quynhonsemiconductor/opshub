@@ -21,6 +21,8 @@ import { DelegationExpiryCron } from './cron/delegation-expiry.cron';
 import { ContractExpiryCron } from './cron/contract-expiry.cron';
 import { StorageCleanupCron } from './cron/storage-cleanup.cron';
 import { ReviewDueCron } from './cron/review-due.cron';
+import { AttendanceFlagsCron } from './cron/attendance-flags.cron';
+import { WorkforceModule } from '@modules/workforce';
 import { WorkerHeartbeatService } from './heartbeat/worker-heartbeat.service';
 
 @Module({
@@ -37,6 +39,9 @@ import { WorkerHeartbeatService } from './heartbeat/worker-heartbeat.service';
     ContractsModule,
     IsmsModule,
     DoorJobsModule,
+    // For the attendance morning sweep: the cron reuses the SAME month derivation the API serves,
+    // so the notification and the screen can never disagree about what a day says.
+    WorkforceModule,
   ],
   providers: [
     // Writes the beat `make check` reads (apps/worker/src/heartbeat). It proves the worker is alive and connected to the cache.
@@ -47,6 +52,7 @@ import { WorkerHeartbeatService } from './heartbeat/worker-heartbeat.service';
     ContractExpiryCron,
     StorageCleanupCron,
     ReviewDueCron,
+    AttendanceFlagsCron,
   ],
 })
 export class WorkerModule {}

@@ -125,6 +125,16 @@ const EVENT_GROUPS: EventGroup[] = [
     ],
   },
   {
+    group: 'Attendance',
+    events: [
+      {
+        type: 'attendance.flags_unresolved',
+        label: 'Yesterday has attendance flags to explain',
+        hint: 'The morning sweep — unresolved late/early/missing-checkout/absent flags on your own days.',
+      },
+    ],
+  },
+  {
     group: 'People',
     events: [
       {

@@ -33,6 +33,11 @@ export class AttendanceDayDto {
   flags!: ('late' | 'early' | 'missing_checkout' | 'absent' | 'unsynced')[];
   /** A justification has been filed for this day but not decided yet. */
   pendingJustification!: boolean;
+  /** The approved leave type covering the day, when the status is `leave`. */
+  leaveType!: string | null;
+  /** Which part of the day approved leave takes, when any — halves count 0.5 in the sheets. */
+  @ApiProperty({ enum: ['full_day', 'morning', 'afternoon'], nullable: true })
+  leavePortion!: 'full_day' | 'morning' | 'afternoon' | null;
 }
 
 export class EmployeeAttendanceMonthDto {

@@ -39,6 +39,7 @@ export const NOTIFICATION_TEMPLATE_NAMES = [
   'contract.expired',
   'review.due',
   'request.sla_breach',
+  'attendance.flags_unresolved',
   'request.delegation_created',
   'request.step_ready',
   'request.submitted',
@@ -106,6 +107,10 @@ export interface NotificationTemplateVars {
     requestType: string;
     requestId: string;
     deadline: string; // ISO string
+  };
+  'attendance.flags_unresolved': {
+    date: string; // YYYY-MM-DD
+    flags: string[]; // late | early | missing_checkout | absent
   };
   'request.delegation_created': {
     delegatorName: string;
@@ -221,6 +226,22 @@ const templates: {
     return {
       title: 'SLA breach warning',
       body: `Your ${v.requestType} request (${v.requestId}) has exceeded its SLA deadline of ${v.deadline}. Please take action.`,
+    };
+  },
+  'attendance.flags_unresolved'(v) {
+    // The morning sweep's one job: put yesterday's unresolved flags in front of the person while a
+    // justification can still be filed, so the wording points at the filing action.
+    const labels: Record<string, string> = {
+      late: 'đi muộn',
+      early: 'về sớm',
+      missing_checkout: 'không quét thẻ khi ra về',
+      absent: 'vắng không phép',
+    };
+    return {
+      title: `Chấm công ${v.date}: ${v.flags.length} mục cần giải trình`,
+      body:
+        `Hôm qua bạn có: ${v.flags.map((f) => labels[f] ?? f).join(', ')}. ` +
+        'Hãy nộp đơn giải trình để quản lý duyệt.',
     };
   },
   'request.delegation_created'(v) {

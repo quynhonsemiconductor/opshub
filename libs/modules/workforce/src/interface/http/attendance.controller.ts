@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
@@ -124,6 +125,43 @@ export class AttendanceController {
   ): Promise<AttendanceMonthResponseDto> {
     const month = await this.service.getMyMonth(query.month, user);
     return { ...month, close: toCloseDto(month.close) };
+  }
+
+  @Get('summary.csv')
+  // Scoped like the view: a reader exports everybody (incl. offboarded for months worked); a
+  // manager exports their team and themself; an employee exports themself.
+  @AuthorizedInService(
+    'scope decided in service: same rule as the month view, narrowed to the caller',
+    'attendance-access-narrowing.spec.ts',
+  )
+  @ApiOperation({
+    summary: 'The monthly summary CSV, one row per employee',
+    description:
+      'office_days, wfh_days, leave days by type, unpaid, unexcused absences, late/early counts, ' +
+      'total hours — derived from the same month view, never stored.',
+  })
+  @Header('content-type', 'text/csv; charset=utf-8')
+  @Header('content-disposition', 'attachment; filename="attendance-summary.csv"')
+  async summaryCsv(
+    @Query() query: MyAttendanceMonthQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<string> {
+    return this.service.summaryCsv(query.month, user);
+  }
+
+  @Get('days.csv')
+  @AuthorizedInService(
+    'scope decided in service: same rule as the month view, narrowed to the caller',
+    'attendance-access-narrowing.spec.ts',
+  )
+  @ApiOperation({ summary: 'The per-day CSV, one row per employee per working day' })
+  @Header('content-type', 'text/csv; charset=utf-8')
+  @Header('content-disposition', 'attachment; filename="attendance-days.csv"')
+  async daysCsv(
+    @Query() query: MyAttendanceMonthQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<string> {
+    return this.service.daysCsv(query.month, user);
   }
 
   @Get('justifications/preview')

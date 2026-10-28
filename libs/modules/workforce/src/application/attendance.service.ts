@@ -59,7 +59,14 @@ export interface EmployeeAttendanceMonth {
   id: string;
   name: string;
   department: string | null;
-  days: (AttendanceDay & { pendingJustification: boolean })[];
+  /** Employment status as of now — the sweep skips the offboarded; historical months keep them. */
+  status?: string;
+  days: (AttendanceDay & {
+    pendingJustification: boolean;
+    leaveType: string | null;
+    /** Which part of the day approved leave takes, when any — the CSVs count halves. */
+    leavePortion: LeavePortion | null;
+  })[];
 }
 
 export interface AttendanceMonth {
@@ -160,7 +167,7 @@ export class AttendanceService {
    */
   private async rosterForMonth(
     month: string,
-  ): Promise<{ id: string; name: string; department: string | null }[]> {
+  ): Promise<{ id: string; name: string; department: string | null; status: string }[]> {
     const from = `${month}-01`;
     const to = lastDayOf(month);
     const rows = await this.db
@@ -210,8 +217,31 @@ export class AttendanceService {
 
   // ── The derived month ───────────────────────────────────────────────────────
 
+  /** The month through a viewer's scope — the one derivation, filtered per audience. */
+  private async computeMonthFor(
+    month: string,
+    actor: Actor,
+    employeeId?: string,
+  ): Promise<{ month: string; employees: EmployeeAttendanceMonth[] }> {
+    const allowed = await this.scopedEmployees(actor, month, employeeId);
+    const allowedIds = new Set(allowed.map((e) => e.id));
+    const whole = await this.computeMonth(month);
+    return { month, employees: whole.employees.filter((e) => allowedIds.has(e.id)) };
+  }
+
   async getMonth(month: string, actor: Actor, employeeId?: string): Promise<AttendanceMonth> {
-    const people = await this.scopedEmployees(actor, month, employeeId);
+    const whole = await this.computeMonthFor(month, actor, employeeId);
+    return { ...whole, close: await this.getMonthClose(month) };
+  }
+
+  /**
+   * The derived month for EVERYBODY the roster accounts for — the one implementation of the
+   * derivation, shared by the scoped reads, the CSVs and the morning sweep.
+   */
+  async computeMonth(
+    month: string,
+  ): Promise<{ month: string; employees: EmployeeAttendanceMonth[] }> {
+    const people = await this.rosterForMonth(month);
     const from = `${month}-01`;
     const to = lastDayOf(month);
     const [monthStart, monthEnd] = monthInstantBounds(month);
@@ -228,6 +258,7 @@ export class AttendanceService {
           endDate: leaveRequests.endDate,
           startPortion: leaveRequests.startPortion,
           endPortion: leaveRequests.endPortion,
+          leaveType: leaveRequests.leaveType,
         })
         .from(leaveRequests)
         .where(
@@ -326,7 +357,7 @@ export class AttendanceService {
 
     // Per person per working date: leave portion, approved WFH, approved/pending justification —
     // all indexed once so each day of each person is a lookup, not another scan.
-    const leaveDays = new Map<string, LeavePortion>();
+    const leaveDays = new Map<string, { portion: LeavePortion; type: string }>();
     const wfhDays = new Set<string>();
     for (const person of people) {
       for (const date of workingDays) {
@@ -335,7 +366,12 @@ export class AttendanceService {
           leaveWindows.filter((l) => l.employeeId === person.id),
           date,
         );
-        if (leave) leaveDays.set(key, leave);
+        if (leave) {
+          const window = leaveWindows.find(
+            (l) => l.employeeId === person.id && portionOn(l, date) === leave,
+          );
+          leaveDays.set(key, { portion: leave, type: window?.leaveType ?? 'other' });
+        }
         if (
           wfhWindows.some(
             (w) => w.employeeId === person.id && w.startDate <= date && w.endDate >= date,
@@ -376,11 +412,12 @@ export class AttendanceService {
         .map((date) => {
           const key = `${person.id}|${date}`;
           const swipes = swipeIndex.get(key);
+          const leave = leaveDays.get(key);
           const day = computeAttendanceDay({
             date,
             holiday: holidaySet.has(date),
             unsynced: swipes?.unsynced ?? false,
-            leave: leaveDays.get(key) ?? null,
+            leave: leave?.portion ?? null,
             // An approved WFH window counts on its working days only: it was costed against this
             // same calendar at submit, and a holiday added inside it later is not a WFH day.
             wfh: wfhDays.has(key),
@@ -389,16 +426,170 @@ export class AttendanceService {
             lastOut: swipes && swipes.count >= 2 ? swipes.last : null,
             swipeCount: swipes?.count ?? 0,
           });
-          return { ...day, pendingJustification: pendingJustifiedDays.has(key) };
+          return {
+            ...day,
+            leaveType: leave?.type ?? null,
+            leavePortion: leave?.portion ?? null,
+            pendingJustification: pendingJustifiedDays.has(key),
+          };
         });
-      return { id: person.id, name: person.name, department: person.department, days };
+      return {
+        id: person.id,
+        name: person.name,
+        department: person.department,
+        status: person.status,
+        days,
+      };
     });
 
-    return { month, close: await this.getMonthClose(month), employees: employeeMonths };
+    return { month, employees: employeeMonths };
   }
 
   async getMyMonth(month: string, actor: Actor): Promise<AttendanceMonth> {
     return this.getMonth(month, actor, actor.sub);
+  }
+
+  // ── CSVs ────────────────────────────────────────────────────────────────────
+
+  /**
+   * The monthly summary, one row per employee: office days, WFH days, leave days by type, unpaid
+   * days, unexcused absences, late and early counts, total hours — the owner's list, in that order.
+   */
+  async summaryCsv(month: string, actor: Actor): Promise<string> {
+    const whole = await this.computeMonthFor(month, actor);
+    const header =
+      'employee,department,office_days,wfh_days,leave_annual,leave_sick,leave_unpaid,' +
+      'leave_parental,leave_other,unexcused_absences,late_count,early_count,total_hours';
+    const lines = whole.employees.map((person) => {
+      const counts = {
+        office: 0,
+        wfh: 0,
+        annual: 0,
+        sick: 0,
+        unpaid: 0,
+        parental: 0,
+        other: 0,
+        absences: 0,
+        late: 0,
+        early: 0,
+        minutes: 0,
+      };
+      for (const day of person.days) {
+        // Half days count HALF: a morning of leave plus an afternoon in the office is 0.5 leave
+        // and 0.5 office, not one of each — the sheet must add up to the month's working days.
+        const whole = day.leavePortion === 'morning' || day.leavePortion === 'afternoon' ? 0.5 : 1;
+        if (day.status === 'wfh') counts.wfh += whole;
+        else if (day.status === 'absent') counts.absences += whole;
+        else if (day.status === 'office') counts.office += whole;
+        if (day.leaveType) {
+          // A leave type the sheet has no column for (a new enum value) is counted as `other`,
+          // never `undefined + 0.5` = NaN in the file.
+          counts[LEAVE_COLUMNS.has(day.leaveType) ? (day.leaveType as LeaveColumn) : 'other'] +=
+            whole;
+        }
+        if (day.flags.includes('late')) counts.late += 1;
+        if (day.flags.includes('early')) counts.early += 1;
+        counts.minutes += day.workedMinutes;
+      }
+      return [
+        csvField(person.name),
+        csvField(person.department),
+        counts.office,
+        counts.wfh,
+        counts.annual,
+        counts.sick,
+        counts.unpaid,
+        counts.parental,
+        counts.other,
+        counts.absences,
+        counts.late,
+        counts.early,
+        (counts.minutes / 60).toFixed(2),
+      ].join(',');
+    });
+    return [header, ...lines].join('\r\n') + '\r\n';
+  }
+
+  /** The per-day sheet: every working day of every employee, one row per (employee, day). */
+  async daysCsv(month: string, actor: Actor): Promise<string> {
+    const whole = await this.computeMonthFor(month, actor);
+    const header =
+      'employee,department,date,status,worked_hours,late_minutes,early_minutes,flags,justification_pending';
+    const lines: string[] = [];
+    for (const person of whole.employees) {
+      for (const day of person.days) {
+        lines.push(
+          [
+            csvField(person.name),
+            csvField(person.department),
+            day.date,
+            day.status,
+            (day.workedMinutes / 60).toFixed(2),
+            day.lateMinutes ?? '',
+            day.earlyMinutes ?? '',
+            day.flags.length ? `"${day.flags.join(' ')}"` : '',
+            day.pendingJustification ? 'yes' : '',
+          ].join(','),
+        );
+      }
+    }
+    return [header, ...lines].join('\r\n') + '\r\n';
+  }
+
+  // ── The morning sweep ───────────────────────────────────────────────────────
+
+  /**
+   * Every CURRENTLY-EMPLOYED person with unresolved flags on `date` (a working day), for the
+   * morning notification: the person themselves, so yesterday's problems are in front of them
+   * while a justification can still be filed. A day with a PENDING justification is skipped —
+   * nagging somebody whose explanation is already on a manager's desk asks for nothing.
+   */
+  async unresolvedFlagsFor(
+    date: string,
+  ): Promise<{ employeeId: string; name: string; flags: string[] }[]> {
+    const month = date.slice(0, 7);
+    const whole = await this.computeMonth(month);
+    const out: { employeeId: string; name: string; flags: string[] }[] = [];
+    for (const person of whole.employees) {
+      // Offboarded people stay in historical months, but the morning sweep is for the people who
+      // can still file a justification today.
+      if (person.status === 'offboarded') continue;
+      const day = person.days.find((d) => d.date === date);
+      if (!day || day.flags.length === 0 || day.pendingJustification) continue;
+      out.push({ employeeId: person.id, name: person.name, flags: day.flags });
+    }
+    return out;
+  }
+
+  /**
+   * The previous WORKING day before `now` in HCM: step back over weekends and the holiday
+   * calendar — Monday morning reports Friday, and the morning after a holiday reports the last
+   * worked day, not the holiday nobody was expected in for.
+   */
+  async previousWorkingDay(
+    now: Date = new Date(),
+    knownHolidays?: ReadonlySet<string>,
+  ): Promise<string> {
+    const hcmNow = new Date(now.getTime() + 7 * 3_600_000);
+    let date = hcmNow.toISOString().slice(0, 10);
+    for (let i = 0; i < 10; i += 1) {
+      date = new Date(new Date(`${date}T00:00:00Z`).getTime() - 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+      if (weekday === 0 || weekday === 6) continue;
+      if (knownHolidays) {
+        if (!knownHolidays.has(date)) return date;
+        continue;
+      }
+      const [holiday] = await this.db
+        .select({ date: holidays.date })
+        .from(holidays)
+        .where(eq(holidays.date, date))
+        .limit(1);
+      if (!holiday) return date;
+    }
+    return date;
   }
 
   // ── Month close ─────────────────────────────────────────────────────────────
@@ -649,6 +840,29 @@ export class AttendanceService {
     await this.engine.cancel(row.requestId, actor);
     return this.getJustification(id);
   }
+}
+
+/** The leave columns the summary sheet has. Anything else is counted under `other`. */
+type LeaveColumn = 'annual' | 'sick' | 'unpaid' | 'parental' | 'other';
+const LEAVE_COLUMNS: ReadonlySet<string> = new Set<LeaveColumn>([
+  'annual',
+  'sick',
+  'unpaid',
+  'parental',
+  'other',
+]);
+
+/**
+ * A CSV field: a leading `=`, `+`, `-`, `@`, tab or CR is neutralised with a leading apostrophe,
+ * because those are the characters a spreadsheet turns into a FORMULA — a name is data, never
+ * code. The apostrophe goes INSIDE the quotes: it must be part of the cell's value, not a stray
+ * character in front of the opening quote (which would make the quote itself literal).
+ * Then the field is quoted when it contains a comma, quote or newline, with quotes doubled.
+ */
+export function csvField(value: string | null): string {
+  if (value === null) return '';
+  const safe = /^[=+@\t\r-]/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
 /** Fold contract rows into one window per employee. See `employmentByEmployee` for the rule. */

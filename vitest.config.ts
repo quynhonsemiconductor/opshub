@@ -117,15 +117,13 @@ export default defineConfig({
       // shutdown / readiness / pool specs landed: lines 46.34 / statements 46.24 / branches 37.06 / functions 31.75.
       // Raised 2026-10-24 by the door terminal work (guard, allow-list, ingestion specs): CI measured
       // lines 49.35 / statements 49.18 / branches 40.40 / functions 33+; floors ~0.5 under.
-      // Statements lowered 2026-10-28: the attendance core's service layer (the derived month's
-      // queries and the month close) is exercised end to end against a database, so the unit
-      // measurement fell to 48.84 and the check refused the 49 floor. The pure day computation is
-      // table-tested exhaustively; what is missing here is query plumbing, not rules.
+      // Raised again 2026-10-28 with the attendance specs (CSV scope/guard, morning sweep, cron, month
+      // roster): measured lines 51.56 / statements 51.36 / branches 43.23 / functions 35.80.
       thresholds: {
         lines: 49,
         functions: 33,
-        branches: 40,
-        statements: 48,
+        branches: 41,
+        statements: 49,
       },
     },
   },
