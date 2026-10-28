@@ -7,7 +7,7 @@
  * only prove by failing in production.
  */
 import { createFakeAudit } from '../../../audit/src/testing/audit.fake';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConflictException, PreconditionFailedException, ActorScope } from '@platform';
 import { WorkforceService } from './workforce.service';
 
@@ -91,7 +91,18 @@ function service(): WorkforceService {
   );
 }
 
-/** A future window, so the past rule never fires. */
+// A FIXED clock (a Wednesday), so `FUTURE()` is the same window on every day the suite runs: relative to
+// the real date it can land on a weekend and cover no working day. Only `Date` is faked, so promises
+// and timers behave normally.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-14T03:00:00Z'));
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
+
+/** A future window (Friday 2026-11-13 under the fixed clock), so the past rule never fires. */
 const FUTURE = () => {
   const d = new Date(Date.now() + 7 * 3_600_000 + 30 * 86_400_000);
   const iso = d.toISOString().slice(0, 10);
