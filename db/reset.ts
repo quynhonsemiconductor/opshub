@@ -30,7 +30,7 @@ import { resolveMigrationUrl } from './database-url';
  * Every table holding operational data, listed EXPLICITLY.
  *
  * `TRUNCATE ... CASCADE` follows the foreign keys itself, which is the point — hand-ordering
- * a safe delete across 28 tables is the discipline that never holds. Explicit rather than
+ * a safe delete across all the tables listed here is the discipline that never holds. Explicit rather than
  * discovered from `information_schema`: a new table nobody adds here keeps its rows, which
  * is a visible bug, where auto-discovery would silently wipe a table someone meant to keep.
  *

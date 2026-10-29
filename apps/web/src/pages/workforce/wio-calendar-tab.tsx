@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '@/shared/api/client';
@@ -21,14 +21,8 @@ import {
 import { RequestWfhModal } from './request-wfh-modal';
 
 /** The status ladder for a WFH request badge. */
-const wfhTone = (status: string) =>
-  status === 'approved'
-    ? 'green'
-    : status === 'pending'
-      ? 'amber'
-      : status === 'rejected'
-        ? 'red'
-        : 'neutral';
+const WFH_TONES = { approved: 'green', pending: 'amber', rejected: 'red' } as const;
+const wfhTone = (status: string) => WFH_TONES[status as keyof typeof WFH_TONES] ?? 'neutral';
 
 /**
  * WIO calendar — who is in the office, who works from home, day by day.
@@ -98,7 +92,7 @@ export function WioCalendarTab() {
   });
 
   const people = calendar.data?.people ?? [];
-  const index = indexMonth(calendar.data);
+  const index = useMemo(() => indexMonth(calendar.data), [calendar.data]);
   const myId = me.data?.sub;
   const selectedInView = selected.slice(0, 7) === month;
 
