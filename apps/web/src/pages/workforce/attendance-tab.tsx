@@ -30,9 +30,8 @@ import {
 import { RequestJustificationModal } from './request-justification-modal';
 
 /**
- * Chấm công (attendance) — the derived month: statuses, worked minutes and flags per working day,
- * computed by the API from the door swipes plus the live requests. Vietnamese labels, per the
- * rules: this screen is read by everyone at the factory.
+ * Attendance — the derived month: statuses, worked minutes and flags per working day,
+ * computed by the API from the door swipes plus the live requests. English labels, to match the rest of the app. This screen is read by everyone at the factory.
  *
  * HR/auditor (workforce.attendance.read) see everyone and get the CSVs; a manager sees themself
  * and their direct reports; an employee sees themself — the API applies the scope, this tab just
@@ -73,11 +72,11 @@ export function AttendanceTab() {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success(`Đã chốt tháng ${month}`);
+      toast.success(`Month ${month} closed`);
       setCloseConfirm(false);
       return qc.invalidateQueries({ queryKey });
     },
-    onError: (error) => toast.error(apiErrorMessage(error, 'Không chốt được tháng.')),
+    onError: (error) => toast.error(apiErrorMessage(error, 'Could not close the month.')),
   });
 
   const reopenMonth = useMutation({
@@ -90,12 +89,12 @@ export function AttendanceTab() {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast.success(`Đã mở lại tháng ${month}`);
+      toast.success(`Month ${month} reopened`);
       setReopenConfirm(false);
       setReopenNote('');
       return qc.invalidateQueries({ queryKey });
     },
-    onError: (error) => toast.error(apiErrorMessage(error, 'Không mở lại được tháng.')),
+    onError: (error) => toast.error(apiErrorMessage(error, 'Could not reopen the month.')),
   });
 
   const close = monthQuery.data?.close ?? null;
@@ -109,7 +108,7 @@ export function AttendanceTab() {
     const { data, error } = await api.GET(path, { params: { query: { month } }, parseAs: 'text' });
     if (error || typeof data !== 'string') {
       // The API's message when it answered; the fallback is only for when it did not.
-      toast.error(apiErrorMessage(error, 'Không tải được file CSV.'));
+      toast.error(apiErrorMessage(error, 'Could not download the CSV.'));
       return;
     }
     const url = URL.createObjectURL(
@@ -131,18 +130,18 @@ export function AttendanceTab() {
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Tháng trước"
+            aria-label="Previous month"
             onClick={() => setView((v) => shiftMonth(v, -1))}
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <h2 className="min-w-36 text-center text-sm font-semibold text-fg" aria-live="polite">
-            Tháng {MONTHS[view.m]} {view.y}
+            {MONTHS[view.m]} {view.y}
           </h2>
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Tháng sau"
+            aria-label="Next month"
             onClick={() => setView((v) => shiftMonth(v, 1))}
           >
             <ChevronRight className="h-4 w-4" />
@@ -151,11 +150,11 @@ export function AttendanceTab() {
         <div className="flex flex-wrap items-center gap-2">
           {close ? (
             <span className="text-xs text-fg-subtle">
-              Đã chốt tháng ({formatDate(close.closedAt)}) — không nhận đơn hay duyệt mới cho tháng
-              này.
+              Month closed ({formatDate(close.closedAt)}) — no new requests or approvals for this
+              month.
             </span>
           ) : (
-            <span className="text-xs text-fg-subtle">Tháng chưa chốt.</span>
+            <span className="text-xs text-fg-subtle">Month not closed.</span>
           )}
           {(can('workforce.attendance.read') || hasRole('manager')) && (
             <>
@@ -166,7 +165,7 @@ export function AttendanceTab() {
                   void downloadCsv('/v1/workforce/attendance/summary.csv', 'cham-cong-tong-hop')
                 }
               >
-                <Download className="h-3.5 w-3.5" aria-hidden="true" /> Tổng hợp (CSV)
+                <Download className="h-3.5 w-3.5" aria-hidden="true" /> Summary (CSV)
               </Button>
               <Button
                 size="sm"
@@ -175,18 +174,18 @@ export function AttendanceTab() {
                   void downloadCsv('/v1/workforce/attendance/days.csv', 'cham-cong-theo-ngay')
                 }
               >
-                <Download className="h-3.5 w-3.5" aria-hidden="true" /> Theo ngày (CSV)
+                <Download className="h-3.5 w-3.5" aria-hidden="true" /> By day (CSV)
               </Button>
             </>
           )}
           {!close && can('workforce.attendance.close') && (
             <Button size="sm" variant="default" onClick={() => setCloseConfirm(true)}>
-              Chốt tháng
+              Close month
             </Button>
           )}
           {close && can('workforce.attendance.reopen') && (
             <Button size="sm" variant="danger" onClick={() => setReopenConfirm(true)}>
-              Mở lại tháng
+              Reopen month
             </Button>
           )}
         </div>
@@ -195,15 +194,15 @@ export function AttendanceTab() {
       <PanelState
         query={monthQuery}
         count={employees.length}
-        empty="Chưa có nhân viên nào."
-        error="Không tải được dữ liệu chấm công."
+        empty="No employees yet."
+        error="Could not load attendance data."
       />
 
       {employees.length > 0 && (
         <div className="flex flex-col gap-4">
           <div className="flex justify-end">
             <Button size="sm" variant="outline" onClick={() => setJustificationOpen(true)}>
-              Nộp đơn giải trình
+              Submit justification
             </Button>
           </div>
           <EmployeeTable employees={employees} onSelect={setSelected} selected={selected} />
@@ -220,9 +219,9 @@ export function AttendanceTab() {
       <ConfirmDialog
         open={closeConfirm}
         variant="warning"
-        title={`Chốt tháng ${month}?`}
-        description="Sau khi chốt, không nhận đơn nghỉ phép / làm tại nhà / giải trình mới cho tháng này và không duyệt hay hủy đơn đã có. Mở lại tháng cần quản trị viên."
-        confirmLabel="Chốt tháng"
+        title={`Close month ${month}?`}
+        description="Once closed, no new leave, work-from-home or justification requests are accepted for this month, and existing requests can no longer be approved or cancelled. Reopening needs an administrator."
+        confirmLabel="Close month"
         loading={closeMonth.isPending}
         onConfirm={() => closeMonth.mutate()}
         onCancel={() => setCloseConfirm(false)}
@@ -230,7 +229,7 @@ export function AttendanceTab() {
       <Modal
         open={reopenConfirm}
         onClose={() => setReopenConfirm(false)}
-        title={`Mở lại tháng ${month}?`}
+        title={`Reopen month ${month}?`}
         size="sm"
       >
         <form
@@ -241,21 +240,22 @@ export function AttendanceTab() {
           }}
         >
           <p className="text-xs text-fg-subtle">
-            Đây là thao tác của quản trị viên. Lý do BẮT BUỘC và sẽ được ghi vào nhật ký kiểm tra.
+            This is an administrator action. A reason is REQUIRED and will be recorded in the audit
+            log.
           </p>
-          <FormField label="Lý do mở lại" htmlFor="reopen-note" required>
+          <FormField label="Reason for reopening" htmlFor="reopen-note" required>
             <Textarea
               id="reopen-note"
               rows={2}
               value={reopenNote}
               onChange={(e) => setReopenNote(e.target.value)}
-              placeholder="Ví dụ: sửa chấm công sau khi kiểm tra lại…"
+              placeholder="e.g. corrected attendance after re-checking…"
             />
           </FormField>
           <FormActions
             loading={reopenMonth.isPending}
             onClose={() => setReopenConfirm(false)}
-            submitLabel="Mở lại tháng"
+            submitLabel="Reopen month"
           />
         </form>
       </Modal>
@@ -284,15 +284,15 @@ function EmployeeTable({
     <table className="w-full text-sm">
       <thead>
         <tr className="border-b border-border text-left text-xs text-fg-subtle">
-          <th className="py-2 pr-2 font-medium">Nhân viên</th>
-          <th className="py-2 pr-2 font-medium">Phòng ban</th>
-          <th className="py-2 pr-2 text-right font-medium">Ngày văn phòng</th>
-          <th className="py-2 pr-2 text-right font-medium">Làm tại nhà</th>
-          <th className="py-2 pr-2 text-right font-medium">Nghỉ phép</th>
-          <th className="py-2 pr-2 text-right font-medium">Vắng không phép</th>
-          <th className="py-2 pr-2 text-right font-medium">Đi muộn</th>
-          <th className="py-2 pr-2 text-right font-medium">Về sớm</th>
-          <th className="py-2 pr-2 text-right font-medium">Tổng giờ</th>
+          <th className="py-2 pr-2 font-medium">Employee</th>
+          <th className="py-2 pr-2 font-medium">Department</th>
+          <th className="py-2 pr-2 text-right font-medium">Office days</th>
+          <th className="py-2 pr-2 text-right font-medium">WFH days</th>
+          <th className="py-2 pr-2 text-right font-medium">Leave days</th>
+          <th className="py-2 pr-2 text-right font-medium">Absences</th>
+          <th className="py-2 pr-2 text-right font-medium">Late</th>
+          <th className="py-2 pr-2 text-right font-medium">Left early</th>
+          <th className="py-2 pr-2 text-right font-medium">Total hours</th>
         </tr>
       </thead>
       <tbody>
@@ -335,25 +335,25 @@ function EmployeeTable({
 function EmployeeDetail({ employee }: { employee: EmployeeAttendanceMonth }) {
   return (
     <section
-      aria-label={`Chấm công theo ngày của ${employee.name}`}
+      aria-label={`Daily attendance for ${employee.name}`}
       className="rounded-lg border border-border bg-surface p-4"
     >
-      <h3 className="mb-3 text-sm font-semibold text-fg">{employee.name} — theo ngày</h3>
+      <h3 className="mb-3 text-sm font-semibold text-fg">{employee.name} — daily</h3>
       <ul className="flex flex-col gap-1.5">
         {employee.days.map((day) => (
           <li key={day.date} className="flex flex-wrap items-baseline gap-2 text-sm">
             <span className="w-24 text-fg-subtle">{formatDate(day.date)}</span>
             <StatusBadge tone={STATUS_TONE[day.status]}>{STATUS_LABEL[day.status]}</StatusBadge>
-            <span className="text-fg-subtle">{hoursLabel(day.workedMinutes / 60)} giờ</span>
+            <span className="text-fg-subtle">{hoursLabel(day.workedMinutes / 60)} h</span>
             {day.flags.map((flag) => (
               <span key={flag} className="text-xs text-warning">
                 {FLAG_LABEL[flag]}
-                {flag === 'late' && day.lateMinutes ? ` (${day.lateMinutes} phút)` : null}
-                {flag === 'early' && day.earlyMinutes ? ` (${day.earlyMinutes} phút)` : null}
+                {flag === 'late' && day.lateMinutes ? ` (${day.lateMinutes} min)` : null}
+                {flag === 'early' && day.earlyMinutes ? ` (${day.earlyMinutes} min)` : null}
               </span>
             ))}
             {day.pendingJustification && (
-              <span className="text-xs text-fg-subtle">Đơn giải trình chờ duyệt</span>
+              <span className="text-xs text-fg-subtle">Justification awaiting approval</span>
             )}
           </li>
         ))}
