@@ -129,7 +129,7 @@ export function computeAttendanceDay(input: AttendanceDayInputs): AttendanceDay 
   const endThreshold = minutesOf(input.leave === 'afternoon' ? LUNCH_START : DAY_END);
 
   if (input.swipeCount === 0) {
-    // No swipes, no request: "vắng không phép". A justified day is the one a `forgot_card` covers.
+    // No swipes, no request: "unexcused absence". A justified day is the one a `forgot_card` covers.
     const noSwipeFlags: DayFlag[] = input.justified ? [] : ['absent'];
     if (input.unsynced) noSwipeFlags.push('unsynced');
     return {

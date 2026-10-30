@@ -6,36 +6,36 @@ export type EmployeeAttendanceMonth = components['schemas']['EmployeeAttendanceM
 export type JustificationKind = components['schemas']['CreateJustificationDto']['kind'];
 
 /**
- * Pure helpers behind the Chấm công tab — no React, no clock reads.
+ * Pure helpers behind the Attendance tab — no React, no clock reads.
  *
  * The day rules themselves live in the API (`attendance-day.ts` there is the exhaustive spec);
- * what lives here is presentation: the Vietnamese labels, and the per-employee month totals the
+ * what lives here is presentation: the English labels, and the per-employee month totals the
  * summary table shows.
  */
 
-/** Status words in Vietnamese, as the rules name them. */
+/** Status words, as the rules name them. */
 export const STATUS_LABEL: Record<AttendanceDay['status'], string> = {
-  holiday: 'Nghỉ lễ',
-  leave: 'Nghỉ phép',
-  wfh: 'Làm tại nhà',
-  office: 'Văn phòng',
-  absent: 'Vắng không phép',
+  holiday: 'Public holiday',
+  leave: 'On leave',
+  wfh: 'Work from home',
+  office: 'Office',
+  absent: 'Unexcused absence',
 };
 
 export const FLAG_LABEL: Record<AttendanceDay['flags'][number], string> = {
-  late: 'Đi muộn',
-  early: 'Về sớm',
-  missing_checkout: 'Không quét thẻ khi ra',
-  absent: 'Vắng không phép',
-  unsynced: 'Giờ thiết bị chưa đồng bộ',
+  late: 'Late',
+  early: 'Left early',
+  missing_checkout: 'Missed check-out',
+  absent: 'Unexcused absence',
+  unsynced: 'Device time not synced',
 };
 
 /** The kinds a justification can repair, in the order the picker offers them. */
 export const JUSTIFICATION_KINDS: { value: JustificationKind; label: string }[] = [
-  { value: 'late', label: 'Đi muộn' },
-  { value: 'early', label: 'Về sớm' },
-  { value: 'forgot_card', label: 'Quên thẻ' },
-  { value: 'missing_checkout', label: 'Không quét thẻ khi ra' },
+  { value: 'late', label: 'Late' },
+  { value: 'early', label: 'Left early' },
+  { value: 'forgot_card', label: 'Forgot card' },
+  { value: 'missing_checkout', label: 'Missed check-out' },
 ];
 
 export interface EmployeeTotals {
