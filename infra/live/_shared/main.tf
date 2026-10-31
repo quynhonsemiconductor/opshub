@@ -36,38 +36,26 @@ data "terraform_remote_state" "platform" {
   }
 }
 
-# ── Container registries ──────────────────────────────────────────────────────
-module "ecr" {
-  # ecr-v2.1.0 (task 0.7, §13): the RELEASE keep rule is now TIME-based
-  # (`release_retention_days = 180`) instead of count-based. A count is a duration only if
-  # the promotion rate is known, and GitOps raises that rate, so a count silently shortens
-  # the rollback window as deploys get healthier. The tag EXISTS (release-please cut it),
-  # so this bump plans and validates today.
-  #
-  # v2.0.0 already split the keep rule by tag prefix (the combined ["sha-","v"] rule was
-  # dead: `tagPrefixList` is AND, so it only matched images carrying BOTH prefixes). rova
-  # verified that live (105 `sha-` images under a policy claiming to keep 30).
-  #
-  # No count/day override here: this call adopts the defaults — keep 10 builds (sha-*;
-  # ecr-v2.2.0 default, was 20), expire releases (v*) after 180 days, untagged after 1 day.
-  # These repositories do not exist yet, so unlike rova there is nothing to preview: the policy applies from the
-  # first pushed image. Run the estate preview (infra/scripts/ecr_lifecycle_preview.py)
-  # before changing the numbers later — a dry run, and the only way to see what a policy
-  # will delete.
-  source = "git::https://github.com/quynhonsemiconductor/tf-modules.git//modules/ecr?ref=ecr-v2.2.0"
-
-  repository_names = ["opshub-api", "opshub-worker", "opshub-migrator"]
-
-  # IMMUTABLE (task 0.8, §11): a rewritable tag underneath a running workload is not
-  # pinned. Flipped only after the CI `:latest` push was removed
-  # (ci/.github/workflows/backend-deploy.yml — 0.8 step a); IMMUTABLE rejects a second push
-  # of an existing tag, so flipping first breaks the pipeline. opshub deploys with
-  # `cache_backend: gha`, so no `:buildcache` overwrite depends on mutability either.
-  image_tag_mutability = "IMMUTABLE"
-  kms_key_arn          = data.terraform_remote_state.platform.outputs.kms_key_arn
-  tags                 = { Scope = "shared" }
-}
-
+// ============================================================================
+// AWS EXIT (E1, 2026-10-31): the shared stack is being destroyed — IN TWO CUTS.
+//
+// THIS PR destroys only the ECR repositories (image fallback lives in GHCR —
+// gitops#33). force_delete is NOT set here, so THE OWNER EMPTIES THE REPOS
+// FIRST (runbook step 4: `aws ecr ... batch-delete-image` per repo, then
+// `list-images` returns empty) — otherwise the apply dies mid-run on
+// RepositoryNotEmpty with no retry.
+//
+// DELIBERATELY KEPT: the GitHub OIDC provider, the deploy/push/infra CI roles
+// and the RDS dev-cost-saver guard policies. This very apply assumes the
+// infra plan/apply roles — destroying them in the same run is self-revocation
+// with no retry. The roles are destroyed LAST, owner-side with admin creds
+// (runbook step 6: tofu destroy -target), after opshub's prod and develop
+// states are confirmed empty.
+//
+// MERGE ORDER: strictly AFTER the develop-stack destroy PR (#488). Draft until
+// the owner's go; merge needs `allow-dns-destroy` (the plan-guard protects the
+// module.iam_oidc roles, so the default guard would refuse this plan).
+// ============================================================================
 # ── GitHub Actions OIDC roles (ECS deploy + ECR push + infra CI) ─────────────
 # Owns ALL opshub AWS deploy roles: API (per-env), ECR push, infra plan/apply.
 # The web SPA deploys to Cloudflare Pages (see web-deploy.yml → wrangler pages
