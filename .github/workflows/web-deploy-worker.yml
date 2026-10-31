@@ -1,0 +1,245 @@
+# =============================================================================
+# Web · Deploy Worker — publish the SPA to Cloudflare Workers Static Assets
+# (the on-prem edge, ONPREM-PLAN §8.2).
+#
+# WHY IT EXISTS: the on-prem design serves opshub-dev.qnsc.vn SAME-ORIGIN. A
+# Worker named `opshub-dev-web` holds `<host>/*`; `/api/auth/*`, `/v1/*` and
+# `/readyz` are Workers routes WITHOUT a script, so Cloudflare sends them
+# through the qnsc-apps tunnel to the API (infra `live/edge/onprem.tf`). The
+# old Pages deploy was removed with the AWS exit (opshub#515), so without this
+# workflow nothing deploys the web app at all.
+#
+# TRIGGERS
+#   develop → push to main, after `Web · CI` passes on the same commit, and
+#             workflow_dispatch (default target).
+#   prod    → workflow_dispatch with environment=production ONLY, and only while
+#             the repository variable WEB_WORKER_PROD_ENABLED is `true`. That
+#             variable stays unset until the prod move (ONPREM-PLAN M-11): prod
+#             is still served elsewhere, and a Worker deployed there would have
+#             no route until the live/edge cutover applies one.
+#
+# WHAT IT DOES NOT DO: no DNS, no Workers routes, no Access. Those are `infra`
+# `live/edge`, applied (and reviewed) by the SA. The token here is Workers
+# Scripts: edit on the QNSC account and nothing else — `wrangler.jsonc`
+# deliberately declares no routes, so a deploy cannot race Terraform, and a
+# token without Zone permission cannot fail on one.
+# =============================================================================
+name: Web · Deploy Worker
+
+on:
+  push:
+    branches: [main]
+    # Same ignore list as backing CI, and for the same reason: a merge that
+    # touches only docs or the backend cannot change the SPA bundle. Anything
+    # shared (root lockfile, package.json) or web-adjacent (apps/web/**,
+    # public/_headers, the wrangler config) is NOT ignored, so under-deploy is
+    # impossible; `infra/**` is not ignored either — an infra merge can change
+    # what the edge routes.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.claude/**'
+      - 'apps/api/**'
+      - 'apps/worker/**'
+      - 'libs/**'
+      - 'db/**'
+      - 'Dockerfile'
+      - 'nest-cli.json'
+      - 'tsconfig.migrator.json'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: >-
+          Cloudflare target. `production` is refused unless the
+          WEB_WORKER_PROD_ENABLED repository variable is true (the prod move).
+        type: choice
+        options: [develop, production]
+        default: develop
+
+concurrency:
+  # One deploy per TARGET environment; never cancel a running one. Keyed on the
+  # environment, not the ref, so a dispatch and a merge cannot ship the same
+  # script at once.
+  group: deploy-web-worker-${{ inputs.environment || 'develop' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # 24, matching .nvmrc, web-ci.yml and the Dockerfile.
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.28.6'
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Resolve the target script and hold the prod gate.
+  #
+  # The gate is a VARIABLE, not the input alone: a workflow_dispatch can name
+  # `production`, and until the prod move that would deploy a script nothing
+  # routes to (and, worse, teach people the target works). `WEB_WORKER_PROD_ENABLED`
+  # is unset until the move, which keeps prod off by default.
+  # ───────────────────────────────────────────────────────────────────────────
+  target:
+    name: Resolve target
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      wrangler_env: ${{ steps.resolve.outputs.wrangler_env }}
+      script: ${{ steps.resolve.outputs.script }}
+    steps:
+      - id: resolve
+        name: Resolve the script name, and refuse prod while it is off
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          INPUT_ENV: ${{ inputs.environment }}
+          PROD_ENABLED: ${{ vars.WEB_WORKER_PROD_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT}" = "push" ]; then
+            # A push to main is ALWAYS the dev host. (`paths-ignore` keeps docs
+            # and backend merges from triggering it at all.)
+            [ "${REF}" = "refs/heads/main" ] || {
+              echo "::error::push deploys are only defined for main."
+              exit 1
+            }
+            environment=develop
+          else
+            environment="${INPUT_ENV:-develop}"
+          fi
+
+          case "${environment}" in
+            develop)
+              wrangler_env=dev
+              script=opshub-dev-web
+              ;;
+            production)
+              if [ "${PROD_ENABLED}" != "true" ]; then
+                echo "::error::production is refused: the on-prem prod move has not happened. Set the vars.WEB_WORKER_PROD_ENABLED repository variable to true only in the prod-move change (ONPREM-PLAN M-11), after live/edge routes the prod host to opshub-prod-web."
+                exit 1
+              fi
+              wrangler_env=prod
+              script=opshub-prod-web
+              ;;
+            *)
+              echo "::error::unknown environment '${environment}' (expected develop or production)."
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "environment=${environment}"
+            echo "wrangler_env=${wrangler_env}"
+            echo "script=${script}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Deploying ${script} from environment ${environment}."
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # CI gate — a red main must not deploy, and a hand-dispatch must not ship a
+  # commit CI never saw. Keyed on the commit sha (never an unrelated run) and
+  # narrowed to `main` so a tag or a branch run of the same file cannot be found
+  # instead. Fails closed when no run exists.
+  #
+  # `wait-for-run` first ships in ci v1.29.0; the rest of opshub still pins
+  # v1.24.3, which does not have it. This workflow therefore pins v1.29.0 for its
+  # own two ci actions — the release that provides the gate — rather than
+  # pretending the older pin can.
+  # ───────────────────────────────────────────────────────────────────────────
+  wait-for-ci:
+    name: Wait for Web · CI
+    needs: [target]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Wait for Web · CI on this commit
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@3b998f73d2fd4648aa1d22f1c2c3354c323de590 # v1.29.0
+        with:
+          workflow: web-ci.yml
+          branch: main
+          label: Web · CI
+          if-missing: fail
+          missing-message: >-
+            No Web · CI run was found for this commit. Pushing to main always runs it; a
+            workflow_dispatch on a commit CI never saw is refused rather than shipped blind.
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Build and deploy.
+  #
+  # The build is SAME-ORIGIN: no VITE_API_URL, so `API_BASE_URL` stays relative
+  # and the SPA calls its own host (`/v1/*`, `/api/auth/*`), which the edge routes
+  # to the API. The repo has no VITE_* variables, so nothing else can bake an
+  # absolute origin into the bundle.
+  #
+  # wrangler is an EXACT devDependency of opshub-web (4.149.0) and is run from
+  # the workspace, never `npx wrangler@latest`: the deploy must ship with the
+  # bundler the lockfile pinned.
+  # ───────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy ${{ needs.target.outputs.script }}
+    needs: [target, wait-for-ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The GitHub Environment carries CLOUDFLARE_WORKERS_API_TOKEN (owner-set:
+    # Workers Scripts: edit on the QNSC account, no DNS, no routes, no Pages).
+    # DELIBERATELY NOT `CLOUDFLARE_API_TOKEN`: that name is an ORG secret holding
+    # the Pages deploy token, and `secrets.*` falls through to it whenever the
+    # environment has none of its own — so this job would have deployed with the
+    # Pages credential and said nothing. A name of its own fails closed (empty)
+    # instead. `production` also carries the required reviewer, which is what
+    # turns the dispatch into a human-gated ship once the variable above is flipped.
+    environment: ${{ needs.target.outputs.environment }}
+    permissions:
+      contents: read
+      packages: read # @quynhonsemiconductor/* from GitHub Packages
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@3b998f73d2fd4648aa1d22f1c2c3354c323de590 # v1.29.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Require the Workers token for this environment
+        # Fail here, naming the secret and the environment, rather than inside
+        # wrangler's own error — an empty `secrets.*` is the one failure mode
+        # that looks like a Cloudflare problem.
+        env:
+          CLOUDFLARE_WORKERS_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+          TARGET_ENV: ${{ needs.target.outputs.environment }}
+        run: |
+          set -euo pipefail
+          [ -n "${CLOUDFLARE_WORKERS_API_TOKEN}" ] || {
+            echo "::error::secrets.CLOUDFLARE_WORKERS_API_TOKEN is not set in the '${TARGET_ENV}' environment. Create it there (Workers Scripts: edit on the QNSC account) before deploying."
+            exit 1
+          }
+
+      - name: Build the SPA for the same-origin edge
+        env:
+          # Relative API base. An absolute origin baked in here would send the
+          # SPA's cookies cross-site and defeat the one-host design.
+          VITE_API_URL: ''
+        run: pnpm --filter opshub-web build
+
+      - name: Deploy ${{ needs.target.outputs.script }}
+        # `pnpm --filter` runs inside apps/web, where wrangler discovers
+        # wrangler.jsonc and resolves `assets.directory = ./dist`. `--env` picks
+        # the script (`opshub-dev-web` / `opshub-prod-web`); never omit it — the
+        # top-level name in the config is not a deploy target.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_ENV: ${{ needs.target.outputs.wrangler_env }}
+        run: >-
+          pnpm --filter opshub-web exec wrangler deploy
+          --env "$WRANGLER_ENV"
