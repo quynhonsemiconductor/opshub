@@ -99,10 +99,14 @@ export class DoorController {
     const terminals = await this.door.listTerminals();
     const enriched: DoorTerminalResponseDto[] = [];
     for (const t of terminals) {
-      const state = await this.door.batteryState(t.id, threshold);
+      const [state, warnings] = await Promise.all([
+        this.door.batteryState(t.id, threshold),
+        this.door.terminalHealth(t.id),
+      ]);
       enriched.push({
         ...toTerminalDto(t),
         battery: { mv: state.mv, low: state.low, reportedAt: state.reportedAt },
+        warnings,
       });
     }
     return enriched;
