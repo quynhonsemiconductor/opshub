@@ -133,15 +133,24 @@ CREATE INDEX IF NOT EXISTS ix_document_ack_employee
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_app') THEN
-    GRANT USAGE ON SCHEMA documents TO opshub_app, opshub_worker, opshub_migrate;
+    GRANT USAGE ON SCHEMA documents TO opshub_app, opshub_worker;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT USAGE ON SCHEMA documents TO opshub_migrate;
+    END IF;
 
     GRANT SELECT, INSERT, UPDATE, DELETE
       ON ALL TABLES IN SCHEMA documents TO opshub_app, opshub_worker;
     GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA documents TO opshub_app, opshub_worker;
 
-    GRANT ALL ON SCHEMA documents TO opshub_migrate;
-    GRANT ALL ON ALL TABLES IN SCHEMA documents TO opshub_migrate;
-    GRANT ALL ON ALL SEQUENCES IN SCHEMA documents TO opshub_migrate;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON SCHEMA documents TO opshub_migrate;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON ALL TABLES IN SCHEMA documents TO opshub_migrate;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON ALL SEQUENCES IN SCHEMA documents TO opshub_migrate;
+    END IF;
 
     -- Future tables in this schema, so the next migration that adds one here does not
     -- reintroduce the same failure. Per GRANTOR, and the grantor is whoever runs migrations.

@@ -2,9 +2,11 @@
  * Grant LOGIN to the least-privilege Postgres roles, then PROVE they are not
  * over-privileged. This is step 2 of docs/runbooks/db-role-least-privilege.md.
  *
- * Migration 0012 creates `opshub_app` and `opshub_worker` NOLOGIN, because giving a
- * role a password is a deliberate cutover step, not something a migration should do
- * on every deploy. This script is that step, and it runs in two places:
+ * Migration 0012 grants `opshub_app` and `opshub_worker` (and creates them, NOLOGIN,
+ * only where the connecting role may create roles — the platform creates the real ones
+ * on-prem). Giving a role a password is a deliberate cutover step, not something a
+ * migration should do on every deploy. This script is that step, and it runs in two
+ * places:
  *
  *  - CI, before the e2e job, so the whole suite connects as `opshub_app` instead of
  *    the owner. Without that the split is untested: every other job connects as an

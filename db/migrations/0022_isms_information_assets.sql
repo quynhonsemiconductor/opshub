@@ -314,10 +314,12 @@ BEGIN
     GRANT SELECT ON isms.classification_levels TO opshub_app, opshub_worker;
     GRANT SELECT, INSERT ON isms.asset_classification_history TO opshub_app, opshub_worker;
 
-    GRANT ALL ON isms.classification_levels,
-                 isms.information_assets,
-                 isms.asset_classification_history,
-                 isms.information_asset_devices
-      TO opshub_migrate;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON isms.classification_levels,
+                   isms.information_assets,
+                   isms.asset_classification_history,
+                   isms.information_asset_devices
+        TO opshub_migrate;
+    END IF;
   END IF;
 END $$;

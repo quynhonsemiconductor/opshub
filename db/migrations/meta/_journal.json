@@ -302,6 +302,13 @@
       "when": 1793034774922,
       "tag": "0042_attendance_justifications_and_month_closes",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793121174922,
+      "tag": "0043_runtime_role_grants",
+      "breakpoints": true
     }
   ]
 }

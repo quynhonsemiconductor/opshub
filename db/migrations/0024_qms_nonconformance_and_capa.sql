@@ -326,14 +326,23 @@ CREATE INDEX IF NOT EXISTS ix_capa_due ON qms.capas (status, due_on);
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_app') THEN
-    GRANT USAGE ON SCHEMA qms TO opshub_app, opshub_worker, opshub_migrate;
-    GRANT ALL ON SCHEMA qms TO opshub_migrate;
+    GRANT USAGE ON SCHEMA qms TO opshub_app, opshub_worker;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT USAGE ON SCHEMA qms TO opshub_migrate;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON SCHEMA qms TO opshub_migrate;
+    END IF;
 
     GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA qms
       TO opshub_app, opshub_worker;
     GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA qms TO opshub_app, opshub_worker;
-    GRANT ALL ON ALL TABLES IN SCHEMA qms TO opshub_migrate;
-    GRANT ALL ON ALL SEQUENCES IN SCHEMA qms TO opshub_migrate;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON ALL TABLES IN SCHEMA qms TO opshub_migrate;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON ALL SEQUENCES IN SCHEMA qms TO opshub_migrate;
+    END IF;
 
     ALTER DEFAULT PRIVILEGES IN SCHEMA qms
       GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO opshub_app, opshub_worker;

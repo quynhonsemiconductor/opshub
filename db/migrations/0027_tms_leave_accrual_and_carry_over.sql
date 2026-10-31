@@ -134,6 +134,8 @@ BEGIN
     REVOKE INSERT, UPDATE, DELETE ON workforce.leave_policies
       FROM opshub_app, opshub_worker;
     GRANT SELECT ON workforce.leave_policies TO opshub_app, opshub_worker;
-    GRANT ALL ON workforce.leave_policies TO opshub_migrate;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON workforce.leave_policies TO opshub_migrate;
+    END IF;
   END IF;
 END $$;
