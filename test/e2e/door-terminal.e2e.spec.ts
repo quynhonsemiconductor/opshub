@@ -367,6 +367,55 @@ describe('door terminal contract v1', () => {
     expect(afterRow?.warnings).toEqual([]);
   });
 
+  it('drops ONLY the UID that was enrolled from the unknown list (bench 2026-10-31)', async () => {
+    // The old query computed `bool_or(EXISTS (… WHERE c.uid = ${events.uid} …))` in a single-table
+    // select; Drizzle rendered `${events.uid}` unqualified, so inside the subquery it resolved to
+    // `c.uid` and the predicate became `c.uid = c.uid`. Once ANY active card existed, every group
+    // was "active" and filtered out — Unknown went to 0. A test with ZERO enrolled cards could
+    // never have caught this: enrolling exactly one is what makes the broken predicate true.
+    const unknowns = [randomUid(), randomUid(), randomUid()];
+    const [a, b, c] = unknowns;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/door/terminal/events',
+      headers: { ...bearer(), 'content-type': 'application/json' },
+      payload: {
+        stream,
+        dropped: 0,
+        events: unknowns.map((uid, i) => ({
+          seq: 1300 + i,
+          reader: 'in',
+          uid,
+          result: 'deny',
+          device_ts: new Date().toISOString(),
+          time_synced: true,
+        })),
+      },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const ours = async () => {
+      const listed = await app.inject({
+        method: 'GET',
+        url: '/v1/door/unknown-cards',
+        headers: authHeaders(admin),
+      });
+      expect(listed.statusCode, listed.body).toBe(200);
+      return listed
+        .json<{ uid: string }[]>()
+        .map((r) => r.uid)
+        .filter((uid) => unknowns.includes(uid))
+        .sort();
+    };
+
+    expect(await ours()).toEqual([a, b, c].sort());
+
+    await enrolCard(a);
+
+    // Before the fix this was [] — every group, not just `a`, fell to the self-comparison.
+    expect(await ours()).toEqual([b, c].sort());
+  });
+
   it('resolves card_id by event time, not by "the card active now"', async () => {
     // Card not valid for another hour: a synced swipe NOW credits nobody...
     const future = new Date(Date.now() + 3600_000).toISOString();
