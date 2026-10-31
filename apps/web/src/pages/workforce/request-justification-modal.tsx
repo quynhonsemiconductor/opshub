@@ -16,8 +16,8 @@ import {
 import { JUSTIFICATION_KINDS, type JustificationKind } from './attendance-model';
 
 /**
- * Nộp đơn giải trình (file an attendance justification): one kind, one date range, the working-day
- * count from the preview endpoint before submit — same shape as the WFH modal, Vietnamese labels.
+ * File an attendance justification: one kind, one date range, the working-day
+ * count from the preview endpoint before submit — same shape as the WFH modal.
  */
 export function RequestJustificationModal({
   open,
@@ -59,18 +59,18 @@ export function RequestJustificationModal({
     });
     setLoading(false);
     if (error) {
-      toast.error(apiErrorMessage(error, 'Không nộp được đơn giải trình.'));
+      toast.error(apiErrorMessage(error, 'Could not submit the justification.'));
       return;
     }
-    toast.success('Đã nộp đơn giải trình, chờ quản lý duyệt');
+    toast.success('Justification submitted, awaiting manager approval');
     onSuccess();
     onClose();
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Nộp đơn giải trình chấm công" size="sm">
+    <Modal open={open} onClose={onClose} title="Submit attendance justification" size="sm">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
-        <FormField label="Loại" htmlFor="justification-kind" required>
+        <FormField label="Type" htmlFor="justification-kind" required>
           <Select
             id="justification-kind"
             value={kind}
@@ -84,10 +84,10 @@ export function RequestJustificationModal({
           </Select>
         </FormField>
         <FormField
-          label="Ngày"
+          label="Dates"
           htmlFor="justification-range"
           required
-          error={rangeTouched && !dateRange ? 'Chọn ngày bắt đầu và kết thúc.' : undefined}
+          error={rangeTouched && !dateRange ? 'Choose a start and end date.' : undefined}
         >
           <DateRangePicker
             id="justification-range"
@@ -102,20 +102,20 @@ export function RequestJustificationModal({
         <p className="text-xs text-fg-subtle" aria-live="polite">
           {preview.data
             ? preview.data.workingDays.length === 1
-              ? 'Đơn này giải trình 1 ngày làm việc (thứ Bảy, Chủ nhật và ngày lễ không tính).'
-              : `Đơn này giải trình ${preview.data.workingDays.length} ngày làm việc (thứ Bảy, Chủ nhật và ngày lễ không tính).`
-            : 'Số ngày làm việc sẽ hiện ra khi bạn chọn ngày.'}
+              ? 'This covers 1 working day (Saturdays, Sundays and public holidays are not counted).'
+              : `This covers ${preview.data.workingDays.length} working days (Saturdays, Sundays and public holidays are not counted).`
+            : 'The working-day count appears once you pick dates.'}
         </p>
-        <FormField label="Lý do" htmlFor="justification-reason">
+        <FormField label="Reason" htmlFor="justification-reason">
           <Textarea
             id="justification-reason"
             rows={2}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Lý do (không bắt buộc)…"
+            placeholder="(Optional) Reason…"
           />
         </FormField>
-        <FormActions loading={loading} onClose={onClose} submitLabel="Nộp đơn" />
+        <FormActions loading={loading} onClose={onClose} submitLabel="Submit" />
       </form>
     </Modal>
   );

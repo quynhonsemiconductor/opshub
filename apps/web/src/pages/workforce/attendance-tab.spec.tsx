@@ -127,27 +127,27 @@ describe('the derived month', () => {
   it('expands a person into their days, flags in Vietnamese', async () => {
     renderTab();
     fireEvent.click(await screen.findByText('Quang'));
-    const section = await screen.findByRole('region', { name: /theo ngày/ });
-    expect(section).toHaveTextContent('Đi muộn (30 phút)');
-    expect(section).toHaveTextContent('Vắng không phép');
-    expect(section).toHaveTextContent('Đơn giải trình chờ duyệt');
+    const section = await screen.findByRole('region', { name: /Daily attendance/ });
+    expect(section).toHaveTextContent('Late (30 min)');
+    expect(section).toHaveTextContent('Unexcused absence');
+    expect(section).toHaveTextContent('Justification awaiting approval');
   });
 
   it('shows the month as not closed, and hides HR actions from a plain employee', async () => {
     renderTab();
-    expect(await screen.findByText('Tháng chưa chốt.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Chốt tháng' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Tổng hợp/ })).toBeNull();
+    expect(await screen.findByText('Month not closed.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close month' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Summary/ })).toBeNull();
   });
 });
 
 describe('filing a justification', () => {
   it('posts kind and range, and says it is waiting for approval', async () => {
     renderTab();
-    fireEvent.click(await screen.findByRole('button', { name: 'Nộp đơn giải trình' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit justification' }));
     // The range seeds on yesterday (2026-10-20) and the preview answers one working day.
-    expect(await screen.findByText(/giải trình 1 ngày làm việc/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Nộp đơn' }));
+    expect(await screen.findByText(/covers 1 working day/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
 
     await waitFor(() =>
       expect(POST).toHaveBeenCalledWith('/v1/workforce/attendance/justifications', {
@@ -155,13 +155,15 @@ describe('filing a justification', () => {
       }),
     );
     await waitFor(() =>
-      expect(toastSuccess).toHaveBeenCalledWith(expect.stringContaining('chờ quản lý duyệt')),
+      expect(toastSuccess).toHaveBeenCalledWith(
+        expect.stringContaining('awaiting manager approval'),
+      ),
     );
   });
 });
 
 describe('the month close', () => {
-  it('HR sees Chốt tháng; confirming closes it and the state changes', async () => {
+  it('HR sees Close month; confirming closes it and the state changes', async () => {
     can.mockImplementation((p: string) => p === 'workforce.attendance.close');
     GET.mockImplementation(async (path: string) => {
       if (path === '/v1/workforce/attendance') {
@@ -170,9 +172,9 @@ describe('the month close', () => {
       return { data: '' };
     });
     renderTab();
-    fireEvent.click(await screen.findByRole('button', { name: 'Chốt tháng' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Close month' }));
     // The header button AND the confirm dialog's confirm button share the name; the dialog's is last.
-    fireEvent.click(screen.getAllByRole('button', { name: 'Chốt tháng' }).pop()!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close month' }).pop()!);
 
     await waitFor(() =>
       expect(POST).toHaveBeenCalledWith('/v1/workforce/attendance/months/{month}/close', {
@@ -180,7 +182,7 @@ describe('the month close', () => {
         body: {},
       }),
     );
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Đã chốt tháng 2026-10'));
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Month 2026-10 closed'));
   });
 
   it('a closed month offers reopen only to the override holder', async () => {
@@ -203,18 +205,18 @@ describe('the month close', () => {
       return { data: '' };
     });
     renderTab();
-    expect(await screen.findByText(/Đã chốt tháng/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Mở lại tháng' }));
+    expect(await screen.findByText(/Month closed/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen month' }));
     // The override now demands a reason, which lands in the audit trail.
     fireEvent.change(await screen.findByRole('textbox'), {
-      target: { value: 'e2e: cần sửa chấm công' },
+      target: { value: 'e2e: fix attendance' },
     });
-    fireEvent.click(screen.getAllByRole('button', { name: 'Mở lại tháng' }).pop()!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Reopen month' }).pop()!);
 
     await waitFor(() =>
       expect(POST).toHaveBeenCalledWith('/v1/workforce/attendance/months/{month}/reopen', {
         params: { path: { month: '2026-10' } },
-        body: { note: 'e2e: cần sửa chấm công' },
+        body: { note: 'e2e: fix attendance' },
       }),
     );
   });
@@ -224,7 +226,7 @@ describe('the CSVs', () => {
   it('an attendance reader gets both downloads, fetched as text', async () => {
     can.mockImplementation((p: string) => p === 'workforce.attendance.read');
     renderTab();
-    const summary = await screen.findByRole('button', { name: /Tổng hợp/ });
+    const summary = await screen.findByRole('button', { name: /Summary/ });
     fireEvent.click(summary);
     await waitFor(() =>
       expect(GET).toHaveBeenCalledWith('/v1/workforce/attendance/summary.csv', {

@@ -244,7 +244,7 @@ export function DoorPage() {
       actions={
         canManage ? (
           <>
-            <Button onClick={() => setAddingCard(true)}>
+            <Button variant="primary" onClick={() => setAddingCard(true)}>
               <Plus className="size-4" /> Enrol card
             </Button>
             <Button variant="outline" onClick={() => setRegistering(true)}>
