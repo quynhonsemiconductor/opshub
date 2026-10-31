@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.5](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.4...v0.4.5) (2026-10-31)
+
+
+### ✨ Features
+
+* **workforce:** attendance core — derived days, justification requests, month close ([#505](https://github.com/quynhonsemiconductor/opshub/issues/505)) ([b1a31e6](https://github.com/quynhonsemiconductor/opshub/commit/b1a31e69677f8b35a5c5993293ab31ddda87dd2e))
+* **workforce:** chấm công tab, attendance CSVs, morning flag notification ([#506](https://github.com/quynhonsemiconductor/opshub/issues/506)) ([72cc27f](https://github.com/quynhonsemiconductor/opshub/commit/72cc27fb9cea4dcacd07bfe73db68b799027728e))
+* **workforce:** wio calendar + manager-approved wfh requests ([#474](https://github.com/quynhonsemiconductor/opshub/issues/474)) ([1cbaaf9](https://github.com/quynhonsemiconductor/opshub/commit/1cbaaf9187baa3a6b9ad96f3c6d5ac2d4a7ddd8d))
+
+
+### 🐛 Bug Fixes
+
+* **ci:** sweep callers to ci v1.24.3; drop the removed secret inputs ([#503](https://github.com/quynhonsemiconductor/opshub/issues/503)) ([f5179f8](https://github.com/quynhonsemiconductor/opshub/commit/f5179f8d64ab4e2cf8370febf9b2ed1acff4e452))
+* **deps:** bump qs override to 6.16.1+, suppress unfixable deepmerge advisory ([#507](https://github.com/quynhonsemiconductor/opshub/issues/507)) ([b6a4d18](https://github.com/quynhonsemiconductor/opshub/commit/b6a4d1821f796e446ca647d8f7ef42f175430bf8))
+* **deps:** drop .pnpmfile.cjs for declarative better-auth peer overrides ([#499](https://github.com/quynhonsemiconductor/opshub/issues/499)) ([d46f32b](https://github.com/quynhonsemiconductor/opshub/commit/d46f32b82714567f539bcf763ddfa82727b2558f))
+* **deps:** floor systeminformation &gt;=5.33.16 and seroval &gt;=1.6.11 ([#514](https://github.com/quynhonsemiconductor/opshub/issues/514)) ([1e278fd](https://github.com/quynhonsemiconductor/opshub/commit/1e278fd1a8e3ad11f1cd3cfcb302e17c9efc54fe))
+* **deps:** minimumReleaseAgeStrict: false so Renovate can regenerate lockfiles ([#502](https://github.com/quynhonsemiconductor/opshub/issues/502)) ([efa309e](https://github.com/quynhonsemiconductor/opshub/commit/efa309e283a48d8ca60669dd3308c1c7e88fb2ea))
+* **deps:** scope the prod-tree peer check to each project's own dependencies ([#501](https://github.com/quynhonsemiconductor/opshub/issues/501)) ([67b56c4](https://github.com/quynhonsemiconductor/opshub/commit/67b56c476e9ff034dbb9338dc4a7dfb028aefeb3))
+* **deps:** update npm production (non-major) ([#419](https://github.com/quynhonsemiconductor/opshub/issues/419)) ([c2af86c](https://github.com/quynhonsemiconductor/opshub/commit/c2af86ce109b059e8d88564fa2bc9fa26d9d35fd))
+* **door:** terminal contract v1 — epoch-second windows, unsynced events ([#508](https://github.com/quynhonsemiconductor/opshub/issues/508)) ([06bcbc8](https://github.com/quynhonsemiconductor/opshub/commit/06bcbc85d07ad5599121798281248618d77a807f))
+
 ## [0.4.4](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.3...v0.4.4) (2026-10-26)
 
 
