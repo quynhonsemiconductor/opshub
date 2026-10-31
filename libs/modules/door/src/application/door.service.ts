@@ -35,6 +35,7 @@ import type {
   CreateCardInput,
   UpdateCardInput,
   ListCardsFilters,
+  TerminalHealthWarning,
 } from '../domain/door.types';
 
 /** 256 bits: the practical floor for a bearer credential that must survive a flash read-out attempt. */
@@ -64,6 +65,53 @@ export function normaliseUid(raw: string): string {
 }
 
 const UID_SHAPE = /^[0-9A-F]{8}([0-9A-F]{6}){0,2}$/;
+
+/**
+ * The plausible pack-voltage window (bench 2026-10-31). Source: the firmware's pack spec in
+ * attendance-lock-firmware `components/power/Kconfig` — a 4.5–6.5 V pack whose regulator drops
+ * out at 4800 mV and whose low-battery alert is 5000 mV. 3000–9000 mV covers every real reading
+ * with margin, including the servo-load sag, while still rejecting an unwired divider (the bench
+ * sent 33924 mV). A value outside the window is treated as NO READING, never as a bad batch.
+ */
+export const BATTERY_PLAUSIBLE_MIN_MV = 3_000;
+export const BATTERY_PLAUSIBLE_MAX_MV = 9_000;
+
+/** The firmware clamps `dropped` to this before sending (sync.h SYNC_DROPPED_REPORT_MAX). */
+export const DROPPED_REPORT_MAX = 100_000;
+
+/** The cache key/TTL shared by the battery badge and its health warning. */
+const BATTERY_CACHE_TTL_SECONDS = 150 * 60;
+
+export const TERMINAL_HEALTH_BATTERY_IMPLAUSIBLE = 'battery_reading_implausible';
+
+/**
+ * Advisory telemetry, parsed where it can never fail the batch. `dropped` is a gauge: anything
+ * unusable counts as 0, floats truncate, and the firmware's own 100000 ceiling applies server-side
+ * too, so a buggy sender cannot inflate it without bound.
+ */
+export function normaliseDropped(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.min(Math.max(Math.trunc(value), 0), DROPPED_REPORT_MAX);
+}
+
+/**
+ * `battery_mv` as the firmware's wire contract means it: 0 (or below) is "no reading" — the
+ * firmware omits the fields entirely when the monitor is off — while a POSITIVE value outside the
+ * plausible window is an implausible READING that must be ignored and surfaced, not stored.
+ */
+export function normaliseBatteryMv(value: unknown): {
+  mv: number | undefined;
+  implausible: number | undefined;
+} {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return { mv: undefined, implausible: undefined };
+  }
+  if (value <= 0) return { mv: undefined, implausible: undefined };
+  if (value < BATTERY_PLAUSIBLE_MIN_MV || value > BATTERY_PLAUSIBLE_MAX_MV) {
+    return { mv: undefined, implausible: value };
+  }
+  return { mv: value, implausible: undefined };
+}
 
 /** One event as the TERMINAL sends it (snake_case wire names, validated per event). */
 export interface IngestEvent {
@@ -374,13 +422,15 @@ export class DoorService {
     terminalId: string,
     input: {
       stream: string;
-      dropped: number;
-      battery_mv?: number;
-      low_battery?: boolean;
+      /** Advisory; see normaliseDropped. Unknown so a bad value is parsed, never a 422. */
+      dropped?: unknown;
+      battery_mv?: unknown;
+      low_battery?: unknown;
       events: IngestEvent[];
     },
   ): Promise<{ ackedThrough: number; rejected: number[] }> {
     const now = new Date();
+    const dropped = normaliseDropped(input.dropped);
     const rejected: number[] = [];
     const valid: NonNullable<Parameters<ICardRepository['insertEvents']>[1]> = [];
     let ackedThrough = 0;
@@ -451,12 +501,12 @@ export class DoorService {
       // inserts only SOME rows (a partially-duplicated resend) can still over-count — the number
       // is a gauge, not a ledger, and the ADR says so.
       if (inserted > 0) {
-        await this.terminals.addDropped(terminalId, input.dropped);
+        await this.terminals.addDropped(terminalId, dropped);
       }
-    } else if (input.dropped > 0) {
+    } else if (dropped > 0) {
       // All-rejected batches never reach the insert; their drops are still reported once (the
       // terminal will not resend them — they were rejected).
-      await this.terminals.addDropped(terminalId, input.dropped);
+      await this.terminals.addDropped(terminalId, dropped);
     }
 
     // Battery telemetry rides batch-level (one pack per controller). Held in the cache —
@@ -464,13 +514,41 @@ export class DoorService {
     // A reading of 0 or below is NO READING, not a dead pack (round-2 review item 1): the firmware
     // omits the field when it has no measurement, but a sender that reports 0 must not trip the
     // low-battery alert on every session — 0 is not a real pack voltage.
+    //
+    // ADVISORY, NEVER FATAL (bench 2026-10-31): a POSITIVE value outside the plausible window is
+    // ignored as no reading. It must not touch the badge cache (a previous good reading stays),
+    // and it is recorded as a health warning for the Terminals tab instead. The events above were
+    // already accepted — telemetry can never send the batch back to the terminal's retry queue.
+    const { mv: batteryMv, implausible } = normaliseBatteryMv(input.battery_mv);
     const thresholdMv = this.config.get('DOOR_LOW_BATTERY_MV');
-    const batteryMv =
-      typeof input.battery_mv === 'number' && input.battery_mv > 0 ? input.battery_mv : undefined;
+    const batteryKey = `door:terminal:${terminalId}:battery`;
+    const healthKey = `door:terminal:${terminalId}:health`;
+
+    if (implausible !== undefined) {
+      await this.cache.setJson(
+        healthKey,
+        {
+          code: TERMINAL_HEALTH_BATTERY_IMPLAUSIBLE,
+          value: implausible,
+          at: new Date().toISOString(),
+        } satisfies TerminalHealthWarning,
+        BATTERY_CACHE_TTL_SECONDS,
+      );
+      this.logger.warn(
+        { terminalId, batteryMv: implausible },
+        'door terminal reported an implausible battery reading; ignored, events accepted',
+      );
+      // Deliberately BEFORE the badge write: the badge keeps its last good reading, and the
+      // device's low flag is not trusted from a session whose own voltage makes no sense.
+      return { ackedThrough, rejected };
+    }
+
+    // A plausible reading clears an earlier health warning.
+    if (batteryMv !== undefined) await this.cache.del(healthKey);
+
     const deviceLow = input.low_battery === true;
     const serverLow = batteryMv !== undefined && batteryMv < thresholdMv;
     const low = deviceLow || serverLow;
-    const batteryKey = `door:terminal:${terminalId}:battery`;
     const prev = await this.cache.getJson<{ low: boolean }>(batteryKey);
 
     // Notify door.manage holders ON TRANSITION into low (not every sync). The device flag and
@@ -495,10 +573,21 @@ export class DoorService {
         low,
         at: new Date().toISOString(),
       },
-      150 * 60, // seconds — expires at the offline threshold; absent = never reported
+      BATTERY_CACHE_TTL_SECONDS, // expires at the offline threshold; absent = never reported
     );
 
     return { ackedThrough, rejected };
+  }
+
+  /**
+   * Active terminal health warnings, read from the telemetry cache for the Terminals tab. An
+   * implausible battery reading is recorded here INSTEAD of the badge cache.
+   */
+  async terminalHealth(terminalId: string): Promise<TerminalHealthWarning[]> {
+    const warning = await this.cache.getJson<TerminalHealthWarning>(
+      `door:terminal:${terminalId}:health`,
+    );
+    return warning ? [warning] : [];
   }
 
   /** One low-battery alert per holder; the daily per-recipient key bounds repeats. */

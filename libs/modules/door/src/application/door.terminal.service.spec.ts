@@ -40,6 +40,7 @@ const mockDb = { transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => f
 const mockCache = {
   getJson: vi.fn<() => Promise<{ low: boolean } | null>>().mockResolvedValue(null),
   setJson: vi.fn().mockResolvedValue(undefined),
+  del: vi.fn().mockResolvedValue(undefined),
 };
 const mockConfig = { get: vi.fn(() => 5000) };
 const mockAlerts = {
@@ -460,6 +461,70 @@ describe('DoorService.ingestEvents()', () => {
         'term-1',
       );
     });
+
+    it('an implausible reading is IGNORED, never fatal: 9 events acked, badge untouched, warning recorded', async () => {
+      // Bench 2026-10-31: an unwired divider sent 33924 mV and the envelope's old max(20_000)
+      // 422'd every batch, so the terminal retried it forever and no attendance landed. The
+      // reading must not touch the badge cache; the events must be acked and inserted.
+      const events = Array.from({ length: 9 }, (_, i) => event({ seq: 100 + i }));
+      const r = await makeService().ingestEvents('term-1', {
+        stream: STREAM,
+        dropped: 0,
+        battery_mv: 33_924,
+        events,
+      });
+
+      expect(r).toEqual({ ackedThrough: 108, rejected: [] });
+      expect(mockCards.insertEvents).toHaveBeenCalledTimes(1);
+      expect(mockCards.insertEvents.mock.calls[0][1]).toHaveLength(9);
+      expect(mockAlerts.send).not.toHaveBeenCalled();
+      expect(mockCache.setJson).toHaveBeenCalledWith(
+        expect.stringContaining(':health'),
+        expect.objectContaining({ code: 'battery_reading_implausible', value: 33_924 }),
+        expect.any(Number),
+      );
+      expect(mockCache.setJson).not.toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('persists a plausible reading and clears an earlier warning', async () => {
+      await syncBattery({ battery_mv: 5400 });
+
+      expect(mockCache.setJson).toHaveBeenCalledWith(
+        expect.stringContaining(':battery'),
+        expect.objectContaining({ mv: 5400, low: false }),
+        expect.any(Number),
+      );
+      expect(mockCache.del).toHaveBeenCalledWith(expect.stringContaining(':health'));
+      expect(mockCache.setJson).not.toHaveBeenCalledWith(
+        expect.stringContaining(':health'),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
+  it('clamps unusable dropped telemetry instead of refusing the batch', async () => {
+    mockCards.insertEvents.mockResolvedValue(1);
+    await makeService().ingestEvents('term-1', {
+      stream: STREAM,
+      dropped: 999_999,
+      events: [event({ seq: 1 })],
+    });
+    expect(mockTerminals.addDropped).toHaveBeenCalledWith('term-1', 100_000);
+
+    vi.clearAllMocks();
+    mockCards.findCardCandidatesByUids.mockResolvedValue([{ ...CARD }]);
+    mockCards.insertEvents.mockResolvedValue(1);
+    await makeService().ingestEvents('term-1', {
+      stream: STREAM,
+      dropped: -5,
+      events: [event({ seq: 2 })],
+    });
+    expect(mockTerminals.addDropped).toHaveBeenCalledWith('term-1', 0);
   });
 
   it('normalises the UID before candidate lookup', async () => {

@@ -125,6 +125,41 @@ describe('DoorPage', () => {
     expect(screen.getByText(/secret-value/)).toBeInTheDocument();
   });
 
+  it('shows an implausible battery warning beside the last good reading', async () => {
+    // The server ignores an out-of-window reading and keeps the badge; the Terminals tab must say
+    // why, with the value, so a miswired divider is visible instead of silent.
+    GET.mockImplementation((path: string) => {
+      if (path === '/v1/door/terminals')
+        return Promise.resolve({
+          data: [
+            {
+              ...TERMINAL,
+              battery: { mv: 5400, low: false, reportedAt: '2026-10-31T00:00:00.000Z' },
+              warnings: [
+                {
+                  code: 'battery_reading_implausible',
+                  value: 33_924,
+                  at: '2026-10-31T00:00:00.000Z',
+                },
+              ],
+            },
+          ],
+          error: undefined,
+        });
+      if (path === '/v1/door/cards')
+        return Promise.resolve({
+          data: { data: [], pageInfo: { total: 0, limit: 25, offset: 0 } },
+          error: undefined,
+        });
+      if (path === '/v1/door/unknown-cards') return Promise.resolve({ data: [], error: undefined });
+      throw new Error(`unexpected GET ${path}`);
+    });
+    renderPage();
+    fireEvent.click(await screen.findByText('Terminals (1)'));
+    expect(await screen.findByText('5.40 V')).toBeInTheDocument();
+    expect(screen.getByText('implausible 33.92 V — ignored')).toBeInTheDocument();
+  });
+
   it('keeps the empty state honest for a read-only holder', async () => {
     GET.mockImplementation((path: string) => {
       if (path === '/v1/door/terminals') return Promise.resolve({ data: [], error: undefined });
