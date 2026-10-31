@@ -169,6 +169,27 @@ overrides:
   # GHSA-68fv-2mgg-jv7q — source-map-js, fixed 1.2.2. Transitive via postcss, tailwind,
   # css-tree (jsdom) and magicast (coverage); all request 1.x.
   "source-map-js": ">=1.2.2 <2.0.0"
+  # GHSA-3g3m-2fjr-6pw4 (CVSS 6.3) — glob's AbortSignal cancellation bypass lets a timed-out
+  # traversal keep walking the filesystem. Introduced in 9.0.0 and fixed in 14.0.2, so there is
+  # NO patched release on 10.x or 13.x: the fix only exists beyond the next major, which is why
+  # this crosses majors where the entries above stay inside one.
+  #
+  # The two copies in this tree are rimraf 5 (via gaxios -> @opentelemetry/resource-detector-gcp,
+  # i.e. the runtime OTel chain) and @fastify/static 10 / @nestjs/cli (`**` file listing). All
+  # three call glob through named exports (`{ glob }` / `{ globSync }`), which 14 keeps, and 14 is
+  # dual CJS/ESM like the majors they declare. The selector is bounded BELOW only, so a package
+  # that legitimately asks for glob 15 later is not dragged down. Same pin as rova#835.
+  "glob@<14.0.3": "14.0.3"
+  # GHSA-g3hv-75wg-m249 (CVSS 6.9) — minimatch's globparts amplification, a DoS reachable from a
+  # pattern an attacker can influence. Fixed in 11.0.1, again with no patch on 3.x/5.x/9.x/10.x.
+  #
+  # Four majors are in the tree: 3.1.5 (fork-ts-checker-webpack-plugin, the nest build),
+  # 5.1.9 (@redocly/openapi-core, the SPA's openapi codegen), 9.0.9 (@swc/cli, and glob 10
+  # beneath rimraf) and 10.x (eslint's @eslint/config-array). Every consumer here calls
+  # minimatch the way the patched line still supports, and 11 ships CJS + ESM builds. Forcing one
+  # version rather than four pinned majors is deliberate: the advisory covers all of them, so a
+  # per-major pin would only re-open the gate on the next unaudited major. Same pin as rova#835.
+  "minimatch@<11.0.3": "11.0.3"
 
   # Keep Better Auth's optional peers out of the production tree, declaratively (replaces
   # .pnpmfile.cjs, whose pnpmfileChecksum broke every Renovate lockfile regen; see "Keeping Better
