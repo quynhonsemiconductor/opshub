@@ -132,8 +132,8 @@ importers:
         specifier: ^1.43.0
         version: 1.43.0
       '@quynhonsemiconductor/identity':
-        specifier: ^8.5.1
-        version: 8.5.1(e5d4bd44c1b7427d391f7332de1de2e7)
+        specifier: ^8.5.2
+        version: 8.5.2(3b17df1e09f05d6bbf9285175039dafc)
       '@quynhonsemiconductor/observability':
         specifier: ^0.6.2
         version: 0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751)
@@ -144,8 +144,8 @@ importers:
         specifier: ^0.1.2
         version: 0.1.2(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@quynhonsemiconductor/observability@0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751))(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1))(pg@8.23.1)
       '@quynhonsemiconductor/platform-http':
-        specifier: ^5.0.0
-        version: 5.0.0(7b463c85e0fa3d2949b391a1c6c5750a)
+        specifier: ^5.0.2
+        version: 5.0.2(7b463c85e0fa3d2949b391a1c6c5750a)
       '@quynhonsemiconductor/platform-mail':
         specifier: ^0.1.7
         version: 0.1.7(6e02964bdf4e08a61a576cec927d0d99)
@@ -2789,8 +2789,8 @@ packages:
   '@protobufjs/utf8@1.1.2':
     resolution: {integrity: sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug==}
 
-  '@quynhonsemiconductor/identity@8.5.1':
-    resolution: {integrity: sha512-nql+0MZ0RjTb5B+8RN6Wb7RWUWzHmDGQipeT4acXV/kJ2SmeSu9h9aVHdj9B2bIp5qH/AbfEYLX8J073GAPA9Q==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/identity/8.5.1/86b797c4a9492e23a2086bef3fcf1cdec26d8fbb}
+  '@quynhonsemiconductor/identity@8.5.2':
+    resolution: {integrity: sha512-khsOGyRjS1lOsK0IL/NK6TOybOZVNhWRftg7kEIGAOb2aLZIkOIIZGN8baxYsbCIQfcVF+F8OOQHplwAFcT35g==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/identity/8.5.2/0afde4a2c8d0186750b94b90a3a081b797c369db}
     peerDependencies:
       '@nestjs/common': '>=11'
       '@nestjs/core': '>=11'
@@ -2802,17 +2802,6 @@ packages:
       fastify: '>=5.12.7 <6.0.0'
       ioredis: '>=5'
       pg: '>=8.11'
-    peerDependenciesMeta:
-      '@nestjs/common':
-        optional: true
-      '@nestjs/core':
-        optional: true
-      '@quynhonsemiconductor/observability':
-        optional: true
-      fastify:
-        optional: true
-      ioredis:
-        optional: true
 
   '@quynhonsemiconductor/observability@0.6.2':
     resolution: {integrity: sha512-1SZZqGpOBA0q8/slmsxDPqggdw9bvU/yPHG1imP81mf5FYlyXOZ4iJOopnhwfe+rxjzqJm5B1pLmOM/b5YHT+w==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/observability/0.6.2/9e93d1e786a8650e24b66459be6500e48293635f}
@@ -2853,6 +2842,19 @@ packages:
 
   '@quynhonsemiconductor/platform-http@5.0.0':
     resolution: {integrity: sha512-JwnE9OPc75m2GKxKP5vNiiq5nc+s5ezRDF5iqjggAjJhpyDYiJ4/jQtGNdADMU8wa1TtGc+/OF47y8ajr+mjwQ==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-http/5.0.0/7cdfcb8550ca9c927e45e999dc79455ab94f8edd}
+    peerDependencies:
+      '@nestjs/common': '>=11'
+      '@nestjs/core': '>=11'
+      '@nestjs/swagger': '>=11'
+      '@quynhonsemiconductor/observability': '>=0.2.3'
+      '@quynhonsemiconductor/platform-cache': '>=2.0.0'
+      fastify: '>=5.12.7 <6.0.0'
+      ioredis: '>=5'
+      nestjs-zod: '>=5'
+      zod: '>=4'
+
+  '@quynhonsemiconductor/platform-http@5.0.2':
+    resolution: {integrity: sha512-soqj/wwHDyMBskjHR7DquiHtBKF0rKTLxjoCCZ9IAxLhEI98tMXiYbXYBlu72fyhBmTH4xFX9krGFPXhMbeOYA==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-http/5.0.2/bc59e23684a4ae9bd557afb16505a77a349e3b23}
     peerDependencies:
       '@nestjs/common': '>=11'
       '@nestjs/core': '>=11'
@@ -9347,27 +9349,26 @@ snapshots:
 
   '@protobufjs/utf8@1.1.2': {}
 
-  '@quynhonsemiconductor/identity@8.5.1(e5d4bd44c1b7427d391f7332de1de2e7)':
+  '@quynhonsemiconductor/identity@8.5.2(3b17df1e09f05d6bbf9285175039dafc)':
     dependencies:
       '@better-auth/core': 1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.10.0)(better-call@1.4.0(zod@4.6.7))(jose@6.2.4)(kysely@0.29.6)(nanostores@1.5.5)
       '@better-auth/drizzle-adapter': 1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.10.0)(better-call@1.4.0(zod@4.6.7))(jose@6.2.4)(kysely@0.29.6)(nanostores@1.5.5))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1))
       '@better-auth/sso': 1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.10.0)(better-call@1.4.0(zod@4.6.7))(jose@6.2.4)(kysely@0.29.6)(nanostores@1.5.5))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-auth@1.7.7(@opentelemetry/api@1.10.0)(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1))(pg@8.23.1))(better-call@1.4.0(zod@4.6.7))
+      '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2)
+      '@nestjs/core': 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@node-rs/argon2': 2.2.2
+      '@quynhonsemiconductor/observability': 0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751)
       '@quynhonsemiconductor/platform-cache': 3.3.0(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(ioredis@5.11.1(supports-color@10.2.2))
       '@quynhonsemiconductor/platform-db': 0.1.2(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@quynhonsemiconductor/observability@0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751))(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1))(pg@8.23.1)
-      '@quynhonsemiconductor/platform-http': 5.0.0(7b463c85e0fa3d2949b391a1c6c5750a)
+      '@quynhonsemiconductor/platform-http': 5.0.2(7b463c85e0fa3d2949b391a1c6c5750a)
       better-auth: 1.7.7(@opentelemetry/api@1.10.0)(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1))(pg@8.23.1)
       drizzle-orm: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1)
+      fastify: 5.12.7
+      ioredis: 5.11.1(supports-color@10.2.2)
       jose: 6.2.4
       pg: 8.23.1
       uuidv7: 1.2.1
       zod: 4.6.6
-    optionalDependencies:
-      '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2)
-      '@nestjs/core': 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
-      '@quynhonsemiconductor/observability': 0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751)
-      fastify: 5.12.7
-      ioredis: 5.11.1(supports-color@10.2.2)
     transitivePeerDependencies:
       - '@better-auth/utils'
       - '@better-fetch/fetch'
@@ -9408,6 +9409,18 @@ snapshots:
       drizzle-orm: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1)
 
   '@quynhonsemiconductor/platform-http@5.0.0(7b463c85e0fa3d2949b391a1c6c5750a)':
+    dependencies:
+      '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2)
+      '@nestjs/core': 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/swagger': 11.4.7(@fastify/static@10.1.7)(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)
+      '@quynhonsemiconductor/observability': 0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751)
+      '@quynhonsemiconductor/platform-cache': 3.3.0(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(ioredis@5.11.1(supports-color@10.2.2))
+      fastify: 5.12.7
+      ioredis: 5.11.1(supports-color@10.2.2)
+      nestjs-zod: 5.5.0(patch_hash=fa2029e87bb600a0b7fa6b0faffefe8cc8c9b2733343113ad1b02d171af1915b)(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@nestjs/swagger@11.4.7(@fastify/static@10.1.7)(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2))(rxjs@7.8.2)(zod@4.6.7)
+      zod: 4.6.7
+
+  '@quynhonsemiconductor/platform-http@5.0.2(7b463c85e0fa3d2949b391a1c6c5750a)':
     dependencies:
       '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2)
       '@nestjs/core': 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
