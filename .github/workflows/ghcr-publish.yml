@@ -51,7 +51,7 @@ jobs:
       packages: write
     # SHA-pinned, NOT @v1 — ci's v1 tag moves on every merge, and a moving ref
     # would let a ci merge change this product's publish pipeline unseen.
-    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
+    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@4ab3aaec8d70a2f0fb9a38e8a5a96cebe90e58e5 # v1.27.0
     with:
       product: opshub
       services-json: '["api","worker","migrator"]'
