@@ -6,7 +6,7 @@ settings:
 
 overrides:
   esbuild@<0.25.0: '>=0.25.0'
-  '@azure/identity>@azure/msal-node': 7.1.0
+  '@azure/identity>@azure/msal-node': 7.1.2
   nodemailer: 10.1.4
   brace-expansion: 5.0.12
   js-yaml@4: ^4.3.2
@@ -593,16 +593,16 @@ packages:
     resolution: {integrity: sha512-Dfl7hPZe9/JJwRhFFXHq2z1oHYBuGubmff3kWXOsd1AGgyXlqjNYAWuN/1JL/ZrcZBs8TKMjGSil6Rcc7E8VPQ==}
     engines: {node: '>=0.8.0'}
 
-  '@azure/msal-common@16.14.2':
-    resolution: {integrity: sha512-HOBR0Gfo39TMrkxNG8k6cfjRkrRjXZc3JQs3ebMWQc9S4cihuknMYra3sgmzbZB752oQBqBN9+WF7c826p2vIQ==}
+  '@azure/msal-common@16.15.0':
+    resolution: {integrity: sha512-lwdLb1B9Q5nEhPLVIKe78XH5wFMN15fCiDkY7ylPDSWZuWcD93G3jpJajrKhO3CQld8SLKz0sHiOi24mxdvtsg==}
     engines: {node: '>=0.8.0'}
 
   '@azure/msal-common@16.9.0':
     resolution: {integrity: sha512-1MWGjqgUCRAYgLmVFZKp7fs3Rg1TFvIMgywY8ze2olNVvLlJoRThuoziWSDJuwwyJI5L4rnLb9Tyt5D9GvSLPw==}
     engines: {node: '>=0.8.0'}
 
-  '@azure/msal-node@7.1.0':
-    resolution: {integrity: sha512-s1O6hSY/C/dmqykTmmeHY6GhSkDuY8N1gxyhuLyaCwbY7N+UBvU2Wu4flas7+NxZiAPcXNPVpgt3n/HP/5yL+w==}
+  '@azure/msal-node@7.1.2':
+    resolution: {integrity: sha512-52hKQLGpEQzwNufIXG1SPVU+wQ3RIe7Rp2+g+VdAmZojCAZ6yCdGEffzQEQ6RnBZGBEs40nl14rWBmfJpCoHsg==}
     engines: {node: '>=20'}
 
   '@babel/code-frame@7.29.7':
@@ -2832,13 +2832,6 @@ packages:
       '@quynhonsemiconductor/observability': '>=0.2.0'
       drizzle-orm: '>=0.45 <1'
       pg: '>=8.11'
-    peerDependenciesMeta:
-      '@nestjs/common':
-        optional: true
-      '@quynhonsemiconductor/observability':
-        optional: true
-      drizzle-orm:
-        optional: true
 
   '@quynhonsemiconductor/platform-http@5.0.0':
     resolution: {integrity: sha512-JwnE9OPc75m2GKxKP5vNiiq5nc+s5ezRDF5iqjggAjJhpyDYiJ4/jQtGNdADMU8wa1TtGc+/OF47y8ajr+mjwQ==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-http/5.0.0/7cdfcb8550ca9c927e45e999dc79455ab94f8edd}
@@ -2886,17 +2879,6 @@ packages:
       '@quynhonsemiconductor/observability': '>=0.2.0'
       '@quynhonsemiconductor/platform-jobs': '>=0.1.2'
       nodemailer: 10.1.4
-    peerDependenciesMeta:
-      '@azure/identity':
-        optional: true
-      '@nestjs/common':
-        optional: true
-      '@nestjs/core':
-        optional: true
-      '@quynhonsemiconductor/platform-jobs':
-        optional: true
-      nodemailer:
-        optional: true
 
   '@quynhonsemiconductor/platform-runtime@0.3.1':
     resolution: {integrity: sha512-y29DBBUUt+8sz/2CQLcYjqqe76vPX5Ht6W/ndV4vef8cmIPlAm3/bkBEJxn3iVDAQFM3bEUQZVP7CgrPZQrmVA==, tarball: https://npm.pkg.github.com/download/@quynhonsemiconductor/platform-runtime/0.3.1/a1cb54e040353624e3c458a551fd7fce2eda02e8}
@@ -2912,17 +2894,6 @@ packages:
       nestjs-pino: '>=4'
       pino: '>=9'
       zod: '>=4'
-    peerDependenciesMeta:
-      '@nestjs/platform-fastify':
-        optional: true
-      '@quynhonsemiconductor/platform-db':
-        optional: true
-      fastify:
-        optional: true
-      nestjs-pino:
-        optional: true
-      pino:
-        optional: true
 
   '@redocly/ajv@8.11.2':
     resolution: {integrity: sha512-io1JpnwtIcvojV7QKDUSIuMN/ikdOUd1ReEnUnMKGfDVridQZ31J0MmIuqwuRjWDZfmvr+Q0MqCcfHM2gTivOg==}
@@ -3082,6 +3053,7 @@ packages:
   '@smithy/core@3.36.2':
     resolution: {integrity: sha512-oRw0rB9QSUiCZfEs23G5F4Af+b2rQt1lItIICWu5IejFNd+uPM8SWqiKLMpQ6bX1Q7slsLbjuoE2niErFtkVPQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -7275,7 +7247,7 @@ snapshots:
       '@azure/core-util': 1.13.1(supports-color@10.2.2)
       '@azure/logger': 1.3.0(supports-color@10.2.2)
       '@azure/msal-browser': 5.14.0
-      '@azure/msal-node': 7.1.0
+      '@azure/msal-node': 7.1.2
       open: 11.0.4
       tslib: 2.8.1
     transitivePeerDependencies:
@@ -7292,13 +7264,13 @@ snapshots:
     dependencies:
       '@azure/msal-common': 16.9.0
 
-  '@azure/msal-common@16.14.2': {}
+  '@azure/msal-common@16.15.0': {}
 
   '@azure/msal-common@16.9.0': {}
 
-  '@azure/msal-node@7.1.0':
+  '@azure/msal-node@7.1.2':
     dependencies:
-      '@azure/msal-common': 16.14.2
+      '@azure/msal-common': 16.15.0
       jsonwebtoken: 9.0.3
 
   '@babel/code-frame@7.29.7':
@@ -9402,11 +9374,10 @@ snapshots:
 
   '@quynhonsemiconductor/platform-db@0.1.2(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@quynhonsemiconductor/observability@0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751))(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1))(pg@8.23.1)':
     dependencies:
-      pg: 8.23.1
-    optionalDependencies:
       '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2)
       '@quynhonsemiconductor/observability': 0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751)
       drizzle-orm: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1)
+      pg: 8.23.1
 
   '@quynhonsemiconductor/platform-http@5.0.0(7b463c85e0fa3d2949b391a1c6c5750a)':
     dependencies:
@@ -9444,15 +9415,13 @@ snapshots:
     transitivePeerDependencies:
       - '@opentelemetry/api'
       - pg-native
-    optional: true
 
   '@quynhonsemiconductor/platform-mail@0.1.7(6e02964bdf4e08a61a576cec927d0d99)':
     dependencies:
-      '@quynhonsemiconductor/observability': 0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751)
-    optionalDependencies:
       '@azure/identity': 4.14.0(supports-color@10.2.2)
       '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2)
       '@nestjs/core': 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@quynhonsemiconductor/observability': 0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751)
       '@quynhonsemiconductor/platform-jobs': 0.1.2(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.10.0)(@quynhonsemiconductor/observability@0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751))(@quynhonsemiconductor/platform-db@0.1.2(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@quynhonsemiconductor/observability@0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751))(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1))(pg@8.23.1))(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1))(pg@8.23.1)
       nodemailer: 10.1.4
 
@@ -9461,15 +9430,14 @@ snapshots:
       '@nestjs/common': 11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2)
       '@nestjs/config': 4.0.4(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(rxjs@7.8.2)
       '@nestjs/core': 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-fastify': 11.2.7(@fastify/static@10.1.7)(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))
       '@quynhonsemiconductor/observability': 0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751)
       '@quynhonsemiconductor/platform-cache': 3.3.0(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(ioredis@5.11.1(supports-color@10.2.2))
-      zod: 4.6.7
-    optionalDependencies:
-      '@nestjs/platform-fastify': 11.2.7(@fastify/static@10.1.7)(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))
       '@quynhonsemiconductor/platform-db': 0.1.2(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@quynhonsemiconductor/observability@0.6.2(e8bbcfe5218d2317c0f323ee1c4f3751))(drizzle-orm@0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.20.0)(kysely@0.29.6)(pg@8.23.1))(pg@8.23.1)
       fastify: 5.12.7
       nestjs-pino: 5.3.1(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@10.2.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.4.0)(rxjs@7.8.2)
       pino: 10.4.0
+      zod: 4.6.7
 
   '@redocly/ajv@8.11.2':
     dependencies:
@@ -10690,7 +10658,6 @@ snapshots:
   cron-parser@5.10.2:
     dependencies:
       luxon: 3.7.2
-    optional: true
 
   cron@4.4.0:
     dependencies:
@@ -12055,8 +12022,7 @@ snapshots:
 
   nodemailer@10.1.4: {}
 
-  non-error@0.1.0:
-    optional: true
+  non-error@0.1.0: {}
 
   normalize-url@8.1.1: {}
 
@@ -12208,7 +12174,6 @@ snapshots:
       serialize-error: 13.0.2
     transitivePeerDependencies:
       - pg-native
-    optional: true
 
   pg-cloudflare@1.4.1:
     optional: true
@@ -12522,7 +12487,6 @@ snapshots:
   rrule-temporal@2.2.8:
     dependencies:
       temporal-spec: 1.0.1
-    optional: true
 
   run-applescript@7.1.0: {}
 
@@ -12593,7 +12557,6 @@ snapshots:
     dependencies:
       non-error: 0.1.0
       type-fest: 5.10.0
-    optional: true
 
   seroval-plugins@1.7.2(seroval@1.7.3):
     dependencies:
@@ -12858,8 +12821,7 @@ snapshots:
 
   systeminformation@5.33.18: {}
 
-  tagged-tag@1.0.0:
-    optional: true
+  tagged-tag@1.0.0: {}
 
   tailwind-merge@3.7.0: {}
 
@@ -12876,8 +12838,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  temporal-spec@1.0.1:
-    optional: true
+  temporal-spec@1.0.1: {}
 
   terser-webpack-plugin@5.6.1(@swc/core@1.15.43)(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.31)(webpack@5.106.2(@swc/core@1.15.43)(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.31)):
     dependencies:
@@ -12992,7 +12953,6 @@ snapshots:
   type-fest@5.10.0:
     dependencies:
       tagged-tag: 1.0.0
-    optional: true
 
   typescript-eslint@8.63.0(eslint@10.6.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3):
     dependencies:
