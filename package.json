@@ -1,7 +1,7 @@
 {
   "name": "opshub",
   "packageManager": "pnpm@11.28.6",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "license": "UNLICENSED",
   "description": "OpsHub — internal IT/HR operations platform (Zone B2). Monorepo: apps/{api,worker,web}",
