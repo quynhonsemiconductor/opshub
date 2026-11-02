@@ -27,6 +27,7 @@ export const SHELL_ROUTES = [
   '/nonconformances',
   '/people',
   '/performance',
+  '/ranks',
   '/roles',
   '/profile',
   '/reports',

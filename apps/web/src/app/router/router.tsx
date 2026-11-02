@@ -12,6 +12,7 @@ import { DashboardPage } from '@/pages/dashboard/dashboard-page';
 import { AssetsPage } from '@/pages/assets/assets-page';
 import { PeoplePage } from '@/pages/people/people-page';
 import { RolesPage } from '@/pages/roles/roles-page';
+import { RanksPage } from '@/pages/roles/ranks-page';
 import { ContractsPage } from '@/pages/contracts/contracts-page';
 import { TrainingPage } from '@/pages/training/training-page';
 import { PerformancePage } from '@/pages/performance/performance-page';
@@ -91,6 +92,12 @@ const rolesRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/roles',
   component: RolesPage,
+});
+
+const ranksRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/ranks',
+  component: RanksPage,
 });
 
 const contractsRoute = createRoute({
@@ -262,6 +269,7 @@ const routeTree = rootRoute.addChildren([
     assetsRoute,
     peopleRoute,
     rolesRoute,
+    ranksRoute,
     contractsRoute,
     trainingRoute,
     performanceRoute,

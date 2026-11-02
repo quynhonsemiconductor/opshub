@@ -18,6 +18,7 @@ import {
   GraduationCap,
   Users,
   Briefcase,
+  Layers,
   FileText,
   Webhook,
   Inbox,
@@ -77,6 +78,7 @@ export const navGroups: NavGroup[] = [
       // and who may see engagements are different questions, and the auditor holds both while a
       // manager holds only the first.
       { to: '/roles', label: 'Roles', icon: Briefcase, cap: 'role.read' },
+      { to: '/ranks', label: 'Ranks', icon: Layers, cap: 'role.read' },
       { to: '/contracts', label: 'Contracts', icon: FileText, cap: 'contract.read' },
     ],
   },
