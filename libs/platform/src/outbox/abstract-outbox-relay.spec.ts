@@ -7,8 +7,6 @@
  * The SQL of the lease steps (claim, fence, reap) is exercised against a real PostgreSQL in
  * test/e2e/outbox-lease.e2e.spec.ts; here those steps are replaced so the LOOP is tested in isolation.
  */
-import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 // The counter is created when the module loads, so the mock must be in place before the import below.
@@ -649,30 +647,9 @@ describe('AbstractOutboxRelay — pass coalescing', () => {
 });
 
 describe('DEAD_LETTER_FIELD', () => {
-  it('uses the field name the infra actually filters on', () => {
-    // Guards the rename: the alarm is worthless if the field drifts away from the pattern.
+  it('keeps the field name the dead-letter alert filters on', () => {
+    // Guards the rename: the alert (in gitops) matches this exact log field.
     expect(DEAD_LETTER_FIELD).toBe('outboxDeadLetter');
-
-    // Searches the whole infra tree rather than naming a file, for the same reason
-    // fail-open.spec.ts does: asserting on a path needs editing every time the Terraform is
-    // reorganised, which is how a guard quietly stops guarding. What matters is that SOME
-    // Terraform in this repo filters on the field the app emits.
-    const infra = join(__dirname, '../../../..', 'infra');
-    // --exclude-dir is not optional: .terraform holds cached provider binaries and module
-    // copies, and scanning them blows the test timeout.
-    const terraform = execFileSync(
-      'grep',
-      ['-rl', '--include=*.tf', '--exclude-dir=.terraform', `$.${DEAD_LETTER_FIELD}`, infra],
-      { encoding: 'utf8' },
-    )
-      .split('\n')
-      .filter(Boolean);
-
-    expect(
-      terraform,
-      `No Terraform under infra/ filters on ${DEAD_LETTER_FIELD}; a relay can exhaust its ` +
-        `retries and lose work with nothing alarming, even though the app emits the field.`,
-    ).not.toEqual([]);
   });
 });
 
