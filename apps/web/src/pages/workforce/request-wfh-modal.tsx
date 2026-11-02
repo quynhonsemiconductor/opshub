@@ -13,6 +13,7 @@ import {
   type FormModalProps,
 } from '@/shared/ui';
 import { todayIso } from '@/shared/lib/format';
+import { describeWfhQuota } from './wfh-quota-message';
 
 /**
  * File a WFH request. The date range is one control (auto-swapping, same reason as the leave modal),
@@ -43,6 +44,21 @@ export function RequestWfhModal({
       return data;
     },
   });
+
+  // The quota of the week the request STARTS in. A window that crosses into another week is judged week by
+  // week by the API, which names the week that is short; this is the first thing the employee needs to see.
+  const quota = useQuery({
+    queryKey: ['workforce', 'wfh-quota', dateRange?.from ?? ''],
+    enabled: open && dateRange !== null,
+    queryFn: async () => {
+      const { data, error } = await api.GET('/v1/workforce/wfh/quota', {
+        params: { query: { weekOf: dateRange!.from } },
+      });
+      if (error || !data) throw new Error('Failed to load your quota');
+      return data;
+    },
+  });
+  const quotaMessage = describeWfhQuota(quota.data);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -95,6 +111,11 @@ export function RequestWfhModal({
               : `Covers ${preview.data.workingDays.length} working days (weekends and public holidays cost nothing).`
             : 'Working days are counted for you once dates are picked.'}
         </p>
+        {quotaMessage && (
+          <p className="text-xs text-fg-subtle" aria-live="polite">
+            {quotaMessage}
+          </p>
+        )}
         <FormField label="Reason" htmlFor="wfh-reason">
           <Textarea
             id="wfh-reason"

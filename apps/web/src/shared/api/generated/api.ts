@@ -1036,6 +1036,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/workforce/wfh/quota': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * My work-from-home quota for a week
+     * @description The allowance set by the rank of the caller's current position, the working days already claimed by pending and approved requests in the Monday–Sunday week containing `weekOf` (the current week when omitted), and what remains. The quota resets every week and never carries over. An allowance of 0 means filing is refused (412 `WFH_QUOTA_NONE`).
+     */
+    get: operations['WorkforceController_getWfhQuota'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/workforce/wfh': {
     parameters: {
       query?: never;
@@ -1051,7 +1071,7 @@ export interface paths {
     put?: never;
     /**
      * Request work from home for the current user
-     * @description A date range expanded to working days: weekends and public holidays cost nothing, and a window covering no working day is refused (412 `WFH_WINDOW_EMPTY`). Refused with 409 `WFH_OVERLAPPING` when it overlaps the caller's live leave or WFH — a day can only be asked for once. Approved or rejected as a whole by a holder of `workforce.wfh.review`.
+     * @description A date range expanded to working days: weekends and public holidays cost nothing, and a window covering no working day is refused (412 `WFH_WINDOW_EMPTY`). Refused with 409 `WFH_OVERLAPPING` when it overlaps the caller's live leave or WFH — a day can only be asked for once. Approved or rejected as a whole by a holder of `workforce.wfh.review`. Refused with 412 `WFH_QUOTA_NONE` when the caller's rank has no allowance, or `WFH_QUOTA_EXCEEDED` when a week in the window asks for more days than it has left.
      */
     post: operations['WorkforceController_createWfh'];
     delete?: never;
@@ -5996,6 +6016,18 @@ export interface components {
       endDate: string;
       /** @description The working days in `[startDate, endDate]` — weekends and public holidays skipped. */
       workingDays: string[];
+    };
+    WfhQuotaResponseDto: {
+      /** @description Monday of the week, `YYYY-MM-DD`. */
+      weekStart: string;
+      /** @description Sunday of the week, `YYYY-MM-DD`. */
+      weekEnd: string;
+      /** @description Work-from-home days the caller's rank allows per week; 0 means filing is not allowed. */
+      weeklyAllowance: number;
+      /** @description Working days already claimed in the week by pending and approved requests. */
+      usedDays: number;
+      /** @description `weeklyAllowance - usedDays`, never below zero. */
+      remainingDays: number;
     };
     WfhResponseDto: {
       /** @enum {string} */
@@ -11619,6 +11651,41 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['WfhPreviewResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  WorkforceController_getWfhQuota: {
+    parameters: {
+      query?: {
+        weekOf?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WfhQuotaResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
