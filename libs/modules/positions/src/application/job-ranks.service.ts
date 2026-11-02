@@ -124,6 +124,42 @@ export class JobRanksService {
   }
 
   /**
+   * Deletes a rank that no position carries.
+   *
+   * Args:
+   *   id: The rank to delete.
+   *   actor: Who is deleting it.
+   *
+   * Raises:
+   *   NotFoundException: If the rank does not exist.
+   *   ConflictException: If a position still carries the rank.
+   */
+  async deleteRank(id: string, actor: Actor): Promise<void> {
+    const rank = await this.getRank(id);
+    const positionsUsingRank = await this.repo.countPositionsUsing(id);
+    if (positionsUsingRank > 0) {
+      throw new ConflictException(
+        ErrorCodes.JOB_RANK_IN_USE,
+        `Rank '${rank.name}' is carried by ${positionsUsingRank} position(s); move them first`,
+      );
+    }
+    await this.db.transaction(async (tx) => {
+      await this.repo.delete(id, tx);
+      await this.audit.record(
+        {
+          actorId: actor.sub,
+          actorEmail: actor.email,
+          action: AUDIT_ACTION.JOB_RANK_DELETED,
+          resourceType: AUDIT_RESOURCE.JOB_RANK,
+          resourceId: id,
+          changes: { before: { ordinal: rank.ordinal, name: rank.name, benefits: rank.benefits } },
+        },
+        tx,
+      );
+    });
+  }
+
+  /**
    * Replaces the whole benefit set of a rank.
    *
    * A benefit code left out of `benefits` is removed, so the caller always states the full picture.

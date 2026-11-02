@@ -38,7 +38,7 @@ function toPositionDto(p: Position): PositionResponseDto {
     code: p.code,
     title: p.title,
     department: p.department,
-    level: p.level,
+    rankId: p.rankId,
     headcount: p.headcount,
     description: p.description,
     status: p.status,

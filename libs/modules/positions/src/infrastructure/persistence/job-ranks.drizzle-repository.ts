@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { asc, eq, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { newId } from '@shared-kernel';
-import { jobRanks, rankBenefits } from '../../../../../../db/schema';
+import { jobRanks, positions, rankBenefits } from '../../../../../../db/schema';
 import type { IJobRanksRepository } from '../../domain/ports/job-ranks.repository';
 import type {
   CreateJobRankInput,
@@ -81,6 +81,18 @@ export class JobRanksDrizzleRepository implements IJobRanksRepository {
       .where(eq(jobRanks.id, id))
       .returning();
     return row ?? null;
+  }
+
+  async countPositionsUsing(rankId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(positions)
+      .where(eq(positions.rankId, rankId));
+    return row?.count ?? 0;
+  }
+
+  async delete(id: string, tx?: DbExecutor): Promise<void> {
+    await (tx ?? this.db).delete(jobRanks).where(eq(jobRanks.id, id));
   }
 
   async setBenefits(rankId: string, benefits: RankBenefit[], outer?: DbExecutor): Promise<void> {

@@ -36,6 +36,8 @@ function makeService(repoOverrides: Record<string, unknown> = {}) {
       .mockImplementation((id: string, input: Partial<JobRank>) =>
         Promise.resolve(jobRank({ id, ...input })),
       ),
+    countPositionsUsing: vi.fn().mockResolvedValue(0),
+    delete: vi.fn().mockResolvedValue(undefined),
     setBenefits: vi.fn().mockResolvedValue(undefined),
     ...repoOverrides,
   };
@@ -129,6 +131,27 @@ describe('setRankBenefits', () => {
         action: 'job_rank.benefits_set',
         changes: { before: { benefits: before.benefits }, after: { benefits } },
       }),
+      transactionContext,
+    );
+  });
+});
+
+describe('deleteRank', () => {
+  it('refuses to delete a rank a position still carries', async () => {
+    const { service, repo } = makeService({ countPositionsUsing: vi.fn().mockResolvedValue(2) });
+
+    await expect(service.deleteRank('rank-1', ACTOR)).rejects.toThrow(ConflictException);
+    expect(repo.delete).not.toHaveBeenCalled();
+  });
+
+  it('deletes an unused rank and records the entry in the same transaction', async () => {
+    const { service, repo, audit, transactionContext } = makeService();
+
+    await service.deleteRank('rank-1', ACTOR);
+
+    expect(repo.delete).toHaveBeenCalledWith('rank-1', transactionContext);
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'job_rank.deleted' }),
       transactionContext,
     );
   });

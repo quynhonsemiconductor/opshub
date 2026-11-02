@@ -27,7 +27,7 @@ export class PositionsDrizzleRepository implements IPositionsRepository {
         code: input.code,
         title: input.title,
         department: input.department,
-        level: input.level ?? null,
+        rankId: input.rankId ?? null,
         headcount: input.headcount ?? 1,
         description: input.description ?? null,
       })
@@ -131,7 +131,7 @@ export class PositionsDrizzleRepository implements IPositionsRepository {
   async update(
     id: string,
     input: Partial<
-      Pick<Position, 'title' | 'department' | 'level' | 'headcount' | 'description' | 'status'>
+      Pick<Position, 'title' | 'department' | 'rankId' | 'headcount' | 'description' | 'status'>
     >,
     tx?: DbExecutor,
   ): Promise<Position | null> {

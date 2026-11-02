@@ -15,7 +15,7 @@ export const CreatePositionSchema = z.object({
     .regex(/^[A-Z][A-Z0-9-]*$/, 'Use uppercase letters, digits and hyphens, e.g. ENG-QA-02'),
   title: z.string().min(2).max(160),
   department: z.string().min(2).max(120),
-  level: z.string().max(40).optional(),
+  rankId: z.string().uuid().optional(),
   /** At least 1: a position permitting nobody is a closed position, expressed by `status`. */
   headcount: z.number().int().min(1).max(10_000).optional(),
   description: z.string().max(5000).optional(),
@@ -26,7 +26,7 @@ export const UpdatePositionSchema = z
   .object({
     title: z.string().min(2).max(160).optional(),
     department: z.string().min(2).max(120).optional(),
-    level: z.string().max(40).nullable().optional(),
+    rankId: z.string().uuid().nullable().optional(),
     headcount: z.number().int().min(1).max(10_000).optional(),
     description: z.string().max(5000).nullable().optional(),
     status: status.optional(),
@@ -66,7 +66,7 @@ export class PositionResponseDto {
   code!: string;
   title!: string;
   department!: string;
-  level!: string | null;
+  rankId!: string | null;
   headcount!: number;
   description!: string | null;
   status!: string;

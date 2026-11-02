@@ -323,6 +323,13 @@
       "when": 1793293974922,
       "tag": "0045_employee_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793380374922,
+      "tag": "0046_position_rank",
+      "breakpoints": true
     }
   ]
 }

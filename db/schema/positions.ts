@@ -89,8 +89,8 @@ export const positions = positionsSchema.table(
     code: varchar('code', { length: 32 }).notNull(),
     title: varchar('title', { length: 160 }).notNull(),
     department: varchar('department', { length: 120 }).notNull(),
-    /** Seniority band. Free text rather than an enum: bands differ per company and change. */
-    level: varchar('level', { length: 40 }),
+    /** Seniority rank. Null for a position nobody has ranked; RESTRICT, so a rank in use cannot be deleted. */
+    rankId: uuid('rank_id').references(() => jobRanks.id, { onDelete: 'restrict' }),
     /**
      * Approved headcount — how many people may hold this position at once.
      *
@@ -109,6 +109,7 @@ export const positions = positionsSchema.table(
     codeIdx: uniqueIndex('uq_position_code').on(t.code),
     departmentIdx: index('ix_position_department').on(t.department),
     statusIdx: index('ix_position_status').on(t.status),
+    rankIdx: index('ix_position_rank').on(t.rankId),
   }),
 );
 

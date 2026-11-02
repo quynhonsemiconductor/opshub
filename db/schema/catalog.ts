@@ -1,7 +1,16 @@
 /**
  * Service catalog schema — admin-configurable self-service request templates.
  */
-import { pgSchema, uuid, varchar, text, integer, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import {
+  pgSchema,
+  uuid,
+  varchar,
+  text,
+  integer,
+  boolean,
+  timestamp,
+  index,
+} from 'drizzle-orm/pg-core';
 
 export const catalogSchema = pgSchema('catalog');
 
@@ -14,7 +23,9 @@ export const catalogItems = catalogSchema.table(
     category: varchar('category', { length: 80 }).notNull().default('other'),
     iconEmoji: varchar('icon_emoji', { length: 10 }).default('📋'),
     /** Platform permission required to approve requests of this catalog item. */
-    approvalPermission: varchar('approval_permission', { length: 100 }).notNull().default('requests.approve'),
+    approvalPermission: varchar('approval_permission', { length: 100 })
+      .notNull()
+      .default('requests.approve'),
     /** Fulfillment SLA in hours. Null = no SLA. */
     slaHours: integer('sla_hours'),
     isActive: boolean('is_active').notNull().default(true),

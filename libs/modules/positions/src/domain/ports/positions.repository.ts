@@ -24,7 +24,7 @@ export interface IPositionsRepository {
   update(
     id: string,
     input: Partial<
-      Pick<Position, 'title' | 'department' | 'level' | 'headcount' | 'description' | 'status'>
+      Pick<Position, 'title' | 'department' | 'rankId' | 'headcount' | 'description' | 'status'>
     >,
     tx?: DbExecutor,
   ): Promise<Position | null>;

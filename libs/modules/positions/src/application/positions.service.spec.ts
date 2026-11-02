@@ -25,7 +25,7 @@ function position(over: Partial<Position> = {}): Position {
     code: 'ENG-QA-01',
     title: 'QA Engineer',
     department: 'Engineering',
-    level: null,
+    rankId: null,
     headcount: 2,
     description: null,
     status: 'active',
@@ -48,7 +48,10 @@ function assignment(over: Partial<EmployeePosition> = {}): EmployeePosition {
   };
 }
 
-function makeService(repoOver: Record<string, unknown> = {}) {
+function makeService(
+  repoOver: Record<string, unknown> = {},
+  jobRanksRepoOver: Record<string, unknown> = {},
+) {
   const repo = {
     create: vi.fn().mockResolvedValue(position()),
     findById: vi.fn().mockResolvedValue(position()),
@@ -85,11 +88,36 @@ function makeService(repoOver: Record<string, unknown> = {}) {
   const db = { transaction } as unknown as DrizzleDB;
   const audit = createFakeAudit();
 
-  const service = new PositionsService(repo, db, audit as never);
-  return { service, repo, db, transaction, audit, TX };
+  const jobRanksRepo = {
+    findById: vi.fn().mockResolvedValue({ id: 'rank-1', ordinal: 1, name: 'Junior', benefits: [] }),
+    ...jobRanksRepoOver,
+  };
+
+  const service = new PositionsService(repo, jobRanksRepo as never, db, audit as never);
+  return { service, repo, jobRanksRepo, db, transaction, audit, TX };
 }
 
 describe('createPosition', () => {
+  it('refuses a rank that does not exist, before writing anything', async () => {
+    const { service, repo } = makeService({}, { findById: vi.fn().mockResolvedValue(null) });
+
+    await expect(
+      service.createPosition(
+        { code: 'ENG-QA-03', title: 'QA', department: 'Eng', rankId: 'missing' },
+        ACTOR,
+      ),
+    ).rejects.toThrow(/Rank missing not found/);
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it('does not look a rank up when the position is created without one', async () => {
+    const { service, jobRanksRepo } = makeService();
+
+    await service.createPosition({ code: 'ENG-QA-04', title: 'QA', department: 'Eng' }, ACTOR);
+
+    expect(jobRanksRepo.findById).not.toHaveBeenCalled();
+  });
+
   it('refuses a duplicate code before writing anything', async () => {
     const { service, repo } = makeService({ findByCode: vi.fn().mockResolvedValue(position()) });
 

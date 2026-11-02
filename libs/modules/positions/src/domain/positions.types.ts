@@ -7,7 +7,8 @@ export interface Position {
   code: string;
   title: string;
   department: string;
-  level: string | null;
+  /** The position's seniority rank; null when nobody has ranked it. */
+  rankId: string | null;
   headcount: number;
   description: string | null;
   status: PositionStatus;
@@ -47,7 +48,7 @@ export interface CreatePositionInput {
   code: string;
   title: string;
   department: string;
-  level?: string | null;
+  rankId?: string | null;
   headcount?: number;
   description?: string | null;
 }

@@ -18,6 +18,9 @@ export interface IJobRanksRepository {
   findByName(name: string): Promise<JobRank | null>;
   create(input: CreateJobRankInput, tx?: DbExecutor): Promise<JobRank>;
   update(id: string, input: UpdateJobRankInput, tx?: DbExecutor): Promise<JobRank | null>;
+  /** How many positions carry this rank; a rank in use cannot be deleted. */
+  countPositionsUsing(rankId: string): Promise<number>;
+  delete(id: string, tx?: DbExecutor): Promise<void>;
   /** Replaces the rank's whole benefit set: a code left out of `benefits` is removed. */
   setBenefits(rankId: string, benefits: RankBenefit[], tx?: DbExecutor): Promise<void>;
 }

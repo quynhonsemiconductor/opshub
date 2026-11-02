@@ -1,5 +1,22 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
-import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
+import {
+  ApiCreatedResponse,
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ApiCommonErrors, Auth, CurrentUser, RequirePermission, type JwtPayload } from '@platform';
 import { JobRanksService } from '../../application/job-ranks.service';
 import type { JobRank, JobRankWithBenefits } from '../../domain/job-ranks.types';
@@ -73,6 +90,22 @@ export class JobRanksController {
     return toJobRankDto(
       await this.service.updateRank(id, dto, { sub: user.sub, email: user.email }),
     );
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermission('position.manage')
+  @ApiOperation({
+    summary: 'Delete a job rank',
+    description: 'Refused (409 `JOB_RANK_IN_USE`) while any position still carries the rank.',
+  })
+  @ApiNoContentResponse()
+  @ApiCommonErrors(401, 403, 404, 409)
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<void> {
+    await this.service.deleteRank(id, { sub: user.sub, email: user.email });
   }
 
   @Put(':id/benefits')

@@ -16,6 +16,10 @@ import {
   POSITIONS_REPOSITORY,
   type IPositionsRepository,
 } from '../domain/ports/positions.repository';
+import {
+  JOB_RANKS_REPOSITORY,
+  type IJobRanksRepository,
+} from '../domain/ports/job-ranks.repository';
 import type {
   CreatePositionInput,
   EmployeePosition,
@@ -44,6 +48,7 @@ import type {
 export class PositionsService {
   constructor(
     @Inject(POSITIONS_REPOSITORY) private readonly repo: IPositionsRepository,
+    @Inject(JOB_RANKS_REPOSITORY) private readonly jobRanksRepo: IJobRanksRepository,
     @InjectDrizzle() private readonly db: DrizzleDB,
     private readonly audit: AuditService,
   ) {}
@@ -57,6 +62,8 @@ export class PositionsService {
         `Position code '${input.code}' is already in use`,
       );
     }
+
+    await this.assertRankExists(input.rankId);
 
     return this.db.transaction(async (tx) => {
       const position = await this.repo.create(input, tx);
@@ -104,11 +111,12 @@ export class PositionsService {
   async updatePosition(
     id: string,
     input: Partial<
-      Pick<Position, 'title' | 'department' | 'level' | 'headcount' | 'description' | 'status'>
+      Pick<Position, 'title' | 'department' | 'rankId' | 'headcount' | 'description' | 'status'>
     >,
     actor: Actor,
   ): Promise<Position> {
     const before = await this.getPosition(id);
+    await this.assertRankExists(input.rankId);
 
     return this.db.transaction(async (tx) => {
       const after = await this.repo.update(id, input, tx);
@@ -128,6 +136,22 @@ export class PositionsService {
       );
       return after!;
     });
+  }
+
+  /**
+   * Refuses a rank id that names no rank, so the caller gets a 404 instead of a foreign-key failure.
+   *
+   * Args:
+   *   rankId: The rank a position is being given. Null or undefined means "no rank" and always passes.
+   *
+   * Raises:
+   *   NotFoundException: If a rank id is given and no such rank exists.
+   */
+  private async assertRankExists(rankId: string | null | undefined): Promise<void> {
+    if (!rankId) return;
+    if (!(await this.jobRanksRepo.findById(rankId))) {
+      throw new NotFoundException(ErrorCodes.JOB_RANK_NOT_FOUND, `Rank ${rankId} not found`);
+    }
   }
 
   // ── Assignments ──────────────────────────────────────────────────────────────
