@@ -49,7 +49,7 @@ function toDto(e: Employee): EmployeeResponseDto {
     department: e.department,
     jobTitle: e.jobTitle,
     managerId: e.managerId,
-    roles: e.groupKeys,
+    groups: e.groupKeys,
     status: e.status,
     photoStorageKey: e.photoStorageKey,
     createdAt: e.createdAt.toISOString(),
@@ -105,7 +105,7 @@ export class EmployeesController {
   @Patch(':id')
   @RequirePermission('employee.write')
   @ApiOperation({
-    summary: 'Update employee profile fields (display name, department, job title, roles)',
+    summary: 'Update employee profile fields (display name, department, job title)',
   })
   @ApiOkResponse({ type: EmployeeResponseDto })
   @ApiCommonErrors(401, 403, 404, 422)

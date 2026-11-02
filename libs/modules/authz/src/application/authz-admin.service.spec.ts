@@ -4,13 +4,13 @@ import { AuthzAdminService } from './authz-admin.service';
 import { createFakeAudit } from '../../../audit/src/testing/audit.fake';
 
 /**
- * Cache invalidation on role-DEFINITION changes.
+ * Cache invalidation on group-DEFINITION changes.
  *
  * Every write path in this service invalidates the holder's cached permission
  * resolution — except two, which used to rely on the 300s cache TTL instead:
- * `setRolePermissions` (documented as "propagates within the cache TTL") and
- * `deleteRole` (undocumented). So removing a permission from a role, or deleting the
- * role outright, left every holder with the old grants for up to five minutes, while
+ * `setGroupPermissions` (documented as "propagates within the cache TTL") and
+ * `deleteGroup` (undocumented). So removing a permission from a group, or deleting the
+ * group outright, left every holder with the old grants for up to five minutes, while
  * assigning and revoking took effect immediately.
  *
  * Two revocation latencies in one service is the defect, and the slow one is the
@@ -22,8 +22,8 @@ const actor = { sub: 'admin-1', email: 'admin@example.test' };
 function build(overrides: { holders?: string[]; system?: boolean } = {}) {
   const holders = overrides.holders ?? ['user-a', 'user-b'];
 
-  const role = {
-    id: 'role-1',
+  const group = {
+    id: 'group-1',
     key: 'helpdesk',
     name: 'Help Desk',
     system: overrides.system ?? false,
@@ -31,21 +31,21 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
     permissions: ['asset.read', 'asset.write'],
   };
 
-  const roleRepo = {
-    findById: vi.fn().mockResolvedValue(role),
-    findByKey: vi.fn().mockResolvedValue(role),
+  const groupRepo = {
+    findById: vi.fn().mockResolvedValue(group),
+    findByKey: vi.fn().mockResolvedValue(group),
     setPermissions: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockResolvedValue(undefined),
-    list: vi.fn().mockResolvedValue([role]),
+    list: vi.fn().mockResolvedValue([group]),
     create: vi.fn(),
     // The service validates incoming codes against the catalogue table.
     listPermissions: vi.fn().mockResolvedValue([{ key: 'asset.read' }, { key: 'asset.write' }]),
   };
 
-  const assignmentRepo = {
-    listUserIdsForRole: vi.fn().mockResolvedValue(holders),
-    syncEmployeeRoleClaims: vi.fn().mockResolvedValue([]),
-    listForUser: vi.fn().mockResolvedValue([]),
+  const employeeGroupRepo = {
+    listEmployeeIdsForGroup: vi.fn().mockResolvedValue(holders),
+    syncEmployeeGroupKeys: vi.fn().mockResolvedValue([]),
+    listForEmployee: vi.fn().mockResolvedValue([]),
     findById: vi.fn(),
     assign: vi.fn(),
     revoke: vi.fn(),
@@ -54,9 +54,10 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
   // Assert at the DECLARATION, not at each call site: these are partial doubles, so
   // the cast belongs where the shape is narrowed, and the constructor call below
   // stays free of noise.
-  const invalidate = vi.fn().mockResolvedValue(undefined);
-  const resolve = vi.fn();
-  const authz = { invalidate, resolve } as unknown as AuthzService & {
+  const authz = {
+    invalidate: vi.fn().mockResolvedValue(undefined),
+    resolve: vi.fn(),
+  } as unknown as AuthzService & {
     invalidate: ReturnType<typeof vi.fn>;
     resolve: ReturnType<typeof vi.fn>;
   };
@@ -82,8 +83,8 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
   };
 
   const service = new AuthzAdminService(
-    roleRepo,
-    assignmentRepo,
+    groupRepo,
+    employeeGroupRepo,
     employeePermissionRepo,
     authz,
     db as never,
@@ -92,11 +93,10 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
 
   return {
     service,
-    roleRepo,
-    assignmentRepo,
+    groupRepo,
+    employeeGroupRepo,
     employeePermissionRepo,
     authz,
-    invalidate,
     holders,
     audit,
     TX,
@@ -106,185 +106,185 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
 
 describe('AuthzAdminService — the audit entry rides the mutation', () => {
   /*
-   * WHY THIS IS ASSERTED HERE OF ALL PLACES. "Who granted which role to whom" is the first question an
+   * WHY THIS IS ASSERTED HERE OF ALL PLACES. "Who granted which group to whom" is the first question an
    * access review asks, and these writes were fire-and-forget: the grant could commit while the entry was
    * lost, leaving the review with no answer. The `tx` in the assertion IS the guarantee.
    */
   it('records a permission change inside the transaction that made it', async () => {
     const { service, audit, TX } = build();
 
-    await service.setRolePermissions('role-1', ['asset.read'], actor);
+    await service.setGroupPermissions('group-1', ['asset.read'], actor);
 
     expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'role.permissions_updated' }),
+      expect.objectContaining({ action: 'group.permissions_updated' }),
       TX,
     );
   });
 
   it('records a revocation inside its transaction', async () => {
-    const { service, assignmentRepo, audit, TX } = build();
-    assignmentRepo.findById.mockResolvedValue({
+    const { service, employeeGroupRepo, audit, TX } = build();
+    employeeGroupRepo.findById.mockResolvedValue({
       id: 'assign-1',
-      userId: 'user-9',
-      roleId: 'role-1',
+      employeeId: 'user-9',
+      groupId: 'group-1',
       scopeType: 'global',
       scopeId: null,
     });
 
-    await service.revokeAssignment('assign-1', actor);
+    await service.revokeEmployeeGroup('assign-1', actor);
 
-    expect(assignmentRepo.revoke).toHaveBeenCalledWith('assign-1', TX);
+    expect(employeeGroupRepo.revoke).toHaveBeenCalledWith('assign-1', TX);
     expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'role.revoked' }),
+      expect.objectContaining({ action: 'group.revoked' }),
       TX,
     );
   });
 });
 
-describe('AuthzAdminService — role-definition changes', () => {
-  it('invalidates every holder when a role’s permissions change', async () => {
-    const { service, invalidate, holders } = build();
+describe('AuthzAdminService — group-definition changes', () => {
+  it('invalidates every holder when a group’s permissions change', async () => {
+    const { service, authz, holders } = build();
 
-    await service.setRolePermissions('role-1', ['asset.read'], actor);
+    await service.setGroupPermissions('group-1', ['asset.read'], actor);
 
-    for (const userId of holders) {
-      expect(invalidate).toHaveBeenCalledWith(userId);
+    for (const employeeId of holders) {
+      expect(authz.invalidate).toHaveBeenCalledWith(employeeId);
     }
-    expect(invalidate).toHaveBeenCalledTimes(holders.length);
+    expect(authz.invalidate).toHaveBeenCalledTimes(holders.length);
   });
 
-  it('does not re-sync role claims when only permissions change', async () => {
-    // `employees.roles` holds role KEYS, which this operation does not touch.
+  it('does not re-sync group claims when only permissions change', async () => {
+    // `employees.groups` holds group KEYS, which this operation does not touch.
     // Re-syncing would be a pointless write on every holder.
-    const { service, assignmentRepo } = build();
+    const { service, employeeGroupRepo } = build();
 
-    await service.setRolePermissions('role-1', ['asset.read'], actor);
+    await service.setGroupPermissions('group-1', ['asset.read'], actor);
 
-    expect(assignmentRepo.syncEmployeeRoleClaims).not.toHaveBeenCalled();
+    expect(employeeGroupRepo.syncEmployeeGroupKeys).not.toHaveBeenCalled();
   });
 
-  it('invalidates AND re-syncs claims when a role is deleted', async () => {
-    // Deleting a role makes both caches wrong: the permission cache still grants its
-    // codes, and `employees.roles` still lists its key.
-    const { service, invalidate, assignmentRepo, holders } = build();
+  it('invalidates AND re-syncs claims when a group is deleted', async () => {
+    // Deleting a group makes both caches wrong: the permission cache still grants its
+    // codes, and `employees.groups` still lists its key.
+    const { service, authz, employeeGroupRepo, holders } = build();
 
-    await service.deleteRole('role-1', actor);
+    await service.deleteGroup('group-1', actor);
 
-    for (const userId of holders) {
-      expect(invalidate).toHaveBeenCalledWith(userId);
-      expect(assignmentRepo.syncEmployeeRoleClaims).toHaveBeenCalledWith(userId);
+    for (const employeeId of holders) {
+      expect(authz.invalidate).toHaveBeenCalledWith(employeeId);
+      expect(employeeGroupRepo.syncEmployeeGroupKeys).toHaveBeenCalledWith(employeeId);
     }
   });
 
-  it('reads the holders BEFORE deleting the role', async () => {
+  it('reads the holders BEFORE deleting the group', async () => {
     // `user_role_assignments.role_id` is ON DELETE CASCADE, so enumerating holders
     // after the delete returns nobody and silently invalidates nothing.
     const calls: string[] = [];
-    const { service, roleRepo, assignmentRepo } = build();
-    assignmentRepo.listUserIdsForRole.mockImplementation(() => {
+    const { service, groupRepo, employeeGroupRepo } = build();
+    employeeGroupRepo.listEmployeeIdsForGroup.mockImplementation(() => {
       calls.push('list');
       return Promise.resolve(['user-a']);
     });
-    roleRepo.delete.mockImplementation(() => {
+    groupRepo.delete.mockImplementation(() => {
       calls.push('delete');
       return Promise.resolve();
     });
 
-    await service.deleteRole('role-1', actor);
+    await service.deleteGroup('group-1', actor);
 
     expect(calls).toEqual(['list', 'delete']);
   });
 
-  it('refuses to delete a system role, and touches no cache', async () => {
-    const { service, roleRepo, invalidate } = build({ system: true });
+  it('refuses to delete a system group, and touches no cache', async () => {
+    const { service, groupRepo, authz } = build({ system: true });
 
-    await expect(service.deleteRole('role-1', actor)).rejects.toMatchObject({
-      code: 'ROLE_IMMUTABLE',
+    await expect(service.deleteGroup('group-1', actor)).rejects.toMatchObject({
+      code: 'GROUP_IMMUTABLE',
     });
-    expect(roleRepo.delete).not.toHaveBeenCalled();
-    expect(invalidate).not.toHaveBeenCalled();
+    expect(groupRepo.delete).not.toHaveBeenCalled();
+    expect(authz.invalidate).not.toHaveBeenCalled();
   });
 
-  it('is a no-op on caches when a role has no holders', async () => {
-    const { service, invalidate } = build({ holders: [] });
+  it('is a no-op on caches when a group has no holders', async () => {
+    const { service, authz } = build({ holders: [] });
 
-    await service.setRolePermissions('role-1', ['asset.read'], actor);
+    await service.setGroupPermissions('group-1', ['asset.read'], actor);
 
-    expect(invalidate).not.toHaveBeenCalled();
+    expect(authz.invalidate).not.toHaveBeenCalled();
   });
 });
 
-describe('AuthzAdminService.syncUserRolesByKeys — the Entra App Role reconcile', () => {
-  /** Roles `employee`, `hr` and `admin` exist; `current` is what the person holds globally. */
-  function buildSync(current: Array<{ id: string; roleId: string }>) {
+describe('AuthzAdminService.syncEmployeeGroupsByKeys — the Entra App Role reconcile', () => {
+  /** Groups `employee`, `hr` and `admin` exist; `current` is what the person holds globally. */
+  function buildSync(current: Array<{ id: string; groupId: string }>) {
     const t = build();
-    const roles = [
+    const groups = [
       { id: 'r-employee', key: 'employee' },
       { id: 'r-hr', key: 'hr' },
       { id: 'r-admin', key: 'admin' },
     ];
-    t.roleRepo.list.mockResolvedValue(roles);
-    t.assignmentRepo.listForUser.mockResolvedValue(
+    t.groupRepo.list.mockResolvedValue(groups);
+    t.employeeGroupRepo.listForEmployee.mockResolvedValue(
       current.map((a) => ({ ...a, scopeType: 'global' })),
     );
-    t.assignmentRepo.assign.mockResolvedValue({ id: 'new' });
-    t.assignmentRepo.revoke.mockResolvedValue(undefined);
+    t.employeeGroupRepo.assign.mockResolvedValue({ id: 'new' });
+    t.employeeGroupRepo.revoke.mockResolvedValue(undefined);
     return t;
   }
   const assigned = (t: ReturnType<typeof buildSync>) =>
-    t.assignmentRepo.assign.mock.calls.map((c) => (c[0] as { roleId: string }).roleId);
+    t.employeeGroupRepo.assign.mock.calls.map((c) => (c[0] as { groupId: string }).groupId);
   const revoked = (t: ReturnType<typeof buildSync>) =>
-    t.assignmentRepo.revoke.mock.calls.map((c) => c[0] as string);
+    t.employeeGroupRepo.revoke.mock.calls.map((c) => c[0] as string);
 
-  it('with no role claim and the floor, a newcomer holds `employee` and NOTHING else', async () => {
+  it('with no group claim and the floor, a newcomer holds `employee` and NOTHING else', async () => {
     const t = buildSync([]);
 
-    await t.service.syncUserRolesByKeys('u', [], actor, 'employee');
+    await t.service.syncEmployeeGroupsByKeys('u', [], actor, 'employee');
 
     expect(assigned(t)).toEqual(['r-employee']);
   });
 
-  it('only roles opshub has never heard of count as no claim: the floor applies, nothing unknown is granted', async () => {
+  it('only groups opshub has never heard of count as no claim: the floor applies, nothing unknown is granted', async () => {
     const t = buildSync([]);
 
-    await t.service.syncUserRolesByKeys('u', ['SuperUser', 'root'], actor, 'employee');
+    await t.service.syncEmployeeGroupsByKeys('u', ['SuperUser', 'root'], actor, 'employee');
 
     expect(assigned(t)).toEqual(['r-employee']);
   });
 
-  it('the floor is NOT added to roles the token does name', async () => {
+  it('the floor is NOT added to groups the token does name', async () => {
     const t = buildSync([]);
 
-    await t.service.syncUserRolesByKeys('u', ['hr'], actor, 'employee');
+    await t.service.syncEmployeeGroupsByKeys('u', ['hr'], actor, 'employee');
 
     expect(assigned(t)).toEqual(['r-hr']);
   });
 
   it('DEMOTES at the next sign-in: an App Role removed in Entra is revoked, and the person falls to the floor', async () => {
     const t = buildSync([
-      { id: 'a-admin', roleId: 'r-admin' },
-      { id: 'a-hr', roleId: 'r-hr' },
+      { id: 'a-admin', groupId: 'r-admin' },
+      { id: 'a-hr', groupId: 'r-hr' },
     ]);
 
-    await t.service.syncUserRolesByKeys('u', [], actor, 'employee');
+    await t.service.syncEmployeeGroupsByKeys('u', [], actor, 'employee');
 
     expect(revoked(t).sort()).toEqual(['a-admin', 'a-hr']);
     expect(assigned(t)).toEqual(['r-employee']);
   });
 
-  it('without a floor, an empty claim leaves no role (the original contract is unchanged)', async () => {
+  it('without a floor, an empty claim leaves no group (the original contract is unchanged)', async () => {
     const t = buildSync([]);
 
-    await t.service.syncUserRolesByKeys('u', [], actor);
+    await t.service.syncEmployeeGroupsByKeys('u', [], actor);
 
     expect(assigned(t)).toEqual([]);
   });
 
-  it('a missing floor role does not fail the sign-in or grant anything else', async () => {
+  it('a missing floor group does not fail the sign-in or grant anything else', async () => {
     const t = buildSync([]);
-    t.roleRepo.list.mockResolvedValue([{ id: 'r-hr', key: 'hr' }] as never);
+    t.groupRepo.list.mockResolvedValue([{ id: 'r-hr', key: 'hr' }] as never);
 
-    await t.service.syncUserRolesByKeys('u', [], actor, 'employee');
+    await t.service.syncEmployeeGroupsByKeys('u', [], actor, 'employee');
 
     expect(assigned(t)).toEqual([]);
   });

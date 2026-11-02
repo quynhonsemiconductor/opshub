@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
  * undescriptored route is not an escalation.
  *
  * It is the reverse: the scoped-grant feature is INERT on these routes. `scope_type` is a five-value
- * enum, `POST /authz/assignments` accepts and validates `scopeType` + `scopeId`, and the row is
+ * enum, `POST /authz/employee-groups` accepts and validates `scopeType` + `scopeId`, and the row is
  * stored — and then every route without a descriptor refuses that holder. An operator can grant
  * "asset.write @ dept=Engineering" through the supported API and watch it do nothing except produce
  * 403s.

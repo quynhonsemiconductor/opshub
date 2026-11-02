@@ -104,7 +104,7 @@ async function me(cookie: string) {
   const res = await app.inject({ method: 'GET', url: '/v1/auth/me', headers: { cookie } });
   return {
     status: res.statusCode,
-    body: res.json<{ sub: string; roles: string[]; permissions: string[] }>(),
+    body: res.json<{ sub: string; groups: string[]; permissions: string[] }>(),
   };
 }
 
@@ -175,13 +175,13 @@ describe('Microsoft sign-in with the staff preset', () => {
 
     const first = await microsoftSignIn(who);
     const asHr = await me(first.cookie!);
-    expect(asHr.body.roles).toEqual(['hr']);
+    expect(asHr.body.groups).toEqual(['hr']);
     expect(asHr.body.permissions).toContain('workforce.read');
 
     // Entra now asserts a different role: the next sign-in reconciles to it. HR is gone.
     const second = await microsoftSignIn({ ...who, claims: { roles: ['auditor'] } });
     const asAuditor = await me(second.cookie!);
-    expect(asAuditor.body.roles).toEqual(['auditor']);
+    expect(asAuditor.body.groups).toEqual(['auditor']);
     expect(asAuditor.body.permissions).not.toContain('workforce.manage');
   });
 
@@ -191,7 +191,7 @@ describe('Microsoft sign-in with the staff preset', () => {
 
     const { cookie } = await microsoftSignIn(who);
 
-    expect((await me(cookie!)).body.roles).toEqual(['employee']);
+    expect((await me(cookie!)).body.groups).toEqual(['employee']);
   });
 
   it('provisions an unknown person from the tenant, with employees.id = the session subject', async () => {
@@ -309,7 +309,7 @@ describe('the access model', () => {
 
       const principal = await me(cookie!);
       expect(principal.status).toBe(200);
-      expect(principal.body.roles).toEqual(['employee']);
+      expect(principal.body.groups).toEqual(['employee']);
       expect(principal.body.permissions, 'JIT granted a permission with no role claim').toEqual([]);
     });
 
@@ -319,7 +319,7 @@ describe('the access model', () => {
       const { cookie } = await microsoftSignIn(who);
 
       const principal = await me(cookie!);
-      expect(principal.body.roles).toEqual(['employee']);
+      expect(principal.body.groups).toEqual(['employee']);
       expect(principal.body.permissions).toEqual([]);
     });
 
@@ -328,7 +328,7 @@ describe('the access model', () => {
 
       const { cookie } = await microsoftSignIn(who);
 
-      expect((await me(cookie!)).body.roles).toEqual(['employee']);
+      expect((await me(cookie!)).body.groups).toEqual(['employee']);
     });
   });
 
@@ -483,7 +483,7 @@ describe('the access model', () => {
 
       const first = await microsoftSignIn(who);
       const asAdmin = await me(first.cookie!);
-      expect(asAdmin.body.roles).toEqual(['admin']);
+      expect(asAdmin.body.groups).toEqual(['admin']);
       expect(asAdmin.body.permissions).toContain('*');
 
       // The assignment is removed in Entra. NOTHING changes for the session already open: the sync runs at
@@ -494,23 +494,23 @@ describe('the access model', () => {
       // Their next sign-in carries no role: demoted to `employee`...
       const second = await microsoftSignIn({ ...who, claims: {} });
       const demoted = await me(second.cookie!);
-      expect(demoted.body.roles).toEqual(['employee']);
+      expect(demoted.body.groups).toEqual(['employee']);
       expect(demoted.body.permissions).toEqual([]);
 
       // ...and, because roles live in the database and not in the session, the OLD session is demoted too
       const oldSession = await me(first.cookie!);
       expect(oldSession.status).toBe(200);
-      expect(oldSession.body.roles).toEqual(['employee']);
+      expect(oldSession.body.groups).toEqual(['employee']);
       expect(oldSession.body.permissions, 'the old admin session kept admin rights').toEqual([]);
     });
 
     it('promotes at the next sign-in too, and a role HR assigned by hand in OpsHub is not Entra’s to keep', async () => {
       const who = person(undefined);
       const first = await microsoftSignIn(who);
-      expect((await me(first.cookie!)).body.roles).toEqual(['employee']);
+      expect((await me(first.cookie!)).body.groups).toEqual(['employee']);
 
       const promoted = await microsoftSignIn({ ...who, claims: { roles: ['hr'] } });
-      expect((await me(promoted.cookie!)).body.roles).toEqual(['hr']);
+      expect((await me(promoted.cookie!)).body.groups).toEqual(['hr']);
     });
   });
 });

@@ -252,7 +252,7 @@ describe('OffboardingTypeDef.onApprove()', () => {
       expect(recordedActions()).not.toContain('auth.logout');
     });
 
-    it('records one entry per role removed, not one for the batch', async () => {
+    it('records one entry per group membership removed, not one for the batch', async () => {
       const tx = makeTx(
         [],
         [
@@ -262,8 +262,8 @@ describe('OffboardingTypeDef.onApprove()', () => {
       );
       await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-      // An access review asks when this person lost THIS role; "2 roles removed" cannot answer it.
-      const revocations = record.mock.calls.filter((c) => c[0] === 'role.revoked');
+      // An access review asks when this person left THIS group; "2 groups removed" cannot answer it.
+      const revocations = record.mock.calls.filter((c) => c[0] === 'group.revoked');
       expect(revocations).toHaveLength(2);
       expect(revocations.map((c) => c[1] as string)).toEqual(['assign-1', 'assign-2']);
     });
@@ -289,12 +289,12 @@ describe('OffboardingTypeDef.onApprove()', () => {
     });
 
     it('writes no entry for a step that removed nothing', async () => {
-      // A leaver with no roles, no assets and no live session. Recording those anyway would put
+      // A leaver in no groups, no assets and no live session. Recording those anyway would put
       // three events in the trail that did not happen.
       const tx = makeTx([], [], []);
       await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-      expect(recordedActions()).not.toContain('role.revoked');
+      expect(recordedActions()).not.toContain('group.revoked');
       expect(recordedActions()).not.toContain('asset.unassigned');
       expect(recordedActions()).not.toContain('session.revoked');
       // The status change always happened, so it is always recorded.

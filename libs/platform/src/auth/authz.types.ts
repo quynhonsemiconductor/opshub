@@ -4,7 +4,7 @@
  */
 import type { JwtPayload } from './principal';
 
-/** Scope dimensions a role assignment can be constrained to. */
+/** Scope dimensions a group assignment can be constrained to. */
 export type ScopeType = 'global' | 'self' | 'team' | 'dept' | 'region';
 
 /** A concrete scope grant attached to an effective permission. */
@@ -87,7 +87,7 @@ export interface Permission {
   description: string;
 }
 
-export interface Role {
+export interface Group {
   id: string;
   key: string;
   name: string;
@@ -95,14 +95,14 @@ export interface Role {
   updatedAt: Date;
 }
 
-export interface RoleWithPermissions extends Role {
+export interface GroupWithPermissions extends Group {
   permissions: string[];
 }
 
-export interface RoleAssignment {
+export interface EmployeeGroup {
   id: string;
-  userId: string;
-  roleId: string;
+  employeeId: string;
+  groupId: string;
   scopeType: ScopeType;
   scopeId: string | null;
   grantedBy: string;

@@ -73,7 +73,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
   readonly slaHours = 24; // same-day SLA for security
 
   private readonly employeeTrail;
-  private readonly roleAssignmentTrail;
+  private readonly employeeGroupTrail;
   private readonly employeePermissionTrail;
   private readonly grantTrail;
   private readonly assetTrail;
@@ -96,7 +96,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     // One trail per resource the workflow touches, bound once — the same shape the owning services
     // use, so the entries this hook writes are indistinguishable from the ones they write.
     this.employeeTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE);
-    this.roleAssignmentTrail = audit.forResource(AUDIT_RESOURCE.ROLE_ASSIGNMENT);
+    this.employeeGroupTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE_GROUP);
     this.employeePermissionTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE_PERMISSION);
     this.grantTrail = audit.forResource(AUDIT_RESOURCE.ACCESS_GRANT);
     this.assetTrail = audit.forResource(AUDIT_RESOURCE.ASSET);
@@ -154,7 +154,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
       .returning({ id: employeeGroups.id, groupId: employeeGroups.groupId });
 
     for (const assignment of removedRoles) {
-      await this.roleAssignmentTrail.record(AUDIT_ACTION.ROLE_REVOKED, assignment.id, actor, tx, {
+      await this.employeeGroupTrail.record(AUDIT_ACTION.GROUP_REVOKED, assignment.id, actor, tx, {
         before: { userId: employeeId, roleId: assignment.groupId },
       });
     }
@@ -290,7 +290,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
    *
    * THE CACHE INVALIDATION IS THE SECURITY-CRITICAL HALF, and it was missing entirely.
    * `AuthzService` caches a principal's resolved permissions for `CACHE_TTL_SECONDS = 300`, and every
-   * other privilege-removal path calls `invalidate` — `AuthzAdminService.revokeAssignment` does it on
+   * other privilege-removal path calls `invalidate` — `AuthzAdminService.revokeEmployeeGroup` does it on
    * the line after its transaction. This hook did not, so for up to five minutes after being
    * offboarded a leaver's requests were still authorised against the roles they no longer held. Their
    * session was revoked, but an access token already in hand keeps working until it expires.

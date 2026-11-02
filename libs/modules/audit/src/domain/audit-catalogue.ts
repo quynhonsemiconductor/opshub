@@ -28,6 +28,17 @@
  */
 export const AUDIT_ACTION = {
   // ── Access / RBAC ──
+  GROUP_CREATED: 'group.created',
+  GROUP_DELETED: 'group.deleted',
+  GROUP_PERMISSIONS_UPDATED: 'group.permissions_updated',
+  GROUP_ASSIGNED: 'group.assigned',
+  GROUP_REVOKED: 'group.revoked',
+  GROUP_SYNCED: 'group.synced',
+  /**
+   * LEGACY — what the permission groups were called when they were "roles". Rows already written carry these
+   * codes and nothing writes them any more; they stay so the Audit Log viewer can still filter the history,
+   * because a code is added, never renamed in place (see above). Their replacements are the `GROUP_*` codes.
+   */
   ROLE_CREATED: 'role.created',
   ROLE_UPDATED: 'role.updated',
   ROLE_DELETED: 'role.deleted',
@@ -340,6 +351,9 @@ export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
  * the viewer by resource type needed you to know which spelling a given writer had picked.
  */
 export const AUDIT_RESOURCE = {
+  GROUP: 'group',
+  EMPLOYEE_GROUP: 'employee_group',
+  /** LEGACY — the same two resources before the rename; kept so existing rows stay filterable. */
   ROLE: 'role',
   ROLE_ASSIGNMENT: 'role_assignment',
   EMPLOYEE_PERMISSION: 'employee_permission',

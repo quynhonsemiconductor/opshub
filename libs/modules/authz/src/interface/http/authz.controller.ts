@@ -22,27 +22,27 @@ import type {
   EmployeePermission,
   JwtPayload,
   Permission,
-  RoleAssignment,
-  RoleWithPermissions,
+  EmployeeGroup,
+  GroupWithPermissions,
 } from '@platform';
 import { DelegationService, type ApprovalDelegation } from '@platform';
 import { AuditService, AUDIT_ACTION, AUDIT_RESOURCE } from '@modules/audit';
 import { AuthzAdminService } from '../../application/authz-admin.service';
 import {
-  AssignRoleDto,
+  AssignGroupDto,
   CreateDelegationDto,
-  CreateRoleDto,
+  CreateGroupDto,
   DelegationResponseDto,
   EmployeePermissionResponseDto,
   GrantEmployeePermissionDto,
   ListDelegationsQueryDto,
   PermissionResponseDto,
-  RoleAssignmentResponseDto,
-  RoleResponseDto,
-  SetRolePermissionsDto,
+  EmployeeGroupResponseDto,
+  GroupResponseDto,
+  SetGroupPermissionsDto,
 } from './dto/authz.dto';
 
-function toRoleDto(r: RoleWithPermissions): RoleResponseDto {
+function toGroupDto(r: GroupWithPermissions): GroupResponseDto {
   return {
     id: r.id,
     key: r.key,
@@ -53,11 +53,11 @@ function toRoleDto(r: RoleWithPermissions): RoleResponseDto {
   };
 }
 
-function toAssignmentDto(a: RoleAssignment): RoleAssignmentResponseDto {
+function toEmployeeGroupDto(a: EmployeeGroup): EmployeeGroupResponseDto {
   return {
     id: a.id,
-    userId: a.userId,
-    roleId: a.roleId,
+    employeeId: a.employeeId,
+    groupId: a.groupId,
     scopeType: a.scopeType,
     scopeId: a.scopeId,
     grantedBy: a.grantedBy,
@@ -110,111 +110,111 @@ export class AuthzController {
     return (await this.authz.listPermissions()) satisfies Permission[];
   }
 
-  @Get('roles')
+  @Get('groups')
   @RequirePermission('rbac.read')
-  @ApiOperation({ summary: 'List roles with their permissions' })
-  @ApiOkResponse({ type: [RoleResponseDto] })
+  @ApiOperation({ summary: 'List groups with their permissions' })
+  @ApiOkResponse({ type: [GroupResponseDto] })
   @ApiCommonErrors(401, 403)
-  async listRoles(): Promise<RoleResponseDto[]> {
-    return (await this.authz.listRoles()).map(toRoleDto);
+  async listGroups(): Promise<GroupResponseDto[]> {
+    return (await this.authz.listGroups()).map(toGroupDto);
   }
 
-  @Get('roles/:id')
+  @Get('groups/:id')
   @RequirePermission('rbac.read')
-  @ApiOperation({ summary: 'Get a role by id' })
-  @ApiOkResponse({ type: RoleResponseDto })
+  @ApiOperation({ summary: 'Get a group by id' })
+  @ApiOkResponse({ type: GroupResponseDto })
   @ApiCommonErrors(401, 403, 404)
-  async getRole(@Param('id', ParseUUIDPipe) id: string): Promise<RoleResponseDto> {
-    return toRoleDto(await this.authz.getRole(id));
+  async getGroup(@Param('id', ParseUUIDPipe) id: string): Promise<GroupResponseDto> {
+    return toGroupDto(await this.authz.getGroup(id));
   }
 
-  @Post('roles')
+  @Post('groups')
   @RequirePermission('rbac.manage')
-  @ApiOperation({ summary: 'Create a custom role' })
-  @ApiCreatedResponse({ type: RoleResponseDto })
+  @ApiOperation({ summary: 'Create a custom group' })
+  @ApiCreatedResponse({ type: GroupResponseDto })
   @ApiCommonErrors(401, 403, 409, 422)
-  async createRole(
-    @Body() dto: CreateRoleDto,
+  async createGroup(
+    @Body() dto: CreateGroupDto,
     @CurrentUser() user: JwtPayload,
-  ): Promise<RoleResponseDto> {
-    const role = await this.authz.createRole(dto, { sub: user.sub, email: user.email });
-    return toRoleDto(role);
+  ): Promise<GroupResponseDto> {
+    const group = await this.authz.createGroup(dto, { sub: user.sub, email: user.email });
+    return toGroupDto(group);
   }
 
-  @Put('roles/:id/permissions')
+  @Put('groups/:id/permissions')
   @RequirePermission('rbac.manage')
-  @ApiOperation({ summary: 'Replace a role’s permission set' })
-  @ApiOkResponse({ type: RoleResponseDto })
+  @ApiOperation({ summary: 'Replace a group’s permission set' })
+  @ApiOkResponse({ type: GroupResponseDto })
   @ApiCommonErrors(401, 403, 404, 422)
-  async setRolePermissions(
+  async setGroupPermissions(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: SetRolePermissionsDto,
+    @Body() dto: SetGroupPermissionsDto,
     @CurrentUser() user: JwtPayload,
-  ): Promise<RoleResponseDto> {
-    const role = await this.authz.setRolePermissions(id, dto.permissions, {
+  ): Promise<GroupResponseDto> {
+    const group = await this.authz.setGroupPermissions(id, dto.permissions, {
       sub: user.sub,
       email: user.email,
     });
-    return toRoleDto(role);
+    return toGroupDto(group);
   }
 
-  @Delete('roles/:id')
+  @Delete('groups/:id')
   @HttpCode(204)
   @RequirePermission('rbac.manage')
-  @ApiOperation({ summary: 'Delete a custom (non-system) role' })
+  @ApiOperation({ summary: 'Delete a custom (non-system) group' })
   @ApiNoContentResponse()
   @ApiCommonErrors(401, 403, 404, 422)
-  async deleteRole(
+  async deleteGroup(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<void> {
-    await this.authz.deleteRole(id, { sub: user.sub, email: user.email });
+    await this.authz.deleteGroup(id, { sub: user.sub, email: user.email });
   }
 
-  @Get('users/:userId/assignments')
+  @Get('employees/:employeeId/groups')
   @RequirePermission('rbac.read')
-  @ApiOperation({ summary: 'List a user’s role assignments' })
-  @ApiOkResponse({ type: [RoleAssignmentResponseDto] })
+  @ApiOperation({ summary: 'List the groups an employee belongs to' })
+  @ApiOkResponse({ type: [EmployeeGroupResponseDto] })
   @ApiCommonErrors(401, 403)
-  async listUserAssignments(
-    @Param('userId', ParseUUIDPipe) userId: string,
-  ): Promise<RoleAssignmentResponseDto[]> {
-    return (await this.authz.listUserAssignments(userId)).map(toAssignmentDto);
+  async listEmployeeGroups(
+    @Param('employeeId', ParseUUIDPipe) employeeId: string,
+  ): Promise<EmployeeGroupResponseDto[]> {
+    return (await this.authz.listEmployeeGroups(employeeId)).map(toEmployeeGroupDto);
   }
 
-  @Post('assignments')
+  @Post('employee-groups')
   @RequirePermission('role.assign')
-  @ApiOperation({ summary: 'Grant a scoped role to a user' })
-  @ApiCreatedResponse({ type: RoleAssignmentResponseDto })
+  @ApiOperation({ summary: 'Put an employee in a group, optionally scoped' })
+  @ApiCreatedResponse({ type: EmployeeGroupResponseDto })
   @ApiCommonErrors(401, 403, 404, 422)
-  async assignRole(
-    @Body() dto: AssignRoleDto,
+  async assignGroup(
+    @Body() dto: AssignGroupDto,
     @CurrentUser() user: JwtPayload,
-  ): Promise<RoleAssignmentResponseDto> {
-    const assignment = await this.authz.assignRole(
+  ): Promise<EmployeeGroupResponseDto> {
+    const assignment = await this.authz.assignGroup(
       {
-        userId: dto.userId,
-        roleId: dto.roleId,
+        employeeId: dto.employeeId,
+        groupId: dto.groupId,
         scopeType: dto.scopeType,
         scopeId: dto.scopeId ?? null,
         expiresAt: dto.expiresAt ?? null,
       },
       { sub: user.sub, email: user.email },
     );
-    return toAssignmentDto(assignment);
+    return toEmployeeGroupDto(assignment);
   }
 
-  @Delete('assignments/:id')
+  @Delete('employee-groups/:id')
   @HttpCode(204)
   @RequirePermission('role.assign')
-  @ApiOperation({ summary: 'Revoke a role assignment' })
+  @ApiOperation({ summary: 'Remove an employee from a group' })
   @ApiNoContentResponse()
   @ApiCommonErrors(401, 403, 404)
-  async revokeAssignment(
+  async revokeEmployeeGroup(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtPayload,
   ): Promise<void> {
-    await this.authz.revokeAssignment(id, { sub: user.sub, email: user.email });
+    await this.authz.revokeEmployeeGroup(id, { sub: user.sub, email: user.email });
   }
 
   // ── Direct employee permissions ────────────────────────────────────────────

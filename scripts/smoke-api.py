@@ -189,19 +189,19 @@ if ar2.get('id'):
     call('access-requests', 'POST', f'/access-requests/{ar2["id"]}/reject', {'note': 'no'}, ADMIN)
 
 # ── authz ────────────────────────────────────────────────────────────────────
-_, role = call('authz', 'POST', '/authz/roles',
-               {'key': f'smoke-{rnd()}', 'name': 'Smoke Role', 'permissions': ['asset.read']},
-               ADMIN)
-rid = role.get('id')
-if rid:
-    call('authz', 'PUT', f'/authz/roles/{rid}/permissions',
+_, group = call('authz', 'POST', '/authz/groups',
+                {'key': f'smoke-{rnd()}', 'name': 'Smoke Group', 'permissions': ['asset.read']},
+                ADMIN)
+gid = group.get('id')
+if gid:
+    call('authz', 'PUT', f'/authz/groups/{gid}/permissions',
          {'permissions': ['asset.read', 'license.read']}, ADMIN)
-    _, asg = call('authz', 'POST', '/authz/assignments',
-                  {'userId': '00000000-0000-7000-8000-000000000008', 'roleId': rid,
+    _, asg = call('authz', 'POST', '/authz/employee-groups',
+                  {'employeeId': '00000000-0000-7000-8000-000000000008', 'groupId': gid,
                    'scopeType': 'global'}, ADMIN)
     if asg.get('id'):
-        call('authz', 'DELETE', f'/authz/assignments/{asg["id"]}', None, ADMIN)
-    call('authz', 'DELETE', f'/authz/roles/{rid}', None, ADMIN)
+        call('authz', 'DELETE', f'/authz/employee-groups/{asg["id"]}', None, ADMIN)
+    call('authz', 'DELETE', f'/authz/groups/{gid}', None, ADMIN)
 
 _, dele = call('authz', 'POST', '/authz/delegations',
                {'toUserId': '00000000-0000-7000-8000-000000000004',

@@ -1,18 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { asc, eq } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB, type DbExecutor } from '@platform';
-import type { Permission, RoleWithPermissions } from '@platform';
+import type { Permission, GroupWithPermissions } from '@platform';
 import { newId } from '@shared-kernel';
 import { permissions, groupPermissions, groups } from '../../../../../../db/schema';
-import type { CreateRoleInput, IRoleRepository } from '../../domain/ports/role.repository';
+import type { CreateGroupInput, IGroupRepository } from '../../domain/ports/group.repository';
 
-type RoleRow = typeof groups.$inferSelect;
+type GroupRow = typeof groups.$inferSelect;
 
 @Injectable()
-export class RoleDrizzleRepository implements IRoleRepository {
+export class GroupDrizzleRepository implements IGroupRepository {
   constructor(@InjectDrizzle() private readonly db: DrizzleDB) {}
 
-  private toDomain(row: RoleRow, perms: string[]): RoleWithPermissions {
+  private toDomain(row: GroupRow, perms: string[]): GroupWithPermissions {
     return {
       id: row.id,
       key: row.key,
@@ -23,42 +23,42 @@ export class RoleDrizzleRepository implements IRoleRepository {
     };
   }
 
-  async list(): Promise<RoleWithPermissions[]> {
-    const [roleRows, permRows] = await Promise.all([
+  async list(): Promise<GroupWithPermissions[]> {
+    const [groupRows, permRows] = await Promise.all([
       this.db.select().from(groups).orderBy(asc(groups.key)),
       this.db.select().from(groupPermissions),
     ]);
-    const byRole = new Map<string, string[]>();
+    const byGroup = new Map<string, string[]>();
     for (const p of permRows) {
-      const list = byRole.get(p.groupId) ?? [];
+      const list = byGroup.get(p.groupId) ?? [];
       list.push(p.permissionKey);
-      byRole.set(p.groupId, list);
+      byGroup.set(p.groupId, list);
     }
-    return roleRows.map((r) => this.toDomain(r, byRole.get(r.id) ?? []));
+    return groupRows.map((r) => this.toDomain(r, byGroup.get(r.id) ?? []));
   }
 
-  async findById(id: string): Promise<RoleWithPermissions | null> {
+  async findById(id: string): Promise<GroupWithPermissions | null> {
     const [row] = await this.db.select().from(groups).where(eq(groups.id, id)).limit(1);
     if (!row) return null;
     return this.toDomain(row, await this.permsFor(id));
   }
 
-  async findByKey(key: string): Promise<RoleWithPermissions | null> {
+  async findByKey(key: string): Promise<GroupWithPermissions | null> {
     const [row] = await this.db.select().from(groups).where(eq(groups.key, key)).limit(1);
     if (!row) return null;
     return this.toDomain(row, await this.permsFor(row.id));
   }
 
-  private async permsFor(roleId: string): Promise<string[]> {
+  private async permsFor(groupId: string): Promise<string[]> {
     const rows = await this.db
       .select({ key: groupPermissions.permissionKey })
       .from(groupPermissions)
-      .where(eq(groupPermissions.groupId, roleId));
+      .where(eq(groupPermissions.groupId, groupId));
     return rows.map((r) => r.key);
   }
 
-  async create(input: CreateRoleInput, outer?: DbExecutor): Promise<RoleWithPermissions> {
-    // A SAVEPOINT when the caller already has a transaction: the role row and its permission rows still
+  async create(input: CreateGroupInput, outer?: DbExecutor): Promise<GroupWithPermissions> {
+    // A SAVEPOINT when the caller already has a transaction: the group row and its permission rows still
     // go in together, and the caller's audit entry joins the same unit of work.
     return (outer ?? this.db).transaction(async (tx) => {
       const [row] = await tx
@@ -75,23 +75,23 @@ export class RoleDrizzleRepository implements IRoleRepository {
   }
 
   async setPermissions(
-    roleId: string,
+    groupId: string,
     permissionKeys: string[],
     outer?: DbExecutor,
   ): Promise<void> {
     await (outer ?? this.db).transaction(async (tx) => {
-      await tx.delete(groupPermissions).where(eq(groupPermissions.groupId, roleId));
+      await tx.delete(groupPermissions).where(eq(groupPermissions.groupId, groupId));
       if (permissionKeys.length > 0) {
         await tx
           .insert(groupPermissions)
-          .values(permissionKeys.map((permissionKey) => ({ groupId: roleId, permissionKey })));
+          .values(permissionKeys.map((permissionKey) => ({ groupId: groupId, permissionKey })));
       }
-      await tx.update(groups).set({ updatedAt: new Date() }).where(eq(groups.id, roleId));
+      await tx.update(groups).set({ updatedAt: new Date() }).where(eq(groups.id, groupId));
     });
   }
 
-  async delete(roleId: string, tx?: DbExecutor): Promise<void> {
-    await (tx ?? this.db).delete(groups).where(eq(groups.id, roleId));
+  async delete(groupId: string, tx?: DbExecutor): Promise<void> {
+    await (tx ?? this.db).delete(groups).where(eq(groups.id, groupId));
   }
 
   async listPermissions(): Promise<Permission[]> {

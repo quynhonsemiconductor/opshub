@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { PaginationQuerySchema } from '@shared-kernel';
 import { employeeStatusEnum } from '@db/schema/enums';
 
-// NOTE: Roles are intentionally NOT settable here. Role assignment is a
+// NOTE: Groups are intentionally NOT settable here. Group membership is a
 // governance action handled exclusively by the authz module
-// (POST /v1/authz/assignments, guarded by `role.assign` + escalation check).
+// (POST /v1/authz/employee-groups, guarded by `role.assign` + escalation check).
 // This prevents privilege escalation via the directory/employee endpoints.
 export const CreateEmployeeSchema = z.object({
   // Stored lower-cased and trimmed: an address is the identity the Graph worker checks a directory
@@ -32,8 +32,8 @@ export const ListEmployeesQuerySchema = z
 
 export class ListEmployeesQueryDto extends createZodDto(ListEmployeesQuerySchema) {}
 
-// Roles are NOT updatable here — see CreateEmployeeSchema note. Use the authz
-// module to grant/revoke roles.
+// Groups are NOT updatable here — see CreateEmployeeSchema note. Use the authz
+// module to add or remove group memberships.
 export const UpdateEmployeeSchema = z.object({
   displayName: z.string().min(1).max(200).optional(),
   department: z.string().max(120).nullable().optional(),
@@ -54,7 +54,8 @@ export class EmployeeResponseDto {
   department!: string | null;
   jobTitle!: string | null;
   managerId!: string | null;
-  roles!: string[];
+  /** Keys of the permission groups the employee belongs to. */
+  groups!: string[];
   status!: string;
   photoStorageKey!: string | null;
   createdAt!: string;

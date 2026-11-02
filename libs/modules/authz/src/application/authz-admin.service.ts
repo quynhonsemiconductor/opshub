@@ -11,8 +11,8 @@ import {
 import type {
   EmployeePermission,
   Permission,
-  RoleAssignment,
-  RoleWithPermissions,
+  EmployeeGroup,
+  GroupWithPermissions,
   ScopeType,
 } from '@platform';
 import { eq } from 'drizzle-orm';
@@ -24,14 +24,14 @@ import {
   type ResourceAuditTrail,
 } from '@modules/audit';
 import {
-  ROLE_REPOSITORY,
-  type CreateRoleInput,
-  type IRoleRepository,
-} from '../domain/ports/role.repository';
+  GROUP_REPOSITORY,
+  type CreateGroupInput,
+  type IGroupRepository,
+} from '../domain/ports/group.repository';
 import {
-  ROLE_ASSIGNMENT_REPOSITORY,
-  type IRoleAssignmentRepository,
-} from '../domain/ports/role-assignment.repository';
+  EMPLOYEE_GROUP_REPOSITORY,
+  type IEmployeeGroupRepository,
+} from '../domain/ports/employee-group.repository';
 import {
   EMPLOYEE_PERMISSION_REPOSITORY,
   type IEmployeePermissionRepository,
@@ -44,9 +44,9 @@ export interface Actor {
   email: string;
 }
 
-export interface AssignRoleCommand {
-  userId: string;
-  roleId: string;
+export interface AssignGroupCommand {
+  employeeId: string;
+  groupId: string;
   scopeType?: ScopeType;
   scopeId?: string | null;
   expiresAt?: Date | null;
@@ -63,11 +63,12 @@ export interface GrantEmployeePermissionCommand {
 }
 
 /**
- * Administrative RBAC operations: manage roles/permissions and grant/revoke scoped role assignments.
+ * Administrative RBAC operations: manage groups and their permissions, put employees in groups (scoped) and remove them, and grant permissions to
+ * one employee directly.
  *
  * THE AUDIT ENTRY SHARES THE MUTATION'S TRANSACTION. These were fire-and-forget, and of everything in this
- * codebase these are the writes least able to afford it: who granted which role to whom, and who deleted a
- * role, is the first question any access review asks. A grant that committed while its entry was lost left no
+ * codebase these are the writes least able to afford it: who granted which group to whom, and who deleted a
+ * group, is the first question any access review asks. A grant that committed while its entry was lost left no
  * answer.
  *
  * CACHE BUSTING HAPPENS AFTER THE COMMIT, and cannot be inside it: Valkey is not transactional, so
@@ -78,151 +79,152 @@ export interface GrantEmployeePermissionCommand {
  */
 @Injectable()
 export class AuthzAdminService {
-  private readonly roleTrail: ResourceAuditTrail;
-  private readonly assignmentTrail: ResourceAuditTrail;
+  private readonly groupTrail: ResourceAuditTrail;
+  private readonly employeeGroupTrail: ResourceAuditTrail;
   private readonly employeeTrail: ResourceAuditTrail;
   private readonly employeePermissionTrail: ResourceAuditTrail;
 
   constructor(
-    @Inject(ROLE_REPOSITORY) private readonly roleRepo: IRoleRepository,
-    @Inject(ROLE_ASSIGNMENT_REPOSITORY)
-    private readonly assignmentRepo: IRoleAssignmentRepository,
+    @Inject(GROUP_REPOSITORY) private readonly groupRepo: IGroupRepository,
+    @Inject(EMPLOYEE_GROUP_REPOSITORY)
+    private readonly employeeGroupRepo: IEmployeeGroupRepository,
     @Inject(EMPLOYEE_PERMISSION_REPOSITORY)
     private readonly employeePermissionRepo: IEmployeePermissionRepository,
     private readonly authz: AuthzService,
     @InjectDrizzle() private readonly db: DrizzleDB,
     audit: AuditService,
   ) {
-    this.roleTrail = audit.forResource(AUDIT_RESOURCE.ROLE);
-    this.assignmentTrail = audit.forResource(AUDIT_RESOURCE.ROLE_ASSIGNMENT);
+    this.groupTrail = audit.forResource(AUDIT_RESOURCE.GROUP);
+    this.employeeGroupTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE_GROUP);
     this.employeeTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE);
     this.employeePermissionTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE_PERMISSION);
   }
 
   // ── Catalog ────────────────────────────────────────────────────────────────
 
-  listRoles(): Promise<RoleWithPermissions[]> {
-    return this.roleRepo.list();
+  listGroups(): Promise<GroupWithPermissions[]> {
+    return this.groupRepo.list();
   }
 
-  async getRole(id: string): Promise<RoleWithPermissions> {
-    const role = await this.roleRepo.findById(id);
-    if (!role) throw new NotFoundException('ROLE_NOT_FOUND', `Role ${id} not found`);
-    return role;
+  async getGroup(id: string): Promise<GroupWithPermissions> {
+    const group = await this.groupRepo.findById(id);
+    if (!group) throw new NotFoundException('GROUP_NOT_FOUND', `Group ${id} not found`);
+    return group;
   }
 
   listPermissions(): Promise<Permission[]> {
-    return this.roleRepo.listPermissions();
+    return this.groupRepo.listPermissions();
   }
 
-  // ── Role management ──────────────────────────────────────────────────────────
+  // ── Group management ──────────────────────────────────────────────────────────
 
-  async createRole(input: CreateRoleInput, actor: Actor): Promise<RoleWithPermissions> {
-    if (await this.roleRepo.findByKey(input.key)) {
-      throw new ConflictException('ROLE_KEY_TAKEN', `Role key '${input.key}' already exists`);
+  async createGroup(input: CreateGroupInput, actor: Actor): Promise<GroupWithPermissions> {
+    if (await this.groupRepo.findByKey(input.key)) {
+      throw new ConflictException('GROUP_KEY_TAKEN', `Group key '${input.key}' already exists`);
     }
     await this.assertPermissionsExist(input.permissions);
     return this.db.transaction(async (tx) => {
-      const role = await this.roleRepo.create(input, tx);
-      await this.roleTrail.record(AUDIT_ACTION.ROLE_CREATED, role.id, actor, tx, {
-        after: { key: role.key, permissions: role.permissions },
+      const group = await this.groupRepo.create(input, tx);
+      await this.groupTrail.record(AUDIT_ACTION.GROUP_CREATED, group.id, actor, tx, {
+        after: { key: group.key, permissions: group.permissions },
       });
-      return role;
+      return group;
     });
   }
 
-  async setRolePermissions(
-    roleId: string,
+  async setGroupPermissions(
+    groupId: string,
     permissionKeys: string[],
     actor: Actor,
-  ): Promise<RoleWithPermissions> {
-    const role = await this.getRole(roleId);
+  ): Promise<GroupWithPermissions> {
+    const group = await this.getGroup(groupId);
     await this.assertPermissionsExist(permissionKeys);
     await this.db.transaction(async (tx) => {
-      await this.roleRepo.setPermissions(roleId, permissionKeys, tx);
-      await this.roleTrail.record(AUDIT_ACTION.ROLE_PERMISSIONS_UPDATED, roleId, actor, tx, {
-        before: { permissions: role.permissions },
+      await this.groupRepo.setPermissions(groupId, permissionKeys, tx);
+      await this.groupTrail.record(AUDIT_ACTION.GROUP_PERMISSIONS_UPDATED, groupId, actor, tx, {
+        before: { permissions: group.permissions },
         after: { permissions: permissionKeys },
       });
     });
-    // Editing a role changes what every HOLDER can do, so their cached resolutions
+    // Editing a group changes what every HOLDER can do, so their cached resolutions
     // are stale the moment this commits. This used to rely on the 300s cache TTL —
-    // documented, but it meant REMOVING a permission from a role took up to five
+    // documented, but it meant REMOVING a permission from a group took up to five
     // minutes to take effect while every other write path here was immediate. Two
     // revocation latencies in one service is the inconsistency, and the slow one is
     // the security-relevant direction.
     //
-    // Role KEYS are unchanged by this operation, so `employees.roles` (the claims
+    // Group KEYS are unchanged by this operation, so `employees.groups` (the claims
     // cache) needs no re-sync — only the permission cache does.
-    await this.invalidateRoleHolders(roleId);
-    return this.getRole(roleId);
+    await this.invalidateGroupMembers(groupId);
+    return this.getGroup(groupId);
   }
 
-  async deleteRole(roleId: string, actor: Actor): Promise<void> {
-    const role = await this.getRole(roleId);
-    if (role.system) {
+  async deleteGroup(groupId: string, actor: Actor): Promise<void> {
+    const group = await this.getGroup(groupId);
+    if (group.system) {
       throw new ValidationException(
-        'ROLE_IMMUTABLE',
-        `System role '${role.key}' cannot be deleted`,
+        'GROUP_IMMUTABLE',
+        `System group '${group.key}' cannot be deleted`,
       );
     }
     // Read holders BEFORE the delete: `user_role_assignments.role_id` is
     // ON DELETE CASCADE, so afterwards there is nothing left to enumerate.
-    const holders = await this.assignmentRepo.listUserIdsForRole(roleId);
+    const holders = await this.employeeGroupRepo.listEmployeeIdsForGroup(groupId);
 
     await this.db.transaction(async (tx) => {
-      await this.roleRepo.delete(roleId, tx);
-      // The entry is the only remaining record of the role and of how many people held it.
-      await this.roleTrail.record(AUDIT_ACTION.ROLE_DELETED, roleId, actor, tx, {
-        before: { key: role.key, permissions: role.permissions, holders: holders.length },
+      await this.groupRepo.delete(groupId, tx);
+      // The entry is the only remaining record of the group and of how many people held it.
+      await this.groupTrail.record(AUDIT_ACTION.GROUP_DELETED, groupId, actor, tx, {
+        before: { key: group.key, permissions: group.permissions, holders: holders.length },
       });
     });
 
     // Both caches are now wrong for every holder: the permission cache still grants
-    // the deleted role's codes, and `employees.roles` still lists its key.
-    for (const userId of holders) {
-      await this.assignmentRepo.syncEmployeeRoleClaims(userId);
-      await this.authz.invalidate(userId);
+    // the deleted group's codes, and `employees.groups` still lists its key.
+    for (const employeeId of holders) {
+      await this.employeeGroupRepo.syncEmployeeGroupKeys(employeeId);
+      await this.authz.invalidate(employeeId);
     }
   }
 
   /**
-   * Drop the cached permission resolution of everyone holding `roleId`.
+   * Drop the cached permission resolution of everyone holding `groupId`.
    *
    * Sequential rather than parallel on purpose: the holder count is bounded by the
-   * org's headcount, and a burst of concurrent Valkey deletes on a role held by
+   * org's headcount, and a burst of concurrent Valkey deletes on a group held by
    * everyone is a worse failure mode than taking a few more milliseconds.
    */
-  private async invalidateRoleHolders(roleId: string): Promise<void> {
-    const holders = await this.assignmentRepo.listUserIdsForRole(roleId);
-    for (const userId of holders) {
-      await this.authz.invalidate(userId);
+  private async invalidateGroupMembers(groupId: string): Promise<void> {
+    const holders = await this.employeeGroupRepo.listEmployeeIdsForGroup(groupId);
+    for (const employeeId of holders) {
+      await this.authz.invalidate(employeeId);
     }
   }
 
   // ── Assignments ──────────────────────────────────────────────────────────────
 
-  listUserAssignments(userId: string): Promise<RoleAssignment[]> {
-    return this.assignmentRepo.listForUser(userId);
+  listEmployeeGroups(employeeId: string): Promise<EmployeeGroup[]> {
+    return this.employeeGroupRepo.listForEmployee(employeeId);
   }
 
-  async assignRole(command: AssignRoleCommand, actor: Actor): Promise<RoleAssignment> {
-    const role = await this.roleRepo.findById(command.roleId);
-    if (!role) throw new NotFoundException('ROLE_NOT_FOUND', `Role ${command.roleId} not found`);
+  async assignGroup(command: AssignGroupCommand, actor: Actor): Promise<EmployeeGroup> {
+    const group = await this.groupRepo.findById(command.groupId);
+    if (!group)
+      throw new NotFoundException('GROUP_NOT_FOUND', `Group ${command.groupId} not found`);
 
     // Privilege-escalation guard (NIST AC-6 least privilege): an actor may only
-    // grant a role whose permission set is a subset of their own. This prevents,
+    // grant a group whose permission set is a subset of their own. This prevents,
     // e.g., an HR/role.assign holder from granting themselves or others the
-    // `admin` (`*`) role. Holders of `*` (platform admins) can grant anything.
-    await this.assertCanGrantRole(actor, role);
+    // `admin` (`*`) group. Holders of `*` (platform admins) can grant anything.
+    await this.assertCanGrantGroup(actor, group);
 
     const { scopeType, scopeId } = resolveGrantScope(command.scopeType, command.scopeId);
 
     const assignment = await this.db.transaction(async (tx) => {
-      const created = await this.assignmentRepo.assign(
+      const created = await this.employeeGroupRepo.assign(
         {
-          userId: command.userId,
-          roleId: command.roleId,
+          employeeId: command.employeeId,
+          groupId: command.groupId,
           scopeType,
           scopeId,
           grantedBy: actor.sub,
@@ -231,10 +233,10 @@ export class AuthzAdminService {
         tx,
       );
       // The grant and the record of who made it commit together — the pair an access review reads.
-      await this.assignmentTrail.record(AUDIT_ACTION.ROLE_ASSIGNED, created.id, actor, tx, {
+      await this.employeeGroupTrail.record(AUDIT_ACTION.GROUP_ASSIGNED, created.id, actor, tx, {
         after: {
-          userId: command.userId,
-          roleKey: role.key,
+          employeeId: command.employeeId,
+          groupKey: group.key,
           scopeType,
           scopeId,
           expiresAt: created.expiresAt?.toISOString() ?? null,
@@ -243,63 +245,63 @@ export class AuthzAdminService {
       return created;
     });
 
-    // Keep the JWT roles[] claim cache in sync with the RBAC source of truth, then bust the permission
+    // Keep the JWT groups[] claim cache in sync with the RBAC source of truth, then bust the permission
     // cache so enforcement is immediate. After the commit: neither is transactional.
-    await this.assignmentRepo.syncEmployeeRoleClaims(command.userId);
-    await this.authz.invalidate(command.userId);
+    await this.employeeGroupRepo.syncEmployeeGroupKeys(command.employeeId);
+    await this.authz.invalidate(command.employeeId);
     return assignment;
   }
 
   /**
-   * Reconcile a user's GLOBAL role assignments to exactly match `roleKeys`
+   * Reconcile an employee's GLOBAL group memberships to exactly match `groupKeys`
    * (grant missing, revoke extra), then refresh the JWT claim cache and
    * permission cache. This is the single mechanism by which external identity
    * providers (Entra App Roles) become OpsHub permissions — the assignments
-   * table stays the source of truth, and `employees.roles` is derived from it.
+   * table stays the source of truth, and `employees.groups` is derived from it.
    *
-   * Unknown role keys are ignored (fail-safe: an unmapped Entra role never
+   * Unknown group keys are ignored (fail-safe: an unmapped Entra App Role never
    * grants access). Scoped (non-global) assignments are left untouched.
    *
-   * `fallbackKey` is what the person holds when NONE of `roleKeys` names a role that exists (an empty claim, or
-   * only roles opshub has never heard of). It is a floor, never an addition: it applies only when the
-   * reconciliation would otherwise leave them with no global role at all, and it can never exceed what the
-   * caller names. The sign-in passes `employee`, the role with no permissions of its own.
+   * `fallbackKey` is what the person holds when NONE of `groupKeys` names a group that exists (an empty claim, or
+   * only groups opshub has never heard of). It is a floor, never an addition: it applies only when the
+   * reconciliation would otherwise leave them with no global group at all, and it can never exceed what the
+   * caller names. The sign-in passes `employee`, the group with no permissions of its own.
    * This bypasses the interactive escalation guard by design: it runs as the
    * system during SSO provisioning, mirroring what the IdP already asserts.
    */
-  async syncUserRolesByKeys(
-    userId: string,
-    roleKeys: string[],
+  async syncEmployeeGroupsByKeys(
+    employeeId: string,
+    groupKeys: string[],
     actor: Actor,
     fallbackKey?: string,
   ): Promise<string[]> {
-    const allRoles = await this.roleRepo.list();
-    const idByKey = new Map(allRoles.map((r) => [r.key, r.id]));
-    const keyById = new Map(allRoles.map((r) => [r.id, r.key]));
+    const allGroups = await this.groupRepo.list();
+    const idByKey = new Map(allGroups.map((r) => [r.key, r.id]));
+    const keyById = new Map(allGroups.map((r) => [r.id, r.key]));
 
-    const desiredRoleIds = new Set(
-      roleKeys.map((k) => idByKey.get(k)).filter((id): id is string => !!id),
+    const desiredGroupIds = new Set(
+      groupKeys.map((k) => idByKey.get(k)).filter((id): id is string => !!id),
     );
-    if (desiredRoleIds.size === 0 && fallbackKey) {
+    if (desiredGroupIds.size === 0 && fallbackKey) {
       const fallbackId = idByKey.get(fallbackKey);
-      if (fallbackId) desiredRoleIds.add(fallbackId);
+      if (fallbackId) desiredGroupIds.add(fallbackId);
     }
 
-    const current = await this.assignmentRepo.listForUser(userId);
+    const current = await this.employeeGroupRepo.listForEmployee(employeeId);
     const currentGlobal = current.filter((a) => a.scopeType === 'global');
-    const currentRoleIds = new Set(currentGlobal.map((a) => a.roleId));
+    const currentGroupIds = new Set(currentGlobal.map((a) => a.groupId));
 
-    const granted = [...desiredRoleIds].map((id) => keyById.get(id)).filter(Boolean);
+    const granted = [...desiredGroupIds].map((id) => keyById.get(id)).filter(Boolean);
 
-    // ONE transaction for the whole reconciliation and its entry: an SSO login that granted three roles and
+    // ONE transaction for the whole reconciliation and its entry: an SSO login that granted three groups and
     // revoked one is a single event, and a partially applied one would misrepresent what the IdP asserted.
     await this.db.transaction(async (tx) => {
-      for (const roleId of desiredRoleIds) {
-        if (!currentRoleIds.has(roleId)) {
-          await this.assignmentRepo.assign(
+      for (const groupId of desiredGroupIds) {
+        if (!currentGroupIds.has(groupId)) {
+          await this.employeeGroupRepo.assign(
             {
-              userId,
-              roleId,
+              employeeId,
+              groupId,
               scopeType: 'global',
               scopeId: null,
               grantedBy: actor.sub,
@@ -310,18 +312,18 @@ export class AuthzAdminService {
         }
       }
       for (const a of currentGlobal) {
-        if (!desiredRoleIds.has(a.roleId)) {
-          await this.assignmentRepo.revoke(a.id, tx);
+        if (!desiredGroupIds.has(a.groupId)) {
+          await this.employeeGroupRepo.revoke(a.id, tx);
         }
       }
-      await this.employeeTrail.record(AUDIT_ACTION.ROLE_SYNCED, userId, actor, tx, {
-        before: { roleIds: [...currentRoleIds] },
-        after: { requestedKeys: roleKeys, appliedRoles: granted },
+      await this.employeeTrail.record(AUDIT_ACTION.GROUP_SYNCED, employeeId, actor, tx, {
+        before: { groupIds: [...currentGroupIds] },
+        after: { requestedKeys: groupKeys, appliedGroups: granted },
       });
     });
 
-    const finalKeys = await this.assignmentRepo.syncEmployeeRoleClaims(userId);
-    await this.authz.invalidate(userId);
+    const finalKeys = await this.employeeGroupRepo.syncEmployeeGroupKeys(employeeId);
+    await this.authz.invalidate(employeeId);
     return finalKeys;
   }
 
@@ -443,39 +445,39 @@ export class AuthzAdminService {
     await this.authz.invalidate(grant.employeeId);
   }
 
-  async revokeAssignment(id: string, actor: Actor): Promise<void> {
-    const assignment = await this.assignmentRepo.findById(id);
+  async revokeEmployeeGroup(id: string, actor: Actor): Promise<void> {
+    const assignment = await this.employeeGroupRepo.findById(id);
     if (!assignment) {
-      throw new NotFoundException('ROLE_ASSIGNMENT_NOT_FOUND', `Assignment ${id} not found`);
+      throw new NotFoundException('EMPLOYEE_GROUP_NOT_FOUND', `Assignment ${id} not found`);
     }
     await this.db.transaction(async (tx) => {
-      await this.assignmentRepo.revoke(id, tx);
-      await this.assignmentTrail.record(AUDIT_ACTION.ROLE_REVOKED, id, actor, tx, {
-        before: { userId: assignment.userId, roleId: assignment.roleId },
+      await this.employeeGroupRepo.revoke(id, tx);
+      await this.employeeGroupTrail.record(AUDIT_ACTION.GROUP_REVOKED, id, actor, tx, {
+        before: { employeeId: assignment.employeeId, groupId: assignment.groupId },
       });
     });
 
-    await this.assignmentRepo.syncEmployeeRoleClaims(assignment.userId);
-    await this.authz.invalidate(assignment.userId);
+    await this.employeeGroupRepo.syncEmployeeGroupKeys(assignment.employeeId);
+    await this.authz.invalidate(assignment.employeeId);
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
   /**
    * Enforce no-privilege-escalation: the actor must already hold every
-   * permission carried by the role they are granting. Platform admins (holders
-   * of the `*` wildcard) can grant any role. Fails closed.
+   * permission carried by the group they are granting. Platform admins (holders
+   * of the `*` wildcard) can grant any group. Fails closed.
    */
-  private async assertCanGrantRole(actor: Actor, role: RoleWithPermissions): Promise<void> {
+  private async assertCanGrantGroup(actor: Actor, group: GroupWithPermissions): Promise<void> {
     const effective = await this.authz.resolve(actor.sub);
     const actorPerms = new Set(Object.keys(effective));
     if (actorPerms.has('*')) return; // platform admin — may grant anything
 
-    // Granting a role that itself carries `*` requires the actor to be `*`.
-    const missing = role.permissions.filter((p) => !actorPerms.has(p));
+    // Granting a group that itself carries `*` requires the actor to be `*`.
+    const missing = group.permissions.filter((p) => !actorPerms.has(p));
     if (missing.length > 0) {
       throw new PermissionDeniedException(
-        `Cannot grant role '${role.key}': it includes permissions you do not hold (${missing.join(', ')}).`,
+        `Cannot grant group '${group.key}': it includes permissions you do not hold (${missing.join(', ')}).`,
       );
     }
   }
@@ -495,7 +497,7 @@ export class AuthzAdminService {
 
   private async assertPermissionsExist(keys: string[]): Promise<void> {
     if (keys.length === 0) return;
-    const catalog = new Set((await this.roleRepo.listPermissions()).map((p) => p.key));
+    const catalog = new Set((await this.groupRepo.listPermissions()).map((p) => p.key));
     const unknown = keys.filter((k) => !catalog.has(k));
     if (unknown.length > 0) {
       throw new ValidationException(

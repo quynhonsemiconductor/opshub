@@ -9,7 +9,7 @@ import {
 
 export const ScopeTypeSchema = z.enum(['global', 'self', 'team', 'dept', 'region']);
 
-export const CreateRoleSchema = z.object({
+export const CreateGroupSchema = z.object({
   key: z
     .string()
     .min(2)
@@ -18,16 +18,16 @@ export const CreateRoleSchema = z.object({
   name: z.string().min(1).max(120),
   permissions: z.array(z.string().max(120)).default([]),
 });
-export class CreateRoleDto extends createZodDto(CreateRoleSchema) {}
+export class CreateGroupDto extends createZodDto(CreateGroupSchema) {}
 
-export const SetRolePermissionsSchema = z.object({
+export const SetGroupPermissionsSchema = z.object({
   permissions: z.array(z.string().max(120)),
 });
-export class SetRolePermissionsDto extends createZodDto(SetRolePermissionsSchema) {}
+export class SetGroupPermissionsDto extends createZodDto(SetGroupPermissionsSchema) {}
 
-export const AssignRoleSchema = z.object({
-  userId: z.string().uuid(),
-  roleId: z.string().uuid(),
+export const AssignGroupSchema = z.object({
+  employeeId: z.string().uuid(),
+  groupId: z.string().uuid(),
   scopeType: ScopeTypeSchema.default('global'),
   scopeId: z.string().max(120).nullable().optional(),
   expiresAt: z
@@ -36,7 +36,7 @@ export const AssignRoleSchema = z.object({
     .nullish()
     .transform((v) => (v != null ? new Date(v) : null)),
 });
-export class AssignRoleDto extends createZodDto(AssignRoleSchema) {}
+export class AssignGroupDto extends createZodDto(AssignGroupSchema) {}
 
 export const GrantEmployeePermissionSchema = z.object({
   employeeId: z.string().uuid(),
@@ -57,7 +57,7 @@ export class PermissionResponseDto {
   description!: string;
 }
 
-export class RoleResponseDto {
+export class GroupResponseDto {
   id!: string;
   key!: string;
   name!: string;
@@ -66,10 +66,10 @@ export class RoleResponseDto {
   updatedAt!: string;
 }
 
-export class RoleAssignmentResponseDto {
+export class EmployeeGroupResponseDto {
   id!: string;
-  userId!: string;
-  roleId!: string;
+  employeeId!: string;
+  groupId!: string;
   scopeType!: string;
   scopeId!: string | null;
   grantedBy!: string;
