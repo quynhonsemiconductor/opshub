@@ -62,7 +62,13 @@ const ROOT = join(__dirname, '..');
  * a department-scoped holder of `rbac.read` or `role.assign` is not a thing anyone wants, and granting a
  * permission is further bounded by the no-escalation rule in `AuthzAdminService`.
  */
-const MAX_UNSCOPED_ROW_ROUTES = 153;
+/*
+ * 156 after the three row-addressed routes of job ranks (rename or reorder, replace benefits, delete). A
+ * rank is organisation-wide reference data, not something owned by an employee or a department, so there is
+ * no row attribute a `self`/`dept` grant could be compared against; the same is true of the other
+ * `position.manage` administration already counted.
+ */
+const MAX_UNSCOPED_ROW_ROUTES = 156;
 
 /** Sanity floor: if the scanner stops finding routes, fail loudly rather than silently. */
 const MIN_ROW_ROUTES_FOUND = 120;

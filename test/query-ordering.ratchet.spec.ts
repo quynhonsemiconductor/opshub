@@ -86,6 +86,12 @@ const ROOT = join(__dirname, '..');
  *                          filters on `review_id` first. A future query ordering goals by title
  *                          across reviews would be exempted by this entry and should not be.
  *
+ *   - `rankBenefits.benefitCode` part of PRIMARY KEY (rank_id, benefit_code)
+ *                          (db/schema/positions.ts, migration 0044). CONDITIONAL, like
+ *                          `attachments.fileId`: unique only WITHIN one rank, and listed because every
+ *                          query ordering by it ends `orderBy(rank_id, benefit_code)`, which is the whole
+ *                          primary key, so the order is total.
+ *
  * The reference-table entries are the same pattern: a REFERENCE TABLE keyed by its enum, carrying a `rank` column
  * and the policy that rank implies. They are enumerated individually rather than matched by a naming
  * rule on purpose — an entry here is a claim about a specific schema, and a pattern match would
@@ -113,6 +119,7 @@ const UNIQUE_NON_ID_COLUMNS = [
   'managementReviews.reference',
   'performanceRatingScale.rank',
   'performanceGoals.title',
+  'rankBenefits.benefitCode',
 ] as const;
 
 interface Ordering {

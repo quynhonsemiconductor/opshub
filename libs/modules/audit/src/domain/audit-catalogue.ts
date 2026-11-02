@@ -131,6 +131,10 @@ export const AUDIT_ACTION = {
   POSITION_UPDATED: 'position.updated',
   POSITION_ASSIGNED: 'position.assigned',
   POSITION_UNASSIGNED: 'position.unassigned',
+  JOB_RANK_CREATED: 'job_rank.created',
+  JOB_RANK_UPDATED: 'job_rank.updated',
+  JOB_RANK_DELETED: 'job_rank.deleted',
+  JOB_RANK_BENEFITS_SET: 'job_rank.benefits_set',
 
   // ── Employment contracts ──
   CONTRACT_DRAFTED: 'contract.drafted',
@@ -365,6 +369,7 @@ export const AUDIT_RESOURCE = {
   DOCUMENT_VERSION: 'document_version',
   POSITION: 'position',
   EMPLOYEE_POSITION: 'employee_position',
+  JOB_RANK: 'job_rank',
   EMPLOYMENT_CONTRACT: 'employment_contract',
   TRAINING_COURSE: 'training_course',
   TRAINING_REQUIREMENT: 'training_requirement',
