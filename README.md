@@ -1,6 +1,6 @@
 # opshub
 
-Internal IT/HR operations platform (**Zone B2 — internal**, not internet-exposed by default). Runs on **ECS Fargate**, per the [platform architecture](https://github.com/quynhonsemiconductor/.github/blob/main/docs/PLATFORM_ARCHITECTURE.md).
+Internal IT/HR operations platform (**Zone B2 — internal**, not internet-exposed by default). Runs on the on-prem k3s platform (since the AWS exit, 2026-11-02), per the [platform architecture](https://github.com/quynhonsemiconductor/.github/blob/main/docs/PLATFORM_ARCHITECTURE.md).
 
 > **Monorepo.** Consolidates the former `opshub-api` + `opshub-web` + `opshub-infra` into one repository per [REPOSITORY_STRUCTURE.md](https://github.com/quynhonsemiconductor/.github/blob/main/docs/REPOSITORY_STRUCTURE.md) (ADR-R1). Old repos archived (read-only) for history.
 
@@ -8,11 +8,9 @@ Internal IT/HR operations platform (**Zone B2 — internal**, not internet-expos
 
 ```
 opshub/
-├── apps/{api,worker,web}/   # NestJS api + worker (ECS Fargate); Vite SPA (S3+CloudFront)
+├── apps/{api,worker,web}/   # NestJS api + worker (k3s, gitops); Vite SPA (Cloudflare Worker)
 ├── libs/                    # shared backend libs (== design's "packages/", NestJS convention)
 ├── db/                      # Drizzle schema + migrations
-├── deploy/ecs/              # deploy-descriptor notes (task-def is infra-owned)
-├── infra/                   # OpenTofu (product-owned resources)
 │   ├── live/{_shared,develop,prod}/
 │   └── modules/             # LOCAL modules (see KNOWN ISSUES — dedup to qnsc-tf-modules pending)
 ├── .github/workflows/       # CI/CD → quynhonsemiconductor/ci
@@ -173,4 +171,4 @@ Backend (`api` + `worker`) and web **build clean**. Consolidation is faithful (i
 1. **Generate the first Drizzle migration** for the license enums/tables (`pnpm db:generate`) before deploying the license module.
 2. Stray compiled `.js`/`.js.map` files beside some `db/schema/*.ts` — clean + gitignore.
 
-The "infra/modules/ are local copies" item is gone: every resource is a versioned `qnsc-tf-modules` ref, and `infra/modules/stack` is the local _composition_ module both environments call — so develop and production cannot drift structurally, and the callers in `infra/live/<env>` hold only values.
+(`infra/` was removed with the AWS exit, 2026-11-02; cloud resources live in the `infra` repository and deployment in `gitops`.)

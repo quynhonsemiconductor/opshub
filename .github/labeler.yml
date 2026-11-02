@@ -21,8 +21,6 @@ area/db:
 area/infra:
   - changed-files:
     - any-glob-to-any-file:
-      - "infra/**"
-      - "deploy/**"
       - "Dockerfile"
       - "docker-compose*.yml"
 
