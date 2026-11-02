@@ -179,7 +179,7 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Update employee profile fields (display name, department, job title, roles) */
+    /** Update employee profile fields (display name, department, job title) */
     patch: operations['EmployeesController_update'];
     trace?: never;
   };
@@ -286,43 +286,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/v1/authz/roles': {
+  '/v1/authz/groups': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** List roles with their permissions */
-    get: operations['AuthzController_listRoles'];
+    /** List groups with their permissions */
+    get: operations['AuthzController_listGroups'];
     put?: never;
-    /** Create a custom role */
-    post: operations['AuthzController_createRole'];
+    /** Create a custom group */
+    post: operations['AuthzController_createGroup'];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  '/v1/authz/roles/{id}': {
+  '/v1/authz/groups/{id}': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Get a role by id */
-    get: operations['AuthzController_getRole'];
+    /** Get a group by id */
+    get: operations['AuthzController_getGroup'];
     put?: never;
     post?: never;
-    /** Delete a custom (non-system) role */
-    delete: operations['AuthzController_deleteRole'];
+    /** Delete a custom (non-system) group */
+    delete: operations['AuthzController_deleteGroup'];
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  '/v1/authz/roles/{id}/permissions': {
+  '/v1/authz/groups/{id}/permissions': {
     parameters: {
       query?: never;
       header?: never;
@@ -330,8 +330,8 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace a role’s permission set */
-    put: operations['AuthzController_setRolePermissions'];
+    /** Replace a group’s permission set */
+    put: operations['AuthzController_setGroupPermissions'];
     post?: never;
     delete?: never;
     options?: never;
@@ -339,15 +339,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/v1/authz/users/{userId}/assignments': {
+  '/v1/authz/employees/{employeeId}/groups': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** List a user’s role assignments */
-    get: operations['AuthzController_listUserAssignments'];
+    /** List the groups an employee belongs to */
+    get: operations['AuthzController_listEmployeeGroups'];
     put?: never;
     post?: never;
     delete?: never;
@@ -356,24 +356,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/v1/authz/assignments': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Grant a scoped role to a user */
-    post: operations['AuthzController_assignRole'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/v1/authz/assignments/{id}': {
+  '/v1/authz/employee-groups': {
     parameters: {
       query?: never;
       header?: never;
@@ -382,9 +365,26 @@ export interface paths {
     };
     get?: never;
     put?: never;
+    /** Put an employee in a group, optionally scoped */
+    post: operations['AuthzController_assignGroup'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/authz/employee-groups/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
     post?: never;
-    /** Revoke a role assignment */
-    delete: operations['AuthzController_revokeAssignment'];
+    /** Remove an employee from a group */
+    delete: operations['AuthzController_revokeEmployeeGroup'];
     options?: never;
     head?: never;
     patch?: never;
@@ -5633,7 +5633,8 @@ export interface components {
       department: string | null;
       jobTitle: string | null;
       managerId: string | null;
-      roles: string[];
+      /** @description Keys of the permission groups the employee belongs to. */
+      groups: string[];
       status: string;
       photoStorageKey: string | null;
       createdAt: string;
@@ -5674,9 +5675,10 @@ export interface components {
       sub: string;
       email: string;
       name: string;
-      roles: string[];
+      /** @description Keys of the permission groups the caller belongs to — a display list, never used to authorize. */
+      groups: string[];
       /**
-       * @description Effective permission keys resolved from the user's role assignments (DB).
+       * @description Effective permission keys resolved from the user's group memberships and direct grants (DB).
        *     `'*'` means super-admin (all permissions). This is the single source of
        *     truth the SPA uses to gate UI — it must never re-derive permissions itself.
        */
@@ -5693,7 +5695,7 @@ export interface components {
       key: string;
       description: string;
     };
-    RoleResponseDto: {
+    GroupResponseDto: {
       id: string;
       key: string;
       name: string;
@@ -5701,30 +5703,30 @@ export interface components {
       permissions: string[];
       updatedAt: string;
     };
-    CreateRoleDto: {
+    CreateGroupDto: {
       key: string;
       name: string;
       /** @default [] */
       permissions: string[];
     };
-    SetRolePermissionsDto: {
+    SetGroupPermissionsDto: {
       permissions: string[];
     };
-    RoleAssignmentResponseDto: {
+    EmployeeGroupResponseDto: {
       id: string;
-      userId: string;
-      roleId: string;
+      employeeId: string;
+      groupId: string;
       scopeType: string;
       scopeId: string | null;
       grantedBy: string;
       expiresAt: string | null;
       createdAt: string;
     };
-    AssignRoleDto: {
+    AssignGroupDto: {
       /** Format: uuid */
-      userId: string;
+      employeeId: string;
       /** Format: uuid */
-      roleId: string;
+      groupId: string;
       /**
        * @default global
        * @enum {string}
@@ -8651,6 +8653,8 @@ export interface operations {
         actorId?: string;
         actorEmail?: string;
         resourceType?:
+          | 'group'
+          | 'employee_group'
           | 'role'
           | 'role_assignment'
           | 'employee_permission'
@@ -9420,7 +9424,7 @@ export interface operations {
       };
     };
   };
-  AuthzController_listRoles: {
+  AuthzController_listGroups: {
     parameters: {
       query?: never;
       header?: never;
@@ -9434,7 +9438,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RoleResponseDto'][];
+          'application/json': components['schemas']['GroupResponseDto'][];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -9453,7 +9457,7 @@ export interface operations {
       };
     };
   };
-  AuthzController_createRole: {
+  AuthzController_createGroup: {
     parameters: {
       query?: never;
       header?: never;
@@ -9462,7 +9466,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CreateRoleDto'];
+        'application/json': components['schemas']['CreateGroupDto'];
       };
     };
     responses: {
@@ -9471,7 +9475,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RoleResponseDto'];
+          'application/json': components['schemas']['GroupResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -9504,7 +9508,7 @@ export interface operations {
       };
     };
   };
-  AuthzController_getRole: {
+  AuthzController_getGroup: {
     parameters: {
       query?: never;
       header?: never;
@@ -9520,7 +9524,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RoleResponseDto'];
+          'application/json': components['schemas']['GroupResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -9546,7 +9550,7 @@ export interface operations {
       };
     };
   };
-  AuthzController_deleteRole: {
+  AuthzController_deleteGroup: {
     parameters: {
       query?: never;
       header?: never;
@@ -9593,7 +9597,7 @@ export interface operations {
       };
     };
   };
-  AuthzController_setRolePermissions: {
+  AuthzController_setGroupPermissions: {
     parameters: {
       query?: never;
       header?: never;
@@ -9604,7 +9608,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['SetRolePermissionsDto'];
+        'application/json': components['schemas']['SetGroupPermissionsDto'];
       };
     };
     responses: {
@@ -9613,7 +9617,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RoleResponseDto'];
+          'application/json': components['schemas']['GroupResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -9646,12 +9650,12 @@ export interface operations {
       };
     };
   };
-  AuthzController_listUserAssignments: {
+  AuthzController_listEmployeeGroups: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        userId: string;
+        employeeId: string;
       };
       cookie?: never;
     };
@@ -9662,7 +9666,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RoleAssignmentResponseDto'][];
+          'application/json': components['schemas']['EmployeeGroupResponseDto'][];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -9681,7 +9685,7 @@ export interface operations {
       };
     };
   };
-  AuthzController_assignRole: {
+  AuthzController_assignGroup: {
     parameters: {
       query?: never;
       header?: never;
@@ -9690,7 +9694,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['AssignRoleDto'];
+        'application/json': components['schemas']['AssignGroupDto'];
       };
     };
     responses: {
@@ -9699,7 +9703,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RoleAssignmentResponseDto'];
+          'application/json': components['schemas']['EmployeeGroupResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -9732,7 +9736,7 @@ export interface operations {
       };
     };
   };
-  AuthzController_revokeAssignment: {
+  AuthzController_revokeEmployeeGroup: {
     parameters: {
       query?: never;
       header?: never;

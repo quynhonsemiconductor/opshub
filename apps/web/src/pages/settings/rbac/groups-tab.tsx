@@ -23,8 +23,8 @@ import {
 import { cn } from '@/shared/lib/utils';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { SectionCard, SectionHeader } from './rbac-shared';
-import { usePermissionCatalogue, useRoles } from './use-rbac';
-import type { RoleResponse } from '@/shared/api/types';
+import { usePermissionCatalogue, useGroups } from './use-rbac';
+import type { GroupResponse } from '@/shared/api/types';
 
 function CreateRoleModal({
   open,
@@ -48,40 +48,40 @@ function CreateRoleModal({
     }
     setLoading(true);
     setErr('');
-    const { error } = await api.POST('/v1/authz/roles', {
+    const { error } = await api.POST('/v1/authz/groups', {
       body: { key: key.trim(), name: name.trim(), permissions: [] },
     });
     setLoading(false);
     if (error) {
       // The API says WHICH key collided, and whether a collision was the problem at all — this file
       // already reads its message on the delete path two functions below.
-      setErr(apiErrorMessage(error, 'Failed to create the role.'));
+      setErr(apiErrorMessage(error, 'Failed to create the group.'));
       return;
     }
-    toast.success('Role created');
+    toast.success('Group created');
     onSuccess();
     onClose();
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Create role" size="sm">
+    <Modal open={open} onClose={onClose} title="Create group" size="sm">
       <form onSubmit={submit} className="flex flex-col gap-3 p-5">
         <FormField
           label="Key"
-          htmlFor="role-key"
+          htmlFor="group-key"
           required
           hint="The slug the API and the guards match on. Cannot be changed later."
         >
           <Input
-            id="role-key"
+            id="group-key"
             value={key}
             onChange={(e) => setKey(e.target.value)}
             placeholder="e.g. compliance-reviewer"
           />
         </FormField>
-        <FormField label="Display name" htmlFor="role-name" required>
+        <FormField label="Display name" htmlFor="group-name" required>
           <Input
-            id="role-name"
+            id="group-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Compliance Reviewer"
@@ -100,26 +100,26 @@ function CreateRoleModal({
 }
 
 /**
- * Roles, their permissions, and which of them the system owns.
+ * Groups, their permissions, and which of them the system owns.
  *
  * A TABLE, not a hand-rolled card list. The rows were `<div>`s with a click handler: no header, no
  * empty state, no loading state, and nothing to tell a keyboard user they were interactive. The
  * column set is the same information the divs carried.
  */
-export function RolesTab() {
+export function GroupsTab() {
   const qc = useQueryClient();
-  const { data: roles, isLoading, isError } = useRoles();
+  const { data: groups, isLoading, isError } = useGroups();
   const { data: allPerms } = usePermissionCatalogue();
   /*
    * `rbac.manage`, READ OFF THE CONTROLLER rather than inferred from the screen's name. All three
    * routes behind this tab carry `@RequirePermission('rbac.manage')` in
-   * `libs/modules/authz/src/interface/http/authz.controller.ts`: `POST /authz/roles`,
-   * `PUT /authz/roles/:id/permissions` and `DELETE /authz/roles/:id`. Reading the tab needs only
+   * `libs/modules/authz/src/interface/http/authz.controller.ts`: `POST /authz/groups`,
+   * `PUT /authz/groups/:id/permissions` and `DELETE /authz/groups/:id`. Reading the tab needs only
    * `rbac.read` — which `it-admin` and `auditor` hold and `rbac.manage` does not follow from — so
-   * without this every control below was offered to two roles the API refuses.
+   * without this every control below was offered to two groups the API refuses.
    *
    * NOT the same permission as the Assignments tab, which is `group.assign`. Gating both on one flag
-   * would hand role EDITING to whoever may only hand roles OUT, and the API would refuse it.
+   * would hand group EDITING to whoever may only hand groups OUT, and the API would refuse it.
    */
   const canManage = usePermissions().can('rbac.manage');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -128,32 +128,32 @@ export function RolesTab() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['authz', 'roles'] });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['authz', 'groups'] });
 
   // Re-read from the list rather than holding the row: adding a permission has to be visible in the
   // open panel, and a captured copy would show the state from before the mutation.
-  const current = roles?.find((r) => r.id === selectedId) ?? null;
+  const current = groups?.find((r) => r.id === selectedId) ?? null;
 
   async function doDeleteRole() {
     if (!pendingDeleteId) return;
     setDeleting(true);
-    const { error } = await api.DELETE('/v1/authz/roles/{id}', {
+    const { error } = await api.DELETE('/v1/authz/groups/{id}', {
       params: { path: { id: pendingDeleteId } },
     });
     setDeleting(false);
     setPendingDeleteId(null);
     if (error) {
-      toast.error(apiErrorMessage(error, 'Failed to delete role.'));
+      toast.error(apiErrorMessage(error, 'Failed to delete group.'));
       return;
     }
-    toast.success('Role deleted');
+    toast.success('Group deleted');
     if (selectedId === pendingDeleteId) setSelectedId(null);
     invalidate();
   }
 
-  async function setPermissions(roleId: string, permissions: string[]) {
-    const { error } = await api.PUT('/v1/authz/roles/{id}/permissions', {
-      params: { path: { id: roleId } },
+  async function setPermissions(groupId: string, permissions: string[]) {
+    const { error } = await api.PUT('/v1/authz/groups/{id}/permissions', {
+      params: { path: { id: groupId } },
       body: { permissions },
     });
     if (error) {
@@ -163,16 +163,16 @@ export function RolesTab() {
     invalidate();
   }
 
-  const columns: DataTableColumn<RoleResponse>[] = [
+  const columns: DataTableColumn<GroupResponse>[] = [
     {
       key: 'name',
-      header: 'Role',
-      cell: (role) => (
+      header: 'Group',
+      cell: (group) => (
         <div className="flex items-center gap-3">
           <ShieldCheck className="h-4 w-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-fg">{role.name}</p>
-            <p className="truncate font-mono text-xs text-fg-subtle">{role.key}</p>
+            <p className="truncate text-sm font-medium text-fg">{group.name}</p>
+            <p className="truncate font-mono text-xs text-fg-subtle">{group.key}</p>
           </div>
         </div>
       ),
@@ -180,30 +180,30 @@ export function RolesTab() {
     {
       key: 'type',
       header: 'Type',
-      cell: (role) =>
-        role.system ? <Badge>System</Badge> : <span className="text-fg">Custom</span>,
+      cell: (group) =>
+        group.system ? <Badge>System</Badge> : <span className="text-fg">Custom</span>,
     },
     {
       key: 'permissions',
       header: 'Permissions',
       align: 'right',
-      cell: (role) => role.permissions.length,
+      cell: (group) => group.permissions.length,
     },
     {
       key: 'actions',
       header: '',
       align: 'right',
-      cell: (role) => (
+      cell: (group) => (
         <div onClick={(e) => e.stopPropagation()}>
-          {/* A system role has no delete: the seed owns it, and removing it would break the guards.
+          {/* A system group has no delete: the seed owns it, and removing it would break the guards.
               A reader without `rbac.manage` has none either — the row is theirs to inspect, not to
-              destroy, and `DELETE /authz/roles/:id` would answer 403. */}
-          {canManage && !role.system && (
+              destroy, and `DELETE /authz/groups/:id` would answer 403. */}
+          {canManage && !group.system && (
             <IconAction
-              label={`Delete ${role.name}`}
+              label={`Delete ${group.name}`}
               icon={Trash2}
               tone="danger"
-              onClick={() => setPendingDeleteId(role.id)}
+              onClick={() => setPendingDeleteId(group.id)}
             />
           )}
         </div>
@@ -224,44 +224,44 @@ export function RolesTab() {
         onCancel={() => setPendingDeleteId(null)}
         onConfirm={doDeleteRole}
         loading={deleting}
-        title="Delete role?"
-        description="This will permanently remove the role and all its permissions. Users with this role will lose access. This cannot be undone."
-        confirmLabel="Delete role"
+        title="Delete group?"
+        description="This will permanently remove the group and all its permissions. Users with this group will lose access. This cannot be undone."
+        confirmLabel="Delete group"
         variant="danger"
       />
 
       <SectionCard>
         <SectionHeader
-          title="Roles"
-          description="System roles come from the seed; custom roles are yours to manage."
+          title="Groups"
+          description="System groups come from the seed; custom groups are yours to manage."
           action={
             canManage ? (
               <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                <Plus className="h-3.5 w-3.5" /> New role
+                <Plus className="h-3.5 w-3.5" /> New group
               </Button>
             ) : undefined
           }
         />
         <DataTable
           columns={columns}
-          rows={roles}
+          rows={groups}
           isLoading={isLoading}
           isError={isError}
-          errorMessage="Failed to load roles."
-          emptyMessage="No roles yet"
+          errorMessage="Failed to load groups."
+          emptyMessage="No groups yet"
           emptyIcon={ShieldCheck}
           emptyAction={
             !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                <Plus className="h-3.5 w-3.5" /> Create your first role
+                <Plus className="h-3.5 w-3.5" /> Create your first group
               </Button>
             )
           }
-          onRowClick={(role) => {
-            setSelectedId(role.id);
+          onRowClick={(group) => {
+            setSelectedId(group.id);
             setAddPermKey('');
           }}
-          isRowActive={(role) => role.id === selectedId}
+          isRowActive={(group) => group.id === selectedId}
         />
       </SectionCard>
 
@@ -271,7 +271,7 @@ export function RolesTab() {
           setSelectedId(null);
           setAddPermKey('');
         }}
-        title={current?.name ?? 'Role'}
+        title={current?.name ?? 'Group'}
         description={current?.key}
         items={
           current
@@ -318,7 +318,7 @@ export function RolesTab() {
                         ))}
                       </div>
 
-                      {/* A system role's permissions are fixed by the seed, so no add control at all —
+                      {/* A system group's permissions are fixed by the seed, so no add control at all —
                           and neither is there one for a caller who cannot write the set. */}
                       {canManage && !current.system && allPerms && (
                         <div className="flex items-center gap-2">
@@ -355,7 +355,7 @@ export function RolesTab() {
               ]
             : []
         }
-        activity={current ? { resourceId: current.id, resourceType: 'role' } : undefined}
+        activity={current ? { resourceId: current.id, resourceType: 'group' } : undefined}
       />
     </>
   );

@@ -25,11 +25,11 @@ export function Avatar({ name }: { name: string }) {
   );
 }
 
-/** A role name as a chip. Roles are governed on Settings → Access Control, never edited here. */
-export function RoleChip({ role }: { role: string }) {
+/** A group name as a chip. Groups are governed on Settings → Access Control, never edited here. */
+export function GroupChip({ group }: { group: string }) {
   return (
     <span className="inline-flex items-center rounded-md bg-surface-muted px-2 py-0.5 text-xs font-medium text-fg-muted">
-      {role}
+      {group}
     </span>
   );
 }

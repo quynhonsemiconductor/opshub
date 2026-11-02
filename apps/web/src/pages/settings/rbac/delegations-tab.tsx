@@ -124,7 +124,7 @@ function CreateDelegationModal({
  * claiming a lapsed delegation is live.
  *
  * DELIBERATELY UNGATED, and this is the one tab on the screen where that is correct. The other two
- * tabs' routes carry `@RequirePermission` — `rbac.manage` for roles, `group.assign` for assignments —
+ * tabs' routes carry `@RequirePermission` — `rbac.manage` for groups, `group.assign` for memberships —
  * and the three delegation routes carry `@SelfScoped` instead: no permission, only a session. The
  * reason is in the decorator's own note on `POST /authz/delegations` — it "delegates the CALLER's own
  * approval authority — fromUserId is user.sub". The API takes the grantor from the token and IGNORES

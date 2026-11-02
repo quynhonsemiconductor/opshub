@@ -23,7 +23,7 @@ import { EmployeePositionHistoryPanel } from './position-history-panel';
 import { EmployeeModal } from './employee-modal';
 import { OnboardingWizard } from './onboarding-wizard';
 import { OffboardingModal } from './offboarding-modal';
-import { Avatar, EmployeeStatusBadge, RoleChip, StatusSelect } from './people-shared';
+import { Avatar, EmployeeStatusBadge, GroupChip, StatusSelect } from './people-shared';
 import { STATUS_FILTERS, type EmployeeResponse } from './people.types';
 import { orDash } from '@/shared/lib/format';
 
@@ -136,12 +136,12 @@ export function PeoplePage() {
       hideOnMobile: true,
     },
     {
-      key: 'roles',
-      header: 'Roles',
+      key: 'groups',
+      header: 'Groups',
       cell: (emp) => (
         <div className="flex flex-wrap gap-1">
-          {emp.roles.length ? (
-            emp.roles.map((r) => <RoleChip key={r} role={r} />)
+          {emp.groups.length ? (
+            emp.groups.map((g) => <GroupChip key={g} group={g} />)
           ) : (
             <span className="text-fg-subtle">—</span>
           )}
@@ -286,11 +286,11 @@ export function PeoplePage() {
                 // two it does.
                 { label: 'Status', value: <EmployeeStatusBadge status={selected.status} /> },
                 {
-                  label: 'Roles',
-                  value: selected.roles.length ? (
+                  label: 'Groups',
+                  value: selected.groups.length ? (
                     <div className="flex flex-wrap gap-1">
-                      {selected.roles.map((r) => (
-                        <RoleChip key={r} role={r} />
+                      {selected.groups.map((g) => (
+                        <GroupChip key={g} group={g} />
                       ))}
                     </div>
                   ) : null,

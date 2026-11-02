@@ -25,7 +25,7 @@ const ME = {
   sub: 'emp-1',
   email: 'jane@acme.com',
   name: 'Jane Doe',
-  roles: ['employee'],
+  groups: ['employee'],
   permissions: ['asset.read'],
   csrfToken: 'csrf-1',
 };

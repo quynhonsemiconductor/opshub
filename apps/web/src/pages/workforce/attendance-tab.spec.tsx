@@ -27,7 +27,7 @@ const can = vi.fn();
 vi.mock('@/shared/hooks/use-permissions', () => ({
   usePermissions: () => ({
     can: (p: string) => can(p),
-    hasRole: (r: string) => r === 'manager' && can('__role_manager'),
+    hasGroup: (g: string) => g === 'manager' && can('__group_manager'),
   }),
 }));
 vi.mock('@/shared/hooks/use-current-user', () => ({

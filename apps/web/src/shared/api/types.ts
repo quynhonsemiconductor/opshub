@@ -49,10 +49,10 @@ export type CreateWebhookSubscriptionDto = components['schemas']['CreateWebhookS
 export type OnboardingResponse = components['schemas']['OnboardingResponseDto'];
 export type OffboardingResponse = components['schemas']['OffboardingResponseDto'];
 
-// Roles / Permissions / Delegations
-export type RoleResponse = components['schemas']['RoleResponseDto'];
+// Groups / Permissions / Delegations
+export type GroupResponse = components['schemas']['GroupResponseDto'];
 export type PermissionResponse = components['schemas']['PermissionResponseDto'];
-export type RoleAssignmentResponse = components['schemas']['RoleAssignmentResponseDto'];
+export type EmployeeGroupResponse = components['schemas']['EmployeeGroupResponseDto'];
 export type DelegationResponse = components['schemas']['DelegationResponseDto'];
 
 // Positions — the HISTORY shape carries the role it refers to, unlike the plain assignment dto.
@@ -120,12 +120,14 @@ export const AUDIT_RESOURCE_TYPES = [
   'document_version',
   'employee',
   'employee_avatar',
+  'employee_group',
   'employee_permission',
   'employee_position',
   'employment_contract',
   'holiday',
   'incident',
   'information_asset',
+  'group',
   'internal_audit',
   'job_rank',
   'leave_document',

@@ -132,7 +132,7 @@ function routeGet(review: Record<string, unknown>) {
 function renderAs(who: string, permissions: string[], review = REVIEW) {
   held = permissions;
   useAuthStore.setState({
-    user: { sub: who, email: 'me@example.com', name: 'Me', roles: [], permissions },
+    user: { sub: who, email: 'me@example.com', name: 'Me', groups: [], permissions },
   });
   routeGet(review);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

@@ -24,35 +24,35 @@ import { employeeOptions } from '@/shared/api/picker-sources';
 import { formatDate } from '@/shared/lib/format';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { SectionCard, SectionHeader } from './rbac-shared';
-import { useRoles } from './use-rbac';
-import type { RoleAssignmentResponse, RoleResponse } from '@/shared/api/types';
+import { useGroups } from './use-rbac';
+import type { EmployeeGroupResponse, GroupResponse } from '@/shared/api/types';
 
-function AssignRoleModal({
+function AddToGroupModal({
   open,
-  roles,
+  groups,
   onClose,
   onSuccess,
 }: {
   open: boolean;
-  roles: RoleResponse[];
+  groups: GroupResponse[];
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [userId, setUserId] = useState('');
-  const [roleId, setRoleId] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
+  const [groupId, setGroupId] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!userId.trim() || !roleId) {
-      setErr('User ID and role are both required.');
+    if (!employeeId.trim() || !groupId) {
+      setErr('An employee and a group are both required.');
       return;
     }
     setLoading(true);
     setErr('');
-    const { error } = await api.POST('/v1/authz/assignments', {
-      body: { userId: userId.trim(), roleId, scopeType: 'global', scopeId: null },
+    const { error } = await api.POST('/v1/authz/employee-groups', {
+      body: { employeeId: employeeId.trim(), groupId, scopeType: 'global', scopeId: null },
     });
     setLoading(false);
     if (error) {
@@ -60,39 +60,39 @@ function AssignRoleModal({
        * NOT "check the user ID", which is what this said. The id came out of a picker, so it is the
        * one part of the submission nobody mistyped; the likeliest refusal is `group.assign`, which only
        * `admin` holds. The tab now hides Assign from a caller who lacks it, but the message still has
-       * to pass the API's own sentence through: a stale token, a role deleted underneath the form, or
+       * to pass the API's own sentence through: a stale token, a group deleted underneath the form, or
        * a scope the caller may not write all answer here, and each says something different.
        */
-      setErr(apiErrorMessage(error, 'Failed to assign the role.'));
+      setErr(apiErrorMessage(error, 'Failed to add the employee to the group.'));
       return;
     }
-    toast.success('Role assigned');
+    toast.success('Added to group');
     onSuccess();
     onClose();
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Assign role" size="sm">
+    <Modal open={open} onClose={onClose} title="Add to group" size="sm">
       <form onSubmit={submit} className="flex flex-col gap-3 p-5">
-        <FormField label="User" htmlFor="assign-user" required>
+        <FormField label="Employee" htmlFor="assign-employee" required>
           <EntityPicker
-            id="assign-user"
+            id="assign-employee"
             queryKey="employees"
-            value={userId}
-            onChange={setUserId}
+            value={employeeId}
+            onChange={setEmployeeId}
             fetchOptions={employeeOptions}
             placeholder="Search people…"
           />
         </FormField>
         <FormField
-          label="Role"
-          htmlFor="assign-role"
+          label="Group"
+          htmlFor="assign-group"
           required
-          hint="Assigned GLOBALLY. Scoped assignments are made by the API, not from here."
+          hint="Added GLOBALLY. Scoped memberships are made by the API, not from here."
         >
-          <Select id="assign-role" value={roleId} onChange={(e) => setRoleId(e.target.value)}>
-            <option value="">Select a role…</option>
-            {roles.map((r) => (
+          <Select id="assign-group" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+            <option value="">Select a group…</option>
+            {groups.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}
               </option>
@@ -100,35 +100,30 @@ function AssignRoleModal({
           </Select>
         </FormField>
         <FormError message={err} />
-        <FormActions
-          loading={loading}
-          onClose={onClose}
-          submitLabel="Assign"
-          pendingLabel="Assigning…"
-        />
+        <FormActions loading={loading} onClose={onClose} submitLabel="Add" pendingLabel="Adding…" />
       </form>
     </Modal>
   );
 }
 
 /**
- * Who holds which role.
+ * Who holds which group.
  *
- * LOOKUP BY USER, not a list of everything: the API exposes assignments per user
- * (`/authz/users/{userId}/assignments`) because a global list is unbounded. The empty state says so
+ * LOOKUP BY EMPLOYEE, not a list of everything: the API exposes memberships per employee
+ * (`/authz/employees/{employeeId}/groups`) because a global list is unbounded. The empty state says so
  * rather than looking like a broken table, which is what a bare "no rows" implied before.
  */
-export function AssignmentsTab() {
+export function EmployeeGroupsTab() {
   const qc = useQueryClient();
   /*
-   * `group.assign`, and DELIBERATELY NOT `rbac.manage`. `POST /authz/assignments` and
-   * `DELETE /authz/assignments/:id` both carry `@RequirePermission('group.assign')` in
-   * `libs/modules/authz/src/interface/http/authz.controller.ts`, while the Roles tab's routes carry
-   * `rbac.manage`. They are two separable capabilities — editing what a role MEANS is not the same
+   * `group.assign`, and DELIBERATELY NOT `rbac.manage`. `POST /authz/employee-groups` and
+   * `DELETE /authz/employee-groups/:id` both carry `@RequirePermission('group.assign')` in
+   * `libs/modules/authz/src/interface/http/authz.controller.ts`, while the Groups tab's routes carry
+   * `rbac.manage`. They are two separable capabilities — editing what a group MEANS is not the same
    * authority as deciding who HOLDS it — so this tab asks for its own, and a holder of only the other
-   * one sees no Assign and no Revoke here.
+   * one sees no Add and no Remove here.
    *
-   * The LOOKUP below stays ungated: `GET /authz/users/:userId/assignments` is `rbac.read`, which is
+   * The LOOKUP below stays ungated: `GET /authz/employees/:employeeId/groups` is `rbac.read`, which is
    * what it takes to reach this screen at all. An auditor is meant to read who holds what.
    */
   const canAssign = usePermissions().can('group.assign');
@@ -142,53 +137,53 @@ export function AssignmentsTab() {
     data: assignments,
     isLoading,
     isError,
-  } = useQuery<RoleAssignmentResponse[]>({
-    queryKey: ['authz', 'assignments', searchUserId],
+  } = useQuery<EmployeeGroupResponse[]>({
+    queryKey: ['authz', 'memberships', searchUserId],
     enabled: searchUserId.length > 0,
     queryFn: async () => {
-      const { data, error } = await api.GET('/v1/authz/users/{userId}/assignments', {
-        params: { path: { userId: searchUserId } },
+      const { data, error } = await api.GET('/v1/authz/employees/{employeeId}/groups', {
+        params: { path: { employeeId: searchUserId } },
       });
-      if (error || !data) throw new Error('Failed to load assignments');
-      return data as RoleAssignmentResponse[];
+      if (error || !data) throw new Error('Failed to load memberships');
+      return data as EmployeeGroupResponse[];
     },
   });
-  const { data: roles } = useRoles();
+  const { data: groups } = useGroups();
 
   const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ['authz', 'assignments', searchUserId] });
+    qc.invalidateQueries({ queryKey: ['authz', 'memberships', searchUserId] });
 
-  const roleName = (roleId: string) => roles?.find((r) => r.id === roleId)?.name ?? roleId;
+  const roleName = (groupId: string) => groups?.find((r) => r.id === groupId)?.name ?? groupId;
 
   async function doRevoke() {
     if (!pendingRevokeId) return;
     setRevoking(true);
-    const { error } = await api.DELETE('/v1/authz/assignments/{id}', {
+    const { error } = await api.DELETE('/v1/authz/employee-groups/{id}', {
       params: { path: { id: pendingRevokeId } },
     });
     setRevoking(false);
     setPendingRevokeId(null);
     if (error) {
-      toast.error(apiErrorMessage(error, 'Failed to revoke assignment.'));
+      toast.error(apiErrorMessage(error, 'Failed to remove the employee from the group.'));
       return;
     }
-    toast.success('Assignment revoked');
+    toast.success('Removed from group');
     invalidate();
   }
 
-  const columns: DataTableColumn<RoleAssignmentResponse>[] = [
+  const columns: DataTableColumn<EmployeeGroupResponse>[] = [
     {
-      key: 'userId',
-      header: 'User ID',
-      cell: (a) => <span className="font-mono text-xs text-fg-muted">{a.userId}</span>,
+      key: 'employeeId',
+      header: 'Employee ID',
+      cell: (a) => <span className="font-mono text-xs text-fg-muted">{a.employeeId}</span>,
     },
     {
-      key: 'role',
-      header: 'Role',
-      // The response carries `roleId`, not a name — so the name is looked up from the roles query
+      key: 'group',
+      header: 'Group',
+      // The response carries `groupId`, not a name — so the name is looked up from the groups query
       // this tab already loads for the assign form. Falling back to the id keeps a row readable if
-      // the role was deleted underneath the assignment.
-      cell: (a) => <Badge tone="blue">{roleName(a.roleId)}</Badge>,
+      // the group was deleted underneath the assignment.
+      cell: (a) => <Badge tone="blue">{roleName(a.groupId)}</Badge>,
     },
     { key: 'scope', header: 'Scope', cell: (a) => humanizeStatus(a.scopeType) },
     { key: 'expires', header: 'Expires', cell: (a) => formatDate(a.expiresAt) },
@@ -201,7 +196,7 @@ export function AssignmentsTab() {
       cell: (a) =>
         !canAssign ? null : (
           <IconAction
-            label="Revoke assignment"
+            label="Remove from group"
             icon={Trash2}
             tone="danger"
             onClick={() => setPendingRevokeId(a.id)}
@@ -212,9 +207,9 @@ export function AssignmentsTab() {
 
   return (
     <>
-      <AssignRoleModal
+      <AddToGroupModal
         open={showAssign}
-        roles={roles ?? []}
+        groups={groups ?? []}
         onClose={() => setShowAssign(false)}
         onSuccess={invalidate}
       />
@@ -224,20 +219,20 @@ export function AssignmentsTab() {
         onCancel={() => setPendingRevokeId(null)}
         onConfirm={doRevoke}
         loading={revoking}
-        title="Revoke role assignment?"
-        description="The user loses every permission this role grants, immediately."
-        confirmLabel="Revoke"
+        title="Remove from group?"
+        description="The employee loses every permission this group grants, immediately."
+        confirmLabel="Remove"
         variant="danger"
       />
 
       <SectionCard>
         <SectionHeader
-          title="Assignments"
-          description="Look a user up by id to see and revoke what they hold."
+          title="Memberships"
+          description="Look an employee up by id to see and remove the groups they belong to."
           action={
             canAssign ? (
               <Button variant="primary" size="sm" onClick={() => setShowAssign(true)}>
-                <UserCheck className="h-3.5 w-3.5" /> Assign role
+                <UserCheck className="h-3.5 w-3.5" /> Add to group
               </Button>
             ) : undefined
           }
@@ -253,8 +248,8 @@ export function AssignmentsTab() {
           <Input
             value={lookupUserId}
             onChange={(e) => setLookupUserId(e.target.value)}
-            aria-label="User ID to look up"
-            placeholder="Enter a user ID to look up assignments…"
+            aria-label="Employee ID to look up"
+            placeholder="Enter an employee ID to look up their groups…"
             className="max-w-md"
           />
           <Button type="submit" size="sm" variant="outline">
@@ -263,27 +258,27 @@ export function AssignmentsTab() {
         </form>
 
         {/* Nothing is fetched until a user is named, so the pre-search state is its own message and
-            not an empty table pretending the user has no roles. */}
+            not an empty table pretending the user has no groups. */}
         {searchUserId ? (
           <DataTable
             columns={columns}
             rows={assignments}
             isLoading={isLoading}
             isError={isError}
-            errorMessage="Failed to load assignments for that user."
-            emptyMessage="No assignments for this user"
+            errorMessage="Failed to load the groups of that employee."
+            emptyMessage="This employee belongs to no group"
             emptyIcon={UserCheck}
             emptyAction={
               !canAssign ? undefined : (
                 <Button variant="primary" size="sm" onClick={() => setShowAssign(true)}>
-                  <UserCheck className="h-3.5 w-3.5" /> Assign your first role
+                  <UserCheck className="h-3.5 w-3.5" /> Add to a group
                 </Button>
               )
             }
           />
         ) : (
           <p className="px-4 py-10 text-center text-sm text-fg-subtle">
-            Enter a user ID above to view their assignments.
+            Enter an employee ID above to view their groups.
           </p>
         )}
       </SectionCard>

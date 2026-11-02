@@ -140,7 +140,7 @@ async function _run(): Promise<void> {
       sub: user.sub,
       email: user.email,
       name: user.name,
-      roles: user.roles,
+      groups: user.groups,
       permissions: user.permissions,
     });
   } finally {

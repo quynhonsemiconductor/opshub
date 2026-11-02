@@ -149,7 +149,7 @@ describe('RecordsTab', () => {
     // The signed-in principal. The real store rather than a mock, because the ownership half of the
     // certificate rule is read from it and a mock would let the wrong field satisfy the test.
     useAuthStore.setState({
-      user: { sub: ME, email: 'me@example.com', name: 'Me', roles: [], permissions: [] },
+      user: { sub: ME, email: 'me@example.com', name: 'Me', groups: [], permissions: [] },
     });
   });
 

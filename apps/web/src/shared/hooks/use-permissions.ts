@@ -4,17 +4,17 @@
  * Design:
  *  - The backend (PolicyGuard + AuthzService) is the single source of truth for
  *    authorization. `/me` returns the user's *effective permission keys* resolved
- *    from their DB role assignments, including the `'*'` super-admin wildcard.
+ *    from their DB group memberships and direct grants, including the `'*'` super-admin wildcard.
  *  - This hook is a thin reader over that list. It NEVER re-derives permissions
- *    from role names — that previously caused FE/BE drift (e.g. the `admin` role
+ *    from group names — that previously caused FE/BE drift (e.g. the `admin` group
  *    was unknown to the FE and its entire menu was hidden).
  *  - It is a UI convenience only, NOT a security boundary; every gated action is
  *    independently enforced server-side.
  *
  * Usage:
- *   const { can, hasRole, primaryRole } = usePermissions();
+ *   const { can, hasGroup, primaryGroup } = usePermissions();
  *   if (can('asset.read')) { ... }   // permission keys match the backend exactly
- *   if (hasRole('it-admin'))  { ... }
+ *   if (hasGroup('it-admin')) { ... }
  */
 import { useMemo } from 'react';
 import { useCurrentUser } from './use-current-user';
@@ -24,9 +24,9 @@ import { useCurrentUser } from './use-current-user';
 /** Super-admin permission — grants every capability (mirrors backend WILDCARD_PERMISSION). */
 const WILDCARD = '*';
 
-// ── Role priority (for primaryRole / persona-aware UI) ─────────────────────────
+// ── Group priority (for primaryGroup / persona-aware UI) ─────────────────────────
 
-const ROLE_PRIORITY: Record<string, number> = {
+const GROUP_PRIORITY: Record<string, number> = {
   admin: 11,
   'it-admin': 10,
   security: 9,
@@ -39,7 +39,7 @@ const ROLE_PRIORITY: Record<string, number> = {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type AppRole =
+export type GroupKey =
   'admin' | 'it-admin' | 'security' | 'hr' | 'helpdesk' | 'auditor' | 'manager' | 'employee';
 
 export interface PermissionHelpers {
@@ -48,15 +48,15 @@ export interface PermissionHelpers {
    * wildcard `'*'` or the exact key. Returns false while /me is loading.
    */
   can: (permission: string) => boolean;
-  /** Check if the user has a specific role. */
-  hasRole: (role: AppRole | string) => boolean;
+  /** Check if the user belongs to a specific group. */
+  hasGroup: (group: GroupKey | string) => boolean;
   /**
-   * The user's highest-priority role — drives persona-aware dashboard widgets.
+   * The user's highest-priority group — drives persona-aware dashboard widgets.
    * Returns 'employee' as a safe default while loading.
    */
-  primaryRole: AppRole;
-  /** All roles the user holds. */
-  roles: string[];
+  primaryGroup: GroupKey;
+  /** All groups the user belongs to. */
+  groups: string[];
   /** All effective permission keys the user holds (may contain `'*'`). */
   permissions: string[];
   /** True while /me is still loading. */
@@ -69,22 +69,22 @@ export function usePermissions(): PermissionHelpers {
   const { data: me, isLoading } = useCurrentUser();
 
   return useMemo<PermissionHelpers>(() => {
-    const roles: string[] = (me as { roles?: string[] })?.roles ?? [];
+    const groups: string[] = (me as { groups?: string[] })?.groups ?? [];
     const permissions: string[] = (me as { permissions?: string[] })?.permissions ?? [];
     const permSet = new Set(permissions);
     const isSuperAdmin = permSet.has(WILDCARD);
 
-    // Primary role = highest priority role the user holds
-    const primaryRole = roles.reduce<string>(
-      (best, r) => ((ROLE_PRIORITY[r] ?? 0) > (ROLE_PRIORITY[best] ?? 0) ? r : best),
+    // Primary group = highest priority group the user belongs to
+    const primaryGroup = groups.reduce<string>(
+      (best, r) => ((GROUP_PRIORITY[r] ?? 0) > (GROUP_PRIORITY[best] ?? 0) ? r : best),
       'employee',
-    ) as AppRole;
+    ) as GroupKey;
 
     return {
       can: (perm) => isSuperAdmin || permSet.has(perm),
-      hasRole: (role) => roles.includes(role),
-      primaryRole,
-      roles,
+      hasGroup: (group) => groups.includes(group),
+      primaryGroup,
+      groups,
       permissions,
       isLoading,
     };

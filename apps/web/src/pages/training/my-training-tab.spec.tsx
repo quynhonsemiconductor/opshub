@@ -127,7 +127,7 @@ describe('MyTrainingTab', () => {
      * mock would let some other field satisfy the assertion.
      */
     useAuthStore.setState({
-      user: { sub: ME, email: 'me@example.com', name: 'Me', roles: [], permissions: [] },
+      user: { sub: ME, email: 'me@example.com', name: 'Me', groups: [], permissions: [] },
     });
   });
 

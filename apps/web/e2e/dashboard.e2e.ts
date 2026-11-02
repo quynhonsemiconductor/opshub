@@ -46,7 +46,7 @@ test.describe('dashboard', () => {
 
   test('a section link navigates too', async ({ page }) => {
     await gotoInShell(page, '/');
-    await page.getByText('Roles, permissions and assignments').click();
+    await page.getByText('Groups, permissions and memberships').click();
     await expect(page).toHaveURL(/\/settings\/access-control$/);
     await expect(page.getByRole('tab', { name: 'Roles' })).toBeVisible();
   });
