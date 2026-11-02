@@ -505,7 +505,7 @@ export const ROLE_NAMES: Record<RoleKey, string> = {
 };
 
 /**
- * Role → permission bundles, seeded into `authz.role_permissions`.
+ * Role → permission bundles, seeded into `authz.group_permissions`.
  *
  * `admin` holds only the wildcard, deliberately: enumerating every code for it
  * would need editing here on every new permission, and a missed edit would make

@@ -39,9 +39,9 @@ import { resolveMigrationUrl } from './database-url';
  *   • `identity.employees` IS the fixture set. The e2e specs authenticate as those rows
  *     (`employee@opshub.local`, `hr@opshub.local`), so truncating them removes the very
  *     thing the suite logs in as.
- *   • `authz.*` holds the permission catalogue, the system roles, their grants and the
- *     `user_role_assignments` that make `hr` an unconstrained `workforce.read` holder.
- *     Dropping a role takes its assignments with it, and the tier fixtures stop meaning
+ *   • `authz.*` holds the permission catalogue, the system groups, their grants and the
+ *     `employee_groups` that make `hr` an unconstrained `workforce.read` holder.
+ *     Dropping a group takes its memberships with it, and the tier fixtures stop meaning
  *     anything.
  *
  * Both are reconciled idempotently by `seedRbacCatalog` / `seed`, so they need no reset.

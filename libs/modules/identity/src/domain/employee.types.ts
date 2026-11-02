@@ -10,7 +10,8 @@ export interface Employee {
   department: string | null;
   jobTitle: string | null;
   managerId: string | null;
-  roles: string[];
+  /** Keys of the permission groups the employee belongs to — a cache of `authz.employee_groups`. */
+  groupKeys: string[];
   status: EmployeeStatus;
   /** S3 object key for the profile photo; null until an avatar is uploaded. */
   photoStorageKey: string | null;
@@ -25,11 +26,11 @@ export interface CreateEmployeeInput {
   jobTitle?: string | null;
   managerId?: string | null;
   /**
-   * Only set by the Entra SSO JIT-provisioning path (roles from the token's
-   * App Role claim). The directory/employee HTTP endpoints never set this —
-   * role assignment is governed by the authz module.
+   * Only set by the Entra SSO JIT-provisioning path (the group keys named by the
+   * token's App Role claim). The directory/employee HTTP endpoints never set this —
+   * group membership is governed by the authz module.
    */
-  roles?: string[];
+  groupKeys?: string[];
   entraOid?: string | null;
 }
 

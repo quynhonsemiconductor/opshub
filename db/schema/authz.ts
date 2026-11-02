@@ -1,8 +1,8 @@
 /**
- * Authorization (RBAC) schema — fine-grained permissions, roles, scoped role
- * assignments, and approval delegations. Coexists with the legacy coarse
- * `identity.employees.roles` jsonb column (which still drives the JWT); the
- * PolicyGuard resolves effective permissions from these tables.
+ * Authorization (RBAC) schema — fine-grained permissions, groups (named sets of permissions), the groups
+ * employees belong to (scoped), permissions granted to one employee directly, and approval delegations.
+ * Coexists with the `identity.employees.group_keys` jsonb column, a cache of each person's group keys that
+ * `/auth/me` displays; the PolicyGuard resolves effective permissions from these tables.
  */
 import {
   pgSchema,
@@ -26,51 +26,51 @@ export const permissions = authzSchema.table('permissions', {
   description: text('description').notNull(),
 });
 
-/** Named role grouping a set of permissions, e.g. `it-admin`. */
-export const roles = authzSchema.table(
-  'roles',
+/** Named group of permissions, e.g. `it-admin`. */
+export const groups = authzSchema.table(
+  'groups',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     key: varchar('key', { length: 64 }).notNull(),
     name: varchar('name', { length: 120 }).notNull(),
-    /** System roles are seed-managed and cannot be deleted via the API. */
+    /** System groups are seed-managed and cannot be deleted via the API. */
     system: boolean('system').notNull().default(false),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    keyUq: uniqueIndex('uq_role_key').on(t.key),
+    keyUq: uniqueIndex('uq_group_key').on(t.key),
   }),
 );
 
-/** Role → permission membership (many-to-many). */
-export const rolePermissions = authzSchema.table(
-  'role_permissions',
+/** Group → permission membership (many-to-many). */
+export const groupPermissions = authzSchema.table(
+  'group_permissions',
   {
-    roleId: uuid('role_id')
+    groupId: uuid('group_id')
       .notNull()
-      .references(() => roles.id, { onDelete: 'cascade' }),
+      .references(() => groups.id, { onDelete: 'cascade' }),
     permissionKey: varchar('permission_key', { length: 120 })
       .notNull()
       .references(() => permissions.key, { onDelete: 'cascade' }),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.roleId, t.permissionKey] }),
+    pk: primaryKey({ columns: [t.groupId, t.permissionKey] }),
   }),
 );
 
 /**
- * Scoped role grant to a user. `scopeType=global` (scopeId null) grants the
- * role everywhere; narrower scopes (team/dept/region/self) constrain the grant
+ * Scoped membership of an employee in a group. `scopeType=global` (scopeId null) grants the
+ * group's permissions everywhere; narrower scopes (team/dept/region/self) constrain the grant
  * to matching resources. Optional `expiresAt` supports time-boxed access.
  */
-export const userRoleAssignments = authzSchema.table(
-  'user_role_assignments',
+export const employeeGroups = authzSchema.table(
+  'employee_groups',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id').notNull(),
-    roleId: uuid('role_id')
+    employeeId: uuid('employee_id').notNull(),
+    groupId: uuid('group_id')
       .notNull()
-      .references(() => roles.id, { onDelete: 'cascade' }),
+      .references(() => groups.id, { onDelete: 'cascade' }),
     scopeType: scopeTypeEnum('scope_type').notNull().default('global'),
     scopeId: varchar('scope_id', { length: 120 }),
     grantedBy: uuid('granted_by').notNull(),
@@ -82,13 +82,13 @@ export const userRoleAssignments = authzSchema.table(
     // 1. Global assignments (scope_id IS NULL) — enforce uniqueness ignoring the NULL column.
     // 2. Scoped assignments (scope_id IS NOT NULL) — standard composite uniqueness.
     // This avoids the PostgreSQL NULL != NULL gotcha in unique indexes.
-    uniqGlobal: uniqueIndex('uq_ura_user_role_global')
-      .on(t.userId, t.roleId, t.scopeType)
+    uniqGlobal: uniqueIndex('uq_employee_group_global')
+      .on(t.employeeId, t.groupId, t.scopeType)
       .where(sql`scope_id IS NULL`),
-    uniqScoped: uniqueIndex('uq_ura_user_role_scoped')
-      .on(t.userId, t.roleId, t.scopeType, t.scopeId)
+    uniqScoped: uniqueIndex('uq_employee_group_scoped')
+      .on(t.employeeId, t.groupId, t.scopeType, t.scopeId)
       .where(sql`scope_id IS NOT NULL`),
-    userIdx: index('ix_ura_user').on(t.userId),
+    employeeIdx: index('ix_employee_group_employee').on(t.employeeId),
   }),
 );
 
@@ -96,7 +96,7 @@ export const userRoleAssignments = authzSchema.table(
  * A permission granted to ONE employee directly, outside any group — the exception path.
  *
  * Group membership is how almost everyone gets their permissions. This table is for the one-off: a single
- * extra permission that does not justify a group of its own. It carries what `user_role_assignments`
+ * extra permission that does not justify a group of its own. It carries what `employee_groups`
  * carries — a scope, an optional expiry, who granted it — plus a `reason`, because a grant that bypasses
  * the groups has to say why it exists.
  */
@@ -117,7 +117,7 @@ export const employeePermissions = authzSchema.table(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    // Same pair of partial indexes as `user_role_assignments`: NULL scope_id is distinct in a unique index.
+    // Same pair of partial indexes as `employee_groups`: NULL scope_id is distinct in a unique index.
     uniqGlobal: uniqueIndex('uq_employee_permission_global')
       .on(t.employeeId, t.permissionKey, t.scopeType)
       .where(sql`scope_id IS NULL`),

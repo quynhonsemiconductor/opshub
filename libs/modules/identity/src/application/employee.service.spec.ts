@@ -77,7 +77,7 @@ describe('EmployeeService.create()', () => {
     mockEmployeeRepo.create.mockResolvedValue(EMPLOYEE);
 
     const result = await makeService().create(
-      { email: 'jane@acme.com', displayName: 'Jane Doe', roles: [] },
+      { email: 'jane@acme.com', displayName: 'Jane Doe', groupKeys: [] },
       ACTOR,
     );
     expect(result.email).toBe('jane@acme.com');
@@ -96,14 +96,17 @@ describe('EmployeeService.create()', () => {
     mockEmployeeRepo.findByEmail.mockResolvedValue(null);
     mockEmployeeRepo.create.mockResolvedValue({ ...EMPLOYEE, email: 'jane@acme.com' });
 
-    await makeService().create({ email: 'JANE@ACME.COM', displayName: 'Jane', roles: [] }, ACTOR);
+    await makeService().create(
+      { email: 'JANE@ACME.COM', displayName: 'Jane', groupKeys: [] },
+      ACTOR,
+    );
     expect(mockEmployeeRepo.findByEmail).toHaveBeenCalledWith('jane@acme.com');
   });
 
   it('throws ConflictException when email already exists', async () => {
     mockEmployeeRepo.findByEmail.mockResolvedValue(EMPLOYEE);
     await expect(
-      makeService().create({ email: 'jane@acme.com', displayName: 'Jane', roles: [] }, ACTOR),
+      makeService().create({ email: 'jane@acme.com', displayName: 'Jane', groupKeys: [] }, ACTOR),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(mockEmployeeRepo.create).not.toHaveBeenCalled();
   });

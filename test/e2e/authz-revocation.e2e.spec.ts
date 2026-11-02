@@ -3,7 +3,7 @@
  * no re-login, and nothing for the client to do.
  *
  * The property under test is the ABSENCE of a snapshot. opshub's session carries
- * identity and NOTHING else (the roles shown by `/v1/auth/me` are read from `employees.roles`): `PolicyGuard` resolves
+ * identity and NOTHING else (the roles shown by `/v1/auth/me` are read from `employees.group_keys`): `PolicyGuard` resolves
  * permissions from the database on every request, cached per user in Valkey and invalidated
  * by the write paths. So there is no embedded permission list to go stale, and no epoch
  * counter needed to expire one early — the same token simply gets a different answer.
@@ -80,7 +80,7 @@ function probe() {
   return app.inject({ method: 'GET', url: PROBE_ROUTE, headers: authHeaders(victim) });
 }
 
-/** The roles `/v1/auth/me` displays for a session: a DISPLAY list, read from `employees.roles`. */
+/** The roles `/v1/auth/me` displays for a session: a DISPLAY list, read from `employees.group_keys`. */
 async function displayedRoles(session: Session): Promise<string[]> {
   const res = await app.inject({
     method: 'GET',
@@ -173,13 +173,13 @@ describe('permission changes take effect on the next request', () => {
 
   it('does not authorize from the displayed roles list', async () => {
     // The strongest form of the property, and the reason the RoleGuard that read a roles array
-    // was removed. `syncEmployeeRoleClaims` rewrites `employees.roles` on every grant, and
+    // was removed. `syncEmployeeRoleClaims` rewrites `employees.group_keys` on every grant, and
     // `/v1/auth/me` shows it. So write `auditor` there WITHOUT an assignment: the list says
     // auditor, the authorization decision must still say no.
     const before = await displayedRoles(victim);
     await db
       .update(employees)
-      .set({ roles: [...before, 'auditor'] })
+      .set({ groupKeys: [...before, 'auditor'] })
       .where(eq(employees.id, FIXTURE.NO_PERMISSIONS.id));
     try {
       expect(await displayedRoles(victim)).toEqual(expect.arrayContaining(['auditor']));
@@ -187,7 +187,7 @@ describe('permission changes take effect on the next request', () => {
     } finally {
       await db
         .update(employees)
-        .set({ roles: before })
+        .set({ groupKeys: before })
         .where(eq(employees.id, FIXTURE.NO_PERMISSIONS.id));
     }
   });

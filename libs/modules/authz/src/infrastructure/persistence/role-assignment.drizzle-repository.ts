@@ -3,13 +3,13 @@ import { and, desc, eq, gt, isNull, or } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB, type DbExecutor } from '@platform';
 import type { RoleAssignment } from '@platform';
 import { newId } from '@shared-kernel';
-import { employees, roles as rolesTable, userRoleAssignments } from '../../../../../../db/schema';
+import { employees, groups, employeeGroups } from '../../../../../../db/schema';
 import type {
   AssignRoleInput,
   IRoleAssignmentRepository,
 } from '../../domain/ports/role-assignment.repository';
 
-type AssignmentRow = typeof userRoleAssignments.$inferSelect;
+type AssignmentRow = typeof employeeGroups.$inferSelect;
 
 @Injectable()
 export class RoleAssignmentDrizzleRepository implements IRoleAssignmentRepository {
@@ -18,8 +18,8 @@ export class RoleAssignmentDrizzleRepository implements IRoleAssignmentRepositor
   private toDomain(row: AssignmentRow): RoleAssignment {
     return {
       id: row.id,
-      userId: row.userId,
-      roleId: row.roleId,
+      userId: row.employeeId,
+      roleId: row.groupId,
       scopeType: row.scopeType,
       scopeId: row.scopeId,
       grantedBy: row.grantedBy,
@@ -31,25 +31,25 @@ export class RoleAssignmentDrizzleRepository implements IRoleAssignmentRepositor
   async listForUser(userId: string): Promise<RoleAssignment[]> {
     const rows = await this.db
       .select()
-      .from(userRoleAssignments)
-      .where(eq(userRoleAssignments.userId, userId))
-      .orderBy(desc(userRoleAssignments.createdAt), desc(userRoleAssignments.id));
+      .from(employeeGroups)
+      .where(eq(employeeGroups.employeeId, userId))
+      .orderBy(desc(employeeGroups.createdAt), desc(employeeGroups.id));
     return rows.map((r) => this.toDomain(r));
   }
 
   async listUserIdsForRole(roleId: string): Promise<string[]> {
     const rows = await this.db
-      .selectDistinct({ userId: userRoleAssignments.userId })
-      .from(userRoleAssignments)
-      .where(eq(userRoleAssignments.roleId, roleId));
+      .selectDistinct({ userId: employeeGroups.employeeId })
+      .from(employeeGroups)
+      .where(eq(employeeGroups.groupId, roleId));
     return rows.map((r) => r.userId);
   }
 
   async findById(id: string): Promise<RoleAssignment | null> {
     const [row] = await this.db
       .select()
-      .from(userRoleAssignments)
-      .where(eq(userRoleAssignments.id, id))
+      .from(employeeGroups)
+      .where(eq(employeeGroups.id, id))
       .limit(1);
     return row ? this.toDomain(row) : null;
   }
@@ -61,11 +61,11 @@ export class RoleAssignmentDrizzleRepository implements IRoleAssignmentRepositor
     if (existing) return existing;
 
     const [row] = await (tx ?? this.db)
-      .insert(userRoleAssignments)
+      .insert(employeeGroups)
       .values({
         id: newId(),
-        userId: input.userId,
-        roleId: input.roleId,
+        employeeId: input.userId,
+        groupId: input.roleId,
         scopeType: input.scopeType,
         scopeId: input.scopeId,
         grantedBy: input.grantedBy,
@@ -78,15 +78,15 @@ export class RoleAssignmentDrizzleRepository implements IRoleAssignmentRepositor
   private async findEquivalent(input: AssignRoleInput): Promise<RoleAssignment | null> {
     const [row] = await this.db
       .select()
-      .from(userRoleAssignments)
+      .from(employeeGroups)
       .where(
         and(
-          eq(userRoleAssignments.userId, input.userId),
-          eq(userRoleAssignments.roleId, input.roleId),
-          eq(userRoleAssignments.scopeType, input.scopeType),
+          eq(employeeGroups.employeeId, input.userId),
+          eq(employeeGroups.groupId, input.roleId),
+          eq(employeeGroups.scopeType, input.scopeType),
           input.scopeId === null
-            ? isNull(userRoleAssignments.scopeId)
-            : eq(userRoleAssignments.scopeId, input.scopeId),
+            ? isNull(employeeGroups.scopeId)
+            : eq(employeeGroups.scopeId, input.scopeId),
         ),
       )
       .limit(1);
@@ -94,25 +94,25 @@ export class RoleAssignmentDrizzleRepository implements IRoleAssignmentRepositor
   }
 
   async revoke(id: string, tx?: DbExecutor): Promise<void> {
-    await (tx ?? this.db).delete(userRoleAssignments).where(eq(userRoleAssignments.id, id));
+    await (tx ?? this.db).delete(employeeGroups).where(eq(employeeGroups.id, id));
   }
 
   async syncEmployeeRoleClaims(userId: string): Promise<string[]> {
     // Distinct active (non-expired) role keys for this user.
     const rows = await this.db
-      .selectDistinct({ key: rolesTable.key })
-      .from(userRoleAssignments)
-      .innerJoin(rolesTable, eq(rolesTable.id, userRoleAssignments.roleId))
+      .selectDistinct({ key: groups.key })
+      .from(employeeGroups)
+      .innerJoin(groups, eq(groups.id, employeeGroups.groupId))
       .where(
         and(
-          eq(userRoleAssignments.userId, userId),
-          or(isNull(userRoleAssignments.expiresAt), gt(userRoleAssignments.expiresAt, new Date())),
+          eq(employeeGroups.employeeId, userId),
+          or(isNull(employeeGroups.expiresAt), gt(employeeGroups.expiresAt, new Date())),
         ),
       );
     const keys = rows.map((r) => r.key).sort();
     await this.db
       .update(employees)
-      .set({ roles: keys, updatedAt: new Date() })
+      .set({ groupKeys: keys, updatedAt: new Date() })
       .where(eq(employees.id, userId));
     return keys;
   }

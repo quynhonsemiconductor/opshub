@@ -22,7 +22,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { AuthzService, DRIZZLE, type DrizzleDB } from '@platform';
-import { roles, userRoleAssignments } from '../../db/schema';
+import { groups, employeeGroups } from '../../db/schema';
 import { FIXTURE, createTestApp } from './support/harness';
 
 let app: NestFastifyApplication;
@@ -38,7 +38,7 @@ beforeAll(async () => {
   authz = app.get(AuthzService);
   db = app.get<DrizzleDB>(DRIZZLE);
 
-  const [hr] = await db.select({ id: roles.id }).from(roles).where(eq(roles.key, 'hr')).limit(1);
+  const [hr] = await db.select({ id: groups.id }).from(groups).where(eq(groups.key, 'hr')).limit(1);
   expect(hr, 'the seeded `hr` role is missing — run pnpm db:seed').toBeTruthy();
   hrRoleId = hr.id;
 
@@ -53,8 +53,8 @@ afterAll(async () => {
 /** Leaves no assignment behind: a stray global grant would silently widen other specs. */
 async function clearSubjectGrants(): Promise<void> {
   await db
-    .delete(userRoleAssignments)
-    .where(and(eq(userRoleAssignments.userId, SUBJECT), eq(userRoleAssignments.roleId, hrRoleId)));
+    .delete(employeeGroups)
+    .where(and(eq(employeeGroups.employeeId, SUBJECT), eq(employeeGroups.groupId, hrRoleId)));
 }
 
 /**
@@ -67,9 +67,9 @@ async function clearSubjectGrants(): Promise<void> {
  */
 async function grant(scopeType: 'global' | 'team', expiresAt: Date | null): Promise<void> {
   await clearSubjectGrants();
-  await db.insert(userRoleAssignments).values({
-    userId: SUBJECT,
-    roleId: hrRoleId,
+  await db.insert(employeeGroups).values({
+    employeeId: SUBJECT,
+    groupId: hrRoleId,
     scopeType,
     scopeId: scopeType === 'global' ? null : 'team-alpha',
     // `granted_by` is NOT NULL — every grant records who made it, which is the point of the column.
@@ -78,9 +78,9 @@ async function grant(scopeType: 'global' | 'team', expiresAt: Date | null): Prom
   });
 
   const stored = await db
-    .select({ id: userRoleAssignments.id })
-    .from(userRoleAssignments)
-    .where(and(eq(userRoleAssignments.userId, SUBJECT), eq(userRoleAssignments.roleId, hrRoleId)));
+    .select({ id: employeeGroups.id })
+    .from(employeeGroups)
+    .where(and(eq(employeeGroups.employeeId, SUBJECT), eq(employeeGroups.groupId, hrRoleId)));
   expect(stored, `the ${scopeType} grant under test was not stored`).toHaveLength(1);
 }
 

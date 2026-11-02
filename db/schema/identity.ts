@@ -18,8 +18,11 @@ export const employees = identitySchema.table(
     department: varchar('department', { length: 120 }),
     jobTitle: varchar('job_title', { length: 120 }),
     managerId: uuid('manager_id'),
-    /** Application roles, e.g. ['it-admin','security']. Drives RBAC. */
-    roles: jsonb('roles').notNull().$type<string[]>().default([]),
+    /**
+     * Keys of the permission groups the employee belongs to, e.g. ['it-admin','security'] — a cache of
+     * `authz.employee_groups` that `/auth/me` displays. Authorization is resolved from the tables, not this.
+     */
+    groupKeys: jsonb('group_keys').notNull().$type<string[]>().default([]),
     status: employeeStatusEnum('status').notNull().default('active'),
     /** S3 stored_files.id for the employee's profile photo — null until uploaded. */
     photoStorageKey: varchar('photo_storage_key', { length: 512 }),

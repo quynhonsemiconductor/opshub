@@ -16,7 +16,7 @@ import { REQUEST_TYPE } from '@shared-kernel';
 import {
   employeePermissions,
   employees,
-  userRoleAssignments,
+  employeeGroups,
   accessGrants,
   assetAssignments,
   assets,
@@ -149,13 +149,13 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
      * row saying "5 roles removed" cannot answer it.
      */
     const removedRoles = await tx
-      .delete(userRoleAssignments)
-      .where(eq(userRoleAssignments.userId, employeeId))
-      .returning({ id: userRoleAssignments.id, roleId: userRoleAssignments.roleId });
+      .delete(employeeGroups)
+      .where(eq(employeeGroups.employeeId, employeeId))
+      .returning({ id: employeeGroups.id, groupId: employeeGroups.groupId });
 
     for (const assignment of removedRoles) {
       await this.roleAssignmentTrail.record(AUDIT_ACTION.ROLE_REVOKED, assignment.id, actor, tx, {
-        before: { userId: employeeId, roleId: assignment.roleId },
+        before: { userId: employeeId, roleId: assignment.groupId },
       });
     }
 
@@ -194,7 +194,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
      */
     await tx
       .update(employees)
-      .set({ roles: [], updatedAt: now })
+      .set({ groupKeys: [], updatedAt: now })
       .where(eq(employees.id, employeeId));
 
     // 3. Revoke all active access grants

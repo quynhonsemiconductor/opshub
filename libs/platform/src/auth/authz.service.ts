@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB } from '../database/drizzle.provider';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { employeePermissions, rolePermissions, userRoleAssignments } from '../../../../db/schema';
+import { employeePermissions, groupPermissions, employeeGroups } from '../../../../db/schema';
 import { ScopeEvaluator } from './scope-evaluator';
 import { permissionGrants } from '@shared-kernel';
 import {
@@ -50,19 +50,16 @@ export class AuthzService {
       const [groupRows, directRows] = await Promise.all([
         this.db
           .select({
-            permissionKey: rolePermissions.permissionKey,
-            scopeType: userRoleAssignments.scopeType,
-            scopeId: userRoleAssignments.scopeId,
+            permissionKey: groupPermissions.permissionKey,
+            scopeType: employeeGroups.scopeType,
+            scopeId: employeeGroups.scopeId,
           })
-          .from(userRoleAssignments)
-          .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoleAssignments.roleId))
+          .from(employeeGroups)
+          .innerJoin(groupPermissions, eq(groupPermissions.groupId, employeeGroups.groupId))
           .where(
             and(
-              eq(userRoleAssignments.userId, userId),
-              or(
-                isNull(userRoleAssignments.expiresAt),
-                gt(userRoleAssignments.expiresAt, new Date()),
-              ),
+              eq(employeeGroups.employeeId, userId),
+              or(isNull(employeeGroups.expiresAt), gt(employeeGroups.expiresAt, new Date())),
             ),
           ),
         this.db
@@ -126,18 +123,15 @@ export class AuthzService {
       const [groupRows, directRows] = await Promise.all([
         db
           .select({
-            userId: userRoleAssignments.userId,
-            permissionKey: rolePermissions.permissionKey,
+            userId: employeeGroups.employeeId,
+            permissionKey: groupPermissions.permissionKey,
           })
-          .from(userRoleAssignments)
-          .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoleAssignments.roleId))
+          .from(employeeGroups)
+          .innerJoin(groupPermissions, eq(groupPermissions.groupId, employeeGroups.groupId))
           .where(
             and(
-              eq(userRoleAssignments.scopeType, 'global'),
-              or(
-                isNull(userRoleAssignments.expiresAt),
-                gt(userRoleAssignments.expiresAt, new Date()),
-              ),
+              eq(employeeGroups.scopeType, 'global'),
+              or(isNull(employeeGroups.expiresAt), gt(employeeGroups.expiresAt, new Date())),
             ),
           ),
         db

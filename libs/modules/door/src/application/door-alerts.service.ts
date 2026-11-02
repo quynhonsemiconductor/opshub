@@ -8,8 +8,8 @@ import {
 import {
   employeePermissions,
   employees,
-  rolePermissions,
-  userRoleAssignments,
+  groupPermissions,
+  employeeGroups,
 } from '../../../../../db/schema';
 
 /**
@@ -37,16 +37,13 @@ export class DoorAlertsService {
       this.db
         .selectDistinct({ id: employees.id })
         .from(employees)
-        .innerJoin(userRoleAssignments, eq(userRoleAssignments.userId, employees.id))
-        .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoleAssignments.roleId))
+        .innerJoin(employeeGroups, eq(employeeGroups.employeeId, employees.id))
+        .innerJoin(groupPermissions, eq(groupPermissions.groupId, employeeGroups.groupId))
         .where(
           and(
-            inArray(rolePermissions.permissionKey, ['door.manage', '*']),
+            inArray(groupPermissions.permissionKey, ['door.manage', '*']),
             eq(employees.status, 'active'),
-            or(
-              isNull(userRoleAssignments.expiresAt),
-              gt(userRoleAssignments.expiresAt, sql`now()`),
-            ),
+            or(isNull(employeeGroups.expiresAt), gt(employeeGroups.expiresAt, sql`now()`)),
           ),
         ),
       this.db

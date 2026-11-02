@@ -50,7 +50,7 @@ const ROOT = join(__dirname, '..');
  * assumed:
  *
  *   - `permissions.key`   PRIMARY KEY (db/schema/authz.ts)
- *   - `roles.key`         uniqueIndex('uq_role_key')
+ *   - `groups.key`        uniqueIndex('uq_group_key')
  *   - `attachments.fileId` part of PRIMARY KEY (entity_type, entity_id, file_id)
  *                          (db/schema/storage.ts, migration 0018)
  *   - `classificationLevels.code` PRIMARY KEY (db/schema/isms-information-assets.ts and
@@ -64,7 +64,7 @@ const ROOT = join(__dirname, '..');
  *                          levels above, and `rank` is UNIQUE there too.
  *   - `nonconformanceSeverities.code` PRIMARY KEY (db/schema/qms.ts and migration 0024).
  *   - `managementReviews.reference` uniqueIndex('uq_management_review_reference')
- *                          (db/schema/qms.ts, migration 0026). Unconditional, like `roles.key`: the
+ *                          (db/schema/qms.ts, migration 0026). Unconditional, like `groups.key`: the
  *                          index is on the column alone, so any ordering ending on it is total.
  *   - `internalAuditAuditors.auditorId` part of PRIMARY KEY (internal_audit_id, auditor_id)
  *                          (db/schema/qms.ts, migration 0025). CONDITIONAL in the same way
@@ -110,7 +110,7 @@ const ROOT = join(__dirname, '..');
  */
 const UNIQUE_NON_ID_COLUMNS = [
   'permissions.key',
-  'roles.key',
+  'groups.key',
   'attachments.fileId',
   'classificationLevels.code',
   'vendorCriticalityLevels.code',

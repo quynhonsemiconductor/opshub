@@ -330,6 +330,13 @@
       "when": 1793380374922,
       "tag": "0046_position_rank",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793466774922,
+      "tag": "0047_rename_roles_to_groups",
+      "breakpoints": true
     }
   ]
 }

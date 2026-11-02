@@ -30,7 +30,7 @@ import { Pool } from 'pg';
 import { pgOptions, tlsFromEnv } from './pg-ssl';
 import { resolveDatabaseUrl } from './database-url';
 import { log } from './script-log';
-import { permissions, roles, rolePermissions, userRoleAssignments } from './schema/authz';
+import { permissions, groups, groupPermissions, employeeGroups } from './schema/authz';
 import { employees } from './schema/identity';
 import { user as identityUser } from './schema/identity-auth';
 import { controls } from './schema/isms-controls';
@@ -64,8 +64,8 @@ const ROLES: Array<{ key: string; name: string; permissions: string[] }> = Objec
 
 // ── Demo employees — one per system role, for RBAC + test-login testing ───────
 // Fixed UUIDs keep re-seeds idempotent. Each employee gets the matching legacy
-// `employees.roles` jsonb (the denormalised copy) AND a global
-// `user_role_assignments` row (drives effective permissions via authz.resolve).
+// `employees.group_keys` jsonb (the denormalised copy) AND a global
+// `employee_groups` row (drives effective permissions via authz.resolve).
 // Sign in locally with any of these via `POST /api/auth/test-login` (IDENTITY_TEST_LOGIN=enabled).
 const ADMIN_EMPLOYEE_ID = '00000000-0000-7000-8000-000000000001';
 
@@ -219,19 +219,19 @@ async function seedRbacCatalogInto(db: SeedDb): Promise<void> {
 
     // 2. System roles — upsert so display names reconcile on re-run.
     await tx
-      .insert(roles)
+      .insert(groups)
       .values(ROLES.map((r) => ({ key: r.key, name: r.name, system: true })))
       .onConflictDoUpdate({
-        target: roles.key,
+        target: groups.key,
         set: { name: sql`excluded.name`, system: sql`excluded.system` },
       });
 
     const roleRows = await tx
-      .select({ id: roles.id, key: roles.key })
-      .from(roles)
+      .select({ id: groups.id, key: groups.key })
+      .from(groups)
       .where(
         inArray(
-          roles.key,
+          groups.key,
           ROLES.map((r) => r.key),
         ),
       );
@@ -242,11 +242,11 @@ async function seedRbacCatalogInto(db: SeedDb): Promise<void> {
     for (const r of ROLES) {
       const roleId = roleIdByKey.get(r.key);
       if (!roleId) continue;
-      await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+      await tx.delete(groupPermissions).where(eq(groupPermissions.groupId, roleId));
       if (r.permissions.length > 0) {
         await tx
-          .insert(rolePermissions)
-          .values(r.permissions.map((permissionKey) => ({ roleId, permissionKey })))
+          .insert(groupPermissions)
+          .values(r.permissions.map((permissionKey) => ({ groupId: roleId, permissionKey })))
           .onConflictDoNothing();
       }
     }
@@ -313,7 +313,7 @@ export async function seedRbacCatalog(connectionUrl?: string): Promise<void> {
 async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
   const adminEmail = process.env['ADMIN_EMAIL'] ?? 'admin@opshub.local';
 
-  // 1. Employees — `employees.roles` is the denormalised copy of the role assignments below.
+  // 1. Employees — `employees.group_keys` is the denormalised copy of the role assignments below.
   await db
     .insert(employees)
     .values(
@@ -325,7 +325,7 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
         // `onConflictDoNothing`, and test-login minted a NEW user instead of finding the fixture.
         email: e.id === ADMIN_EMPLOYEE_ID ? adminEmail : e.email,
         displayName: e.displayName,
-        roles: [e.roleKey],
+        groupKeys: [e.roleKey],
         status: 'active' as const,
       })),
     )
@@ -363,11 +363,11 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
 
   // 2. Global role assignments — drive effective permissions via authz.resolve.
   const roleRows = await db
-    .select({ id: roles.id, key: roles.key })
-    .from(roles)
+    .select({ id: groups.id, key: groups.key })
+    .from(groups)
     .where(
       inArray(
-        roles.key,
+        groups.key,
         DEMO_EMPLOYEES.map((e) => e.roleKey),
       ),
     );
@@ -377,10 +377,10 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
     const roleId = roleIdByKey.get(e.roleKey);
     if (!roleId) continue;
     await db
-      .insert(userRoleAssignments)
+      .insert(employeeGroups)
       .values({
-        userId: e.id,
-        roleId,
+        employeeId: e.id,
+        groupId: roleId,
         scopeType: 'global',
         grantedBy: ADMIN_EMPLOYEE_ID,
       })

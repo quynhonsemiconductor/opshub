@@ -14,7 +14,7 @@ import { OffboardingTypeDef } from './offboarding.type-def';
 import {
   employeePermissions,
   employees,
-  userRoleAssignments,
+  employeeGroups,
   accessGrants,
   assetAssignments,
   assets,
@@ -33,7 +33,7 @@ import {
  */
 function makeTx(
   assetReturnRows: Array<{ assetId: string }> = [],
-  roleReturnRows: Array<{ id: string; roleId: string }> = [],
+  roleReturnRows: Array<{ id: string; groupId: string }> = [],
   sessionReturnRows: Array<{ id: string }> = [{ id: 'token-1' }],
   entraOid: string | null = null,
   directPermissionReturnRows: Array<{ id: string; permissionKey: string }> = [],
@@ -140,7 +140,7 @@ describe('OffboardingTypeDef.onApprove()', () => {
     const tx = makeTx();
     await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-    const roleDeleteCall = tx._deleteCalls.find((c) => c.table === userRoleAssignments);
+    const roleDeleteCall = tx._deleteCalls.find((c) => c.table === employeeGroups);
     expect(roleDeleteCall).toBeDefined();
   });
 
@@ -223,20 +223,22 @@ describe('OffboardingTypeDef.onApprove()', () => {
   });
 
   it('clears the denormalised role claims alongside the assignments', async () => {
-    const tx = makeTx([], [{ id: 'a-1', roleId: 'r-1' }]);
+    const tx = makeTx([], [{ id: 'a-1', groupId: 'g-1' }]);
     await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-    // `employees.roles` feeds the JWT claims and nothing maintained it here, so an offboarded row
-    // still listed the roles whose assignments had just been deleted.
-    const rolesWrite = tx._updateCalls
+    // `employees.group_keys` is what `/auth/me` displays and nothing maintained it here, so an offboarded row
+    // still listed the groups whose memberships had just been deleted.
+    const groupKeysWrite = tx._updateCalls
       .filter((c) => c.table === employees)
       .find((c) =>
         c.chain.set.mock.calls.some((args) =>
-          Array.isArray((args[0] as { roles?: unknown }).roles),
+          Array.isArray((args[0] as { groupKeys?: unknown }).groupKeys),
         ),
       );
-    expect(rolesWrite, 'no write cleared employees.roles').toBeDefined();
-    expect(rolesWrite!.chain.set).toHaveBeenCalledWith(expect.objectContaining({ roles: [] }));
+    expect(groupKeysWrite, 'no write cleared employees.group_keys').toBeDefined();
+    expect(groupKeysWrite!.chain.set).toHaveBeenCalledWith(
+      expect.objectContaining({ groupKeys: [] }),
+    );
   });
 
   describe('the audit trail — the evidence an access review reads', () => {
@@ -254,8 +256,8 @@ describe('OffboardingTypeDef.onApprove()', () => {
       const tx = makeTx(
         [],
         [
-          { id: 'assign-1', roleId: 'role-1' },
-          { id: 'assign-2', roleId: 'role-2' },
+          { id: 'assign-1', groupId: 'group-1' },
+          { id: 'assign-2', groupId: 'group-2' },
         ],
       );
       await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);

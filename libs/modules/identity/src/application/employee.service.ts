@@ -88,7 +88,7 @@ export class EmployeeService {
         after: {
           email: employee.email,
           displayName: employee.displayName,
-          roles: employee.roles,
+          groups: employee.groupKeys,
         },
       });
       return employee;

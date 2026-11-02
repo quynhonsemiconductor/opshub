@@ -185,7 +185,7 @@ END $$;
 \echo '  opshub_app can read its own tables'
 SET ROLE opshub_app;
 SELECT count(*) IS NOT NULL AS readable FROM identity.employees;
-SELECT count(*) IS NOT NULL AS readable FROM authz.user_role_assignments;
+SELECT count(*) IS NOT NULL AS readable FROM authz.employee_groups;
 SELECT count(*) IS NOT NULL AS readable FROM audit.audit_logs;
 SELECT count(*) IS NOT NULL AS readable FROM requests.request_items;
 SELECT count(*) IS NOT NULL AS readable FROM storage.stored_files;

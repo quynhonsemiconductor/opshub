@@ -49,7 +49,7 @@ function toDto(e: Employee): EmployeeResponseDto {
     department: e.department,
     jobTitle: e.jobTitle,
     managerId: e.managerId,
-    roles: e.roles,
+    roles: e.groupKeys,
     status: e.status,
     photoStorageKey: e.photoStorageKey,
     createdAt: e.createdAt.toISOString(),
