@@ -8,7 +8,15 @@ import {
   ValidationException,
   type DrizzleDB,
 } from '@platform';
-import type { Permission, RoleAssignment, RoleWithPermissions, ScopeType } from '@platform';
+import type {
+  EmployeePermission,
+  Permission,
+  RoleAssignment,
+  RoleWithPermissions,
+  ScopeType,
+} from '@platform';
+import { eq } from 'drizzle-orm';
+import { employees } from '../../../../../db/schema';
 import {
   AuditService,
   AUDIT_ACTION,
@@ -24,6 +32,12 @@ import {
   ROLE_ASSIGNMENT_REPOSITORY,
   type IRoleAssignmentRepository,
 } from '../domain/ports/role-assignment.repository';
+import {
+  EMPLOYEE_PERMISSION_REPOSITORY,
+  type IEmployeePermissionRepository,
+} from '../domain/ports/employee-permission.repository';
+import { resolveGrantScope } from './grant-scope.helper';
+import { mayGrantPermission } from './permission-grant.helper';
 
 export interface Actor {
   sub: string;
@@ -35,6 +49,16 @@ export interface AssignRoleCommand {
   roleId: string;
   scopeType?: ScopeType;
   scopeId?: string | null;
+  expiresAt?: Date | null;
+}
+
+export interface GrantEmployeePermissionCommand {
+  employeeId: string;
+  permissionKey: string;
+  scopeType?: ScopeType;
+  scopeId?: string | null;
+  /** Why the employee holds this permission outside a group. */
+  reason: string;
   expiresAt?: Date | null;
 }
 
@@ -57,11 +81,14 @@ export class AuthzAdminService {
   private readonly roleTrail: ResourceAuditTrail;
   private readonly assignmentTrail: ResourceAuditTrail;
   private readonly employeeTrail: ResourceAuditTrail;
+  private readonly employeePermissionTrail: ResourceAuditTrail;
 
   constructor(
     @Inject(ROLE_REPOSITORY) private readonly roleRepo: IRoleRepository,
     @Inject(ROLE_ASSIGNMENT_REPOSITORY)
     private readonly assignmentRepo: IRoleAssignmentRepository,
+    @Inject(EMPLOYEE_PERMISSION_REPOSITORY)
+    private readonly employeePermissionRepo: IEmployeePermissionRepository,
     private readonly authz: AuthzService,
     @InjectDrizzle() private readonly db: DrizzleDB,
     audit: AuditService,
@@ -69,6 +96,7 @@ export class AuthzAdminService {
     this.roleTrail = audit.forResource(AUDIT_RESOURCE.ROLE);
     this.assignmentTrail = audit.forResource(AUDIT_RESOURCE.ROLE_ASSIGNMENT);
     this.employeeTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE);
+    this.employeePermissionTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE_PERMISSION);
   }
 
   // ── Catalog ────────────────────────────────────────────────────────────────
@@ -188,34 +216,7 @@ export class AuthzAdminService {
     // `admin` (`*`) role. Holders of `*` (platform admins) can grant anything.
     await this.assertCanGrantRole(actor, role);
 
-    const scopeType = command.scopeType ?? 'global';
-    const scopeId =
-      scopeType === 'global' || scopeType === 'self' ? null : (command.scopeId ?? null);
-    if (scopeType !== 'global' && scopeType !== 'self' && !scopeId) {
-      throw new ValidationException(
-        'VALIDATION_FAILED',
-        `scopeId is required for scope type '${scopeType}'`,
-      );
-    }
-
-    // `team` and `region` are in the scope_type enum and the ScopeEvaluator, but
-    // NOTHING in the schema produces a team or a region: there is no teams table and
-    // no region column, so `ResourceScopeResolver` can never populate those
-    // attributes and a grant scoped to them can only ever deny.
-    //
-    // Refusing at write time is the honest failure. Accepting the grant would let an
-    // operator believe they had scoped someone's access when they had actually
-    // removed it — and before the guard started failing closed, it silently GRANTED
-    // everything instead, which is worse. Re-allow a dimension here in the same
-    // change that gives the schema and the resolver something to match on.
-    if (scopeType === 'team' || scopeType === 'region') {
-      throw new ValidationException(
-        'VALIDATION_FAILED',
-        `Scope type '${scopeType}' is not supported yet: no resource carries a ` +
-          `${scopeType}, so the grant could never be satisfied. Use 'global', 'self' ` +
-          `or 'dept'.`,
-      );
-    }
+    const { scopeType, scopeId } = resolveGrantScope(command.scopeType, command.scopeId);
 
     const assignment = await this.db.transaction(async (tx) => {
       const created = await this.assignmentRepo.assign(
@@ -324,6 +325,124 @@ export class AuthzAdminService {
     return finalKeys;
   }
 
+  // ── Direct employee permissions ──────────────────────────────────────────────
+
+  /**
+   * Lists the permissions granted straight to an employee, outside any group.
+   *
+   * Args:
+   *   employeeId: The employee whose direct grants are wanted.
+   *
+   * Returns:
+   *   Every direct grant, newest first, expired ones included so a review can see them.
+   */
+  listEmployeePermissions(employeeId: string): Promise<EmployeePermission[]> {
+    return this.employeePermissionRepo.listForEmployee(employeeId);
+  }
+
+  /**
+   * Grants one permission straight to an employee, outside any group.
+   *
+   * The grant and its audit entry commit together. The employee's cached permissions are dropped after the
+   * commit, so enforcement is immediate.
+   *
+   * Args:
+   *   command: The employee, the permission, an optional scope and expiry, and the mandatory reason.
+   *   actor: Who is granting; they must themselves hold the permission globally (see `mayGrantPermission`).
+   *
+   * Returns:
+   *   The stored grant; the existing one when the same permission and scope were already granted.
+   *
+   * Raises:
+   *   NotFoundException: If the employee does not exist.
+   *   ValidationException: If the permission is unknown, the scope is invalid or the expiry is in the past.
+   *   PermissionDeniedException: If the actor does not hold the permission they are trying to grant.
+   */
+  async grantEmployeePermission(
+    command: GrantEmployeePermissionCommand,
+    actor: Actor,
+  ): Promise<EmployeePermission> {
+    const [employee] = await this.db
+      .select({ id: employees.id })
+      .from(employees)
+      .where(eq(employees.id, command.employeeId))
+      .limit(1);
+    if (!employee) {
+      throw new NotFoundException('EMPLOYEE_NOT_FOUND', `Employee ${command.employeeId} not found`);
+    }
+
+    await this.assertPermissionsExist([command.permissionKey]);
+    await this.assertCanGrantPermission(actor, command.permissionKey);
+    const { scopeType, scopeId } = resolveGrantScope(command.scopeType, command.scopeId);
+
+    if (command.expiresAt && command.expiresAt.getTime() <= Date.now()) {
+      throw new ValidationException('VALIDATION_FAILED', 'expiresAt must be in the future');
+    }
+
+    const grant = await this.db.transaction(async (tx) => {
+      const created = await this.employeePermissionRepo.grant(
+        {
+          employeeId: command.employeeId,
+          permissionKey: command.permissionKey,
+          scopeType,
+          scopeId,
+          grantedBy: actor.sub,
+          reason: command.reason,
+          expiresAt: command.expiresAt ?? null,
+        },
+        tx,
+      );
+      await this.employeePermissionTrail.record(
+        AUDIT_ACTION.EMPLOYEE_PERMISSION_GRANTED,
+        created.id,
+        actor,
+        tx,
+        {
+          after: {
+            employeeId: command.employeeId,
+            permissionKey: command.permissionKey,
+            scopeType,
+            scopeId,
+            reason: command.reason,
+            expiresAt: created.expiresAt?.toISOString() ?? null,
+          },
+        },
+      );
+      return created;
+    });
+
+    await this.authz.invalidate(command.employeeId);
+    return grant;
+  }
+
+  /**
+   * Revokes a permission that was granted straight to an employee.
+   *
+   * Args:
+   *   id: The direct grant to remove.
+   *   actor: Who is revoking.
+   *
+   * Raises:
+   *   NotFoundException: If the grant does not exist.
+   */
+  async revokeEmployeePermission(id: string, actor: Actor): Promise<void> {
+    const grant = await this.employeePermissionRepo.findById(id);
+    if (!grant) {
+      throw new NotFoundException('EMPLOYEE_PERMISSION_NOT_FOUND', `Grant ${id} not found`);
+    }
+    await this.db.transaction(async (tx) => {
+      await this.employeePermissionRepo.revoke(id, tx);
+      await this.employeePermissionTrail.record(
+        AUDIT_ACTION.EMPLOYEE_PERMISSION_REVOKED,
+        id,
+        actor,
+        tx,
+        { before: { employeeId: grant.employeeId, permissionKey: grant.permissionKey } },
+      );
+    });
+    await this.authz.invalidate(grant.employeeId);
+  }
+
   async revokeAssignment(id: string, actor: Actor): Promise<void> {
     const assignment = await this.assignmentRepo.findById(id);
     if (!assignment) {
@@ -357,6 +476,19 @@ export class AuthzAdminService {
     if (missing.length > 0) {
       throw new PermissionDeniedException(
         `Cannot grant role '${role.key}': it includes permissions you do not hold (${missing.join(', ')}).`,
+      );
+    }
+  }
+
+  /**
+   * Enforces no-privilege-escalation for a direct grant: the actor must hold the permission globally.
+   * Fails closed.
+   */
+  private async assertCanGrantPermission(actor: Actor, permissionKey: string): Promise<void> {
+    const grantorPermissions = await this.authz.resolve(actor.sub);
+    if (!mayGrantPermission(grantorPermissions, permissionKey)) {
+      throw new PermissionDeniedException(
+        `Cannot grant '${permissionKey}': you do not hold it without a scope limit.`,
       );
     }
   }

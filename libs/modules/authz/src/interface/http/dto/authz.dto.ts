@@ -1,6 +1,11 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  EMPLOYEE_PERMISSION_REASON_MAX_LENGTH,
+  GRANT_SCOPE_ID_MAX_LENGTH,
+  PERMISSION_KEY_MAX_LENGTH,
+} from '../../../authz.constants';
 
 export const ScopeTypeSchema = z.enum(['global', 'self', 'team', 'dept', 'region']);
 
@@ -33,6 +38,20 @@ export const AssignRoleSchema = z.object({
 });
 export class AssignRoleDto extends createZodDto(AssignRoleSchema) {}
 
+export const GrantEmployeePermissionSchema = z.object({
+  employeeId: z.string().uuid(),
+  permissionKey: z.string().min(1).max(PERMISSION_KEY_MAX_LENGTH),
+  scopeType: ScopeTypeSchema.default('global'),
+  scopeId: z.string().max(GRANT_SCOPE_ID_MAX_LENGTH).nullable().optional(),
+  reason: z.string().trim().min(3).max(EMPLOYEE_PERMISSION_REASON_MAX_LENGTH),
+  expiresAt: z
+    .string()
+    .datetime({ offset: true })
+    .nullish()
+    .transform((v) => (v != null ? new Date(v) : null)),
+});
+export class GrantEmployeePermissionDto extends createZodDto(GrantEmployeePermissionSchema) {}
+
 export class PermissionResponseDto {
   key!: string;
   description!: string;
@@ -54,6 +73,18 @@ export class RoleAssignmentResponseDto {
   scopeType!: string;
   scopeId!: string | null;
   grantedBy!: string;
+  expiresAt!: string | null;
+  createdAt!: string;
+}
+
+export class EmployeePermissionResponseDto {
+  id!: string;
+  employeeId!: string;
+  permissionKey!: string;
+  scopeType!: string;
+  scopeId!: string | null;
+  grantedBy!: string;
+  reason!: string;
   expiresAt!: string | null;
   createdAt!: string;
 }

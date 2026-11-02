@@ -110,5 +110,19 @@ export interface RoleAssignment {
   createdAt: Date;
 }
 
+/** A permission granted to one employee directly, outside any group. */
+export interface EmployeePermission {
+  id: string;
+  employeeId: string;
+  permissionKey: string;
+  scopeType: ScopeType;
+  scopeId: string | null;
+  grantedBy: string;
+  /** Why the employee holds this permission outside a group. */
+  reason: string;
+  expiresAt: Date | null;
+  createdAt: Date;
+}
+
 /** Re-export for guard/decorator consumers that resolve the principal. */
 export type { JwtPayload };

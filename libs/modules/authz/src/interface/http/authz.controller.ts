@@ -18,7 +18,13 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { ApiCommonErrors, Auth, CurrentUser, RequirePermission, SelfScoped } from '@platform';
-import type { JwtPayload, Permission, RoleAssignment, RoleWithPermissions } from '@platform';
+import type {
+  EmployeePermission,
+  JwtPayload,
+  Permission,
+  RoleAssignment,
+  RoleWithPermissions,
+} from '@platform';
 import { DelegationService, type ApprovalDelegation } from '@platform';
 import { AuditService, AUDIT_ACTION, AUDIT_RESOURCE } from '@modules/audit';
 import { AuthzAdminService } from '../../application/authz-admin.service';
@@ -27,6 +33,8 @@ import {
   CreateDelegationDto,
   CreateRoleDto,
   DelegationResponseDto,
+  EmployeePermissionResponseDto,
+  GrantEmployeePermissionDto,
   ListDelegationsQueryDto,
   PermissionResponseDto,
   RoleAssignmentResponseDto,
@@ -55,6 +63,20 @@ function toAssignmentDto(a: RoleAssignment): RoleAssignmentResponseDto {
     grantedBy: a.grantedBy,
     expiresAt: a.expiresAt?.toISOString() ?? null,
     createdAt: a.createdAt.toISOString(),
+  };
+}
+
+function toEmployeePermissionDto(g: EmployeePermission): EmployeePermissionResponseDto {
+  return {
+    id: g.id,
+    employeeId: g.employeeId,
+    permissionKey: g.permissionKey,
+    scopeType: g.scopeType,
+    scopeId: g.scopeId,
+    grantedBy: g.grantedBy,
+    reason: g.reason,
+    expiresAt: g.expiresAt?.toISOString() ?? null,
+    createdAt: g.createdAt.toISOString(),
   };
 }
 
@@ -193,6 +215,60 @@ export class AuthzController {
     @CurrentUser() user: JwtPayload,
   ): Promise<void> {
     await this.authz.revokeAssignment(id, { sub: user.sub, email: user.email });
+  }
+
+  // ── Direct employee permissions ────────────────────────────────────────────
+
+  @Get('employees/:employeeId/permissions')
+  @RequirePermission('rbac.read')
+  @ApiOperation({ summary: 'List the permissions granted straight to an employee' })
+  @ApiOkResponse({ type: [EmployeePermissionResponseDto] })
+  @ApiCommonErrors(401, 403)
+  async listEmployeePermissions(
+    @Param('employeeId', ParseUUIDPipe) employeeId: string,
+  ): Promise<EmployeePermissionResponseDto[]> {
+    return (await this.authz.listEmployeePermissions(employeeId)).map(toEmployeePermissionDto);
+  }
+
+  @Post('employee-permissions')
+  @RequirePermission('role.assign')
+  @ApiOperation({
+    summary: 'Grant one permission straight to an employee',
+    description:
+      'The exception path, outside any group: a `reason` is required, and the caller must hold the ' +
+      'permission globally themselves (no privilege escalation).',
+  })
+  @ApiCreatedResponse({ type: EmployeePermissionResponseDto })
+  @ApiCommonErrors(401, 403, 404, 422)
+  async grantEmployeePermission(
+    @Body() dto: GrantEmployeePermissionDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<EmployeePermissionResponseDto> {
+    const grant = await this.authz.grantEmployeePermission(
+      {
+        employeeId: dto.employeeId,
+        permissionKey: dto.permissionKey,
+        scopeType: dto.scopeType,
+        scopeId: dto.scopeId ?? null,
+        reason: dto.reason,
+        expiresAt: dto.expiresAt ?? null,
+      },
+      { sub: user.sub, email: user.email },
+    );
+    return toEmployeePermissionDto(grant);
+  }
+
+  @Delete('employee-permissions/:id')
+  @HttpCode(204)
+  @RequirePermission('role.assign')
+  @ApiOperation({ summary: 'Revoke a permission granted straight to an employee' })
+  @ApiNoContentResponse()
+  @ApiCommonErrors(401, 403, 404)
+  async revokeEmployeePermission(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<void> {
+    await this.authz.revokeEmployeePermission(id, { sub: user.sub, email: user.email });
   }
 
   // ── Approval Delegation ────────────────────────────────────────────────────

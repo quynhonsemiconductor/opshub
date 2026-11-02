@@ -55,21 +55,53 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
   // the cast belongs where the shape is narrowed, and the constructor call below
   // stays free of noise.
   const invalidate = vi.fn().mockResolvedValue(undefined);
-  const authz = { invalidate, resolve: vi.fn() } as unknown as AuthzService;
+  const resolve = vi.fn();
+  const authz = { invalidate, resolve } as unknown as AuthzService & {
+    invalidate: ReturnType<typeof vi.fn>;
+    resolve: ReturnType<typeof vi.fn>;
+  };
   const audit = createFakeAudit();
   /** The transaction each mutation and its audit entry now share. */
   const TX = { tx: true };
-  const db = { transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(TX)) };
+  /** `select … from employees where id = … limit 1` resolves to the employee the grant targets. */
+  const employeeLookup = vi.fn().mockResolvedValue([{ id: 'emp-1' }]);
+  const db = {
+    transaction: vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn(TX)),
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ limit: employeeLookup }),
+      }),
+    }),
+  };
+
+  const employeePermissionRepo = {
+    listForEmployee: vi.fn().mockResolvedValue([]),
+    findById: vi.fn(),
+    grant: vi.fn(),
+    revoke: vi.fn().mockResolvedValue(undefined),
+  };
 
   const service = new AuthzAdminService(
     roleRepo,
     assignmentRepo,
+    employeePermissionRepo,
     authz,
     db as never,
     audit as never,
   );
 
-  return { service, roleRepo, assignmentRepo, authz, invalidate, holders, audit, TX };
+  return {
+    service,
+    roleRepo,
+    assignmentRepo,
+    employeePermissionRepo,
+    authz,
+    invalidate,
+    holders,
+    audit,
+    TX,
+    employeeLookup,
+  };
 }
 
 describe('AuthzAdminService — the audit entry rides the mutation', () => {
@@ -255,5 +287,142 @@ describe('AuthzAdminService.syncUserRolesByKeys — the Entra App Role reconcile
     await t.service.syncUserRolesByKeys('u', [], actor, 'employee');
 
     expect(assigned(t)).toEqual([]);
+  });
+});
+
+/**
+ * Permissions granted straight to an employee, outside any group.
+ *
+ * The same three guarantees the group path has, asserted again because this is a SECOND way to hold a
+ * permission and a gap here is a gap in access control: the entry rides the transaction, the grantor cannot
+ * hand out more than they hold, and the employee's cached permissions are dropped so the change is immediate.
+ */
+describe('AuthzAdminService — direct employee permissions', () => {
+  const grantCommand = {
+    employeeId: 'emp-1',
+    permissionKey: 'asset.read',
+    reason: 'covering the help desk for a week',
+  };
+  const storedGrant = {
+    id: 'grant-1',
+    employeeId: 'emp-1',
+    permissionKey: 'asset.read',
+    scopeType: 'global',
+    scopeId: null,
+    grantedBy: 'admin-1',
+    reason: grantCommand.reason,
+    expiresAt: null,
+    createdAt: new Date(),
+  };
+
+  it('records the grant inside its transaction and drops the employee’s cached permissions', async () => {
+    const { service, authz, employeePermissionRepo, audit, TX } = build();
+    authz.resolve.mockResolvedValue({
+      'asset.read': [{ type: 'global', id: null }],
+    });
+    employeePermissionRepo.grant.mockResolvedValue(storedGrant);
+
+    await service.grantEmployeePermission(grantCommand, actor);
+
+    expect(employeePermissionRepo.grant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        employeeId: 'emp-1',
+        permissionKey: 'asset.read',
+        scopeType: 'global',
+      }),
+      TX,
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'employee_permission.granted' }),
+      TX,
+    );
+    expect(authz.invalidate).toHaveBeenCalledWith('emp-1');
+  });
+
+  it('refuses to grant a permission the grantor does not hold', async () => {
+    const { service, authz, employeePermissionRepo } = build();
+    authz.resolve.mockResolvedValue({
+      'asset.write': [{ type: 'global', id: null }],
+    });
+
+    await expect(service.grantEmployeePermission(grantCommand, actor)).rejects.toThrow(
+      /do not hold it/,
+    );
+    expect(employeePermissionRepo.grant).not.toHaveBeenCalled();
+  });
+
+  it('refuses a permission the grantor holds only inside a department', async () => {
+    // Passing it on as global would hand the grantee more reach than the grantor has.
+    const { service, authz, employeePermissionRepo } = build();
+    authz.resolve.mockResolvedValue({
+      'asset.read': [{ type: 'dept', id: 'QA' }],
+    });
+
+    await expect(service.grantEmployeePermission(grantCommand, actor)).rejects.toThrow();
+    expect(employeePermissionRepo.grant).not.toHaveBeenCalled();
+  });
+
+  it('lets a platform administrator (the `*` wildcard) grant anything', async () => {
+    const { service, authz, employeePermissionRepo } = build();
+    authz.resolve.mockResolvedValue({
+      '*': [{ type: 'global', id: null }],
+    });
+    employeePermissionRepo.grant.mockResolvedValue(storedGrant);
+
+    await expect(service.grantEmployeePermission(grantCommand, actor)).resolves.toBe(storedGrant);
+  });
+
+  it('refuses an unknown permission key before touching the grantor’s permissions', async () => {
+    const { service, authz } = build();
+
+    await expect(
+      service.grantEmployeePermission(
+        { ...grantCommand, permissionKey: 'no.such.permission' },
+        actor,
+      ),
+    ).rejects.toThrow(/Unknown permission keys/);
+    expect(authz.resolve).not.toHaveBeenCalled();
+  });
+
+  it('refuses an expiry in the past', async () => {
+    const { service, authz } = build();
+    authz.resolve.mockResolvedValue({
+      '*': [{ type: 'global', id: null }],
+    });
+
+    await expect(
+      service.grantEmployeePermission(
+        { ...grantCommand, expiresAt: new Date(Date.now() - 60_000) },
+        actor,
+      ),
+    ).rejects.toThrow(/future/);
+  });
+
+  it('refuses a grant to an employee who does not exist', async () => {
+    const { service, employeeLookup } = build();
+    employeeLookup.mockResolvedValue([]);
+
+    await expect(service.grantEmployeePermission(grantCommand, actor)).rejects.toThrow(/not found/);
+  });
+
+  it('records a revocation inside its transaction and drops the cached permissions', async () => {
+    const { service, authz, employeePermissionRepo, audit, TX } = build();
+    employeePermissionRepo.findById.mockResolvedValue(storedGrant);
+
+    await service.revokeEmployeePermission('grant-1', actor);
+
+    expect(employeePermissionRepo.revoke).toHaveBeenCalledWith('grant-1', TX);
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'employee_permission.revoked' }),
+      TX,
+    );
+    expect(authz.invalidate).toHaveBeenCalledWith('emp-1');
+  });
+
+  it('answers 404 when the grant to revoke does not exist', async () => {
+    const { service, employeePermissionRepo } = build();
+    employeePermissionRepo.findById.mockResolvedValue(null);
+
+    await expect(service.revokeEmployeePermission('missing', actor)).rejects.toThrow(/not found/);
   });
 });

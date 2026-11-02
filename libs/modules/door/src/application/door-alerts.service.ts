@@ -5,7 +5,12 @@ import {
   NotificationSchedulerService,
   type NotificationTemplateVars,
 } from '@platform/notifications';
-import { employees, rolePermissions, userRoleAssignments } from '../../../../../db/schema';
+import {
+  employeePermissions,
+  employees,
+  rolePermissions,
+  userRoleAssignments,
+} from '../../../../../db/schema';
 
 /**
  * The door module's notification sender: WHO gets door alerts (the permission-based holders query)
@@ -23,23 +28,43 @@ export class DoorAlertsService {
 
   /**
    * Active employees whose EFFECTIVE permissions include door.manage: the union of roles granted
-   * `door.manage` and roles holding the `*` wildcard (admin), via authz.role_permissions — NOT by
-   * role display name. Expired assignments and offboarded employees are excluded.
+   * `door.manage`, roles holding the `*` wildcard (admin), and permissions granted straight to the
+   * employee — via authz.role_permissions and authz.employee_permissions, NOT by role display name.
+   * Expired grants and offboarded employees are excluded.
    */
   async doorManageHolders(): Promise<string[]> {
-    const rows = await this.db
-      .selectDistinct({ id: employees.id })
-      .from(employees)
-      .innerJoin(userRoleAssignments, eq(userRoleAssignments.userId, employees.id))
-      .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoleAssignments.roleId))
-      .where(
-        and(
-          inArray(rolePermissions.permissionKey, ['door.manage', '*']),
-          eq(employees.status, 'active'),
-          or(isNull(userRoleAssignments.expiresAt), gt(userRoleAssignments.expiresAt, sql`now()`)),
+    const [viaGroups, viaDirectGrants] = await Promise.all([
+      this.db
+        .selectDistinct({ id: employees.id })
+        .from(employees)
+        .innerJoin(userRoleAssignments, eq(userRoleAssignments.userId, employees.id))
+        .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoleAssignments.roleId))
+        .where(
+          and(
+            inArray(rolePermissions.permissionKey, ['door.manage', '*']),
+            eq(employees.status, 'active'),
+            or(
+              isNull(userRoleAssignments.expiresAt),
+              gt(userRoleAssignments.expiresAt, sql`now()`),
+            ),
+          ),
         ),
-      );
-    return rows.map((r) => r.id);
+      this.db
+        .selectDistinct({ id: employees.id })
+        .from(employees)
+        .innerJoin(employeePermissions, eq(employeePermissions.employeeId, employees.id))
+        .where(
+          and(
+            inArray(employeePermissions.permissionKey, ['door.manage', '*']),
+            eq(employees.status, 'active'),
+            or(
+              isNull(employeePermissions.expiresAt),
+              gt(employeePermissions.expiresAt, sql`now()`),
+            ),
+          ),
+        ),
+    ]);
+    return [...new Set([...viaGroups, ...viaDirectGrants].map((r) => r.id))];
   }
 
   /**

@@ -56,7 +56,13 @@ const ROOT = join(__dirname, '..');
  * a scoped `workforce.approve` grant instead of failing closed for its holder; the engine's own
  * separation-of-duties check still refuses a requester approving their own request.
  */
-const MAX_UNSCOPED_ROW_ROUTES = 151;
+/*
+ * 153 after the two row-addressed routes of direct employee permissions (list one employee's grants,
+ * revoke one grant). They are administrative and global by nature, like the `rbac.*` routes already counted:
+ * a department-scoped holder of `rbac.read` or `role.assign` is not a thing anyone wants, and granting a
+ * permission is further bounded by the no-escalation rule in `AuthzAdminService`.
+ */
+const MAX_UNSCOPED_ROW_ROUTES = 153;
 
 /** Sanity floor: if the scanner stops finding routes, fail loudly rather than silently. */
 const MIN_ROW_ROUTES_FOUND = 120;

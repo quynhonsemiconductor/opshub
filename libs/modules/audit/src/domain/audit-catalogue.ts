@@ -35,6 +35,8 @@ export const AUDIT_ACTION = {
   ROLE_ASSIGNED: 'role.assigned',
   ROLE_REVOKED: 'role.revoked',
   ROLE_SYNCED: 'role.synced',
+  EMPLOYEE_PERMISSION_GRANTED: 'employee_permission.granted',
+  EMPLOYEE_PERMISSION_REVOKED: 'employee_permission.revoked',
   DELEGATION_CREATED: 'delegation.created',
   DELEGATION_REVOKED: 'delegation.revoked',
 
@@ -336,6 +338,7 @@ export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
 export const AUDIT_RESOURCE = {
   ROLE: 'role',
   ROLE_ASSIGNMENT: 'role_assignment',
+  EMPLOYEE_PERMISSION: 'employee_permission',
   DELEGATION: 'delegation',
   ACCESS_REQUEST: 'access_request',
   ACCESS_GRANT: 'access_grant',

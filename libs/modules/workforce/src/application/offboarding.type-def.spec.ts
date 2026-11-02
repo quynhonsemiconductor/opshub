@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OffboardingTypeDef } from './offboarding.type-def';
 import {
+  employeePermissions,
   employees,
   userRoleAssignments,
   accessGrants,
@@ -35,6 +36,7 @@ function makeTx(
   roleReturnRows: Array<{ id: string; roleId: string }> = [],
   sessionReturnRows: Array<{ id: string }> = [{ id: 'token-1' }],
   entraOid: string | null = null,
+  directPermissionReturnRows: Array<{ id: string; permissionKey: string }> = [],
 ) {
   const updateCalls: Array<{ table: unknown; chain: ReturnType<typeof makeUpdateChain> }> = [];
   const deleteCalls: Array<{ table: unknown }> = [];
@@ -63,7 +65,9 @@ function makeTx(
     deleteCalls.push({ table });
     // `.returning()` because each removed assignment is audited individually — the chain has to
     // resolve to the removed rows, not to `undefined`.
-    const rows = table === identitySession ? sessionReturnRows : roleReturnRows;
+    let rows: unknown[] = roleReturnRows;
+    if (table === identitySession) rows = sessionReturnRows;
+    if (table === employeePermissions) rows = directPermissionReturnRows;
     const where = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(rows) });
     return { where };
   });
@@ -140,6 +144,16 @@ describe('OffboardingTypeDef.onApprove()', () => {
     expect(roleDeleteCall).toBeDefined();
   });
 
+  it('deletes the permissions granted straight to the employee, and audits each one', async () => {
+    const tx = makeTx([], [], [{ id: 'token-1' }], null, [
+      { id: 'grant-1', permissionKey: 'door.manage' },
+    ]);
+    await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
+
+    expect(tx._deleteCalls.some((c) => c.table === employeePermissions)).toBe(true);
+    expect(recordedActions()).toContain('employee_permission.revoked');
+  });
+
   it('updates access_grants to set revokedAt (only active grants)', async () => {
     const tx = makeTx();
     await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
@@ -204,8 +218,8 @@ describe('OffboardingTypeDef.onApprove()', () => {
     // see the comment at that call site for why it is not a post-commit sync.
     expect(tx._updateCalls).toHaveLength(6);
     expect(tx._updateCalls.filter((c) => c.table === employees)).toHaveLength(2);
-    // user_role_assignments + identity session rows = 2 deletes
-    expect(tx._deleteCalls).toHaveLength(2);
+    // user_role_assignments + employee_permissions + identity session rows = 3 deletes
+    expect(tx._deleteCalls).toHaveLength(3);
   });
 
   it('clears the denormalised role claims alongside the assignments', async () => {

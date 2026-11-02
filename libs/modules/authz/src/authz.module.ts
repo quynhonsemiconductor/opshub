@@ -6,6 +6,8 @@ import { RoleDrizzleRepository } from './infrastructure/persistence/role.drizzle
 import { RoleAssignmentDrizzleRepository } from './infrastructure/persistence/role-assignment.drizzle-repository';
 import { ROLE_REPOSITORY } from './domain/ports/role.repository';
 import { ROLE_ASSIGNMENT_REPOSITORY } from './domain/ports/role-assignment.repository';
+import { EmployeePermissionDrizzleRepository } from './infrastructure/persistence/employee-permission.drizzle-repository';
+import { EMPLOYEE_PERMISSION_REPOSITORY } from './domain/ports/employee-permission.repository';
 
 /**
  * Authz module — administrative RBAC surface (manage roles/permissions, grant
@@ -19,6 +21,7 @@ import { ROLE_ASSIGNMENT_REPOSITORY } from './domain/ports/role-assignment.repos
     AuthzAdminService,
     { provide: ROLE_REPOSITORY, useClass: RoleDrizzleRepository },
     { provide: ROLE_ASSIGNMENT_REPOSITORY, useClass: RoleAssignmentDrizzleRepository },
+    { provide: EMPLOYEE_PERMISSION_REPOSITORY, useClass: EmployeePermissionDrizzleRepository },
   ],
   exports: [AuthzAdminService],
 })

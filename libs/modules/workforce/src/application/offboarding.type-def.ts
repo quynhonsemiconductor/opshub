@@ -14,6 +14,7 @@ import { AUDIT_ACTION, AUDIT_RESOURCE, AuditService } from '@modules/audit';
 import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
 import { REQUEST_TYPE } from '@shared-kernel';
 import {
+  employeePermissions,
   employees,
   userRoleAssignments,
   accessGrants,
@@ -35,7 +36,8 @@ export interface OffboardingPayload extends Record<string, unknown> {
  *
  * `onApprove` atomically:
  *   1. Sets employee status → `offboarded`
- *   2. Removes all RBAC role assignments, and clears the cached role claims with them
+ *   2. Removes all RBAC role assignments and every permission granted straight to the employee, and clears
+ *      the cached role claims with them
  *   3. Revokes all active access grants
  *   4. Returns all assigned hardware assets (sets returnedAt, status → in_stock)
  *   5. Blocks the employee from signing in (identity user `banned`) and deletes every session row
@@ -72,6 +74,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
 
   private readonly employeeTrail;
   private readonly roleAssignmentTrail;
+  private readonly employeePermissionTrail;
   private readonly grantTrail;
   private readonly assetTrail;
   private readonly sessionTrail;
@@ -94,6 +97,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     // use, so the entries this hook writes are indistinguishable from the ones they write.
     this.employeeTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE);
     this.roleAssignmentTrail = audit.forResource(AUDIT_RESOURCE.ROLE_ASSIGNMENT);
+    this.employeePermissionTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE_PERMISSION);
     this.grantTrail = audit.forResource(AUDIT_RESOURCE.ACCESS_GRANT);
     this.assetTrail = audit.forResource(AUDIT_RESOURCE.ASSET);
     this.sessionTrail = audit.forResource(AUDIT_RESOURCE.SESSION);
@@ -153,6 +157,29 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
       await this.roleAssignmentTrail.record(AUDIT_ACTION.ROLE_REVOKED, assignment.id, actor, tx, {
         before: { userId: employeeId, roleId: assignment.roleId },
       });
+    }
+
+    /*
+     * Permissions granted straight to the employee, outside any group, go in the same step: they bypass
+     * the groups, so removing the memberships alone would leave a leaver holding them. One entry per
+     * grant, for the same reason as above.
+     */
+    const removedDirectPermissions = await tx
+      .delete(employeePermissions)
+      .where(eq(employeePermissions.employeeId, employeeId))
+      .returning({
+        id: employeePermissions.id,
+        permissionKey: employeePermissions.permissionKey,
+      });
+
+    for (const grant of removedDirectPermissions) {
+      await this.employeePermissionTrail.record(
+        AUDIT_ACTION.EMPLOYEE_PERMISSION_REVOKED,
+        grant.id,
+        actor,
+        tx,
+        { before: { employeeId, permissionKey: grant.permissionKey } },
+      );
     }
 
     /*
