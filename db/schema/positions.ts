@@ -35,7 +35,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { positionStatusEnum, rankBenefitCodeEnum } from './enums';
 
-export const positionsSchema = pgSchema('positions');
+export const positionsSchema = pgSchema('roles');
 
 /**
  * Seniority ranks (1 = most junior) — what a position's `level` was as free text, made a row.
@@ -82,7 +82,7 @@ export const rankBenefits = positionsSchema.table(
 );
 
 export const positions = positionsSchema.table(
-  'positions',
+  'roles',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     /** Stable identifier used in headcount plans and contracts, e.g. `ENG-QA-02`. */
@@ -106,19 +106,19 @@ export const positions = positionsSchema.table(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    codeIdx: uniqueIndex('uq_position_code').on(t.code),
-    departmentIdx: index('ix_position_department').on(t.department),
-    statusIdx: index('ix_position_status').on(t.status),
-    rankIdx: index('ix_position_rank').on(t.rankId),
+    codeIdx: uniqueIndex('uq_role_code').on(t.code),
+    departmentIdx: index('ix_role_department').on(t.department),
+    statusIdx: index('ix_role_status').on(t.status),
+    rankIdx: index('ix_role_rank').on(t.rankId),
   }),
 );
 
 export const employeePositions = positionsSchema.table(
-  'employee_positions',
+  'employee_roles',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     employeeId: uuid('employee_id').notNull(),
-    positionId: uuid('position_id')
+    positionId: uuid('role_id')
       .notNull()
       .references(() => positions.id, { onDelete: 'restrict' }),
     effectiveFrom: date('effective_from').notNull(),
@@ -136,10 +136,10 @@ export const employeePositions = positionsSchema.table(
      * unconstrained, so a person can hold the same position twice over a career, but cannot occupy
      * two at once — which is what makes "their position" a question with one answer.
      */
-    currentIdx: uniqueIndex('uq_employee_current_position')
+    currentIdx: uniqueIndex('uq_employee_current_role')
       .on(t.employeeId)
       .where(sql`effective_to IS NULL`),
-    employeeIdx: index('ix_employee_position_employee').on(t.employeeId, t.effectiveFrom),
-    positionIdx: index('ix_employee_position_position').on(t.positionId),
+    employeeIdx: index('ix_employee_role_employee').on(t.employeeId, t.effectiveFrom),
+    positionIdx: index('ix_employee_role_role').on(t.positionId),
   }),
 );

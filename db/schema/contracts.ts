@@ -63,7 +63,7 @@ export const employmentContracts = contractsSchema.table(
      * Nullable for a contractor engaged for work rather than a seat, and `restrict` on delete so a
      * position with contract history cannot be erased out from under it.
      */
-    positionId: uuid('position_id').references(() => positions.id, { onDelete: 'restrict' }),
+    positionId: uuid('role_id').references(() => positions.id, { onDelete: 'restrict' }),
     /** Human reference quoted in correspondence, e.g. `EMP-2026-0042`. */
     reference: varchar('reference', { length: 40 }).notNull(),
     contractType: contractTypeEnum('contract_type').notNull(),
@@ -114,7 +114,7 @@ export const employmentContracts = contractsSchema.table(
       .where(sql`status = 'active'`),
     referenceIdx: uniqueIndex('uq_contract_reference').on(t.reference),
     employeeIdx: index('ix_contract_employee').on(t.employeeId, t.startDate),
-    positionIdx: index('ix_contract_position').on(t.positionId),
+    positionIdx: index('ix_contract_role').on(t.positionId),
     /** The sweep's query: active contracts ordered by when they end. */
     expiryIdx: index('ix_contract_status_end').on(t.status, t.endDate),
   }),

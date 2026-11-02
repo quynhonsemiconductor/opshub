@@ -105,7 +105,7 @@ export const performanceReviews = performanceSchema.table(
      * Nullable because somebody can be between assignments, and refusing to review them for that
      * reason would be the tail wagging the dog.
      */
-    positionId: uuid('position_id').references(() => positions.id, { onDelete: 'set null' }),
+    positionId: uuid('role_id').references(() => positions.id, { onDelete: 'set null' }),
     status: performanceReviewStatusEnum('status').notNull().default('self_assessment'),
 
     selfAssessment: text('self_assessment'),

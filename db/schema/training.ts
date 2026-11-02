@@ -72,10 +72,10 @@ export const trainingCourses = trainingSchema.table(
 );
 
 export const trainingPositionRequirements = trainingSchema.table(
-  'position_requirements',
+  'role_requirements',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    positionId: uuid('position_id')
+    positionId: uuid('role_id')
       .notNull()
       .references(() => positions.id, { onDelete: 'cascade' }),
     courseId: uuid('course_id')
@@ -94,7 +94,7 @@ export const trainingPositionRequirements = trainingSchema.table(
   (t) => ({
     /** One requirement row per (position, course) — listing it twice says nothing new. */
     uniqueIdx: uniqueIndex('uq_training_requirement').on(t.positionId, t.courseId),
-    positionIdx: index('ix_training_requirement_position').on(t.positionId),
+    positionIdx: index('ix_training_requirement_role').on(t.positionId),
     courseIdx: index('ix_training_requirement_course').on(t.courseId),
   }),
 );

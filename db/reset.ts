@@ -108,24 +108,24 @@ export const FIXTURE_TABLES = [
   'documents.document_versions',
   'documents.documents',
   /**
-   * positions — BOTH tables, and `employee_positions` matters most.
+   * roles — BOTH tables, and `employee_roles` matters most.
    *
    * Left out, an employee keeps the open assignment a previous run gave them, and the next run's
    * first transfer is dated BEFORE it and refused as `POSITION_INVALID_WINDOW`. That is a suite
    * which passes exactly once per database, and it fails ten tests in with a status that looks
    * like a product bug rather than a stale row. Measured, not predicted.
    */
-  'positions.employee_positions',
-  'positions.positions',
-  'positions.rank_benefits',
-  'positions.job_ranks',
+  'roles.employee_roles',
+  'roles.roles',
+  'roles.rank_benefits',
+  'roles.job_ranks',
   // employment contracts — `uq_employee_active_contract` is per employee, so one left active by a
   // previous run makes the next run's first activation a 409 that names a contract nobody wrote.
   'contracts.employment_contracts',
   // training — `uq_training_record_current` is per (employee, course), so a record left current by a
   // previous run makes the next run's first completion for that pair a 409 nobody wrote.
   'training.records',
-  'training.position_requirements',
+  'training.role_requirements',
   'training.courses',
   // ISMS — `uq_risk_reference` is global, and a risk left `accepted` by a previous run makes the
   // next run's acceptance a 412 nobody wrote. Treatments cascade from risks, listed for intent.
