@@ -132,11 +132,9 @@ RUN addgroup --system --gid 1001 nodejs \
     && adduser  --system --uid 1001 nestjs \
     && chown -R nestjs:nodejs /app
 USER nestjs
-# ECS bridge: materialize the injected GRAPH_CLIENT_CERTIFICATE secret value as
-# the file AZURE_CLIENT_CERTIFICATE_PATH and unset it (worker only; see the
-# script header).
-COPY docker/graph-cert-bridge.sh /app/docker/graph-cert-bridge.sh
-ENTRYPOINT ["/sbin/tini", "--", "/bin/sh", "/app/docker/graph-cert-bridge.sh"]
+# The Graph Service-app certificate is a mounted FILE (AZURE_CLIENT_CERTIFICATE_PATH, set by the chart); the ECS env-to-file
+# bridge entrypoint was removed with the AWS exit (2026-11-02).
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "dist/apps/worker/apps/worker/src/main.js"]
 
 # ── migrator (one-shot Drizzle migration runner) ─────────────────────────────
