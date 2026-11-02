@@ -9,7 +9,7 @@
  * mechanical change that does not belong in a security-sensitive diff. There is no JWT any more.
  *
  * `roles` is NOT filled here and is NOT for authorization: `PolicyGuard` resolves permissions from the
- * database on every request. `GET /v1/auth/me` returns the employee's roles from `employees.roles`.
+ * database on every request. `GET /v1/auth/me` returns the employee's groups from `employees.group_keys`.
  */
 export interface JwtPayload {
   /** The employee id (= identity user id). */

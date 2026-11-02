@@ -36,7 +36,7 @@ export interface OffboardingPayload extends Record<string, unknown> {
  *
  * `onApprove` atomically:
  *   1. Sets employee status → `offboarded`
- *   2. Removes all RBAC role assignments and every permission granted straight to the employee, and clears
+ *   2. Removes every group membership and every permission granted straight to the employee, and clears
  *      the cached role claims with them
  *   3. Revokes all active access grants
  *   4. Returns all assigned hardware assets (sets returnedAt, status → in_stock)
@@ -142,7 +142,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     });
 
     /*
-     * 2. Remove all RBAC role assignments.
+     * 2. Remove every group membership.
      *
      * `returning()` so each removal can be recorded individually. One entry per assignment, not one
      * summarising them: an access review asks "when did this person lose THIS role", and a single
@@ -183,12 +183,12 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     }
 
     /*
-     * The cached role claims go with them, IN THIS TRANSACTION.
+     * The cached group keys go with them, IN THIS TRANSACTION.
      *
-     * `employees.roles` is a denormalised copy of the active assignments that feeds the JWT claims,
+     * `employees.group_keys` is a denormalised copy of the active memberships that `/auth/me` displays,
      * and nothing here maintained it — so an offboarded employee's row still listed `it-admin` after
-     * every assignment behind it was gone. `AuthzAdminService` keeps it in step by calling
-     * `syncEmployeeRoleClaims` after its own transaction; here the answer is known without a query,
+     * every membership behind it was gone. `AuthzAdminService` keeps it in step by calling
+     * `syncEmployeeGroupKeys` after its own transaction; here the answer is known without a query,
      * because step 2 removed ALL of them, and setting it inside the transaction means the copy can
      * never disagree with the rows it copies.
      */

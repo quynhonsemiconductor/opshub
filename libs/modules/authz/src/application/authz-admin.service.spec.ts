@@ -177,7 +177,7 @@ describe('AuthzAdminService — group-definition changes', () => {
   });
 
   it('reads the holders BEFORE deleting the group', async () => {
-    // `user_role_assignments.role_id` is ON DELETE CASCADE, so enumerating holders
+    // `employee_groups.group_id` is ON DELETE CASCADE, so enumerating holders
     // after the delete returns nobody and silently invalidates nothing.
     const calls: string[] = [];
     const { service, groupRepo, employeeGroupRepo } = build();

@@ -167,7 +167,7 @@ export class AuthzAdminService {
         `System group '${group.key}' cannot be deleted`,
       );
     }
-    // Read holders BEFORE the delete: `user_role_assignments.role_id` is
+    // Read holders BEFORE the delete: `employee_groups.group_id` is
     // ON DELETE CASCADE, so afterwards there is nothing left to enumerate.
     const holders = await this.employeeGroupRepo.listEmployeeIdsForGroup(groupId);
 

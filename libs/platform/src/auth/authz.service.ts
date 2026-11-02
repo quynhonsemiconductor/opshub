@@ -17,7 +17,7 @@ import {
  * permission checks for the PolicyGuard.
  *
  * Resolution is the union of two indexed reads, both filtered to non-expired grants: the
- * permissions of the groups the user belongs to (assignments ⋈ role_permissions) and the permissions
+ * permissions of the groups the user belongs to (employee_groups ⋈ group_permissions) and the permissions
  * granted to the user directly (`employee_permissions`). The result is cached in Valkey under a
  * per-user key with a bounded TTL. The cache is shared across replicas, so {@link invalidate} busts every
  * instance at once; the TTL is the safety net for role-definition edits.

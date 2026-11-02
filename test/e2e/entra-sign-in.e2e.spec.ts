@@ -10,7 +10,7 @@
  * What it proves, and what it cannot:
  *  - the person who signs in IS the employee HR created: `sub` equals the existing `employees.id`
  *    (the decision that keeps every foreign key in the product valid across the cutover);
- *  - App Roles reconcile into the role assignments on every sign-in, and no role means `employee`;
+ *  - App Roles reconcile into the group memberships on every sign-in, and no role means `employee`;
  *  - an unknown person from the tenant is provisioned, with `id = user.id`;
  *  - another tenant, and an address outside `qnsc.vn`, get no session.
  *  Not provable here: Entra's own behaviour (the single-tenant app registration, the `email` optional claim,
@@ -169,7 +169,7 @@ describe('Microsoft sign-in with the staff preset', () => {
     expect(row?.entraOid, 'the Entra object id was not recorded on the employee').toBe(who.oid);
   });
 
-  it('reconciles the App Roles into the role assignments, and removes a role Entra no longer asserts', async () => {
+  it('reconciles the App Roles into the group memberships, and removes a role Entra no longer asserts', async () => {
     const who = person(['hr']);
     await createEmployee(who.email!);
 

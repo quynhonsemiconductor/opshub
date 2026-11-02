@@ -63,7 +63,7 @@ export class AuthController {
       sub: user.sub,
       email: user.email,
       name: user.name,
-      // from the employee row (kept in step with the role assignments at every sign-in), not from a token
+      // from the employee row (kept in step with the group memberships at every sign-in), not from a token
       groups: employee.groupKeys,
       permissions: Object.keys(effective),
       // Minted here rather than from a dedicated endpoint: the SPA already calls this on

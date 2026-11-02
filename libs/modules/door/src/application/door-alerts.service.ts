@@ -29,7 +29,7 @@ export class DoorAlertsService {
   /**
    * Active employees whose EFFECTIVE permissions include door.manage: the union of roles granted
    * `door.manage`, roles holding the `*` wildcard (admin), and permissions granted straight to the
-   * employee — via authz.role_permissions and authz.employee_permissions, NOT by role display name.
+   * employee — via authz.group_permissions and authz.employee_permissions, NOT by group display name.
    * Expired grants and offboarded employees are excluded.
    */
   async doorManageHolders(): Promise<string[]> {

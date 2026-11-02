@@ -31,9 +31,9 @@ package: our dotted codes cannot express rova's `ns:*` semantics.
 | --- | --- | --- |
 | scope dimensions | `global`, `self`, `team`, `dept`, `region` | `global`, `workspace`, `project` |
 | delegation | `authz/delegation.service.ts` | none |
-| grant expiry | `expiresAt` on assignments | none |
-| IdP role mapping | Entra App Roles → global assignments | none |
-| custom roles | none | editor UI + backend CRUD |
+| grant expiry | `expiresAt` on group memberships and direct permissions | none |
+| IdP role mapping | Entra App Roles → global group memberships | none |
+| custom groups | none | editor UI + backend CRUD |
 
 Both resolve from the database, cached per user, invalidated on write — that part is
 the same model (`docs/superpowers/specs/2026-07-28-auth-convergence.md`, in rova).
@@ -90,7 +90,7 @@ Both products authenticate with `@quynhonsemiconductor/identity`; what each conf
 | B2B guests of the tenant | refused (`allowGuests: false`) | allowed, for vendors |
 | who may sign in | Entra "Assignment required" ON: the dynamic group `opshub-users` (every enabled member of the QNSC tenant) is assigned to the app with the App Role `employee` (decided 2026-10-18); then an address on `qnsc.vn`; no App Role means the `employee` role | by product policy |
 | person identity | `identity.employees.id` **is** `identity.user.id`: every foreign key in the product points at `employees`, so the identity user is created with the employee's id (`UserDirectory`) and a first sign-in finds that user by email | the identity user is the person |
-| roles | Entra **App Roles** are reconciled into `user_role_assignments` on every sign-in (`hooks.onStaffSignIn`, `StaffSignInHandler`); authorization is resolved from the database per request, never read from the session | product-assigned |
+| groups | Entra **App Roles** are reconciled into `authz.employee_groups` (each App Role names a group by its key) on every sign-in (`hooks.onStaffSignIn`, `StaffSignInHandler`); authorization is resolved from the database per request, never read from the session | product-assigned |
 | offboarding | `SessionRevoker` (`setUserBanned` + session deletion) after the status change commits; the workflow also bans and deletes in its own transaction | not applicable |
 | mail | none: the staff preset sends no mail, so `mail` is not configured | verification and reset mail |
 | tables | `identity.user`, `session`, `account`, `verification` only: no organization, member, SSO provider or two-factor tables | per preset |
@@ -120,7 +120,7 @@ Tracked as work, not as divergence. Ordered plan in the convergence spec.
 | gap | rova state |
 | --- | --- |
 | scoped authorization dimensions, delegation, grant expiry | workspace/project only |
-| IdP role mapping (`ISsoProvisioningHook`) | not bound; roles are app-assigned only |
+| IdP role mapping (`ISsoProvisioningHook`) | not bound; groups are app-assigned only |
 | cross-tab refresh coordination (Web Locks) | not applicable: no token refreshes under identity 8, but the idea is ours |
 
 ## Not divergence — fix on sight

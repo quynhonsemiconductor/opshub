@@ -1,7 +1,7 @@
 /**
  * OffboardingTypeDef.onApprove() unit tests.
  *
- * Tests that the 5 cleanup operations (employee status, role assignments,
+ * Tests that the 5 cleanup operations (employee status, group memberships,
  * access grants, asset assignments + asset status reset, ban + session
  * removal) are all called with the correct table arguments, and that the Entra disable +
  * session revoke are QUEUED in the same transaction rather than called.
@@ -136,7 +136,7 @@ describe('OffboardingTypeDef.onApprove()', () => {
     );
   });
 
-  it('deletes user_role_assignments for the employee', async () => {
+  it('deletes employee_groups for the employee', async () => {
     const tx = makeTx();
     await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
@@ -218,7 +218,7 @@ describe('OffboardingTypeDef.onApprove()', () => {
     // see the comment at that call site for why it is not a post-commit sync.
     expect(tx._updateCalls).toHaveLength(6);
     expect(tx._updateCalls.filter((c) => c.table === employees)).toHaveLength(2);
-    // user_role_assignments + employee_permissions + identity session rows = 3 deletes
+    // employee_groups + employee_permissions + identity session rows = 3 deletes
     expect(tx._deleteCalls).toHaveLength(3);
   });
 

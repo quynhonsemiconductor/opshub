@@ -313,7 +313,7 @@ export async function seedRbacCatalog(connectionUrl?: string): Promise<void> {
 async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
   const adminEmail = process.env['ADMIN_EMAIL'] ?? 'admin@opshub.local';
 
-  // 1. Employees — `employees.group_keys` is the denormalised copy of the role assignments below.
+  // 1. Employees — `employees.group_keys` is the denormalised copy of the group memberships below.
   await db
     .insert(employees)
     .values(
@@ -361,7 +361,7 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
     )
     .onConflictDoNothing();
 
-  // 2. Global role assignments — drive effective permissions via authz.resolve.
+  // 2. Global group memberships — drive effective permissions via authz.resolve.
   const roleRows = await db
     .select({ id: groups.id, key: groups.key })
     .from(groups)
@@ -407,7 +407,7 @@ export async function seed(connectionUrl?: string): Promise<void> {
   const pool = new Pool({ ...pgOptions(url, tlsFromEnv()), max: 1 });
   const db = drizzle(pool);
   try {
-    // Reference catalogue first so role assignments below resolve.
+    // Reference catalogue first so the group memberships below resolve.
     await seedRbacCatalogInto(db);
     await seedControlCatalogueInto(db);
     await seedDemoEmployeesInto(db);

@@ -26,7 +26,7 @@ export interface IEmployeeGroupRepository {
   assign(input: AssignGroupInput, tx?: DbExecutor): Promise<EmployeeGroup>;
   revoke(id: string, tx?: DbExecutor): Promise<void>;
   /**
-   * Recompute the user's distinct active group keys from user_role_assignments
+   * Recompute the user's distinct active group keys from employee_groups
    * and write them to employees.groups (the JSONB cache used for the JWT claim).
    * Keeps the token's groups[] in sync with the RBAC source of truth.
    */
