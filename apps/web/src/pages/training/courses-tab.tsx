@@ -181,7 +181,7 @@ export function CoursesTab() {
         onCancel={() => setRetiring(null)}
         onConfirm={retire}
         title="Retire this course?"
-        description="It can no longer be required by a position or recorded against anybody. Existing records and certificates are kept, because an audit asks what somebody was trained in at the time."
+        description="It can no longer be required by a role or recorded against anybody. Existing records and certificates are kept, because an audit asks what somebody was trained in at the time."
         confirmLabel="Retire course"
       />
 

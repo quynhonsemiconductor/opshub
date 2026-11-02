@@ -181,7 +181,7 @@ export function MyTrainingTab() {
           isLoading={gaps.isLoading}
           isError={gaps.isError}
           errorMessage="Failed to load your outstanding training."
-          emptyMessage="Nothing outstanding — every course your position requires is current"
+          emptyMessage="Nothing outstanding — every course your role requires is current"
           emptyIcon={ShieldCheck}
         />
       </section>

@@ -12,9 +12,9 @@ import {
 /**
  * Training and competency — five tabs, and the full loop that makes them worth having.
  *
- * THE LOOP IS THE POINT. A course on its own proves nothing; what an audit asks is "does this position
+ * THE LOOP IS THE POINT. A course on its own proves nothing; what an audit asks is "does this role
  * require it, has this person done it, and is the evidence attached". So the long journey below creates a
- * course, requires it of a position, sees the gap that requirement opens, records the completion, watches
+ * course, requires it of a role, sees the gap that requirement opens, records the completion, watches
  * the gap close, and attaches a certificate to the record — through the UI, against the real API.
  *
  * Everything it asserts on, it creates. A fresh database has no courses at all (measured: `total: 0`),
@@ -37,10 +37,10 @@ async function createEmployee(request: APIRequestContext): Promise<{ id: string;
   return { id: body.data?.id ?? body.id!, name };
 }
 
-async function createPosition(request: APIRequestContext): Promise<{ id: string; title: string }> {
+async function createRole(request: APIRequestContext): Promise<{ id: string; title: string }> {
   const stamp = Date.now();
   const title = `Training Role ${stamp}`;
-  const res = await request.post('/v1/positions', {
+  const res = await request.post('/v1/roles', {
     headers: await csrfHeaders(request),
     data: { code: `TRN-${stamp}`, title, department: 'Quality', headcount: 5 },
   });
@@ -87,18 +87,18 @@ test.describe('training', () => {
     await expect(page.locator('tbody tr', { hasText: code })).toContainText('Retired');
   });
 
-  test('requires a course of a position, records the completion, and closes the gap', async ({
+  test('requires a course of a role, records the completion, and closes the gap', async ({
     page,
     request,
   }) => {
     const employee = await createEmployee(request);
-    const position = await createPosition(request);
+    const role = await createRole(request);
     const courseCode = unique('PWG').toUpperCase();
     const courseTitle = `Playwright Gap Course ${Date.now()}`;
 
-    // The employee has to HOLD the position for its requirements to apply to them — that is the whole
+    // The employee has to HOLD the role for its requirements to apply to them — that is the whole
     // design of requirements attaching to a job rather than a person.
-    const assigned = await request.post(`/v1/positions/${position.id}/assignments`, {
+    const assigned = await request.post(`/v1/roles/${role.id}/assignments`, {
       headers: await csrfHeaders(request),
       data: { employeeId: employee.id, effectiveFrom: '2026-01-01' },
     });
@@ -119,18 +119,18 @@ test.describe('training', () => {
     // ── The requirement ───────────────────────────────────────────────────────
     await page.getByRole('tab', { name: 'Requirements' }).click();
     // Nothing chosen says so, rather than showing an empty table that would read as "requires nothing".
-    await expect(page.getByText(/choose a position to see what it requires/i)).toBeVisible();
+    await expect(page.getByText(/choose a role to see what it requires/i)).toBeVisible();
 
     // The picker searches by NAME. This is the field that used to demand a pasted UUID.
     //
     // Located by its ACCESSIBLE NAME, not `.first()`: a native `<select>` also has role combobox, so
     // "the first combobox" silently means a different control the moment a tab grows a select.
-    await chooseFromPicker(page, page.locator('body'), 'Position', position.title);
+    await chooseFromPicker(page, page.locator('body'), 'Role', role.title);
 
     await page.getByRole('button', { name: /require a course/i }).click();
     dialog = page.getByRole('dialog');
-    // The modal names the position, which it can only do because the picker reports the chosen option.
-    await expect(dialog.getByRole('heading', { name: new RegExp(position.title) })).toBeVisible();
+    // The modal names the role, which it can only do because the picker reports the chosen option.
+    await expect(dialog.getByRole('heading', { name: new RegExp(role.title) })).toBeVisible();
     await chooseFromPicker(page, dialog, 'Course', courseTitle);
     await dialog.getByRole('button', { name: /add requirement/i }).click();
     await expect(dialog).toBeHidden();

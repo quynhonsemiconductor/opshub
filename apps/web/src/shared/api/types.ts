@@ -55,8 +55,8 @@ export type PermissionResponse = components['schemas']['PermissionResponseDto'];
 export type EmployeeGroupResponse = components['schemas']['EmployeeGroupResponseDto'];
 export type DelegationResponse = components['schemas']['DelegationResponseDto'];
 
-// Positions — the HISTORY shape carries the role it refers to, unlike the plain assignment dto.
-export type EmployeePositionHistory = components['schemas']['EmployeePositionHistoryResponseDto'];
+// Roles — the HISTORY shape carries the role it refers to, unlike the plain assignment dto.
+export type EmployeeRoleHistory = components['schemas']['EmployeeRoleHistoryResponseDto'];
 export type ContractResponse = components['schemas']['ContractResponseDto'];
 
 /*
@@ -123,6 +123,7 @@ export const AUDIT_RESOURCE_TYPES = [
   'employee_group',
   'employee_permission',
   'employee_position',
+  'employee_role',
   'employment_contract',
   'holiday',
   'incident',
@@ -130,6 +131,7 @@ export const AUDIT_RESOURCE_TYPES = [
   'group',
   'internal_audit',
   'job_rank',
+  'job_role',
   'leave_document',
   'leave_entitlement',
   'leave_request',

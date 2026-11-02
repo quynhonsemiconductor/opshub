@@ -15,36 +15,36 @@ import {
 } from '@/shared/ui';
 import { activeEmployeeOptions } from '@/shared/api/picker-sources';
 import { todayIso } from '@/shared/lib/format';
-import type { Position } from './position.types';
+import type { Role } from './role.types';
 import { useJobRanks } from './use-job-ranks';
 
 /**
- * Create or edit a position.
+ * Create or edit a role.
  *
- * A position's CODE is immutable after creation — it is quoted in contracts, training requirements and
+ * A role's CODE is immutable after creation — it is quoted in contracts, training requirements and
  * org charts, so the edit form omits it rather than offering a field the API would reject.
  */
-export function PositionModal({
+export function RoleModal({
   open,
-  position,
+  role,
   onClose,
   onSuccess,
 }: {
   open: boolean;
   /** Absent for a create. */
-  position?: Position;
+  role?: Role;
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const editing = !!position;
+  const editing = !!role;
   const [form, setForm] = useState({
-    code: position?.code ?? '',
-    title: position?.title ?? '',
-    department: position?.department ?? '',
-    rankId: position?.rankId ?? '',
-    headcount: String(position?.headcount ?? 1),
-    description: position?.description ?? '',
-    status: position?.status ?? 'active',
+    code: role?.code ?? '',
+    title: role?.title ?? '',
+    department: role?.department ?? '',
+    rankId: role?.rankId ?? '',
+    headcount: String(role?.headcount ?? 1),
+    description: role?.description ?? '',
+    status: role?.status ?? 'active',
   });
   const [error, setError] = useState('');
   const jobRanks = useJobRanks();
@@ -52,8 +52,8 @@ export function PositionModal({
   const mutation = useMutation({
     mutationFn: async () => {
       if (editing) {
-        const { error: err } = await api.PATCH('/v1/positions/{id}', {
-          params: { path: { id: position.id } },
+        const { error: err } = await api.PATCH('/v1/roles/{id}', {
+          params: { path: { id: role.id } },
           body: {
             title: form.title,
             department: form.department,
@@ -63,10 +63,10 @@ export function PositionModal({
             status: form.status as 'active' | 'frozen' | 'closed',
           },
         });
-        if (err) throw new Error(apiErrorMessage(err, 'Failed to update the position.'));
+        if (err) throw new Error(apiErrorMessage(err, 'Failed to update the role.'));
         return;
       }
-      const { error: err } = await api.POST('/v1/positions', {
+      const { error: err } = await api.POST('/v1/roles', {
         body: {
           code: form.code,
           title: form.title,
@@ -76,10 +76,10 @@ export function PositionModal({
           description: form.description || undefined,
         },
       });
-      if (err) throw new Error(apiErrorMessage(err, 'Failed to create the position.'));
+      if (err) throw new Error(apiErrorMessage(err, 'Failed to create the role.'));
     },
     onSuccess: () => {
-      toast.success(editing ? 'Position updated' : 'Position created');
+      toast.success(editing ? 'Role updated' : 'Role created');
       onSuccess();
       onClose();
     },
@@ -91,7 +91,7 @@ export function PositionModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={editing ? 'Edit position' : 'New position'}>
+    <Modal open={open} onClose={onClose} title={editing ? 'Edit role' : 'New role'}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -158,7 +158,7 @@ export function PositionModal({
             label="Headcount"
             htmlFor="pos-headcount"
             required
-            hint="How many people this position may hold at once."
+            hint="How many people this role may hold at once."
           >
             <Input
               id="pos-headcount"
@@ -173,7 +173,7 @@ export function PositionModal({
             <FormField
               label="Status"
               htmlFor="pos-status"
-              hint="Frozen keeps the position but takes no new assignments."
+              hint="Frozen keeps the role but takes no new assignments."
             >
               <Select
                 id="pos-status"
@@ -202,7 +202,7 @@ export function PositionModal({
         <FormActions
           loading={mutation.isPending}
           onClose={onClose}
-          submitLabel={editing ? 'Save changes' : 'Create position'}
+          submitLabel={editing ? 'Save changes' : 'Create role'}
         />
       </form>
     </Modal>
@@ -210,19 +210,19 @@ export function PositionModal({
 }
 
 /**
- * Assign somebody to a position.
+ * Assign somebody to a role.
  *
  * The API refuses an assignment that would exceed the approved headcount (412
- * `POSITION_HEADCOUNT_EXCEEDED`) and refuses a second CURRENT position for one employee — a database
+ * `ROLE_HEADCOUNT_EXCEEDED`) and refuses a second CURRENT role for one employee — a database
  * guarantee, not a check here. Both surface as the error text rather than being pre-empted, because a
  * client that duplicated those rules would be a second place for them to disagree.
  */
-export function AssignPositionModal({
-  position,
+export function AssignRoleModal({
+  role,
   onClose,
   onSuccess,
 }: {
-  position: Position;
+  role: Role;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -232,11 +232,11 @@ export function AssignPositionModal({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const { error: err } = await api.POST('/v1/positions/{id}/assignments', {
-        params: { path: { id: position.id } },
+      const { error: err } = await api.POST('/v1/roles/{id}/assignments', {
+        params: { path: { id: role.id } },
         body: { employeeId, effectiveFrom },
       });
-      // The headcount rule and the one-current-position rule are the API's, and it says which one it
+      // The headcount rule and the one-current-role rule are the API's, and it says which one it
       // refused on. Naming both here would have been a guess about which applied.
       if (err) throw new Error(apiErrorMessage(err, 'Failed to assign the employee.'));
     },
@@ -253,8 +253,8 @@ export function AssignPositionModal({
       open
       onClose={onClose}
       size="sm"
-      title={`Assign to ${position.title}`}
-      description={`${position.filled} of ${position.headcount} filled`}
+      title={`Assign to ${role.title}`}
+      description={`${role.filled} of ${role.headcount} filled`}
     >
       <form
         onSubmit={(e) => {

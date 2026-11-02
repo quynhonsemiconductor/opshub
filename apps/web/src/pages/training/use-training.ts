@@ -81,18 +81,18 @@ export function useRecords(params: {
 }
 
 /**
- * A position's required courses.
+ * A role's required courses.
  *
- * `enabled` on a chosen position rather than fetching for `undefined`: a request with no position is a
- * 400 the user did not ask for, and an empty table would read as "this position requires nothing".
+ * `enabled` on a chosen role rather than fetching for `undefined`: a request with no role is a
+ * 400 the user did not ask for, and an empty table would read as "this role requires nothing".
  */
-export function useRequirements(positionId: string | null) {
+export function useRequirements(roleId: string | null) {
   return useQuery<Requirement[]>({
-    queryKey: ['training', 'requirements', positionId],
-    enabled: !!positionId,
+    queryKey: ['training', 'requirements', roleId],
+    enabled: !!roleId,
     queryFn: async () => {
-      const { data, error } = await api.GET('/v1/training/positions/{positionId}/requirements', {
-        params: { path: { positionId: positionId! } },
+      const { data, error } = await api.GET('/v1/training/roles/{roleId}/requirements', {
+        params: { path: { roleId: roleId! } },
       });
       if (error || !data) throw new Error('Failed to load requirements');
       return data;
@@ -103,24 +103,24 @@ export function useRequirements(positionId: string | null) {
 /**
  * The competency gap report.
  *
- * Needs at least one of employee or position — the API refuses an unbounded sweep, which is the right
+ * Needs at least one of employee or role — the API refuses an unbounded sweep, which is the right
  * call for a report that joins every requirement against every record.
  */
 export function useGaps(params: {
   employeeId: string;
-  positionId: string;
+  roleId: string;
   includeRecommended: boolean;
 }) {
-  const { employeeId, positionId, includeRecommended } = params;
+  const { employeeId, roleId, includeRecommended } = params;
   return useQuery<CompetencyGap[]>({
-    queryKey: ['training', 'gaps', employeeId, positionId, includeRecommended],
-    enabled: !!(employeeId || positionId),
+    queryKey: ['training', 'gaps', employeeId, roleId, includeRecommended],
+    enabled: !!(employeeId || roleId),
     queryFn: async () => {
       const { data, error } = await api.GET('/v1/training/gaps', {
         params: {
           query: {
             employeeId: employeeId || undefined,
-            positionId: positionId || undefined,
+            roleId: roleId || undefined,
             includeRecommended,
           },
         },

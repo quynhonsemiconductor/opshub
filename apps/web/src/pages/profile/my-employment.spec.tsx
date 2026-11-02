@@ -2,11 +2,11 @@
 /**
  * Your own employment record, on your own profile.
  *
- * WHAT THESE PIN. `/v1/positions/me` and `/v1/contracts/me` are `@SelfScoped` — no id, no permission — and
+ * WHAT THESE PIN. `/v1/roles/me` and `/v1/contracts/me` are `@SelfScoped` — no id, no permission — and
  * neither had a caller, so an employee could not see their own role history or contract anywhere. The
- * assertion that matters is that a role reads as a TITLE: the API resolves `positionCode`/`positionTitle`
+ * assertion that matters is that a role reads as a TITLE: the API resolves `roleCode`/`roleTitle`
  * server-side precisely because a self-scoped caller holds no `role.read` to look one up, and rendering
- * the raw `positionId` is the failure this replaced.
+ * the raw `roleId` is the failure this replaced.
  *
  * AN EMPTY LIST IS AN ONBOARDING GAP, not an error — somebody on the register occupying no approved seat is
  * what the headcount reports are about — so it says so rather than rendering nothing.
@@ -23,9 +23,9 @@ import { MyContracts, MyRoleHistory } from './my-employment';
 const ROLE = {
   id: 'ep-1',
   employeeId: 'emp-1',
-  positionId: '019fff6b-855d-7fac-8f5e-f79f4fec0bc3',
-  positionCode: 'ENG-002',
-  positionTitle: 'Senior Platform Engineer',
+  roleId: '019fff6b-855d-7fac-8f5e-f79f4fec0bc3',
+  roleCode: 'ENG-002',
+  roleTitle: 'Senior Platform Engineer',
   effectiveFrom: '2026-01-01',
   effectiveTo: null,
   endReason: null,
@@ -35,7 +35,7 @@ const ROLE = {
 const CONTRACT = {
   id: 'c-1',
   employeeId: 'emp-1',
-  positionId: null,
+  roleId: null,
   reference: 'EMP-2026-0042',
   contractType: 'permanent',
   startDate: '2026-01-01',
@@ -68,7 +68,7 @@ describe('MyRoleHistory', () => {
     expect(screen.getByText('ENG-002')).toBeTruthy();
     // The UUID must NOT be on screen. Before the API resolved the title this was the only thing a
     // self-scoped caller could render, and it tells the reader nothing.
-    expect(screen.queryByText(ROLE.positionId)).toBeNull();
+    expect(screen.queryByText(ROLE.roleId)).toBeNull();
   });
 
   it('reads an open assignment as current, not as a blank end date', async () => {
@@ -97,7 +97,7 @@ describe('MyRoleHistory', () => {
   it('names an empty history as an onboarding gap', async () => {
     GET.mockResolvedValue({ data: [], error: undefined });
     renderIn(<MyRoleHistory />);
-    expect(await screen.findByText('No position on record yet')).toBeTruthy();
+    expect(await screen.findByText('No role on record yet')).toBeTruthy();
   });
 });
 

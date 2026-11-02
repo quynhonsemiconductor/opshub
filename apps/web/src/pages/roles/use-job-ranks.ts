@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/shared/api/client';
-import type { JobRank } from './position.types';
+import type { JobRank } from './role.types';
 
 /** Query key every job-rank query lives under, so one invalidation refreshes them all. */
 export const JOB_RANKS_QUERY_KEY = ['job-ranks'] as const;

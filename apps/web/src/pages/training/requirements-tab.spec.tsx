@@ -1,21 +1,21 @@
 // @vitest-environment jsdom
 /**
- * WHO MAY CHANGE WHAT A POSITION REQUIRES.
+ * WHO MAY CHANGE WHAT A ROLE REQUIRES.
  *
  * WHY THIS TIER IS ONLY REACHABLE FROM A COMPONENT TEST. Every Playwright seat is an administrator and
  * therefore holds `training.manage`, so the browser suite renders this tab in exactly one of its two
  * states and can never observe the other. That asymmetry is why two ungated write controls lived here
  * unnoticed.
  *
- * WHAT THE API ACTUALLY SAYS, route by route. `GET /training/positions/{positionId}/requirements` is
+ * WHAT THE API ACTUALLY SAYS, route by route. `GET /training/roles/{roleId}/requirements` is
  * `@RequirePermission('training.read')`; `POST` on the same path and `DELETE /training/requirements/{id}`
  * are both `@RequirePermission('training.manage')`. A requirement is the INPUT to the competency gap
  * report, so the read-only tier is not a courtesy: an auditor who could delete a requirement could
  * delete the finding computed from it, which is the audit trail destroying itself.
  *
- * THE TAB STARTS EMPTY BY DESIGN, so every case here has to choose a position first. That is asserted
+ * THE TAB STARTS EMPTY BY DESIGN, so every case here has to choose a role first. That is asserted
  * rather than worked around — the empty state is what a reader sees before they pick, and it must not
- * read as "this position requires nothing".
+ * read as "this role requires nothing".
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
@@ -35,14 +35,14 @@ vi.mock('@/shared/hooks/use-permissions', () => ({
 }));
 
 /**
- * The position picker is replaced, and this is the point of the whole file being a component test.
+ * The role picker is replaced, and this is the point of the whole file being a component test.
  *
  * `EntityPicker` is a combobox that fetches, debounces and filters; driving it through a real search
  * would make every assertion below depend on typing, timers and a second endpoint. Here it is reduced
- * to a button that selects one position, because WHICH position is chosen is irrelevant to who may
+ * to a button that selects one role, because WHICH role is chosen is irrelevant to who may
  * change its requirements — the tab merely has to be past its empty state.
  */
-const POSITION_ID = '019fff6b-855d-7fac-8f5e-f79f4fec0bc3';
+const ROLE_ID = '019fff6b-855d-7fac-8f5e-f79f4fec0bc3';
 vi.mock('@/shared/ui', async () => {
   const real = await vi.importActual<typeof import('@/shared/ui')>('@/shared/ui');
   return {
@@ -54,7 +54,7 @@ vi.mock('@/shared/ui', async () => {
       ariaLabel?: string;
       onChange: (value: string, option?: { label: string }) => void;
     }) => (
-      <button type="button" onClick={() => onChange(POSITION_ID, { label: 'Senior Auditor' })}>
+      <button type="button" onClick={() => onChange(ROLE_ID, { label: 'Senior Auditor' })}>
         {ariaLabel ?? 'picker'}
       </button>
     ),
@@ -65,7 +65,7 @@ import { RequirementsTab } from './requirements-tab';
 
 const REQUIREMENT = {
   id: 'req-1',
-  positionId: POSITION_ID,
+  roleId: ROLE_ID,
   courseId: 'course-1',
   courseCode: 'ISO-27001-AW',
   courseTitle: 'Information Security Awareness',
@@ -82,8 +82,8 @@ async function renderAs(permissions: string[]) {
       <RequirementsTab />
     </QueryClientProvider>,
   );
-  // Choose a position, because the tab shows no table at all until one is named.
-  screen.getByRole('button', { name: 'Position' }).click();
+  // Choose a role, because the tab shows no table at all until one is named.
+  screen.getByRole('button', { name: 'Role' }).click();
   await screen.findByText('Information Security Awareness');
   return view;
 }
@@ -94,7 +94,7 @@ describe('RequirementsTab', () => {
     GET.mockResolvedValue({ data: [REQUIREMENT], error: undefined });
   });
 
-  it('shows what a position requires but no way to change it, to a read-only holder', async () => {
+  it('shows what a role requires but no way to change it, to a read-only holder', async () => {
     await renderAs(['training.read']);
 
     /*
@@ -130,10 +130,10 @@ describe('RequirementsTab', () => {
     /*
      * A MANAGE HOLDER WHO HAS CHOSEN NOTHING still sees the button, DISABLED. The two reasons to
      * withhold this control are not interchangeable and the UI must not conflate them: "name a
-     * position first" is resolved by one click and therefore worth showing, whereas "you do not hold
+     * role first" is resolved by one click and therefore worth showing, whereas "you do not hold
      * training.manage" is resolved by nothing this user can do and is therefore absent entirely.
      *
-     * Collapsing the two — hiding the button when no position is chosen, or grey-disabling it for a
+     * Collapsing the two — hiding the button when no role is chosen, or grey-disabling it for a
      * reader — is the mistake this pins. A greyed control tells a reader to go looking for the
      * precondition that would enable it, and there isn't one.
      */
@@ -148,7 +148,7 @@ describe('RequirementsTab', () => {
     const button = screen.getByRole('button', { name: 'Require a course' });
     expect(button).toBeTruthy();
     expect((button as HTMLButtonElement).disabled).toBe(true);
-    // And the empty state says why there is no table, rather than claiming the position requires nothing.
-    expect(screen.getByText('Choose a position to see what it requires.')).toBeTruthy();
+    // And the empty state says why there is no table, rather than claiming the role requires nothing.
+    expect(screen.getByText('Choose a role to see what it requires.')).toBeTruthy();
   });
 });

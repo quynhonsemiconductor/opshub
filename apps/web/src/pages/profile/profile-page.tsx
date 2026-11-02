@@ -375,7 +375,7 @@ export function ProfilePage() {
             employee could not see their own role history or contract anywhere in the product. */}
         <SectionCard
           title="Your roles"
-          subtitle="The positions you have held, newest first. Read from your own record."
+          subtitle="The roles you have held, newest first. Read from your own record."
         >
           <MyRoleHistory />
         </SectionCard>

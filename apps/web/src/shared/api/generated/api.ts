@@ -1045,7 +1045,7 @@ export interface paths {
     };
     /**
      * My work-from-home quota for a week
-     * @description The allowance set by the rank of the caller's current position, the working days already claimed by pending and approved requests in the Monday–Sunday week containing `weekOf` (the current week when omitted), and what remains. The quota resets every week and never carries over. An allowance of 0 means filing is refused (412 `WFH_QUOTA_NONE`).
+     * @description The allowance set by the rank of the caller's current role, the working days already claimed by pending and approved requests in the Monday–Sunday week containing `weekOf` (the current week when omitted), and what remains. The quota resets every week and never carries over. An allowance of 0 means filing is refused (412 `WFH_QUOTA_NONE`).
      */
     get: operations['WorkforceController_getWfhQuota'];
     put?: never;
@@ -2272,15 +2272,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/v1/positions/me': {
+  '/v1/roles/me': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** My position history, newest first */
-    get: operations['PositionsController_myPositions'];
+    /** My role history, newest first */
+    get: operations['RolesController_myRoles'];
     put?: never;
     post?: never;
     delete?: never;
@@ -2289,7 +2289,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/v1/positions': {
+  '/v1/roles': {
     parameters: {
       query?: never;
       header?: never;
@@ -2297,41 +2297,41 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List positions with occupancy
-     * @description Each row carries `filled` (open assignments) and `vacancies` (`headcount - filled`, floored at 0). `vacantOnly` narrows to positions with an unfilled approved slot.
+     * List roles with occupancy
+     * @description Each row carries `filled` (open assignments) and `vacancies` (`headcount - filled`, floored at 0). `vacantOnly` narrows to roles with an unfilled approved slot.
      */
-    get: operations['PositionsController_list'];
+    get: operations['RolesController_list'];
     put?: never;
-    /** Define a position */
-    post: operations['PositionsController_create'];
+    /** Define a role */
+    post: operations['RolesController_create'];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  '/v1/positions/{id}': {
+  '/v1/roles/{id}': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Get a position */
-    get: operations['PositionsController_getById'];
+    /** Get a role */
+    get: operations['RolesController_getById'];
     put?: never;
     post?: never;
     delete?: never;
     options?: never;
     head?: never;
     /**
-     * Change a position, including approved headcount
+     * Change a role, including approved headcount
      * @description Reducing headcount below current occupancy is ALLOWED — a restructure is a real event — and shows as `vacancies: 0` with `filled > headcount`. No new assignment can be made until that resolves.
      */
-    patch: operations['PositionsController_update'];
+    patch: operations['RolesController_update'];
     trace?: never;
   };
-  '/v1/positions/{id}/assignments': {
+  '/v1/roles/{id}/assignments': {
     parameters: {
       query?: never;
       header?: never;
@@ -2339,23 +2339,23 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Everyone who has held this position, newest first
+     * Everyone who has held this role, newest first
      * @description History, not just current occupants — closed assignments are never deleted.
      */
-    get: operations['PositionsController_listAssignments'];
+    get: operations['RolesController_listAssignments'];
     put?: never;
     /**
-     * Assign an employee, transferring them if they hold another position
-     * @description One transaction: closes any current assignment, checks approved headcount, opens the new one. A frozen or closed position accepts nobody new.
+     * Assign an employee, transferring them if they hold another role
+     * @description One transaction: closes any current assignment, checks approved headcount, opens the new one. A frozen or closed role accepts nobody new.
      */
-    post: operations['PositionsController_assign'];
+    post: operations['RolesController_assign'];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  '/v1/positions/assignments/{id}/end': {
+  '/v1/roles/assignments/{id}/end': {
     parameters: {
       query?: never;
       header?: never;
@@ -2370,20 +2370,20 @@ export interface paths {
     head?: never;
     /**
      * End an assignment without opening another
-     * @description A departure or a vacated role. The row is closed, never deleted. An `effectiveTo` before the assignment started is refused with `POSITION_INVALID_WINDOW`.
+     * @description A departure or a vacated role. The row is closed, never deleted. An `effectiveTo` before the assignment started is refused with `ROLE_INVALID_WINDOW`.
      */
-    patch: operations['PositionsController_endAssignment'];
+    patch: operations['RolesController_endAssignment'];
     trace?: never;
   };
-  '/v1/positions/employees/{employeeId}/history': {
+  '/v1/roles/employees/{employeeId}/history': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** One employee's position history, newest first */
-    get: operations['PositionsController_employeeHistory'];
+    /** One employee's role history, newest first */
+    get: operations['RolesController_employeeHistory'];
     put?: never;
     post?: never;
     delete?: never;
@@ -2425,7 +2425,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a job rank
-     * @description Refused (409 `JOB_RANK_IN_USE`) while any position still carries the rank.
+     * @description Refused (409 `JOB_RANK_IN_USE`) while any role still carries the rank.
      */
     delete: operations['JobRanksController_remove'];
     options?: never;
@@ -2617,7 +2617,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Training my current position requires and I do not hold */
+    /** Training my current role requires and I do not hold */
     get: operations['TrainingController_myGaps'];
     put?: never;
     post?: never;
@@ -2689,19 +2689,19 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/v1/training/positions/{positionId}/requirements': {
+  '/v1/training/roles/{roleId}/requirements': {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Courses a position requires */
+    /** Courses a role requires */
     get: operations['TrainingController_listRequirements'];
     put?: never;
     /**
-     * Require a course of a position
-     * @description The requirement hangs off the POSITION, not the person, so a transfer changes what somebody needs with no backfill.
+     * Require a course of a role
+     * @description The requirement hangs off the ROLE, not the person, so a transfer changes what somebody needs with no backfill.
      */
     post: operations['TrainingController_addRequirement'];
     delete?: never;
@@ -2720,7 +2720,7 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Stop requiring a course of a position */
+    /** Stop requiring a course of a role */
     delete: operations['TrainingController_removeRequirement'];
     options?: never;
     head?: never;
@@ -2924,7 +2924,7 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Competency gaps — who is missing training their CURRENT position requires
+     * Competency gaps — who is missing training their CURRENT role requires
      * @description Mandatory only unless `includeRecommended` is set. `reason` distinguishes `never_completed` from `expired`, because one needs scheduling and the other rescheduling.
      */
     get: operations['TrainingController_gaps'];
@@ -3110,7 +3110,7 @@ export interface paths {
     put?: never;
     /**
      * Create the review for one employee
-     * @description Freezes the employee's CURRENT position on the review: a transfer afterwards does not restate what the review was about. Refused if the reviewer is the employee (412 `PERFORMANCE_SELF_REVIEW`) or the cycle is not open (412 `PERFORMANCE_CYCLE_NOT_OPEN`).
+     * @description Freezes the employee's CURRENT role on the review: a transfer afterwards does not restate what the review was about. Refused if the reviewer is the employee (412 `PERFORMANCE_SELF_REVIEW`) or the cycle is not open (412 `PERFORMANCE_CYCLE_NOT_OPEN`).
      */
     post: operations['PerformanceController_createReview'];
     delete?: never;
@@ -6712,18 +6712,18 @@ export interface components {
       employeeName: string | null;
       acknowledgedAt: string;
     };
-    EmployeePositionHistoryResponseDto: {
+    EmployeeRoleHistoryResponseDto: {
       id: string;
       employeeId: string;
-      positionId: string;
-      positionCode: string;
-      positionTitle: string;
+      roleId: string;
+      roleCode: string;
+      roleTitle: string;
       effectiveFrom: string;
       effectiveTo: string | null;
       endReason: string | null;
       createdAt: string;
     };
-    PositionOccupancyResponseDto: {
+    RoleOccupancyResponseDto: {
       /** @description Open assignments — someone who left last month does not occupy a slot. */
       filled: number;
       /** @description `headcount - filled`, floored at 0: a reduced headcount must not report negative vacancies. */
@@ -6738,7 +6738,7 @@ export interface components {
       status: string;
       createdAt: string;
     };
-    PositionResponseDto: {
+    RoleResponseDto: {
       id: string;
       code: string;
       title: string;
@@ -6749,18 +6749,18 @@ export interface components {
       status: string;
       createdAt: string;
     };
-    PositionAssignmentResponseDto: {
-      /** @description Null when the employee row is gone. The assignment is still part of the position's history. */
+    RoleAssignmentResponseDto: {
+      /** @description Null when the employee row is gone. The assignment is still part of the role's history. */
       employeeName: string | null;
       id: string;
       employeeId: string;
-      positionId: string;
+      roleId: string;
       effectiveFrom: string;
       effectiveTo: string | null;
       endReason: string | null;
       createdAt: string;
     };
-    CreatePositionDto: {
+    CreateRoleDto: {
       code: string;
       title: string;
       department: string;
@@ -6769,7 +6769,7 @@ export interface components {
       headcount?: number;
       description?: string;
     };
-    UpdatePositionDto: {
+    UpdateRoleDto: {
       title?: string;
       department?: string;
       /** Format: uuid */
@@ -6779,17 +6779,17 @@ export interface components {
       /** @enum {string} */
       status?: 'active' | 'frozen' | 'closed';
     };
-    AssignPositionDto: {
+    AssignRoleDto: {
       /** Format: uuid */
       employeeId: string;
       /** Format: date */
       effectiveFrom: string;
       endReason?: string;
     };
-    EmployeePositionResponseDto: {
+    EmployeeRoleResponseDto: {
       id: string;
       employeeId: string;
-      positionId: string;
+      roleId: string;
       effectiveFrom: string;
       effectiveTo: string | null;
       endReason: string | null;
@@ -6844,7 +6844,7 @@ export interface components {
        *     contract is exactly the record that has to outlive the person it was signed with.
        */
       employeeName: string | null;
-      positionId: string | null;
+      roleId: string | null;
       reference: string;
       startDate: string;
       endDate: string | null;
@@ -6870,7 +6870,7 @@ export interface components {
       /** Format: uuid */
       employeeId: string;
       /** Format: uuid */
-      positionId?: string | null;
+      roleId?: string | null;
       reference: string;
       /** @enum {string} */
       contractType: 'permanent' | 'fixed_term' | 'probation' | 'internship' | 'contractor';
@@ -6893,7 +6893,7 @@ export interface components {
     };
     UpdateContractDto: {
       /** Format: uuid */
-      positionId?: string | null;
+      roleId?: string | null;
       /** @enum {string} */
       contractType?: 'permanent' | 'fixed_term' | 'probation' | 'internship' | 'contractor';
       /** Format: date */
@@ -6959,7 +6959,7 @@ export interface components {
       employeeId: string;
       /**
        * @description Who is missing the training, resolved server-side. Null when the employee row is gone; the gap
-       *     report is read from `employee_positions`, so a stale assignment can outlive the directory row it
+       *     report is read from `employee_roles`, so a stale assignment can outlive the directory row it
        *     points at, and a left lookup keeps the finding visible instead of quietly dropping it.
        *
        *     Sent because the report exists to be acted on — somebody has to be booked onto a course — and a
@@ -6967,7 +6967,7 @@ export interface components {
        *     for the same reason; it just gets it from a join, because that report drives off `employees`.
        */
       employeeName: string | null;
-      positionId: string;
+      roleId: string;
       courseId: string;
       courseCode: string;
       courseTitle: string;
@@ -7007,7 +7007,7 @@ export interface components {
     };
     RequirementResponseDto: {
       id: string;
-      positionId: string;
+      roleId: string;
       courseId: string;
       courseCode: string;
       courseTitle: string;
@@ -7084,7 +7084,7 @@ export interface components {
       /** @description Resolved server-side. Null when the reviewer has left — which is why reassignment exists. */
       reviewerName: string | null;
       /** @description The role the employee was reviewed IN, frozen at creation. Null when unassigned then. */
-      positionId: string | null;
+      roleId: string | null;
       status: string;
       selfAssessment: string | null;
       selfAssessmentSubmittedAt: string | null;
@@ -7142,8 +7142,8 @@ export interface components {
       employeeId: string;
       employeeName: string;
       email: string;
-      /** @description The employee's CURRENT position — this is a question about now, not a record of then. */
-      positionId: string | null;
+      /** @description The employee's CURRENT role — this is a question about now, not a record of then. */
+      roleId: string | null;
       /** @description Null when no review exists at all, which is the case the report exists for. */
       reviewId: string | null;
       status: string | null;
@@ -8682,6 +8682,8 @@ export interface operations {
           | 'attendance_month'
           | 'document'
           | 'document_version'
+          | 'job_role'
+          | 'employee_role'
           | 'position'
           | 'employee_position'
           | 'job_rank'
@@ -15151,7 +15153,7 @@ export interface operations {
       };
     };
   };
-  PositionsController_myPositions: {
+  RolesController_myRoles: {
     parameters: {
       query?: never;
       header?: never;
@@ -15165,7 +15167,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['EmployeePositionHistoryResponseDto'][];
+          'application/json': components['schemas']['EmployeeRoleHistoryResponseDto'][];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -15177,7 +15179,7 @@ export interface operations {
       };
     };
   };
-  PositionsController_list: {
+  RolesController_list: {
     parameters: {
       query?: {
         search?: string;
@@ -15200,7 +15202,7 @@ export interface operations {
         };
         content: {
           'application/json': {
-            data?: components['schemas']['PositionOccupancyResponseDto'][];
+            data?: components['schemas']['RoleOccupancyResponseDto'][];
             pageInfo?: {
               total: number;
               limit: number;
@@ -15226,7 +15228,7 @@ export interface operations {
       };
     };
   };
-  PositionsController_create: {
+  RolesController_create: {
     parameters: {
       query?: never;
       header?: never;
@@ -15235,7 +15237,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CreatePositionDto'];
+        'application/json': components['schemas']['CreateRoleDto'];
       };
     };
     responses: {
@@ -15244,7 +15246,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['PositionResponseDto'];
+          'application/json': components['schemas']['RoleResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -15277,7 +15279,7 @@ export interface operations {
       };
     };
   };
-  PositionsController_getById: {
+  RolesController_getById: {
     parameters: {
       query?: never;
       header?: never;
@@ -15293,7 +15295,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['PositionResponseDto'];
+          'application/json': components['schemas']['RoleResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -15319,7 +15321,7 @@ export interface operations {
       };
     };
   };
-  PositionsController_update: {
+  RolesController_update: {
     parameters: {
       query?: never;
       header?: never;
@@ -15330,7 +15332,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['UpdatePositionDto'];
+        'application/json': components['schemas']['UpdateRoleDto'];
       };
     };
     responses: {
@@ -15339,7 +15341,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['PositionResponseDto'];
+          'application/json': components['schemas']['RoleResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -15372,7 +15374,7 @@ export interface operations {
       };
     };
   };
-  PositionsController_listAssignments: {
+  RolesController_listAssignments: {
     parameters: {
       query?: never;
       header?: never;
@@ -15388,7 +15390,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['PositionAssignmentResponseDto'][];
+          'application/json': components['schemas']['RoleAssignmentResponseDto'][];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -15414,7 +15416,7 @@ export interface operations {
       };
     };
   };
-  PositionsController_assign: {
+  RolesController_assign: {
     parameters: {
       query?: never;
       header?: never;
@@ -15425,7 +15427,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['AssignPositionDto'];
+        'application/json': components['schemas']['AssignRoleDto'];
       };
     };
     responses: {
@@ -15434,7 +15436,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['EmployeePositionResponseDto'];
+          'application/json': components['schemas']['EmployeeRoleResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -15481,7 +15483,7 @@ export interface operations {
       };
     };
   };
-  PositionsController_endAssignment: {
+  RolesController_endAssignment: {
     parameters: {
       query?: never;
       header?: never;
@@ -15501,7 +15503,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['EmployeePositionResponseDto'];
+          'application/json': components['schemas']['EmployeeRoleResponseDto'];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -15541,7 +15543,7 @@ export interface operations {
       };
     };
   };
-  PositionsController_employeeHistory: {
+  RolesController_employeeHistory: {
     parameters: {
       query?: never;
       header?: never;
@@ -15557,7 +15559,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['EmployeePositionHistoryResponseDto'][];
+          'application/json': components['schemas']['EmployeeRoleHistoryResponseDto'][];
         };
       };
       /** @description Unauthorized — missing or invalid authentication */
@@ -15859,7 +15861,7 @@ export interface operations {
         employeeId?: string;
         status?: 'draft' | 'active' | 'expired' | 'terminated';
         contractType?: 'permanent' | 'fixed_term' | 'probation' | 'internship' | 'contractor';
-        positionId?: string;
+        roleId?: string;
         endingOnOrBefore?: string;
         limit?: number;
         offset?: number;
@@ -16619,7 +16621,7 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
-        positionId: string;
+        roleId: string;
       };
       cookie?: never;
     };
@@ -16654,7 +16656,7 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
-        positionId: string;
+        roleId: string;
       };
       cookie?: never;
     };
@@ -17325,7 +17327,7 @@ export interface operations {
     parameters: {
       query?: {
         employeeId?: string;
-        positionId?: string;
+        roleId?: string;
         asOf?: string;
         includeRecommended?: boolean | string;
       };

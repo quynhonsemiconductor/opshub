@@ -4,13 +4,13 @@ import type { PickerOption } from '@/shared/ui';
 /**
  * Where an `EntityPicker`'s options come from, defined once per entity.
  *
- * Four forms need to name an employee and three need to name a course or a position. Written at each
+ * Four forms need to name an employee and three need to name a course or a role. Written at each
  * call site, that is seven copies of "fetch, map to `{ value, label, hint }`, decide what the hint is" —
  * and the hint is a property of the ENTITY, not of the form: an employee is always best identified by
  * their department, a course by its code.
  *
- * SEARCHING IS SERVER-SIDE WHERE THE API SUPPORTS IT. `/v1/employees`, `/v1/positions`, `/v1/documents`
- * and `/v1/assets` all take `search` — positions only since this branch: the SPA had shipped a search box
+ * SEARCHING IS SERVER-SIDE WHERE THE API SUPPORTS IT. `/v1/employees`, `/v1/roles`, `/v1/documents`
+ * and `/v1/assets` all take `search` — roles only since this branch: the SPA had shipped a search box
  * for that list while the endpoint had no such parameter, so the term was dropped and the box filtered
  * nothing.
  *
@@ -82,17 +82,17 @@ export async function assetOptions(term: string): Promise<PickerOption[]> {
   }));
 }
 
-/** Positions, searched by the API over title, code and department. */
-export async function positionOptions(term: string): Promise<PickerOption[]> {
-  const { data } = await api.GET('/v1/positions', {
+/** Roles, searched by the API over title, code and department. */
+export async function roleOptions(term: string): Promise<PickerOption[]> {
+  const { data } = await api.GET('/v1/roles', {
     params: {
       query: { search: term || undefined, status: 'active', limit: PICKER_LIMIT, offset: 0 },
     },
   });
-  return (data?.data ?? []).map((position) => ({
-    value: position.id,
-    label: position.title,
-    hint: position.code,
+  return (data?.data ?? []).map((role) => ({
+    value: role.id,
+    label: role.title,
+    hint: role.code,
   }));
 }
 

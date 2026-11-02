@@ -21,17 +21,17 @@ import {
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash, todayIso } from '@/shared/lib/format';
-import { AssignPositionModal, PositionModal } from './position-modals';
+import { AssignRoleModal, RoleModal } from './role-modals';
 import { rankNamesById, useJobRanks } from './use-job-ranks';
-import type { Position, PositionAssignment } from './position.types';
+import type { Role, RoleAssignment } from './role.types';
 
 /**
- * Positions and headcount — the first screen for a module that had none.
+ * Roles and headcount — the first screen for a module that had none.
  *
- * WHY A SCREEN AT ALL. `positions` has been in the API since the EMS depth work: contracts reference a
- * position, training requirements hang off one, and a performance review freezes the position it judged.
+ * WHY A SCREEN AT ALL. `roles` has been in the API since the EMS depth work: contracts reference a
+ * role, training requirements hang off one, and a performance review freezes the role it judged.
  * Until now the only way to create one was a POST by hand, which means the three features that depend
- * on positions were unusable through the UI.
+ * on roles were unusable through the UI.
  *
  * THE HEADCOUNT COLUMN IS THE POINT. `filled` counts OPEN assignments and `vacancies` is
  * `headcount - filled` floored at zero — both computed by the API, because a reduced headcount must not
@@ -45,11 +45,11 @@ const STATUS_FILTERS = [
   { value: 'closed', label: 'Closed' },
 ];
 
-function usePositions(search: string, status: string, limit: number, offset: number) {
+function useRoles(search: string, status: string, limit: number, offset: number) {
   return useQuery({
-    queryKey: ['positions', 'list', search, status, limit, offset],
+    queryKey: ['roles', 'list', search, status, limit, offset],
     queryFn: async () => {
-      const { data, error } = await api.GET('/v1/positions', {
+      const { data, error } = await api.GET('/v1/roles', {
         params: {
           query: {
             search: search || undefined,
@@ -59,19 +59,19 @@ function usePositions(search: string, status: string, limit: number, offset: num
           },
         },
       });
-      if (error || !data) throw new Error('Failed to load positions');
+      if (error || !data) throw new Error('Failed to load roles');
       return data;
     },
   });
 }
 
-function useAssignments(positionId: string | null) {
+function useAssignments(roleId: string | null) {
   return useQuery({
-    queryKey: ['positions', 'assignments', positionId],
-    enabled: !!positionId,
+    queryKey: ['roles', 'assignments', roleId],
+    enabled: !!roleId,
     queryFn: async () => {
-      const { data, error } = await api.GET('/v1/positions/{id}/assignments', {
-        params: { path: { id: positionId! } },
+      const { data, error } = await api.GET('/v1/roles/{id}/assignments', {
+        params: { path: { id: roleId! } },
       });
       if (error || !data) throw new Error('Failed to load assignments');
       return data;
@@ -79,29 +79,29 @@ function useAssignments(positionId: string | null) {
   });
 }
 
-export function PositionsPage() {
+export function RolesPage() {
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('active');
-  const [editing, setEditing] = useState<Position | undefined>();
+  const [editing, setEditing] = useState<Role | undefined>();
   const [creating, setCreating] = useState(false);
-  const [assigning, setAssigning] = useState<Position | null>(null);
-  const [selected, setSelected] = useState<Position | null>(null);
+  const [assigning, setAssigning] = useState<Role | null>(null);
+  const [selected, setSelected] = useState<Role | null>(null);
   /*
    * GATED ON THE PERMISSION THE API ENFORCES. Every write route here carries
    * `@RequirePermission('role.manage')`, and this page offered Create, Edit, Assign and End to
-   * anyone who could READ a position — four affordances that answer 403 for a `role.read` holder.
+   * anyone who could READ a role — four affordances that answer 403 for a `role.read` holder.
    */
   const canManage = usePermissions().can('role.manage');
   const [endingId, setEndingId] = useState<string | null>(null);
   const list = useListState();
 
   const rankNames = rankNamesById(useJobRanks().data);
-  const positions = usePositions(list.search, statusFilter, list.limit, list.offset);
+  const roles = useRoles(list.search, statusFilter, list.limit, list.offset);
   const assignments = useAssignments(selected?.id ?? null);
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['positions'] });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['roles'] });
 
   async function endAssignment(id: string) {
-    const { error } = await api.PATCH('/v1/positions/assignments/{id}/end', {
+    const { error } = await api.PATCH('/v1/roles/assignments/{id}/end', {
       params: { path: { id } },
       // Ends TODAY. A different date is a correction, which belongs on the history screen rather than
       // behind a confirm dialog that has no field for it.
@@ -114,10 +114,10 @@ export function PositionsPage() {
     }
     toast.success('Assignment ended');
     invalidate();
-    void qc.invalidateQueries({ queryKey: ['positions', 'assignments'] });
+    void qc.invalidateQueries({ queryKey: ['roles', 'assignments'] });
   }
 
-  const columns: DataTableColumn<Position>[] = [
+  const columns: DataTableColumn<Role>[] = [
     {
       key: 'code',
       header: 'Code',
@@ -207,18 +207,18 @@ export function PositionsPage() {
 
   return (
     <>
-      {creating && <PositionModal open onClose={() => setCreating(false)} onSuccess={invalidate} />}
+      {creating && <RoleModal open onClose={() => setCreating(false)} onSuccess={invalidate} />}
       {editing && (
-        <PositionModal
+        <RoleModal
           open
-          position={editing}
+          role={editing}
           onClose={() => setEditing(undefined)}
           onSuccess={invalidate}
         />
       )}
       {assigning && (
-        <AssignPositionModal
-          position={assigning}
+        <AssignRoleModal
+          role={assigning}
           onClose={() => setAssigning(null)}
           onSuccess={invalidate}
         />
@@ -235,13 +235,13 @@ export function PositionsPage() {
       />
 
       <ListPage
-        title="Positions"
+        title="Roles"
         description="Approved roles, their headcount, and who occupies them."
         actions={
           canManage ? (
             <Button variant="primary" onClick={() => setCreating(true)}>
               <Plus className="h-4 w-4" strokeWidth={2} />
-              New position
+              New role
             </Button>
           ) : undefined
         }
@@ -261,22 +261,22 @@ export function PositionsPage() {
             }}
           />
         }
-        pageInfo={positions.data?.pageInfo}
+        pageInfo={roles.data?.pageInfo}
         onOffsetChange={list.goToOffset}
-        noun="positions"
+        noun="roles"
       >
         <DataTable
           columns={columns}
-          rows={positions.data?.data as Position[] | undefined}
-          isLoading={positions.isLoading}
-          isError={positions.isError}
-          errorMessage="Failed to load positions."
-          emptyMessage={list.search ? 'No positions match that search' : 'No positions yet'}
+          rows={roles.data?.data as Role[] | undefined}
+          isLoading={roles.isLoading}
+          isError={roles.isError}
+          errorMessage="Failed to load roles."
+          emptyMessage={list.search ? 'No roles match that search' : 'No roles yet'}
           emptyIcon={Briefcase}
           emptyAction={
             list.search || !canManage ? undefined : (
               <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-                <Plus className="h-3.5 w-3.5" /> Create your first position
+                <Plus className="h-3.5 w-3.5" /> Create your first role
               </Button>
             )
           }
@@ -289,7 +289,7 @@ export function PositionsPage() {
         open={!!selected}
         onClose={() => setSelected(null)}
         width="lg"
-        title={selected?.title ?? 'Position'}
+        title={selected?.title ?? 'Role'}
         description={selected ? `${selected.code} · ${selected.department}` : undefined}
         items={
           selected
@@ -318,7 +318,7 @@ export function PositionsPage() {
               ]
             : []
         }
-        activity={selected ? { resourceId: selected.id, resourceType: 'position' } : undefined}
+        activity={selected ? { resourceId: selected.id, resourceType: 'role' } : undefined}
       >
         {selected && (
           <SlideOverSection title="Assignments">
@@ -330,19 +330,19 @@ export function PositionsPage() {
                   key: 'employee',
                   header: 'Employee',
                   // Who has held the role, by name. The history is opened to read exactly that.
-                  cell: (a: PositionAssignment) => (
+                  cell: (a: RoleAssignment) => (
                     <span className="text-xs">{orDash(a.employeeName)}</span>
                   ),
                 },
                 {
                   key: 'from',
                   header: 'From',
-                  cell: (a: PositionAssignment) => formatDate(a.effectiveFrom),
+                  cell: (a: RoleAssignment) => formatDate(a.effectiveFrom),
                 },
                 {
                   key: 'to',
                   header: 'To',
-                  cell: (a: PositionAssignment) =>
+                  cell: (a: RoleAssignment) =>
                     a.effectiveTo ? (
                       formatDate(a.effectiveTo)
                     ) : (
@@ -353,7 +353,7 @@ export function PositionsPage() {
                   key: 'actions',
                   header: '',
                   align: 'right',
-                  cell: (a: PositionAssignment) =>
+                  cell: (a: RoleAssignment) =>
                     a.effectiveTo || !canManage ? null : (
                       <Button variant="outline" size="sm" onClick={() => setEndingId(a.id)}>
                         End

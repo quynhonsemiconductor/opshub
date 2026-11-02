@@ -327,8 +327,8 @@ export async function chooseFromPicker(
   /*
    * The option MATCHING THE TERM, not the first one. The picker debounces its search by 250ms, so for a
    * moment the open list still holds the unfiltered page — and `.first()` then chose a different record
-   * entirely. Measured: a requirement was added to whichever position sorted first, and the failure
-   * surfaced two steps later as a dialog heading naming the wrong position.
+   * entirely. Measured: a requirement was added to whichever role sorted first, and the failure
+   * surfaced two steps later as a dialog heading naming the wrong role.
    *
    * Waiting for the option whose name contains the term is the same wait AND the same assertion.
    */

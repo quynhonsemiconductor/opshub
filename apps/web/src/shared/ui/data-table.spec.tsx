@@ -49,11 +49,9 @@ describe('DataTable', () => {
   it('shows the ERROR, not the empty state, when the request failed', () => {
     // The distinction the hand-rolled copies got wrong: a failed request has no rows either, and
     // "nothing here yet" is a lie about a list nobody managed to read.
-    render(
-      <DataTable columns={COLUMNS} rows={[]} isError errorMessage="Failed to load positions." />,
-    );
+    render(<DataTable columns={COLUMNS} rows={[]} isError errorMessage="Failed to load roles." />);
 
-    expect(screen.getByText('Failed to load positions.')).toBeInTheDocument();
+    expect(screen.getByText('Failed to load roles.')).toBeInTheDocument();
     expect(screen.queryByText('Nothing here yet')).not.toBeInTheDocument();
   });
 
@@ -62,12 +60,12 @@ describe('DataTable', () => {
       <DataTable
         columns={COLUMNS}
         rows={[]}
-        emptyMessage="No positions yet"
+        emptyMessage="No roles yet"
         emptyAction={<button type="button">Create one</button>}
       />,
     );
 
-    expect(screen.getByText('No positions yet')).toBeInTheDocument();
+    expect(screen.getByText('No roles yet')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create one' })).toBeInTheDocument();
   });
 

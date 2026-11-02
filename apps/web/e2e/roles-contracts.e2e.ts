@@ -10,10 +10,10 @@ import {
 } from './support/fixtures';
 
 /**
- * Positions and contracts — the first two screens for modules that had an API and no UI.
+ * Roles and contracts — the first two screens for modules that had an API and no UI.
  *
- * Both create what they assert on: a fresh database has no positions and no contracts, and the whole
- * point of these screens is that a position could not previously be created without a hand-written
+ * Both create what they assert on: a fresh database has no roles and no contracts, and the whole
+ * point of these screens is that a role could not previously be created without a hand-written
  * POST.
  *
  * The contracts test also pins the ONE property that is easy to get wrong here: `compensation` comes
@@ -27,15 +27,15 @@ function unique(prefix: string): string {
 }
 
 /**
- * Create a position through the API.
+ * Create a role through the API.
  *
  * Used by the drawer test so it does not depend on the test above it having run — specs in a file share
  * a database, not an order guarantee, and "the first row exists" is exactly the assumption that has
  * failed three times in this migration.
  */
-async function createPosition(request: APIRequestContext): Promise<string> {
+async function createRole(request: APIRequestContext): Promise<string> {
   const code = unique('PWX').toUpperCase();
-  const res = await request.post('/v1/positions', {
+  const res = await request.post('/v1/roles', {
     headers: await csrfHeaders(request),
     data: { code, title: 'Playwright Seeded', department: 'Quality', headcount: 2 },
   });
@@ -43,15 +43,15 @@ async function createPosition(request: APIRequestContext): Promise<string> {
   return code;
 }
 
-test.describe('positions', () => {
-  test('creates a position, assigns nobody, and reports its vacancies', async ({ page }) => {
+test.describe('roles', () => {
+  test('creates a role, assigns nobody, and reports its vacancies', async ({ page }) => {
     const code = unique('PW').toUpperCase();
-    await gotoInShell(page, '/positions');
+    await gotoInShell(page, '/roles');
 
-    // `.first()`: the header action and the empty-state action are both "New position", which is
+    // `.first()`: the header action and the empty-state action are both "New role", which is
     // correct for a user and ambiguous for a locator.
     await page
-      .getByRole('button', { name: /new position/i })
+      .getByRole('button', { name: /new role/i })
       .first()
       .click();
     const dialog = page.getByRole('dialog');
@@ -60,10 +60,10 @@ test.describe('positions', () => {
     await dialog.getByLabel('Title').fill('Playwright Engineer');
     await dialog.getByLabel('Department').fill('Quality');
     await dialog.getByLabel('Headcount').fill('3');
-    await dialog.getByRole('button', { name: /create position/i }).click();
+    await dialog.getByRole('button', { name: /create role/i }).click();
     await expect(dialog).toBeHidden();
 
-    // FOUND BY SEARCH, because the register is ordered by CODE: with hundreds of positions from the API
+    // FOUND BY SEARCH, because the register is ordered by CODE: with hundreds of roles from the API
     // suites, a new `PW-…` code is wherever the alphabet puts it, which is not page one. The search box
     // is server-side as of #165, so this also proves the term reaches the API.
     await page.getByRole('searchbox').fill(code);
@@ -75,14 +75,14 @@ test.describe('positions', () => {
   });
 
   test('shows the assignment list in the drawer, empty and honest', async ({ page, request }) => {
-    // Opens the position THIS test created, found by search, rather than whichever row sorts first.
+    // Opens the role THIS test created, found by search, rather than whichever row sorts first.
     //
     // `clickFirstRow` was wrong here in a way that only showed up later: the first row eventually became
-    // a position holding an assignment that had already been ENDED, which is neither "nobody assigned"
+    // a role holding an assignment that had already been ENDED, which is neither "nobody assigned"
     // nor "current" — so the assertion failed against a drawer that was rendering correctly. A spec that
     // asserts on state it did not create is asserting on the database's history.
-    const code = await createPosition(request);
-    await gotoInShell(page, '/positions');
+    const code = await createRole(request);
+    await gotoInShell(page, '/roles');
     await page.getByRole('searchbox').fill(code);
     const row = page.locator('tbody tr', { hasText: code });
     await expect(row).toBeVisible({ timeout: 15_000 });
@@ -91,7 +91,7 @@ test.describe('positions', () => {
     const drawer = page.getByRole('dialog');
     await expect(drawer).toBeVisible();
     await expect(drawer.getByRole('heading', { name: 'Assignments' })).toBeVisible();
-    // A position with nobody on it says so rather than rendering an empty table with no explanation.
+    // A role with nobody on it says so rather than rendering an empty table with no explanation.
     await expect(drawer.getByText('Nobody assigned yet')).toBeVisible();
   });
 });
@@ -173,27 +173,27 @@ test.describe('my own employment record', () => {
     request,
   }) => {
     /*
-     * `/v1/positions/me` IS SELF-SCOPED AND HAD NO CALLER, so an employee could not see their own role
-     * history anywhere in the product — reading it through the positions register needs `role.read`.
+     * `/v1/roles/me` IS SELF-SCOPED AND HAD NO CALLER, so an employee could not see their own role
+     * history anywhere in the product — reading it through the roles register needs `role.read`.
      *
-     * THE ASSERTION IS THAT IT READS AS A TITLE. The route used to answer with a bare `positionId`, and a
+     * THE ASSERTION IS THAT IT READS AS A TITLE. The route used to answer with a bare `roleId`, and a
      * screen showing a UUID is the "nobody knows a UUID" problem the SPA's picker exists to remove. The API
      * now resolves the code and title in the same query, and this is where that shows.
      */
     const code = unique('PWME').toUpperCase();
-    const position = await request.post('/v1/positions', {
+    const role = await request.post('/v1/roles', {
       headers: await csrfHeaders(request),
       data: { code, title: 'Playwright Own Role', department: 'Quality', headcount: 3 },
     });
-    expect(position.status(), await position.text()).toBe(201);
-    const positionId = ((await position.json()) as { id: string }).id;
+    expect(role.status(), await role.text()).toBe(201);
+    const roleId = ((await role.json()) as { id: string }).id;
 
     /*
-     * DATED WELL AHEAD. Assigning somebody who already holds a position is a TRANSFER, and a transfer
+     * DATED WELL AHEAD. Assigning somebody who already holds a role is a TRANSFER, and a transfer
      * cannot start before the assignment it closes began — the seats accumulate far-future assignments
-     * across runs, so an earlier date answers `POSITION_INVALID_WINDOW`.
+     * across runs, so an earlier date answers `ROLE_INVALID_WINDOW`.
      */
-    const assigned = await request.post(`/v1/positions/${positionId}/assignments`, {
+    const assigned = await request.post(`/v1/roles/${roleId}/assignments`, {
       headers: await csrfHeaders(request),
       data: { employeeId: await myEmployeeId(request), effectiveFrom: '2046-01-01' },
     });
@@ -205,7 +205,7 @@ test.describe('my own employment record', () => {
     await expect(roles).toBeVisible({ timeout: 15_000 });
     // The code beside it, and NOT the id — which is what this screen would have had to print before.
     await expect(page.getByText(code, { exact: true })).toBeVisible();
-    await expect(page.getByText(positionId)).toHaveCount(0);
+    await expect(page.getByText(roleId)).toHaveCount(0);
 
     // The contract half of the same section, also self-scoped and also previously uncalled. The seeded
     // admin has one, so the section must show something rather than the empty-state line.

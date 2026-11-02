@@ -76,7 +76,7 @@ export const navGroups: NavGroup[] = [
       // `role.read` and `contract.read` are separate codes on purpose: who may see the org chart
       // and who may see engagements are different questions, and the auditor holds both while a
       // manager holds only the first.
-      { to: '/positions', label: 'Positions', icon: Briefcase, cap: 'role.read' },
+      { to: '/roles', label: 'Roles', icon: Briefcase, cap: 'role.read' },
       { to: '/contracts', label: 'Contracts', icon: FileText, cap: 'contract.read' },
     ],
   },
@@ -124,7 +124,7 @@ export const navGroups: NavGroup[] = [
     label: 'Workforce',
     items: [
       { to: '/workforce', label: 'Workforce', icon: CalendarClock },
-      // NO `cap`, deliberately, unlike Positions and Contracts: the screen's first tab is the
+      // NO `cap`, deliberately, unlike Roles and Contracts: the screen's first tab is the
       // caller's OWN training, which is self-scoped and holds no permission code. Gating the nav
       // entry on `training.read` would hide an employee's own certificates from them.
       { to: '/training', label: 'Training', icon: GraduationCap },
