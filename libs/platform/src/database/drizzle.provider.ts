@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool, type ClientConfig } from 'pg';
 import { DbPoolMetrics } from '@quynhonsemiconductor/observability';
+import { guardPool } from '@quynhonsemiconductor/platform-db';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
@@ -55,37 +56,45 @@ export class DrizzleProvider implements OnModuleInit, OnApplicationShutdown {
   private readonly db: DrizzleDB;
 
   constructor(private readonly config: AppConfigService) {
-    this.pool = new Pool({
-      ...databaseClientConfig(config),
-      /**
-       * `min` DOES NOT PRE-CREATE CONNECTIONS. It is kept because it governs idle
-       * REAPING, which is a real and useful effect — but not the effect the option's
-       * name suggests, and not the one this code used to imply.
-       *
-       * Verified against the pinned dependency rather than the type declarations:
-       * `@types/pg` types the option, so the compiler accepts it and says nothing.
-       * In pg-pool 3.14.0 (`node_modules/.pnpm/pg-pool@3.14.0_pg@8.22.0/.../index.js`)
-       * `min` appears exactly twice — line 90 normalises it (`this.options.min =
-       * this.options.min || 0`) and line 124 reads it inside `_isAboveMin()`
-       * (`return this._clients.length > this.options.min`). Its only consumers are
-       * lines 409-411, where an idle client is removed only `if
-       * (this.options.idleTimeoutMillis && this._isAboveMin())`. There is no code path
-       * anywhere in the pool that opens a connection because `min` is set: the pool
-       * creates clients lazily, on `connect()`.
-       *
-       * So the floor it establishes is a floor on connections that ALREADY EXIST — it
-       * stops `idleTimeoutMillis` (30s below) from reaping the pool back to zero
-       * between requests, which on a low-traffic environment is most of the time.
-       * That is worth having, and it is why the alternative — deleting the option as
-       * dead config — was rejected. Together with `onModuleInit` below the two halves
-       * finally mean what the single line used to claim: warm-up opens the floor,
-       * `min` keeps it open.
-       */
-      min: config.get('DATABASE_POOL_MIN'),
-      max: config.get('DATABASE_POOL_MAX'),
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 5_000,
-    });
+    // guardPool: an idle client dropped by a database restart no longer ends the process (pg-pool
+    // re-emits its error on the pool, which threw with no listener), and while the database is down
+    // connection attempts back off (250 ms doubling to 5 s) instead of every relay tick and probe
+    // dialing it. The pool keeps no failed state: one built before PostgreSQL is up serves queries,
+    // and `/readyz` turns 200, as soon as it is (rova's 2026-11-03 node-reboot incident).
+    this.pool = guardPool(
+      new Pool({
+        ...databaseClientConfig(config),
+        /**
+         * `min` DOES NOT PRE-CREATE CONNECTIONS. It is kept because it governs idle
+         * REAPING, which is a real and useful effect — but not the effect the option's
+         * name suggests, and not the one this code used to imply.
+         *
+         * Verified against the pinned dependency rather than the type declarations:
+         * `@types/pg` types the option, so the compiler accepts it and says nothing.
+         * In pg-pool 3.14.0 (`node_modules/.pnpm/pg-pool@3.14.0_pg@8.22.0/.../index.js`)
+         * `min` appears exactly twice — line 90 normalises it (`this.options.min =
+         * this.options.min || 0`) and line 124 reads it inside `_isAboveMin()`
+         * (`return this._clients.length > this.options.min`). Its only consumers are
+         * lines 409-411, where an idle client is removed only `if
+         * (this.options.idleTimeoutMillis && this._isAboveMin())`. There is no code path
+         * anywhere in the pool that opens a connection because `min` is set: the pool
+         * creates clients lazily, on `connect()`.
+         *
+         * So the floor it establishes is a floor on connections that ALREADY EXIST — it
+         * stops `idleTimeoutMillis` (30s below) from reaping the pool back to zero
+         * between requests, which on a low-traffic environment is most of the time.
+         * That is worth having, and it is why the alternative — deleting the option as
+         * dead config — was rejected. Together with `onModuleInit` below the two halves
+         * finally mean what the single line used to claim: warm-up opens the floor,
+         * `min` keeps it open.
+         */
+        min: config.get('DATABASE_POOL_MIN'),
+        max: config.get('DATABASE_POOL_MAX'),
+        idleTimeoutMillis: 30_000,
+        connectionTimeoutMillis: 5_000,
+      }),
+      { logger: this.logger },
+    );
 
     // Pool saturation (`db.pool.in_use` / `db.pool.waiting`), pulled by OpenTelemetry on each collection: the
     // `db-pool-contention` alarm reads `db_pool_waiting`. Same reading as platform-db's own pool helper (which
