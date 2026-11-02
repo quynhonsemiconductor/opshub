@@ -103,10 +103,9 @@ const baseShape = {
    */
   CSRF_SECRET: z.string().min(32),
 
-  // ── AWS (optional in dev) ──────────────────────────────────────────────────
+  // ── Object storage (S3 API: R2 in production, Garage locally) ──────────────
+  /** Region of the S3 client when STORAGE_ENDPOINT is unset (plain AWS S3). With an endpoint the client uses `auto`. */
   AWS_REGION: z.string().default('ap-southeast-1'),
-  /** LocalStack/local-dev endpoint for the AWS SDK clients (SES, SQS). Unset in AWS. */
-  AWS_ENDPOINT_URL: z.string().optional(),
   /** S3 bucket for all stored files — injected by infra as S3_FILES_BUCKET. Optional in dev (uploads stubbed when unset). */
   S3_FILES_BUCKET: z.string().optional(),
   /** CloudFront base URL for file downloads. When set, overrides presigned S3 GET URLs. */
