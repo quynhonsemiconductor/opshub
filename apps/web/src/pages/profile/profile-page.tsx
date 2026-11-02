@@ -219,7 +219,7 @@ function useEmployee(id: string | undefined) {
 /*
  * NO ROLE OR STATUS COLOUR MAPS.
  *
- * `ROLE_LABELS` duplicated `ROLE_NAMES` from the permission catalogue, and the two colour maps
+ * `ROLE_LABELS` duplicated `GROUP_NAMES` from the permission catalogue, and the two colour maps
  * (`colors` inside `RoleBadge`, `statusColors` inside the page) each invented their own palette for
  * words the shared tone map already answers. `humanizeStatus` turns `it-admin` into `It-admin`, which
  * is wrong for a role key, so roles keep an explicit label — but their COLOUR is shared.

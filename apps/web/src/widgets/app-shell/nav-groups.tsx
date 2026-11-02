@@ -61,7 +61,7 @@ export interface NavGroup {
  * Exported for `app-shell.spec.tsx`, which asserts WHICH entries a permission-less employee can see.
  *
  * Not merely a convenience: the gate on an entry is a product decision about who a page is for, and
- * `/access` was gated on `access_request.read` — a code `ROLE.EMPLOYEE` deliberately does not hold —
+ * `/access` was gated on `access_request.read` — a code `GROUP.EMPLOYEE` deliberately does not hold —
  * while every route behind the page is self-scoped or self-narrowing. A test over this array is the
  * cheapest place to catch that, since all eight browser seats are admins and see everything.
  */
@@ -88,7 +88,7 @@ export const navGroups: NavGroup[] = [
        * UNGATED, like the Inbox above it, and for the same reason: this page is self-service before it
        * is administrative.
        *
-       * It was gated on `access_request.read`, which `ROLE.EMPLOYEE` deliberately does not hold — the
+       * It was gated on `access_request.read`, which `GROUP.EMPLOYEE` deliberately does not hold — the
        * permission catalogue says so in as many words, because self-service access "is expressed by
        * the `self` SCOPE on a grant, not by a permission code". So the nav hid the page from the
        * majority of the organisation while the API would have served them: `POST /access-requests` is

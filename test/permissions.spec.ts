@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest';
 import {
   PERMISSION,
   PERMISSION_DESCRIPTIONS,
-  ROLE,
-  ROLE_NAMES,
-  ROLE_PERMISSIONS,
+  GROUP,
+  GROUP_NAMES,
+  GROUP_PERMISSIONS,
   WILDCARD_PERMISSION,
   moduleOf,
   permissionGrants,
@@ -60,9 +60,9 @@ describe('permission codes', () => {
 
 describe('roles', () => {
   it('every role has a display name and a bundle', () => {
-    const keys = Object.values(ROLE).sort();
-    expect(Object.keys(ROLE_NAMES).sort()).toEqual(keys);
-    expect(Object.keys(ROLE_PERMISSIONS).sort()).toEqual(keys);
+    const keys = Object.values(GROUP).sort();
+    expect(Object.keys(GROUP_NAMES).sort()).toEqual(keys);
+    expect(Object.keys(GROUP_PERMISSIONS).sort()).toEqual(keys);
   });
 
   it('grant only codes that exist', () => {
@@ -70,7 +70,7 @@ describe('roles', () => {
     // does not define seeds a row nothing can ever satisfy, so the role looks
     // privileged and is not.
     const valid = new Set<string>([...ALL_CODES, WILDCARD_PERMISSION]);
-    for (const [role, granted] of Object.entries(ROLE_PERMISSIONS)) {
+    for (const [role, granted] of Object.entries(GROUP_PERMISSIONS)) {
       for (const code of granted) {
         expect(valid.has(code), `${role} grants unknown permission ${code}`).toBe(true);
       }
@@ -78,14 +78,14 @@ describe('roles', () => {
   });
 
   it('grant no duplicates within a bundle', () => {
-    for (const [role, granted] of Object.entries(ROLE_PERMISSIONS)) {
+    for (const [role, granted] of Object.entries(GROUP_PERMISSIONS)) {
       expect(new Set<string>(granted).size, `${role} has duplicate grants`).toBe(granted.length);
     }
   });
 
   it('reserve the wildcard for admin alone', () => {
-    for (const [role, granted] of Object.entries(ROLE_PERMISSIONS)) {
-      if (role === ROLE.ADMIN) {
+    for (const [role, granted] of Object.entries(GROUP_PERMISSIONS)) {
+      if (role === GROUP.ADMIN) {
         expect(granted).toEqual([WILDCARD_PERMISSION]);
       } else {
         expect(granted as readonly string[], `${role} must not hold '*'`).not.toContain(
@@ -99,7 +99,7 @@ describe('roles', () => {
     // Self-service access is expressed by the `self` SCOPE on a grant, not by a
     // permission code. An entry creeping in here means someone modelled
     // "my own records" as a capability, which every user would then hold globally.
-    expect(ROLE_PERMISSIONS[ROLE.EMPLOYEE]).toEqual([]);
+    expect(GROUP_PERMISSIONS[GROUP.EMPLOYEE]).toEqual([]);
   });
 });
 

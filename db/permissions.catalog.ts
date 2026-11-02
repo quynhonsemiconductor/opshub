@@ -477,9 +477,9 @@ export function permissionGrants(held: readonly string[] | undefined, required: 
   return held.includes(`${moduleOf(required)}.*`);
 }
 
-// ── Roles ────────────────────────────────────────────────────────────────────
+// ── Groups ───────────────────────────────────────────────────────────────────
 
-export const ROLE = {
+export const GROUP = {
   ADMIN: 'admin',
   IT_ADMIN: 'it-admin',
   SECURITY: 'security',
@@ -490,22 +490,22 @@ export const ROLE = {
   EMPLOYEE: 'employee',
 } as const;
 
-/** Union of every valid system-role key. */
-export type RoleKey = (typeof ROLE)[keyof typeof ROLE];
+/** Union of every valid system-group key. */
+export type GroupKey = (typeof GROUP)[keyof typeof GROUP];
 
-export const ROLE_NAMES: Record<RoleKey, string> = {
-  [ROLE.ADMIN]: 'Platform Administrator',
-  [ROLE.IT_ADMIN]: 'IT Administrator',
-  [ROLE.SECURITY]: 'Security Officer',
-  [ROLE.HR]: 'HR Manager',
-  [ROLE.MANAGER]: 'People Manager',
-  [ROLE.HELPDESK]: 'Help Desk',
-  [ROLE.AUDITOR]: 'Auditor (read-only)',
-  [ROLE.EMPLOYEE]: 'Employee',
+export const GROUP_NAMES: Record<GroupKey, string> = {
+  [GROUP.ADMIN]: 'Platform Administrator',
+  [GROUP.IT_ADMIN]: 'IT Administrator',
+  [GROUP.SECURITY]: 'Security Officer',
+  [GROUP.HR]: 'HR Manager',
+  [GROUP.MANAGER]: 'People Manager',
+  [GROUP.HELPDESK]: 'Help Desk',
+  [GROUP.AUDITOR]: 'Auditor (read-only)',
+  [GROUP.EMPLOYEE]: 'Employee',
 };
 
 /**
- * Role → permission bundles, seeded into `authz.group_permissions`.
+ * Group → permission bundles, seeded into `authz.group_permissions`.
  *
  * `admin` holds only the wildcard, deliberately: enumerating every code for it
  * would need editing here on every new permission, and a missed edit would make
@@ -515,13 +515,13 @@ export const ROLE_NAMES: Record<RoleKey, string> = {
  * request, read your own records) is expressed by the `self` SCOPE on a grant,
  * not by a permission code — so an empty bundle here is correct, not a stub.
  */
-export const ROLE_PERMISSIONS: Record<
-  RoleKey,
+export const GROUP_PERMISSIONS: Record<
+  GroupKey,
   readonly (Permission | typeof WILDCARD_PERMISSION)[]
 > = {
-  [ROLE.ADMIN]: [WILDCARD_PERMISSION],
+  [GROUP.ADMIN]: [WILDCARD_PERMISSION],
 
-  [ROLE.IT_ADMIN]: [
+  [GROUP.IT_ADMIN]: [
     PERMISSION.EMPLOYEE_READ,
     PERMISSION.EMPLOYEE_WRITE,
     PERMISSION.ASSET_READ,
@@ -549,7 +549,7 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.DOOR_MANAGE,
   ],
 
-  [ROLE.SECURITY]: [
+  [GROUP.SECURITY]: [
     PERMISSION.COMPLIANCE_READ,
     PERMISSION.COMPLIANCE_MANAGE,
     PERMISSION.SECURITY_VIEW,
@@ -591,7 +591,7 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.LICENSE_READ,
   ],
 
-  [ROLE.HR]: [
+  [GROUP.HR]: [
     PERMISSION.EMPLOYEE_READ,
     PERMISSION.EMPLOYEE_WRITE,
     PERMISSION.EMPLOYEE_OFFBOARD,
@@ -629,7 +629,7 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.DOOR_MANAGE,
   ],
 
-  [ROLE.MANAGER]: [
+  [GROUP.MANAGER]: [
     PERMISSION.EMPLOYEE_READ,
     PERMISSION.POSITION_READ,
     PERMISSION.TRAINING_READ,
@@ -650,7 +650,7 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.ONBOARDING_APPROVE,
   ],
 
-  [ROLE.HELPDESK]: [
+  [GROUP.HELPDESK]: [
     PERMISSION.ASSET_READ,
     PERMISSION.ASSET_WRITE,
     PERMISSION.ACCESS_REQUEST_READ,
@@ -658,7 +658,7 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.EMPLOYEE_READ,
   ],
 
-  [ROLE.AUDITOR]: [
+  [GROUP.AUDITOR]: [
     PERMISSION.RBAC_READ,
     PERMISSION.AUDIT_READ,
     PERMISSION.COMPLIANCE_READ,
@@ -692,5 +692,5 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.WORKFORCE_ATTENDANCE_READ,
   ],
 
-  [ROLE.EMPLOYEE]: [],
+  [GROUP.EMPLOYEE]: [],
 };

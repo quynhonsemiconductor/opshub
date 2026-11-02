@@ -38,9 +38,9 @@ import { ANNEX_A_CONTROLS } from './annex-a-controls';
 import {
   PERMISSION,
   PERMISSION_DESCRIPTIONS,
-  ROLE,
-  ROLE_NAMES,
-  ROLE_PERMISSIONS,
+  GROUP,
+  GROUP_NAMES,
+  GROUP_PERMISSIONS,
   WILDCARD_PERMISSION,
 } from './permissions.catalog';
 
@@ -58,9 +58,9 @@ const PERMISSIONS: Array<{ key: string; description: string }> = [
   })),
 ];
 
-const ROLES: Array<{ key: string; name: string; permissions: string[] }> = Object.values(ROLE).map(
-  (key) => ({ key, name: ROLE_NAMES[key], permissions: [...ROLE_PERMISSIONS[key]] }),
-);
+const GROUPS: Array<{ key: string; name: string; permissions: string[] }> = Object.values(
+  GROUP,
+).map((key) => ({ key, name: GROUP_NAMES[key], permissions: [...GROUP_PERMISSIONS[key]] }));
 
 // ── Demo employees — one per system role, for RBAC + test-login testing ───────
 // Fixed UUIDs keep re-seeds idempotent. Each employee gets the matching legacy
@@ -220,7 +220,7 @@ async function seedRbacCatalogInto(db: SeedDb): Promise<void> {
     // 2. System roles — upsert so display names reconcile on re-run.
     await tx
       .insert(groups)
-      .values(ROLES.map((r) => ({ key: r.key, name: r.name, system: true })))
+      .values(GROUPS.map((r) => ({ key: r.key, name: r.name, system: true })))
       .onConflictDoUpdate({
         target: groups.key,
         set: { name: sql`excluded.name`, system: sql`excluded.system` },
@@ -232,14 +232,14 @@ async function seedRbacCatalogInto(db: SeedDb): Promise<void> {
       .where(
         inArray(
           groups.key,
-          ROLES.map((r) => r.key),
+          GROUPS.map((r) => r.key),
         ),
       );
     const roleIdByKey = new Map(roleRows.map((r) => [r.key, r.id]));
 
     // 3. Role → permission membership — rebuild each system role's grants so the
     //    join table is authoritative (edits to a role's permission list apply).
-    for (const r of ROLES) {
+    for (const r of GROUPS) {
       const roleId = roleIdByKey.get(r.key);
       if (!roleId) continue;
       await tx.delete(groupPermissions).where(eq(groupPermissions.groupId, roleId));
@@ -252,7 +252,7 @@ async function seedRbacCatalogInto(db: SeedDb): Promise<void> {
     }
   });
 
-  log.info(`✅ RBAC catalogue seeded: ${PERMISSIONS.length} permissions | ${ROLES.length} roles`);
+  log.info(`✅ RBAC catalogue seeded: ${PERMISSIONS.length} permissions | ${GROUPS.length} groups`);
 }
 
 /**
@@ -387,7 +387,7 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
       .onConflictDoNothing();
   }
 
-  log.info(`✅ Demo employees seeded: ${DEMO_EMPLOYEES.length} (one per role)`);
+  log.info(`✅ Demo employees seeded: ${DEMO_EMPLOYEES.length} (one per group)`);
 }
 
 /**

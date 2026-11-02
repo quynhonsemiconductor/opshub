@@ -2,7 +2,7 @@
 /**
  * WHO CAN SEE WHAT IN THE NAV — a product decision, asserted rather than assumed.
  *
- * WHY THIS FILE EXISTS. `/access` was gated on `access_request.read`, and `ROLE.EMPLOYEE` holds no
+ * WHY THIS FILE EXISTS. `/access` was gated on `access_request.read`, and `GROUP.EMPLOYEE` holds no
  * permissions at all — deliberately, because the permission catalogue says self-service access "is
  * expressed by the `self` SCOPE on a grant, not by a permission code". Meanwhile every route behind
  * that page would have served them: `POST /access-requests` is `@SelfScoped`, the list narrows to the

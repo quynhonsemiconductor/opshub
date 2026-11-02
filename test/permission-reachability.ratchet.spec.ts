@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   PERMISSION,
-  ROLE,
-  ROLE_PERMISSIONS,
+  GROUP,
+  GROUP_PERMISSIONS,
   permissionGrants,
   type Permission,
 } from '../db/permissions.catalog';
@@ -145,7 +145,9 @@ function referenceIndex(side: 'backend' | 'web'): Map<Permission, string[]> {
   return index;
 }
 
-const NON_ADMIN_BUNDLES = Object.entries(ROLE_PERMISSIONS).filter(([role]) => role !== ROLE.ADMIN);
+const NON_ADMIN_BUNDLES = Object.entries(GROUP_PERMISSIONS).filter(
+  ([role]) => role !== GROUP.ADMIN,
+);
 
 /** Roles other than `admin` that can satisfy `code`, wildcard semantics included. */
 function holders(code: Permission): string[] {

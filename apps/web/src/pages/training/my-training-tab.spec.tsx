@@ -4,7 +4,7 @@
  *
  * WHY A COMPONENT TEST. All eight Playwright seats are administrators holding `training.manage`, so the
  * browser suite can only ever exercise this flow as somebody who did not need it. The tier this tab was
- * written for — `ROLE.EMPLOYEE`, which holds NO permission code at all — is not constructible from
+ * written for — `GROUP.EMPLOYEE`, which holds NO permission code at all — is not constructible from
  * there, and that is precisely how the gap survived: the API's `assertMayAttach` has permitted "an
  * employee may attach evidence to their OWN record" since the module shipped, and the only
  * `CertificatesPanel` in the product sat behind the Records tab, which needs `training.read`. The flow
