@@ -255,6 +255,23 @@ export class WfhPreviewResponseDto {
   workingDays!: string[];
 }
 
+/** Which week's quota to read: the Monday–Sunday week containing `weekOf`, or the current week when omitted. */
+export const WfhQuotaQuerySchema = z.object({ weekOf: dateStr.optional() });
+export class WfhQuotaQueryDto extends createZodDto(WfhQuotaQuerySchema) {}
+
+export class WfhQuotaResponseDto {
+  /** Monday of the week, `YYYY-MM-DD`. */
+  weekStart!: string;
+  /** Sunday of the week, `YYYY-MM-DD`. */
+  weekEnd!: string;
+  /** Work-from-home days the caller's rank allows per week; 0 means filing is not allowed. */
+  weeklyAllowance!: number;
+  /** Working days already claimed in the week by pending and approved requests. */
+  usedDays!: number;
+  /** `weeklyAllowance - usedDays`, never below zero. */
+  remainingDays!: number;
+}
+
 // ── Overtime ─────────────────────────────────────────────────────────────────
 export const CreateOvertimeSchema = z.object({
   workDate: dateStr,

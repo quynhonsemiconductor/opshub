@@ -75,6 +75,11 @@ const mockBalances = {
   assertSufficientBalance: vi.fn().mockResolvedValue(undefined),
 };
 
+const mockWfhQuota = {
+  assertWithinQuota: vi.fn().mockResolvedValue(undefined),
+  getWeekQuota: vi.fn(),
+};
+
 const SELF = { sub: 'emp-1', email: 'emp1@test.com' };
 
 function service(): WorkforceService {
@@ -87,6 +92,7 @@ function service(): WorkforceService {
     new ActorScope(mockAuthz as never),
     mockBalances as never,
     { assertMonthsOpen: vi.fn().mockResolvedValue(undefined) } as never,
+    mockWfhQuota as never,
     mockDb as never,
   );
 }
@@ -127,6 +133,35 @@ describe('createWfh', () => {
       { startDate: FUTURE().startDate, endDate: FUTURE().startDate },
     ]);
     await expect(service().createWfh(FUTURE(), SELF)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('refuses a window the weekly quota cannot cover, before inserting anything', async () => {
+    mockWfhQuota.assertWithinQuota.mockRejectedValueOnce(
+      new PreconditionFailedException('WFH_QUOTA_EXCEEDED', 'no days left'),
+    );
+
+    await expect(service().createWfh(FUTURE(), SELF)).rejects.toBeInstanceOf(
+      PreconditionFailedException,
+    );
+    expect(mockRepo.createWfh).not.toHaveBeenCalled();
+    expect(mockEngine.submit).not.toHaveBeenCalled();
+  });
+
+  it('asks the quota about the window’s working days, inside the transaction', async () => {
+    mockEngine.submit.mockResolvedValue({ id: 'req-1' });
+    const { startDate } = FUTURE();
+
+    await service().createWfh({ startDate, endDate: startDate }, SELF);
+
+    // The third argument is the transaction that also holds the per-employee lock and the insert.
+    const [employeeId, workingDates, executor] = mockWfhQuota.assertWithinQuota.mock.calls[0] as [
+      string,
+      string[],
+      object,
+    ];
+    expect(employeeId).toBe('emp-1');
+    expect(workingDates).toEqual([startDate]);
+    expect(executor).toHaveProperty('execute');
   });
 
   it('submits with the manager as assignee, so the engine can pin the decision on them', async () => {

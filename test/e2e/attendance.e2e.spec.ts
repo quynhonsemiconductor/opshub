@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type DrizzleDB } from '@platform';
 import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
+import { giveWeeklyWfhAllowance } from './support/wfh-allowance';
 
 let app: NestFastifyApplication;
 let db: DrizzleDB;
@@ -27,6 +28,14 @@ beforeAll(async () => {
   employee = await login(app, FIXTURE.NO_PERMISSIONS);
   admin = await login(app, FIXTURE.ADMIN);
   hr = await login(app, FIXTURE.HR);
+  // The WFH test below files a request, which needs a weekly allowance; five covers any single-day request.
+  await giveWeeklyWfhAllowance(
+    app,
+    hr,
+    FIXTURE.NO_PERMISSIONS.id,
+    5,
+    `att${Date.now().toString(36).slice(-6)}`,
+  );
 });
 
 afterAll(async () => {

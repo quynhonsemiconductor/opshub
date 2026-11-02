@@ -57,6 +57,8 @@ import {
   WfhResponseDto,
   WfhPreviewQueryDto,
   WfhPreviewResponseDto,
+  WfhQuotaQueryDto,
+  WfhQuotaResponseDto,
   CreateOvertimeDto,
   ListOvertimeQueryDto,
   OvertimeResponseDto,
@@ -381,6 +383,25 @@ export class WorkforceController {
     return this.service.previewWfh(query.startDate, query.endDate);
   }
 
+  @Get('wfh/quota')
+  @SelfScoped("reads the CALLER's own quota — no employee parameter exists")
+  @ApiOperation({
+    summary: 'My work-from-home quota for a week',
+    description:
+      "The allowance set by the rank of the caller's current position, the working days already claimed " +
+      'by pending and approved requests in the Monday–Sunday week containing `weekOf` (the current week ' +
+      'when omitted), and what remains. The quota resets every week and never carries over. An ' +
+      'allowance of 0 means filing is refused (412 `WFH_QUOTA_NONE`).',
+  })
+  @ApiOkResponse({ type: WfhQuotaResponseDto })
+  @ApiCommonErrors(401, 422)
+  async getWfhQuota(
+    @Query() query: WfhQuotaQueryDto,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<WfhQuotaResponseDto> {
+    return this.service.getWfhQuota(user.sub, query.weekOf);
+  }
+
   @Get('wfh')
   @AuthorizedInService(
     'optional employeeId filter — see narrowToActor',
@@ -420,7 +441,9 @@ export class WorkforceController {
       'A date range expanded to working days: weekends and public holidays cost nothing, and a ' +
       'window covering no working day is refused (412 `WFH_WINDOW_EMPTY`). Refused with 409 ' +
       "`WFH_OVERLAPPING` when it overlaps the caller's live leave or WFH — a day can only be " +
-      'asked for once. Approved or rejected as a whole by a holder of `workforce.wfh.review`.',
+      'asked for once. Approved or rejected as a whole by a holder of `workforce.wfh.review`. ' +
+      "Refused with 412 `WFH_QUOTA_NONE` when the caller's rank has no allowance, or `WFH_QUOTA_EXCEEDED` " +
+      'when a week in the window asks for more days than it has left.',
   })
   @ApiCreatedResponse({ type: WfhResponseDto })
   @ApiCommonErrors(401, 409, 412, 422)

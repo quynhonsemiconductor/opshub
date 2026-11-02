@@ -22,6 +22,7 @@ import {
   type ResourceAuditTrail,
 } from '@modules/audit';
 import { LeaveBalanceService, type LeaveBalance } from './leave-balance.service';
+import { WfhQuotaService, type WfhWeekQuota } from './wfh-quota.service';
 import { AttendanceService } from './attendance.service';
 import { MS_PER_HOUR, type Actor } from '@shared-kernel';
 import {
@@ -87,6 +88,7 @@ export class WorkforceService {
     private readonly actorScope: ActorScope,
     private readonly balances: LeaveBalanceService,
     private readonly attendance: AttendanceService,
+    private readonly wfhQuota: WfhQuotaService,
     @InjectDrizzle() private readonly db: DrizzleDB,
   ) {
     this.timesheetTrail = audit.forResource(AUDIT_RESOURCE.TIMESHEET);
@@ -611,6 +613,9 @@ export class WorkforceService {
           'You already have a leave or WFH request covering part of that window',
         );
       }
+      // The weekly quota, counted under the same lock and in the same transaction as the insert, so two
+      // requests filed at once cannot both pass against the last remaining day.
+      await this.wfhQuota.assertWithinQuota(actor.sub, workingDays, tx);
       return this.repo.createWfh(
         { ...input, employeeId: actor.sub, workingDays: workingDays.length },
         tx,
@@ -645,6 +650,20 @@ export class WorkforceService {
       });
     });
     return { ...request, requestId: engineItem.id };
+  }
+
+  /**
+   * Reads the caller's work-from-home quota for one week.
+   *
+   * Args:
+   *   employeeId: The employee whose quota is read; always the caller.
+   *   dateInWeek: Any `YYYY-MM-DD` date in the wanted Monday–Sunday week; defaults to the current week.
+   *
+   * Returns:
+   *   The week's allowance, the days already claimed by pending and approved requests, and what remains.
+   */
+  getWfhQuota(employeeId: string, dateInWeek?: string): Promise<WfhWeekQuota> {
+    return this.wfhQuota.getWeekQuota(employeeId, dateInWeek);
   }
 
   async getWfh(id: string): Promise<WfhRequest> {
