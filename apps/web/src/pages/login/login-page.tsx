@@ -38,8 +38,8 @@ function MicrosoftMark() {
  * handed to Microsoft, and comes back to `/api/auth/callback/microsoft`, which creates the session and
  * sets the opaque opshub.session_token cookie (`__Host-` in production, `__Secure-` elsewhere) before redirecting to `callbackURL`.
  *
- * `/api/auth/*` is same-origin with the SPA like `/v1/*`: the Vite proxy locally, a Cloudflare Pages
- * Function deployed (apps/web/functions/api/auth/[[path]].ts). Same-origin is a requirement, not a
+ * `/api/auth/*` is same-origin with the SPA like `/v1/*`: the Vite proxy locally, the Cloudflare
+ * edge route to the API deployed. Same-origin is a requirement, not a
  * preference: the cookie is set on the response the browser lands on, on the SPA host.
  *
  * `window.location.assign`, not the router: this is a top-level navigation to a different
