@@ -66,10 +66,10 @@ const ADMIN_ONLY: Record<string, string> = {
 
   // ── privilege administration: granting privilege is not a delegable operation ──────────────
   'rbac.manage':
-    'defining roles and permissions is the one action that can grant every other one, so it stays ' +
+    'defining groups and permissions is the one action that can grant every other one, so it stays ' +
     "with the super-admin. Also the engine's admin-cancel check (RequestEngine.cancel)",
-  'role.assign':
-    'assigning a role hands out its whole bundle; kept with rbac.manage rather than delegated',
+  'group.assign':
+    'putting an employee in a group hands out its whole bundle, and a direct grant hands out a single permission; kept with rbac.manage rather than delegated',
 };
 
 /**

@@ -58,7 +58,7 @@ function AssignRoleModal({
     if (error) {
       /*
        * NOT "check the user ID", which is what this said. The id came out of a picker, so it is the
-       * one part of the submission nobody mistyped; the likeliest refusal is `role.assign`, which only
+       * one part of the submission nobody mistyped; the likeliest refusal is `group.assign`, which only
        * `admin` holds. The tab now hides Assign from a caller who lacks it, but the message still has
        * to pass the API's own sentence through: a stale token, a role deleted underneath the form, or
        * a scope the caller may not write all answer here, and each says something different.
@@ -121,8 +121,8 @@ function AssignRoleModal({
 export function AssignmentsTab() {
   const qc = useQueryClient();
   /*
-   * `role.assign`, and DELIBERATELY NOT `rbac.manage`. `POST /authz/assignments` and
-   * `DELETE /authz/assignments/:id` both carry `@RequirePermission('role.assign')` in
+   * `group.assign`, and DELIBERATELY NOT `rbac.manage`. `POST /authz/assignments` and
+   * `DELETE /authz/assignments/:id` both carry `@RequirePermission('group.assign')` in
    * `libs/modules/authz/src/interface/http/authz.controller.ts`, while the Roles tab's routes carry
    * `rbac.manage`. They are two separable capabilities — editing what a role MEANS is not the same
    * authority as deciding who HOLDS it — so this tab asks for its own, and a holder of only the other
@@ -131,7 +131,7 @@ export function AssignmentsTab() {
    * The LOOKUP below stays ungated: `GET /authz/users/:userId/assignments` is `rbac.read`, which is
    * what it takes to reach this screen at all. An auditor is meant to read who holds what.
    */
-  const canAssign = usePermissions().can('role.assign');
+  const canAssign = usePermissions().can('group.assign');
   const [lookupUserId, setLookupUserId] = useState('');
   const [searchUserId, setSearchUserId] = useState('');
   const [pendingRevokeId, setPendingRevokeId] = useState<string | null>(null);

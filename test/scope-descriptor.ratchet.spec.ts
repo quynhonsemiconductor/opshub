@@ -59,7 +59,7 @@ const ROOT = join(__dirname, '..');
 /*
  * 153 after the two row-addressed routes of direct employee permissions (list one employee's grants,
  * revoke one grant). They are administrative and global by nature, like the `rbac.*` routes already counted:
- * a department-scoped holder of `rbac.read` or `role.assign` is not a thing anyone wants, and granting a
+ * a department-scoped holder of `rbac.read` or `group.assign` is not a thing anyone wants, and granting a
  * permission is further bounded by the no-escalation rule in `AuthzAdminService`.
  */
 /*

@@ -34,7 +34,7 @@ export const PERMISSION = {
   // ── meta / rbac ────────────────────────────────────────────────────────────
   RBAC_READ: 'rbac.read',
   RBAC_MANAGE: 'rbac.manage',
-  ROLE_ASSIGN: 'role.assign',
+  GROUP_ASSIGN: 'group.assign',
 
   // ── identity / people ──────────────────────────────────────────────────────
   EMPLOYEE_READ: 'employee.read',
@@ -356,9 +356,9 @@ export const WILDCARD_PERMISSION = '*';
 
 /** Human-readable purpose per code. Seeded into `authz.permissions.description`. */
 export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
-  [PERMISSION.RBAC_READ]: 'View roles, permissions and assignments',
-  [PERMISSION.RBAC_MANAGE]: 'Create / edit / delete roles and permissions',
-  [PERMISSION.ROLE_ASSIGN]: 'Grant and revoke role assignments',
+  [PERMISSION.RBAC_READ]: 'View groups, permissions and group memberships',
+  [PERMISSION.RBAC_MANAGE]: 'Create / edit / delete groups and permissions',
+  [PERMISSION.GROUP_ASSIGN]: 'Put employees in groups, and grant them permissions directly',
   [PERMISSION.EMPLOYEE_READ]: 'View employee directory records',
   [PERMISSION.EMPLOYEE_WRITE]: 'Create and update employee records',
   [PERMISSION.POSITION_READ]: 'View positions, approved headcount and occupancy',

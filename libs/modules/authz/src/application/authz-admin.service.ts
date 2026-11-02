@@ -214,7 +214,7 @@ export class AuthzAdminService {
 
     // Privilege-escalation guard (NIST AC-6 least privilege): an actor may only
     // grant a group whose permission set is a subset of their own. This prevents,
-    // e.g., an HR/role.assign holder from granting themselves or others the
+    // e.g., an HR/group.assign holder from granting themselves or others the
     // `admin` (`*`) group. Holders of `*` (platform admins) can grant anything.
     await this.assertCanGrantGroup(actor, group);
 

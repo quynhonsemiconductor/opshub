@@ -4,7 +4,7 @@
  *
  * WHY THIS FILE EXISTS. The screen is reached with `rbac.read` (the nav gates `/settings/access-control`
  * on exactly that) and its five write controls were reached with nothing at all. `it-admin` and
- * `auditor` hold `rbac.read`; only `admin` holds `rbac.manage` and `role.assign`. So two of the eight
+ * `auditor` hold `rbac.read`; only `admin` holds `rbac.manage` and `group.assign`. So two of the eight
  * seeded roles were shown New role, Delete role, Add permission, Remove permission, Assign role and
  * Revoke, and the API answered 403 to every one of them — a screenful of affordances that could not do
  * anything, on the screen whose entire subject is who may do what.
@@ -21,7 +21,7 @@
  * screen at all.
  *
  * THE GATES ARE TWO DIFFERENT PERMISSIONS, not one, and the cross-checks below are the point: role
- * MANAGEMENT is `rbac.manage` and role ASSIGNMENT is `role.assign`, read off
+ * MANAGEMENT is `rbac.manage` and role ASSIGNMENT is `group.assign`, read off
  * `libs/modules/authz/src/interface/http/authz.controller.ts`. Gating both on one flag would pass every
  * "a reader sees nothing" assertion while handing each holder the other's controls.
  */
@@ -232,14 +232,14 @@ describe('the Roles tab, for an rbac.manage holder', () => {
   });
 });
 
-describe('the Roles tab, for a role.assign holder', () => {
+describe('the Roles tab, for a group.assign holder', () => {
   it('does not treat handing roles out as permission to rewrite them', async () => {
     /*
-     * THE CROSS-CHECK. `role.assign` and `rbac.manage` are separate permissions on separate routes, so
+     * THE CROSS-CHECK. `group.assign` and `rbac.manage` are separate permissions on separate routes, so
      * the holder of one must not inherit the other's controls. Gating this whole screen on a single
      * "may administer access" flag would pass every other test in this file.
      */
-    caller.permissions = ['rbac.read', 'role.assign'];
+    caller.permissions = ['rbac.read', 'group.assign'];
     renderIn(<RolesTab />);
     await screen.findByText('Compliance Reviewer');
 
@@ -261,7 +261,7 @@ describe('the Assignments tab, for an rbac.read holder', () => {
     expect(screen.getByText(ASSIGNMENT.userId)).toBeTruthy();
   });
 
-  it('offers neither Assign role nor Revoke, because both need role.assign', async () => {
+  it('offers neither Assign role nor Revoke, because both need group.assign', async () => {
     renderIn(<AssignmentsTab />);
     await lookUpAssignments();
 
@@ -270,9 +270,9 @@ describe('the Assignments tab, for an rbac.read holder', () => {
   });
 });
 
-describe('the Assignments tab, for a role.assign holder', () => {
+describe('the Assignments tab, for a group.assign holder', () => {
   beforeEach(() => {
-    caller.permissions = ['rbac.read', 'role.assign'];
+    caller.permissions = ['rbac.read', 'group.assign'];
   });
 
   it('offers Assign role and a Revoke on the row', async () => {
@@ -300,12 +300,12 @@ describe('the Assignments tab, for a role.assign holder', () => {
      * likeliest refusal was a missing permission. That sentence sent people looking for a typo in a
      * value the picker supplied, which is worse than saying nothing.
      *
-     * The gate above hides the button from a caller who plainly lacks `role.assign`, but the message
+     * The gate above hides the button from a caller who plainly lacks `group.assign`, but the message
      * still has to carry the API's reason: a stale token, a role deleted underneath the open form, or a
      * scope the caller may not write all arrive here and all say something different.
      */
     POST.mockResolvedValue({
-      error: { error: { code: 'FORBIDDEN', message: 'Missing required permission: role.assign' } },
+      error: { error: { code: 'FORBIDDEN', message: 'Missing required permission: group.assign' } },
     });
 
     renderIn(<AssignmentsTab />);
@@ -323,7 +323,7 @@ describe('the Assignments tab, for a role.assign holder', () => {
     fireEvent.change(dialog.getByLabelText(/^Role/), { target: { value: CUSTOM_ROLE.id } });
     fireEvent.click(dialog.getByRole('button', { name: 'Assign' }));
 
-    expect(await screen.findByText('Missing required permission: role.assign')).toBeTruthy();
+    expect(await screen.findByText('Missing required permission: group.assign')).toBeTruthy();
     expect(screen.queryByText(/check the user id/i)).toBeNull();
     await waitFor(() => expect(POST).toHaveBeenCalledTimes(1));
   });

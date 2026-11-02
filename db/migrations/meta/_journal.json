@@ -337,6 +337,13 @@
       "when": 1793466774922,
       "tag": "0047_rename_roles_to_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793553174922,
+      "tag": "0048_rename_role_assign_permission",
+      "breakpoints": true
     }
   ]
 }

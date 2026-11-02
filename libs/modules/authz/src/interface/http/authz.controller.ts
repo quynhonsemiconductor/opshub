@@ -183,7 +183,7 @@ export class AuthzController {
   }
 
   @Post('employee-groups')
-  @RequirePermission('role.assign')
+  @RequirePermission('group.assign')
   @ApiOperation({ summary: 'Put an employee in a group, optionally scoped' })
   @ApiCreatedResponse({ type: EmployeeGroupResponseDto })
   @ApiCommonErrors(401, 403, 404, 422)
@@ -206,7 +206,7 @@ export class AuthzController {
 
   @Delete('employee-groups/:id')
   @HttpCode(204)
-  @RequirePermission('role.assign')
+  @RequirePermission('group.assign')
   @ApiOperation({ summary: 'Remove an employee from a group' })
   @ApiNoContentResponse()
   @ApiCommonErrors(401, 403, 404)
@@ -231,7 +231,7 @@ export class AuthzController {
   }
 
   @Post('employee-permissions')
-  @RequirePermission('role.assign')
+  @RequirePermission('group.assign')
   @ApiOperation({
     summary: 'Grant one permission straight to an employee',
     description:
@@ -260,7 +260,7 @@ export class AuthzController {
 
   @Delete('employee-permissions/:id')
   @HttpCode(204)
-  @RequirePermission('role.assign')
+  @RequirePermission('group.assign')
   @ApiOperation({ summary: 'Revoke a permission granted straight to an employee' })
   @ApiNoContentResponse()
   @ApiCommonErrors(401, 403, 404)

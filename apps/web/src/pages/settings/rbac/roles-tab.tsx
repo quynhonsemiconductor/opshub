@@ -118,7 +118,7 @@ export function RolesTab() {
    * `rbac.read` — which `it-admin` and `auditor` hold and `rbac.manage` does not follow from — so
    * without this every control below was offered to two roles the API refuses.
    *
-   * NOT the same permission as the Assignments tab, which is `role.assign`. Gating both on one flag
+   * NOT the same permission as the Assignments tab, which is `group.assign`. Gating both on one flag
    * would hand role EDITING to whoever may only hand roles OUT, and the API would refuse it.
    */
   const canManage = usePermissions().can('rbac.manage');

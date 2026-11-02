@@ -5,7 +5,7 @@ import { employeeStatusEnum } from '@db/schema/enums';
 
 // NOTE: Groups are intentionally NOT settable here. Group membership is a
 // governance action handled exclusively by the authz module
-// (POST /v1/authz/employee-groups, guarded by `role.assign` + escalation check).
+// (POST /v1/authz/employee-groups, guarded by `group.assign` + escalation check).
 // This prevents privilege escalation via the directory/employee endpoints.
 export const CreateEmployeeSchema = z.object({
   // Stored lower-cased and trimmed: an address is the identity the Graph worker checks a directory
