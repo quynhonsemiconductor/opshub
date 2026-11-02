@@ -121,15 +121,29 @@ export function DoorPage() {
       key: 'battery',
       header: 'Battery',
       cell: (t) => {
-        if (!t.battery || (t.battery.mv === null && !t.battery.low))
-          return orDash('never reported');
+        // An implausible reading never reaches the badge (the server ignores it); it shows here
+        // instead, with the value, so a miswired divider is visible without hiding real events.
+        const warning = t.warnings?.find((w) => w.code === 'battery_reading_implausible');
+        const battery = t.battery;
+        const never = !battery || (battery.mv === null && !battery.low);
+        if (never && !warning) return orDash('never reported');
         const low =
-          t.battery.low || (t.battery.mv !== null && t.battery.mv < LOW_BATTERY_MV_FALLBACK);
+          battery !== undefined &&
+          (battery.low || (battery.mv !== null && battery.mv < LOW_BATTERY_MV_FALLBACK));
         return (
-          <StatusBadge tone={low ? 'red' : 'green'}>
-            {t.battery.mv !== null ? `${(t.battery.mv / 1000).toFixed(2)} V` : 'reported'}
-            {low ? ' · low' : ''}
-          </StatusBadge>
+          <div className="flex flex-col items-start gap-1">
+            {never ? null : (
+              <StatusBadge tone={low ? 'red' : 'green'}>
+                {battery?.mv != null ? `${(battery.mv / 1000).toFixed(2)} V` : 'reported'}
+                {low ? ' · low' : ''}
+              </StatusBadge>
+            )}
+            {warning ? (
+              <StatusBadge tone="amber">
+                implausible {(warning.value / 1000).toFixed(2)} V — ignored
+              </StatusBadge>
+            ) : null}
+          </div>
         );
       },
       hideOnMobile: true,

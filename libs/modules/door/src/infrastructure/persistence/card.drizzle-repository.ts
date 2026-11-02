@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, notExists, or, sql } from 'drizzle-orm';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { newId } from '@shared-kernel';
 import { cards, employees, events } from '../../../../../../db/schema';
@@ -88,26 +88,39 @@ export class CardDrizzleRepository implements ICardRepository {
         count: sql<number>`count(*)::int`,
         lastSeenAt: sql<Date>`max(${events.receivedAt})`,
         reader: sql<string>`(array_agg(${events.reader} ORDER BY ${events.receivedAt} DESC))[1]`,
-        active: sql<number>`bool_or(EXISTS (
-          SELECT 1 FROM "door"."cards" c WHERE c.uid = ${events.uid} AND c.status = 'active'
-        ))`,
       })
       .from(events)
       // The ONE definition of unknown (ADR §2.5): no card owned the UID at event time, which the
       // insert-time resolution decided — the column says so. The NOT-EXISTS then drops UIDs that
       // have SINCE been enrolled: those are done, not pending HR work.
-      .where(and(isNull(events.cardId), gt(events.receivedAt, since)))
+      //
+      // NOT-EXISTS IN THE WHERE, not a `bool_or(EXISTS (…))` computed column filtered in JS. A raw
+      // SQL fragment inside a single-table select renders its columns UNQUALIFIED, so interpolating
+      // `events.uid` there produced `c.uid = "uid"` — resolved inside the subquery to `c.uid`, i.e.
+      // `c.uid = c.uid`. One active card anywhere made EXISTS true for every group and the whole
+      // list was filtered away (bench 2026-10-31). Drizzle's `notExists` qualifies both sides and
+      // filters BEFORE the limit, so a page of unknowns is never short because some were enrolled.
+      .where(
+        and(
+          isNull(events.cardId),
+          gt(events.receivedAt, since),
+          notExists(
+            this.db
+              .select({ one: sql`1` })
+              .from(cards)
+              .where(and(eq(cards.uid, events.uid), eq(cards.status, 'active'))),
+          ),
+        ),
+      )
       .groupBy(events.uid)
       .orderBy(desc(sql`max(${events.receivedAt})`), asc(events.uid))
       .limit(limit);
-    return rows
-      .filter((r) => !r.active)
-      .map((r) => ({
-        uid: r.uid,
-        count: r.count,
-        lastSeenAt: new Date(r.lastSeenAt),
-        reader: r.reader as 'in' | 'out',
-      }));
+    return rows.map((r) => ({
+      uid: r.uid,
+      count: r.count,
+      lastSeenAt: new Date(r.lastSeenAt),
+      reader: r.reader as 'in' | 'out',
+    }));
   }
 
   async listAllowList(): Promise<AllowListEntry[]> {

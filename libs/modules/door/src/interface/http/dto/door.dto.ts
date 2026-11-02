@@ -78,6 +78,10 @@ export class DoorTerminalResponseDto {
     low: boolean;
     reportedAt: string | null;
   };
+  // Active telemetry warnings (from the health cache, absent/empty when healthy). The only code
+  // today is `battery_reading_implausible`: the terminal sent a positive pack voltage outside the
+  // plausible window; the reading was ignored and the badge kept its last good value.
+  warnings?: { code: string; value: number; at: string }[];
 }
 
 /** The ONLY response that ever carries a token — create and regenerate, never a read. */

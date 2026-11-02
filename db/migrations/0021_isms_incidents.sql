@@ -191,6 +191,8 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_app') THEN
     GRANT SELECT, INSERT, UPDATE, DELETE
       ON isms.incidents, isms.incident_events TO opshub_app, opshub_worker;
-    GRANT ALL ON isms.incidents, isms.incident_events TO opshub_migrate;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON isms.incidents, isms.incident_events TO opshub_migrate;
+    END IF;
   END IF;
 END $$;

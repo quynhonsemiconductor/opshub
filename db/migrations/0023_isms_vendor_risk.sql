@@ -323,10 +323,12 @@ BEGIN
     GRANT SELECT ON isms.vendor_criticality_levels TO opshub_app, opshub_worker;
     GRANT SELECT, INSERT ON isms.vendor_assessments TO opshub_app, opshub_worker;
 
-    GRANT ALL ON isms.vendor_criticality_levels,
-                 isms.vendors,
-                 isms.vendor_assessments,
-                 isms.vendor_risks
-      TO opshub_migrate;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON isms.vendor_criticality_levels,
+                   isms.vendors,
+                   isms.vendor_assessments,
+                   isms.vendor_risks
+        TO opshub_migrate;
+    END IF;
   END IF;
 END $$;

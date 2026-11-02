@@ -219,6 +219,8 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE, DELETE
       ON qms.management_reviews, qms.management_review_actions
       TO opshub_app, opshub_worker;
-    GRANT ALL ON qms.management_reviews, qms.management_review_actions TO opshub_migrate;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opshub_migrate') THEN
+      GRANT ALL ON qms.management_reviews, qms.management_review_actions TO opshub_migrate;
+    END IF;
   END IF;
 END $$;

@@ -441,21 +441,18 @@ const refineApiAuth = (
   // SIGN-IN MUST BE CONFIGURED WHERE IT IS REAL. In production a missing Entra setting is a refused boot, not a
   // login page that sends everyone to an error; in development and CI the Entra fields may stay unset
   // (test-login signs in).
+  //
+  // EDGE_CLIENT_IP_SECRET is deliberately NOT in this list, in any environment. It turns on the SIGNED edge
+  // address; it is not what makes the visitor's address correct. On-prem the same-origin host has no Pages
+  // Function — Cloudflare sets `cf-connecting-ip` at the tunnel edge and `clientIp()` uses it directly. Requiring
+  // the signing key there refused the boot of an otherwise complete deployment.
   if (env.NODE_ENV !== 'production') return;
-  for (const key of [
-    'ENTRA_TENANT_ID',
-    'ENTRA_CLIENT_ID',
-    'ENTRA_CLIENT_SECRET',
-    'EDGE_CLIENT_IP_SECRET',
-  ] as const) {
+  for (const key of ['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET'] as const) {
     if (!env[key]) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: [key],
-        message:
-          key === 'EDGE_CLIENT_IP_SECRET'
-            ? "EDGE_CLIENT_IP_SECRET is required when NODE_ENV=production: every browser request reaches the API through the Pages Function, which signs the visitor address with it. Without it the API sees one shared Cloudflare address and the per-address rate-limit bucket is the whole company's."
-            : `${key} is required when NODE_ENV=production: staff sign in with Microsoft Entra.`,
+        message: `${key} is required when NODE_ENV=production: staff sign in with Microsoft Entra.`,
       });
     }
   }
@@ -506,13 +503,14 @@ export const ApiEnvSchema = z
      */
     ENTRA_CLIENT_SECRET: emptyToUndefined(z.string().min(1).optional()),
     /**
-     * The key the Cloudflare Pages Function signs the visitor's address with (`@quynhonsemiconductor/platform-http/edge`),
-     * and `clientIp()` verifies. Behind a Pages Function the API's `cf-connecting-ip` is a Cloudflare address shared
-     * by every visitor, so without a verifiable address one per-address rate-limit bucket (`PRE_AUTH_IP_BUCKET`) would be
-     * the whole company's. The SAME value as the Pages project's secret of that name; at least 32 characters.
-     * Optional so development and CI (no Pages Function in front) boot, where `clientIp()` treats an absent secret as
-     * "no signed address, use cf-connecting-ip"; REQUIRED in production (`refineApiAuth`), where an empty value stops
-     * the boot: the only way a browser reaches the API is through the Function, and that means a shared address.
+     * The key a Cloudflare edge function MAY sign the visitor's address with (`@quynhonsemiconductor/platform-http/edge`),
+     * and `clientIp()` verifies. When set, a verified signed address wins; when ABSENT the feature is OFF and
+     * `clientIp()` uses `cf-connecting-ip`, which Cloudflare overwrites at its edge and a caller cannot forge.
+     *
+     * OPTIONAL IN EVERY ENVIRONMENT, including production. On-prem the same-origin host has no Pages Function: the
+     * tunnel routes `/v1/*` straight to the API and `cf-connecting-ip` is the real visitor. Requiring this key made
+     * an otherwise complete production deployment crash-loop. Sign only when a function actually sits in front and
+     * the edge's own header would otherwise be a shared Cloudflare address; at least 32 characters when set.
      */
     EDGE_CLIENT_IP_SECRET: emptyToUndefined(edgeSecret.optional()),
     /** The previous key, accepted for verification only while the Pages secret is being rotated. */

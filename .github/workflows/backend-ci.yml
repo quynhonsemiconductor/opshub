@@ -573,6 +573,126 @@ jobs:
         run: pnpm db:migrate
 
   # ─────────────────────────────────────────────────────────────────────────
+  # 4. Fresh DB rebuild — the on-prem gate
+  #
+  #    `test` migrates a fresh database as a SUPERUSER, so it can never tell that
+  #    0012 needed CREATEROLE (it created `opshub_migrate`), or that a database
+  #    whose roles the platform created received no grants at all (the later
+  #    grant blocks skip themselves when `opshub_app` is missing). On CNPG the
+  #    migrator is `opshub_migrator`, which OWNS the database and deliberately has
+  #    NO CREATEROLE, and the roles exist before the first migration. That is what
+  #    this job reproduces.
+  #
+  #    Two scenarios, two clusters (roles are cluster-wide, so they must not
+  #    share one):
+  #      fresh  — CNPG shape: roles pre-created, no objects, no CREATEROLE. Every
+  #               migration must apply, and the runtime roles must end up able to
+  #               read/write everything, unable to run DDL, and covered by the
+  #               default privileges for tables created later.
+  #      legacy — the shape every AWS-era environment had: the frozen 0012 created
+  #               `opshub_app` / `opshub_worker` / `opshub_migrate` and set the
+  #               role timeouts. The rest of the journal must apply without a
+  #               break and leave the same grants (proven by the same assertions).
+  #
+  #    Both halves assert with `db/fresh-db/assert-runtime-privileges.sql`; the
+  #    scripts are plain SQL so a local run against any Postgres 18 is the same
+  #    code path (see the header of each file).
+  # ─────────────────────────────────────────────────────────────────────────
+  fresh-db:
+    name: Fresh DB rebuild
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PGPASSWORD: postgres
+
+    services:
+      postgres:
+        image: postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      postgres-legacy:
+        image: postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      # ── Scenario 1: rebuild from zero, CNPG shape ─────────────────────────
+      - name: Provision the platform's roles and a fresh database (the CNPG shape)
+        run: psql -h localhost -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f db/fresh-db/cnpg-roles.sql
+
+      - name: Migrate the fresh database as opshub_migrator, which holds no CREATEROLE
+        run: pnpm db:migrate
+        env:
+          DATABASE_MIGRATION_URL: postgresql://opshub_migrator:opshub_migrator@localhost:5432/opshub_fresh?sslmode=disable
+          # The seed runs on the APP connection in every deployed environment.
+          DATABASE_URL: postgresql://opshub_app:opshub_app@localhost:5432/opshub_fresh?sslmode=disable
+
+      - name: Assert the runtime roles can read and write, and cannot run DDL
+        run: |
+          psql -h localhost -p 5432 -U postgres -d opshub_fresh -v ON_ERROR_STOP=1 \
+            -v creator=opshub_migrator -f db/fresh-db/assert-runtime-privileges.sql
+
+      # ── Scenario 2: the upgrade path, from a database that ran the old 0012 ─
+      - name: Create the legacy database (owned by the master, as RDS was)
+        run: psql -h localhost -p 5433 -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE opshub_legacy'
+
+      - name: Apply the journal up to the historical 0012, which created the roles
+        run: pnpm exec tsx db/fresh-db/apply-legacy-head.ts
+        env:
+          DATABASE_MIGRATION_URL: postgresql://postgres:postgres@localhost:5433/opshub_legacy?sslmode=disable
+
+      - name: Apply the rest of the journal on the legacy database
+        # Only the migration URL: the legacy runtime roles are NOLOGIN, so the seed
+        # falls back to the superuser (db/migrate.ts's documented behaviour).
+        run: pnpm db:migrate
+        env:
+          DATABASE_MIGRATION_URL: postgresql://postgres:postgres@localhost:5433/opshub_legacy?sslmode=disable
+
+      - name: Assert the grants ended up on opshub_app / opshub_worker
+        run: |
+          psql -h localhost -p 5433 -U postgres -d opshub_legacy -v ON_ERROR_STOP=1 \
+            -v creator=postgres -f db/fresh-db/assert-runtime-privileges.sql
+
+      # The CNPG role must NOT exist here: its presence would mean the two
+      # scenarios share one cluster, and the legacy half would then be testing
+      # the fresh shape. opshub_migrate is the legacy fixture and must exist.
+      - name: The legacy database has the legacy role, and not the CNPG one
+        run: |
+          psql -h localhost -p 5433 -U postgres -d opshub_legacy -At \
+            -c "select count(*) from pg_roles where rolname = 'opshub_migrate'" | grep -qx 1
+          psql -h localhost -p 5433 -U postgres -d opshub_legacy -At \
+            -c "select count(*) from pg_roles where rolname = 'opshub_migrator'" | grep -qx 0
+
+  # ─────────────────────────────────────────────────────────────────────────
   # 4. Docker build validation (BuildKit cache, no push)
   #    PARALLEL with the test jobs, not after them: `Backend CI required` gates
   #    on this job too, so a broken image still blocks the PR — it just stops
@@ -774,7 +894,7 @@ jobs:
   ci-required:
     name: Backend CI required
     if: always()
-    needs: [changes, quality, test, e2e, migrations, build, openapi]
+    needs: [changes, quality, test, e2e, migrations, fresh-db, build, openapi]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -795,7 +915,7 @@ jobs:
         if: ${{ needs.changes.outputs.run == 'true' && github.event_name == 'push' }}
         uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
         with:
-          results: ${{ needs.changes.result }},${{ needs.quality.result }},${{ needs.test.result }},${{ needs.e2e.result }},${{ needs.migrations.result }},${{ needs.openapi.result }}
+          results: ${{ needs.changes.result }},${{ needs.quality.result }},${{ needs.test.result }},${{ needs.e2e.result }},${{ needs.migrations.result }},${{ needs['fresh-db'].result }},${{ needs.openapi.result }}
 
       - name: Nothing here to test (every changed file is ignorable)
         if: ${{ needs.changes.outputs.run != 'true' }}

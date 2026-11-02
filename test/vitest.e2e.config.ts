@@ -114,6 +114,22 @@ export default defineConfig({
        * ships, this keeps the e2e contract honest.
        */
       'nestjs-zod': createRequire(join(process.cwd(), 'package.json')).resolve('nestjs-zod'),
+      /**
+       * ONE `nestjs-pino` instance, the CJS one — same failure as `nestjs-zod` above, and it takes the whole
+       * suite down at boot when it fires.
+       *
+       * nestjs-pino 5 ships DUAL ESM/CJS builds. The app's own source is transformed by vite and imports the
+       * ESM build's `PinoLogger`; `@quynhonsemiconductor/observability` ships CJS and `require`s the CJS build
+       * to register `LoggerModule`. Two class objects means two DI tokens, so `AuthModule`'s
+       * `IdentityModule.forRootAsync` asks for an ESM `PinoLogger` while only the CJS one is provided:
+       * `Nest can't resolve dependencies … PinoLogger at index [5]`. Every e2e file failed at boot (CI run
+       * 41226060436). Production compiles CJS throughout, so this is a vitest-only split.
+       *
+       * Resolve through `require`, never a literal path: pnpm's store directory hash changes on every lockfile
+       * change. `nestjs-pino`'s own `exports` map exposes "." for both loaders; the require answer is the CJS
+       * entry, which is the copy observability already has.
+       */
+      'nestjs-pino': createRequire(join(process.cwd(), 'package.json')).resolve('nestjs-pino'),
     },
   },
 });

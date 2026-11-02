@@ -13,23 +13,50 @@ do nothing. Moving the runtime off the owner is what makes that layer possible a
 
 ## Design
 
-| Role             | Rights                                                                                    | Used by       |
-| ---------------- | ----------------------------------------------------------------------------------------- | ------------- |
-| `opshub_app`     | `SELECT, INSERT, UPDATE, DELETE` on every application table; `USAGE, SELECT` on sequences | API task      |
-| `opshub_worker`  | the same                                                                                  | worker task   |
-| `opshub_migrate` | `ALL` on the application schemas and on `drizzle`                                         | migrator task |
+| Role              | Rights                                                                                                                                              | Used by       |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `opshub_app`      | `SELECT, INSERT, UPDATE, DELETE` on every application table; `USAGE, SELECT` on sequences                                                           | API task      |
+| `opshub_worker`   | the same                                                                                                                                            | worker task   |
+| `opshub_migrator` | **On-prem (CNPG) only:** owns the database and every object the migrations create; it needs no grants.                                              | migrator task |
+| `opshub_migrate`  | **Legacy (AWS-era) name only.** AWS-era databases carry it; CNPG creates `opshub_migrator` instead and the journal no longer requires the old name. | unused        |
 
-No runtime role holds `CREATE`, `DROP`, `TRUNCATE` or ownership. Per-role
-`statement_timeout` (30s app / 120s worker) and `idle_in_transaction_session_timeout` are set
+No runtime role holds `CREATE`, `DROP`, `TRUNCATE` or ownership. Per-role timeouts are set
 on the roles rather than in the parameter group, so the **migrator keeps no limit** — DDL on a
 large table legitimately runs for minutes, and a migration killed halfway is a far worse
-failure than a slow request.
+failure than a slow request. They are **no longer set by migration 0012** (a NOCREATEROLE
+migrator cannot `ALTER ROLE` another role); the platform sets them on the roles it creates,
+and these are the values:
+
+| Role            | `statement_timeout` | `idle_in_transaction_session_timeout` |
+| --------------- | ------------------- | ------------------------------------- |
+| `opshub_app`    | `30s`               | `60s`                                 |
+| `opshub_worker` | `120s`              | `180s`                                |
+
+```sql
+ALTER ROLE opshub_app    SET statement_timeout = '30s';
+ALTER ROLE opshub_app    SET idle_in_transaction_session_timeout = '60s';
+ALTER ROLE opshub_worker SET statement_timeout = '120s';
+ALTER ROLE opshub_worker SET idle_in_transaction_session_timeout = '180s';
+```
+
+Databases that ran the old 0012 keep the settings: `ALTER ROLE … SET` is persisted in
+`pg_db_role_setting`, and nothing in the journal resets it.
 
 ## Step 1 — create the roles (already done by `db:migrate`)
 
-`db/migrations/0012_app_role_least_privilege.sql` creates all three roles **NOLOGIN** and
-grants them. It changes the behaviour of nothing that is running: a NOLOGIN role cannot
-connect, cannot be used, and cannot lock anyone out. It is idempotent and safe to re-run.
+`db/migrations/0012_app_role_least_privilege.sql` **grants** now, and creates the roles only as
+a superuser convenience (CI and a developer's own Postgres); on CNPG the platform has already
+created them and the migrator holds no CREATEROLE, so it creates nothing. It changes the
+behaviour of nothing that is running: a NOLOGIN role cannot connect, cannot be used, and
+cannot lock anyone out. It is idempotent and safe to re-run.
+
+> **On-prem (CNPG) the roles are the PLATFORM's.** CNPG creates `opshub_app`,
+> `opshub_worker` and `opshub_migrator` as managed roles (see `gitops`), and
+> `opshub_migrator` deliberately has **no** CREATEROLE. 0012 therefore only `GRANT`s, and
+> `0043_runtime_role_grants.sql` re-states the full runtime grant set plus the default
+> privileges for future tables, deriving the schema list from ownership so a schema added
+> later is still covered. The rebuild-from-zero gate is the `Fresh DB rebuild` CI job
+> (`db/fresh-db/`).
 
 Verify:
 
@@ -38,8 +65,9 @@ SELECT rolname, rolcanlogin, rolsuper, rolbypassrls, rolconfig
   FROM pg_roles WHERE rolname LIKE 'opshub_%' ORDER BY 1;
 ```
 
-Expect `rolcanlogin = f` for all three before cutover, and the timeouts present in
-`rolconfig` for `opshub_app` and `opshub_worker`.
+Expect `rolcanlogin = f` for the runtime roles before cutover. `rolconfig` carries the
+timeouts on a database that ran the old 0012; on a database whose roles the platform created,
+they are set by the platform (see the values above).
 
 ## Step 2 — generate and store passwords
 

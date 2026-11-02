@@ -340,6 +340,13 @@ describe('RateLimitGuard (pre-auth, per verified address: kept unless identity v
       expect(await keyFor({ 'x-real-ip': '192.0.2.2' })).toBe('IP:10.0.0.1');
     });
 
+    it('x-forwarded-for is not read either (platform-http 5.0.2): the socket decides', async () => {
+      // Before 5.0.2 the chain's FIRST entry was the fallback, so a caller without cf-connecting-ip
+      // chose its own bucket. Now the socket address is the answer for both headers.
+      expect(await keyFor({ 'x-forwarded-for': '198.51.100.99' })).toBe('IP:10.0.0.1');
+      expect(await keyFor({ 'x-forwarded-for': '198.51.100.100' })).toBe('IP:10.0.0.1');
+    });
+
     it('a header value that is not an IP address is skipped, not used as a key', async () => {
       expect(await keyFor({ 'cf-connecting-ip': 'not-an-ip\r\nx' })).toBe('IP:10.0.0.1');
     });

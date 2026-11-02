@@ -10,6 +10,9 @@ dist-ssr/
 # Vite
 .vite/
 
+# Local state written by `wrangler dev` / `wrangler deploy` (Workers Static Assets).
+.wrangler/
+
 # Environment — NEVER commit secrets.
 # Catch all .env variants; .env.example is the only safe-to-commit file.
 .env*

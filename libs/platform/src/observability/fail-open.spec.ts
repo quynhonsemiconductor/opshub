@@ -6,15 +6,8 @@ import { FAIL_OPEN_FIELD, failOpenLog } from '@quynhonsemiconductor/observabilit
 
 /**
  * The log helper itself lives in `@quynhonsemiconductor/observability`. What stays here is the part only
- * THIS repo can assert — that the field name the package emits is the one this repo's
- * Terraform actually filters on.
- *
- * That coupling is invisible from both sides. The package cannot know which infra matches
- * its output, and the Terraform cannot know which constant produced the field. So a package
- * rename or an infra edit would silently disarm the alarm: the guards keep logging, the
- * metric filter keeps matching nothing, and `SecurityFailOpen` sits at zero looking healthy.
- * The alarm even treats missing data as `notBreaching`, which is right for the real
- * no-events case and precisely why a broken filter cannot be told apart from a quiet one.
+ * THIS repo can assert: that the field name the package emits is the one the fail-open alert (in gitops)
+ * filters on, so a package rename fails a test instead of silently disarming the alert.
  *
  * Adopted from rova, which keeps the same spec for the same reason.
  */
@@ -38,34 +31,13 @@ describe('failOpenLog', () => {
     });
   });
 
-  it('names the field the CloudWatch filter matches', () => {
-    // Pinned as a literal, because the Terraform pattern below is a literal too — a shared
-    // constant on both sides is not possible across that boundary.
+  it('names the field the fail-open alert matches', () => {
+    // Pinned as a literal: the alert (in gitops) matches this exact field.
     expect(FAIL_OPEN_FIELD).toBe('securityFailOpen');
   });
 });
 
-describe('the metric filter matches what the app emits', () => {
-  it('finds the field name in the stack Terraform', () => {
-    // grep the INFRA for the pattern built from the package's constant. If the package
-    // renames the field, or the filter is edited or deleted, this fails — which is the whole
-    // point, because nothing else would notice.
-    const matches = execFileSync(
-      'grep',
-      ['-rl', '--include=*.tf', '--exclude-dir=.terraform', `$.${FAIL_OPEN_FIELD}`, 'infra'],
-      { cwd: ROOT, encoding: 'utf8' },
-    )
-      .split('\n')
-      .filter(Boolean);
-
-    expect(
-      matches,
-      `No Terraform metric filter matches "$.${FAIL_OPEN_FIELD}". The guards still log it, ` +
-        `so the alarm would sit at zero looking healthy. Check ` +
-        `aws_cloudwatch_log_metric_filter.security_fail_open in infra/modules/stack/main.tf.`,
-    ).not.toHaveLength(0);
-  });
-
+describe('the fail-open alert keeps matching what the app emits', () => {
   it('both fail-open call sites use the helper rather than a bare object', () => {
     // The rate-limit guard and the identity factory (its sign-in rate limit fails open when Valkey is down) are
     // the only places that fail open. A future one that logs

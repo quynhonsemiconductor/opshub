@@ -18,6 +18,19 @@ export interface DoorTerminal {
   updatedAt: Date;
 }
 
+/**
+ * A cached health warning for one terminal, surfaced on the Terminals tab. Currently the only
+ * code is `battery_reading_implausible`: the envelope carried a positive pack voltage outside the
+ * plausible window, so it was ignored (the badge keeps its last good reading).
+ */
+export interface TerminalHealthWarning {
+  code: 'battery_reading_implausible';
+  /** The rejected reading, in millivolts. */
+  value: number;
+  /** When the reading was received (ISO-8601). */
+  at: string;
+}
+
 export interface DoorCard {
   id: string;
   /** identity.employees.id — validated with assertExist, no cross-schema FK. */

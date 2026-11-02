@@ -1,0 +1,58 @@
+// ── Workers Static Assets: the on-prem SPA (ONPREM-PLAN §8.2) ────────────────
+//
+// The on-prem design serves opshub-dev.qnsc.vn SAME-ORIGIN. A Worker named
+// `opshub-dev-web` holds `<host>/*`; `/api/auth/*`, `/v1/*` and `/readyz` are
+// Workers routes WITHOUT a script, so Cloudflare sends them through the
+// qnsc-apps tunnel to the API (infra `live/edge/onprem.tf`). The SPA calls its
+// own origin; there is no API origin in the bundle.
+//
+// The old Cloudflare Pages deploy was removed with the AWS exit (opshub#515),
+// so this Worker is now the ONLY way the web app is published.
+//
+// ROUTES ARE NOT DECLARED HERE, deliberately. `infra` `live/edge/onprem.tf` owns
+// them (`cloudflare_workers_route.spa`, script name `<product>-<env>-web`), and
+// the deploy token has Workers Scripts: edit only — no Zone permission. A route
+// in this file would race Terraform and fail the deploy. `workers_dev` and
+// `preview_urls` are false so the script's only address is the hostname
+// Terraform routes to it.
+//
+// Two environments, two scripts — `--env dev` deploys `opshub-dev-web`,
+// `--env prod` deploys `opshub-prod-web`. The top-level name is never deployed:
+// every deploy passes `--env`. `workers_dev`/`preview_urls` are repeated inside
+// each environment because Wrangler does NOT inherit them from the top level.
+//
+// KNOWN GAP, cutover prerequisite: `apps/web/functions/**` is a Cloudflare
+// Pages Function (the same-origin /v1 and /api/auth proxy) and does NOT run on
+// Workers Static Assets. On the on-prem host this is not needed: the edge
+// routes those paths to the API directly. Nothing is exposed today because the
+// route is Terraform-gated on the cutover.
+
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "opshub-web",
+  "compatibility_date": "2026-06-01",
+
+  "assets": {
+    "directory": "./dist",
+
+    // Unknown paths serve `index.html`: every app route is a client-side route
+    // with no file behind it.
+    "not_found_handling": "single-page-application"
+  },
+
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "env": {
+    "dev": {
+      "name": "opshub-dev-web",
+      "workers_dev": false,
+      "preview_urls": false
+    },
+    "prod": {
+      "name": "opshub-prod-web",
+      "workers_dev": false,
+      "preview_urls": false
+    }
+  }
+}

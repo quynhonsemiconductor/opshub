@@ -8380,6 +8380,11 @@ export interface components {
         low: boolean;
         reportedAt: string | null;
       };
+      warnings?: {
+        code: string;
+        value: number;
+        at: string;
+      }[];
     };
     CreateTerminalDto: {
       name: string;

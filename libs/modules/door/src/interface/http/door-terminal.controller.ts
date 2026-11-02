@@ -25,13 +25,21 @@ import { TerminalAuthGuard, type DoorTerminalRequest } from './terminal-auth.gua
  */
 const EventsEnvelopeSchema = z
   .object({
+    // `stream` is the batch's IDENTITY (the terminal_id/stream/seq idempotency key) and a uuid
+    // column, so it stays strict: without it the batch cannot be deduped at all. Everything
+    // ADVISORY below is parsed in the service instead — telemetry must never refuse the batch.
     stream: z.string().uuid(),
-    dropped: z.number().int().min(0).max(100_000).default(0),
-    // Batch-level battery telemetry (one pack per controller). Optional for firmware roll-in;
-    // the service persists the latest reading to the cache for the terminals badge.
-    battery_mv: z.number().int().min(0).max(20_000).optional(),
-    low_battery: z.boolean().optional(),
-    events: z.array(z.record(z.string(), z.unknown())).max(100),
+    // Bench 2026-10-31: a `battery_mv` of 33924 (an unwired divider) made every batch a 422, and
+    // the terminal kept it and retried forever, taking every tap event with it. `dropped` was
+    // the same trap at both ends of its range. The envelope now accepts any JSON value for the
+    // telemetry and the service decides what is usable (see DoorService.ingestEvents); a
+    // per-event failure is still strict and named in `rejected`.
+    dropped: z.unknown().optional(),
+    battery_mv: z.unknown().optional(),
+    low_battery: z.unknown().optional(),
+    // ANY item, not just objects: one malformed event is ONE rejected seq (the service's
+    // per-event path), never a 422 for the whole batch.
+    events: z.array(z.unknown()).optional().default([]),
   })
   .loose();
 
@@ -100,9 +108,9 @@ export class DoorTerminalController {
     }
     const envelope = parsed.data as unknown as {
       stream: string;
-      dropped: number;
-      battery_mv?: number;
-      low_battery?: boolean;
+      dropped?: unknown;
+      battery_mv?: unknown;
+      low_battery?: unknown;
       events: IngestEvent[];
     };
     return this.door.ingestEvents(terminal.id, envelope).then((r) => ({

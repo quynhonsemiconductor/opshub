@@ -276,6 +276,146 @@ describe('door terminal contract v1', () => {
     expect(resend.body).toBe(first.body);
   });
 
+  it('accepts an implausible battery reading with all 9 events, warns, and leaves the badge unchanged', async () => {
+    // Bench 2026-10-31: an unwired divider reported 33924 mV. The envelope's old max(20_000)
+    // turned every batch into a 422; the terminal retried it forever and lost all attendance.
+    // Telemetry is advisory: the events must be acked, the badge must keep its last good value,
+    // and the terminal row must surface battery_reading_implausible with the offending value.
+    const body = {
+      stream,
+      dropped: 0,
+      battery_mv: 5400,
+      low_battery: false,
+      events: [
+        {
+          seq: 1100,
+          reader: 'in',
+          uid: randomUid(),
+          result: 'deny',
+          device_ts: new Date().toISOString(),
+          time_synced: true,
+        },
+      ],
+    };
+    const seeded = await app.inject({
+      method: 'POST',
+      url: '/v1/door/terminal/events',
+      headers: { ...bearer(), 'content-type': 'application/json' },
+      payload: body,
+    });
+    expect(seeded.statusCode, seeded.body).toBe(200);
+
+    // Nine VALID events, all carried by an envelope whose voltage is impossible.
+    const events = Array.from({ length: 9 }, (_, i) => ({
+      seq: 1200 + i,
+      reader: 'in' as const,
+      uid: randomUid(),
+      result: 'deny' as const,
+      device_ts: new Date().toISOString(),
+      time_synced: true,
+    }));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/door/terminal/events',
+      headers: { ...bearer(), 'content-type': 'application/json' },
+      payload: { ...body, battery_mv: 33_924, events },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ acked_through: 1208, rejected: [] });
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/v1/door/terminals',
+      headers: authHeaders(admin),
+    });
+    expect(listed.statusCode, listed.body).toBe(200);
+    const row = (
+      JSON.parse(listed.body) as {
+        id: string;
+        battery?: { mv: number | null; low: boolean };
+        warnings?: { code: string; value: number }[];
+      }[]
+    ).find((t) => t.id === terminalId);
+    // The badge kept the last GOOD reading — the implausible one was never persisted.
+    expect(row?.battery?.mv).toBe(5400);
+    expect(row?.battery?.low).toBe(false);
+    expect(row?.warnings).toEqual([
+      expect.objectContaining({ code: 'battery_reading_implausible', value: 33_924 }),
+    ]);
+
+    // In range persists exactly as before, and clears the warning.
+    const good = await app.inject({
+      method: 'POST',
+      url: '/v1/door/terminal/events',
+      headers: { ...bearer(), 'content-type': 'application/json' },
+      payload: { ...body, battery_mv: 5300, events: [] },
+    });
+    expect(good.statusCode, good.body).toBe(200);
+    const after = await app.inject({
+      method: 'GET',
+      url: '/v1/door/terminals',
+      headers: authHeaders(admin),
+    });
+    const afterRow = (
+      JSON.parse(after.body) as {
+        id: string;
+        battery?: { mv: number | null };
+        warnings?: unknown[];
+      }[]
+    ).find((t) => t.id === terminalId);
+    expect(afterRow?.battery?.mv).toBe(5300);
+    expect(afterRow?.warnings).toEqual([]);
+  });
+
+  it('drops ONLY the UID that was enrolled from the unknown list (bench 2026-10-31)', async () => {
+    // The old query computed `bool_or(EXISTS (… WHERE c.uid = ${events.uid} …))` in a single-table
+    // select; Drizzle rendered `${events.uid}` unqualified, so inside the subquery it resolved to
+    // `c.uid` and the predicate became `c.uid = c.uid`. Once ANY active card existed, every group
+    // was "active" and filtered out — Unknown went to 0. A test with ZERO enrolled cards could
+    // never have caught this: enrolling exactly one is what makes the broken predicate true.
+    const unknowns = [randomUid(), randomUid(), randomUid()];
+    const [a, b, c] = unknowns;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/door/terminal/events',
+      headers: { ...bearer(), 'content-type': 'application/json' },
+      payload: {
+        stream,
+        dropped: 0,
+        events: unknowns.map((uid, i) => ({
+          seq: 1300 + i,
+          reader: 'in',
+          uid,
+          result: 'deny',
+          device_ts: new Date().toISOString(),
+          time_synced: true,
+        })),
+      },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const ours = async () => {
+      const listed = await app.inject({
+        method: 'GET',
+        url: '/v1/door/unknown-cards',
+        headers: authHeaders(admin),
+      });
+      expect(listed.statusCode, listed.body).toBe(200);
+      return listed
+        .json<{ uid: string }[]>()
+        .map((r) => r.uid)
+        .filter((uid) => unknowns.includes(uid))
+        .sort();
+    };
+
+    expect(await ours()).toEqual([a, b, c].sort());
+
+    await enrolCard(a);
+
+    // Before the fix this was [] — every group, not just `a`, fell to the self-comparison.
+    expect(await ours()).toEqual([b, c].sort());
+  });
+
   it('resolves card_id by event time, not by "the card active now"', async () => {
     // Card not valid for another hour: a synced swipe NOW credits nobody...
     const future = new Date(Date.now() + 3600_000).toISOString();

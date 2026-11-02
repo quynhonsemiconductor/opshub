@@ -67,7 +67,7 @@ describe('EnvSchema — identity 8 sign-in', () => {
     expect(EnvSchema.safeParse(env(production)).success).toBe(true);
   });
 
-  it.each(['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET', 'EDGE_CLIENT_IP_SECRET'])(
+  it.each(['ENTRA_TENANT_ID', 'ENTRA_CLIENT_ID', 'ENTRA_CLIENT_SECRET'])(
     'production refuses a boot without %s, naming it (an empty string counts as unset)',
     (key) => {
       for (const value of [undefined, '']) {
@@ -455,7 +455,7 @@ describe('role-specific schemas — the API and the worker hold different creden
       expect(ApiEnvSchema.safeParse(env({ NODE_ENV: 'test' })).success).toBe(true);
     });
 
-    it('is REQUIRED in production: unset or empty stops the boot, naming it and why', () => {
+    it(`is OPTIONAL in production: on-prem has no Pages Function and cf-connecting-ip is the visitor (rova parity)`, () => {
       const production = {
         NODE_ENV: 'production',
         APP_URL: 'https://opshub.example.test',
@@ -463,12 +463,11 @@ describe('role-specific schemas — the API and the worker hold different creden
         ENTRA_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
         ENTRA_CLIENT_SECRET: 'client-secret',
       };
+      // THE CRASH-LOOP: an otherwise complete production deployment must boot without the signing key. The
+      // same-origin tunnel makes `cf-connecting-ip` the real visitor; the key only upgrades to a signed address.
       for (const value of [undefined, '']) {
         const result = ApiEnvSchema.safeParse(env({ ...production, EDGE_CLIENT_IP_SECRET: value }));
-        expect(result.success).toBe(false);
-        const issue = result.error?.issues.find((i) => i.path[0] === 'EDGE_CLIENT_IP_SECRET');
-        expect(issue?.message).toMatch(/required when NODE_ENV=production/);
-        expect(issue?.message).toMatch(/shared Cloudflare address/);
+        expect(result.success).toBe(true);
       }
       expect(
         ApiEnvSchema.safeParse(env({ ...production, EDGE_CLIENT_IP_SECRET: KEY })).success,
