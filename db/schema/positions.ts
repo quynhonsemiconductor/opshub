@@ -31,10 +31,55 @@ import {
   timestamp,
   index,
   uniqueIndex,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
-import { positionStatusEnum } from './enums';
+import { positionStatusEnum, rankBenefitCodeEnum } from './enums';
 
 export const positionsSchema = pgSchema('positions');
+
+/**
+ * Seniority ranks (1 = most junior) — what a position's `level` was as free text, made a row.
+ *
+ * A RANK IS A TABLE, NOT A STRING, because the things that hang off it need a key: the benefits in
+ * `rank_benefits` (the weekly WFH allowance is the first) are looked up by rank, and a free-text level
+ * ("Level 2", "L2", "lvl 2") cannot be matched reliably. `ordinal` orders the ranks and is unique, so
+ * two ranks can never claim the same seniority.
+ */
+export const jobRanks = positionsSchema.table(
+  'job_ranks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Seniority order, 1 = most junior. Unique: one rank per step. */
+    ordinal: integer('ordinal').notNull(),
+    name: varchar('name', { length: 80 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    ordinalIdx: uniqueIndex('uq_job_rank_ordinal').on(t.ordinal),
+    nameIdx: uniqueIndex('uq_job_rank_name').on(sql`lower(${t.name})`),
+  }),
+);
+
+/**
+ * What a rank entitles its holders to: one row per (rank, benefit). The row's absence means the rank has
+ * no such benefit — it is NOT the same as a value of zero that someone chose, but both answer "none".
+ */
+export const rankBenefits = positionsSchema.table(
+  'rank_benefits',
+  {
+    rankId: uuid('rank_id')
+      .notNull()
+      .references(() => jobRanks.id, { onDelete: 'cascade' }),
+    benefitCode: rankBenefitCodeEnum('benefit_code').notNull(),
+    /** The benefit's amount; its unit is named by the code (`wfh_weekly_days` → days per week). */
+    value: integer('value').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.rankId, t.benefitCode] }),
+  }),
+);
 
 export const positions = positionsSchema.table(
   'positions',

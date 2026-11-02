@@ -104,12 +104,7 @@ export const overtimeStatusEnum = pgEnum('overtime_status', ['pending', 'approve
  * asked and nobody answered, which is not a refusal — while overtime expiry writes `rejected`
  * because work already done unpaid reads differently. The lists share the vocabulary either way.
  */
-export const wfhStatusEnum = pgEnum('wfh_status', [
-  'pending',
-  'approved',
-  'rejected',
-  'cancelled',
-]);
+export const wfhStatusEnum = pgEnum('wfh_status', ['pending', 'approved', 'rejected', 'cancelled']);
 export const shiftTypeEnum = pgEnum('shift_type', ['night', 'on_call', 'weekend']);
 /** What a manager can be asked to sign off to repair an attendance day. */
 export const justificationKindEnum = pgEnum('attendance_justification_kind', [
@@ -219,6 +214,15 @@ export const documentVersionStatusEnum = pgEnum('document_version_status', [
  * exists and its occupants keep it, but no new assignment may be made against it.
  */
 export const positionStatusEnum = pgEnum('position_status', ['active', 'frozen', 'closed']);
+
+/**
+ * A benefit a job rank entitles its holders to — the codes `rank_benefits.benefit_code` may carry.
+ *
+ * ONE VALUE TODAY, AND A LIST BY DESIGN. `wfh_weekly_days` is the number of work-from-home days an employee of
+ * the rank may take in one Monday–Sunday week. A further per-rank entitlement is one more value here and one
+ * more row per rank, never a new column on `job_ranks`.
+ */
+export const rankBenefitCodeEnum = pgEnum('rank_benefit_code', ['wfh_weekly_days']);
 
 /**
  * Kind of employment agreement.
