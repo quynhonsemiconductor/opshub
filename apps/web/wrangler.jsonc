@@ -20,12 +20,6 @@
 // `--env prod` deploys `opshub-prod-web`. The top-level name is never deployed:
 // every deploy passes `--env`. `workers_dev`/`preview_urls` are repeated inside
 // each environment because Wrangler does NOT inherit them from the top level.
-//
-// KNOWN GAP, cutover prerequisite: `apps/web/functions/**` is a Cloudflare
-// Pages Function (the same-origin /v1 and /api/auth proxy) and does NOT run on
-// Workers Static Assets. On the on-prem host this is not needed: the edge
-// routes those paths to the API directly. Nothing is exposed today because the
-// route is Terraform-gated on the cutover.
 
 {
   "$schema": "node_modules/wrangler/config-schema.json",

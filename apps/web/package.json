@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p functions/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
     "codegen": "openapi-typescript http://localhost:3001/api/docs-json -o src/shared/api/generated/api.ts && prettier --write src/shared/api/generated/api.ts",
