@@ -52,7 +52,7 @@ export default defineConfig({
       ],
       exclude: ['**/*.spec.ts', '**/*.test.ts'],
       // RE-MEASURED 2026-11-02 after `functions/_lib` (the Pages proxy, 100% covered) left the include
-      // list with the Pages Functions: 98.99 statements / 98.8 branches / 100 functions / 100 lines across
+      // list with the Pages Functions: 98.99 statements / 97.52 branches / 100 functions / 100 lines across
       // the nine files above. The statements floor moves 99 -> 98 only because that file's removal took
       // 0.01 off the average (the two uncovered statements are `data-table.tsx`'s unreachable
       // `if (!onSelectionChange) return` guards: the checkboxes only render when it is set). Floors sit
