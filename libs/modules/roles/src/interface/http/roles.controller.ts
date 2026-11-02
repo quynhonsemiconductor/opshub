@@ -12,27 +12,27 @@ import {
   type PagedResult,
 } from '@platform';
 import { EmployeeService } from '@modules/identity';
-import { PositionsService } from '../../application/positions.service';
+import { RolesService } from '../../application/roles.service';
 import type {
-  EmployeePosition,
-  EmployeePositionWithRole,
-  Position,
-  PositionOccupancy,
-} from '../../domain/positions.types';
+  EmployeeRole,
+  EmployeeRoleWithDetails,
+  Role,
+  RoleOccupancy,
+} from '../../domain/roles.types';
 import {
-  AssignPositionDto,
-  CreatePositionDto,
-  EmployeePositionHistoryResponseDto,
-  EmployeePositionResponseDto,
-  PositionAssignmentResponseDto,
+  AssignRoleDto,
+  CreateRoleDto,
+  EmployeeRoleHistoryResponseDto,
+  EmployeeRoleResponseDto,
+  RoleAssignmentResponseDto,
   EndAssignmentDto,
-  ListPositionsQueryDto,
-  PositionOccupancyResponseDto,
-  PositionResponseDto,
-  UpdatePositionDto,
-} from './dto/positions.dto';
+  ListRolesQueryDto,
+  RoleOccupancyResponseDto,
+  RoleResponseDto,
+  UpdateRoleDto,
+} from './dto/roles.dto';
 
-function toPositionDto(p: Position): PositionResponseDto {
+function toRoleDto(p: Role): RoleResponseDto {
   return {
     id: p.id,
     code: p.code,
@@ -46,22 +46,22 @@ function toPositionDto(p: Position): PositionResponseDto {
   };
 }
 
-function toOccupancyDto(p: PositionOccupancy): PositionOccupancyResponseDto {
-  return { ...toPositionDto(p), filled: p.filled, vacancies: p.vacancies };
+function toOccupancyDto(p: RoleOccupancy): RoleOccupancyResponseDto {
+  return { ...toRoleDto(p), filled: p.filled, vacancies: p.vacancies };
 }
 
 /** The named read shape. `toAssignmentDto` stays for the writes, which have no name to give. */
 function toNamedAssignmentDto(
-  a: EmployeePosition & { employeeName: string | null },
-): PositionAssignmentResponseDto {
+  a: EmployeeRole & { employeeName: string | null },
+): RoleAssignmentResponseDto {
   return { ...toAssignmentDto(a), employeeName: a.employeeName };
 }
 
-function toAssignmentDto(a: EmployeePosition): EmployeePositionResponseDto {
+function toAssignmentDto(a: EmployeeRole): EmployeeRoleResponseDto {
   return {
     id: a.id,
     employeeId: a.employeeId,
-    positionId: a.positionId,
+    roleId: a.roleId,
     effectiveFrom: a.effectiveFrom,
     effectiveTo: a.effectiveTo,
     endReason: a.endReason,
@@ -70,50 +70,46 @@ function toAssignmentDto(a: EmployeePosition): EmployeePositionResponseDto {
 }
 
 /** The history shape — the same row, plus the role it refers to. */
-function toHistoryDto(a: EmployeePositionWithRole): EmployeePositionHistoryResponseDto {
-  return { ...toAssignmentDto(a), positionCode: a.positionCode, positionTitle: a.positionTitle };
+function toHistoryDto(a: EmployeeRoleWithDetails): EmployeeRoleHistoryResponseDto {
+  return { ...toAssignmentDto(a), roleCode: a.roleCode, roleTitle: a.roleTitle };
 }
 
-@ApiTags('positions')
-@Controller('positions')
+@ApiTags('roles')
+@Controller('roles')
 @Auth()
-export class PositionsController {
+export class RolesController {
   constructor(
-    private readonly service: PositionsService,
+    private readonly service: RolesService,
     private readonly employees: EmployeeService,
   ) {}
 
   /**
-   * The position the CALLER holds, and their history.
+   * The role the CALLER holds, and their history.
    *
    * Self-scoped and first because it is the only route here most employees need. Knowing your own
    * role and when it changed is not privileged information about anyone else.
    */
   @Get('me')
-  @SelfScoped("returns the caller's own position history — keyed on their own id")
-  @ApiOperation({ summary: 'My position history, newest first' })
-  @ApiOkResponse({ type: [EmployeePositionHistoryResponseDto] })
+  @SelfScoped("returns the caller's own role history — keyed on their own id")
+  @ApiOperation({ summary: 'My role history, newest first' })
+  @ApiOkResponse({ type: [EmployeeRoleHistoryResponseDto] })
   @ApiCommonErrors(401)
-  async myPositions(
-    @CurrentUser() user: JwtPayload,
-  ): Promise<EmployeePositionHistoryResponseDto[]> {
+  async myRoles(@CurrentUser() user: JwtPayload): Promise<EmployeeRoleHistoryResponseDto[]> {
     return (await this.service.listAssignmentsForEmployee(user.sub)).map(toHistoryDto);
   }
 
   @Get()
-  @RequirePermission('position.read')
+  @RequirePermission('role.read')
   @ApiOperation({
-    summary: 'List positions with occupancy',
+    summary: 'List roles with occupancy',
     description:
       'Each row carries `filled` (open assignments) and `vacancies` (`headcount - filled`, ' +
-      'floored at 0). `vacantOnly` narrows to positions with an unfilled approved slot.',
+      'floored at 0). `vacantOnly` narrows to roles with an unfilled approved slot.',
   })
-  @ApiPagedResponse(PositionOccupancyResponseDto)
+  @ApiPagedResponse(RoleOccupancyResponseDto)
   @ApiCommonErrors(401, 403)
-  async list(
-    @Query() query: ListPositionsQueryDto,
-  ): Promise<PagedResult<PositionOccupancyResponseDto>> {
-    const { rows, total } = await this.service.listPositions(
+  async list(@Query() query: ListRolesQueryDto): Promise<PagedResult<RoleOccupancyResponseDto>> {
+    const { rows, total } = await this.service.listRoles(
       {
         search: query.search,
         department: query.department,
@@ -127,74 +123,74 @@ export class PositionsController {
   }
 
   @Get(':id')
-  @RequirePermission('position.read')
-  @ApiOperation({ summary: 'Get a position' })
-  @ApiOkResponse({ type: PositionResponseDto })
+  @RequirePermission('role.read')
+  @ApiOperation({ summary: 'Get a role' })
+  @ApiOkResponse({ type: RoleResponseDto })
   @ApiCommonErrors(401, 403, 404)
-  async getById(@Param('id', ParseUUIDPipe) id: string): Promise<PositionResponseDto> {
-    return toPositionDto(await this.service.getPosition(id));
+  async getById(@Param('id', ParseUUIDPipe) id: string): Promise<RoleResponseDto> {
+    return toRoleDto(await this.service.getRole(id));
   }
 
   @Get(':id/assignments')
-  @RequirePermission('position.read')
+  @RequirePermission('role.read')
   @ApiOperation({
-    summary: 'Everyone who has held this position, newest first',
+    summary: 'Everyone who has held this role, newest first',
     description: 'History, not just current occupants — closed assignments are never deleted.',
   })
-  @ApiOkResponse({ type: [PositionAssignmentResponseDto] })
+  @ApiOkResponse({ type: [RoleAssignmentResponseDto] })
   @ApiCommonErrors(401, 403, 404)
   async listAssignments(
     @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<PositionAssignmentResponseDto[]> {
-    return (await this.service.listAssignmentsForPosition(id)).map(toNamedAssignmentDto);
+  ): Promise<RoleAssignmentResponseDto[]> {
+    return (await this.service.listAssignmentsForRole(id)).map(toNamedAssignmentDto);
   }
 
   @Post()
-  @RequirePermission('position.manage')
-  @ApiOperation({ summary: 'Define a position' })
-  @ApiCreatedResponse({ type: PositionResponseDto })
+  @RequirePermission('role.manage')
+  @ApiOperation({ summary: 'Define a role' })
+  @ApiCreatedResponse({ type: RoleResponseDto })
   @ApiCommonErrors(401, 403, 409, 422)
   async create(
-    @Body() dto: CreatePositionDto,
+    @Body() dto: CreateRoleDto,
     @CurrentUser() user: JwtPayload,
-  ): Promise<PositionResponseDto> {
-    return toPositionDto(await this.service.createPosition(dto, user));
+  ): Promise<RoleResponseDto> {
+    return toRoleDto(await this.service.createRole(dto, user));
   }
 
   @Patch(':id')
-  @RequirePermission('position.manage')
+  @RequirePermission('role.manage')
   @ApiOperation({
-    summary: 'Change a position, including approved headcount',
+    summary: 'Change a role, including approved headcount',
     description:
       'Reducing headcount below current occupancy is ALLOWED — a restructure is a real event — ' +
       'and shows as `vacancies: 0` with `filled > headcount`. No new assignment can be made ' +
       'until that resolves.',
   })
-  @ApiOkResponse({ type: PositionResponseDto })
+  @ApiOkResponse({ type: RoleResponseDto })
   @ApiCommonErrors(401, 403, 404, 422)
   async update(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdatePositionDto,
+    @Body() dto: UpdateRoleDto,
     @CurrentUser() user: JwtPayload,
-  ): Promise<PositionResponseDto> {
-    return toPositionDto(await this.service.updatePosition(id, dto, user));
+  ): Promise<RoleResponseDto> {
+    return toRoleDto(await this.service.updateRole(id, dto, user));
   }
 
   @Post(':id/assignments')
-  @RequirePermission('position.manage')
+  @RequirePermission('role.manage')
   @ApiOperation({
-    summary: 'Assign an employee, transferring them if they hold another position',
+    summary: 'Assign an employee, transferring them if they hold another role',
     description:
       'One transaction: closes any current assignment, checks approved headcount, opens the new ' +
-      'one. A frozen or closed position accepts nobody new.',
+      'one. A frozen or closed role accepts nobody new.',
   })
-  @ApiCreatedResponse({ type: EmployeePositionResponseDto })
+  @ApiCreatedResponse({ type: EmployeeRoleResponseDto })
   @ApiCommonErrors(401, 403, 404, 409, 412, 422)
   async assign(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AssignPositionDto,
+    @Body() dto: AssignRoleDto,
     @CurrentUser() user: JwtPayload,
-  ): Promise<EmployeePositionResponseDto> {
+  ): Promise<EmployeeRoleResponseDto> {
     // `employee_id` carries no cross-schema FK, matching every other module, so a typo would
     // otherwise become an assignment for somebody who does not exist.
     await this.employees.assertExist(dto.employeeId);
@@ -202,7 +198,7 @@ export class PositionsController {
       await this.service.assign(
         {
           employeeId: dto.employeeId,
-          positionId: id,
+          roleId: id,
           effectiveFrom: dto.effectiveFrom,
           endReason: dto.endReason,
         },
@@ -212,31 +208,31 @@ export class PositionsController {
   }
 
   @Patch('assignments/:id/end')
-  @RequirePermission('position.manage')
+  @RequirePermission('role.manage')
   @ApiOperation({
     summary: 'End an assignment without opening another',
     description:
       'A departure or a vacated role. The row is closed, never deleted. An `effectiveTo` before ' +
-      'the assignment started is refused with `POSITION_INVALID_WINDOW`.',
+      'the assignment started is refused with `ROLE_INVALID_WINDOW`.',
   })
-  @ApiOkResponse({ type: EmployeePositionResponseDto })
+  @ApiOkResponse({ type: EmployeeRoleResponseDto })
   @ApiCommonErrors(401, 403, 404, 412, 422)
   async endAssignment(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: EndAssignmentDto,
     @CurrentUser() user: JwtPayload,
-  ): Promise<EmployeePositionResponseDto> {
+  ): Promise<EmployeeRoleResponseDto> {
     return toAssignmentDto(await this.service.endAssignment(id, dto, user));
   }
 
   @Get('employees/:employeeId/history')
-  @RequirePermission('position.read')
-  @ApiOperation({ summary: "One employee's position history, newest first" })
-  @ApiOkResponse({ type: [EmployeePositionHistoryResponseDto] })
+  @RequirePermission('role.read')
+  @ApiOperation({ summary: "One employee's role history, newest first" })
+  @ApiOkResponse({ type: [EmployeeRoleHistoryResponseDto] })
   @ApiCommonErrors(401, 403, 404)
   async employeeHistory(
     @Param('employeeId', ParseUUIDPipe) employeeId: string,
-  ): Promise<EmployeePositionHistoryResponseDto[]> {
+  ): Promise<EmployeeRoleHistoryResponseDto[]> {
     await this.employees.assertExist(employeeId);
     return (await this.service.listAssignmentsForEmployee(employeeId)).map(toHistoryDto);
   }

@@ -54,7 +54,7 @@ function review(over: Partial<PerformanceReview> = {}): PerformanceReview {
     cycleId: 'cyc-1',
     employeeId: EMPLOYEE,
     reviewerId: ACTOR.sub,
-    positionId: 'pos-1',
+    roleId: 'pos-1',
     status: 'manager_review',
     selfAssessment: 'I did the things',
     selfAssessmentSubmittedAt: new Date(),
@@ -149,19 +149,13 @@ function makeService(repoOver: Record<string, unknown> = {}) {
   const db = { transaction } as unknown as DrizzleDB;
   const audit = createFakeAudit();
   const engine = { submit: vi.fn().mockResolvedValue({ id: 'req-1' }) };
-  const positions = { currentAssignment: vi.fn().mockResolvedValue({ positionId: 'pos-9' }) };
+  const roles = { currentAssignment: vi.fn().mockResolvedValue({ roleId: 'pos-9' }) };
 
   // `repo` needs NO widening — the stub covers every method of `IPerformanceRepository`, which is
   // the point: a missing method here would be a type error rather than an `undefined` at run time.
   // The other three are widened because they stand in for classes, not interfaces.
-  const service = new PerformanceService(
-    repo,
-    db,
-    audit as never,
-    engine as never,
-    positions as never,
-  );
-  return { service, repo, db, transaction, audit, engine, positions, TX };
+  const service = new PerformanceService(repo, db, audit as never, engine as never, roles as never);
+  return { service, repo, db, transaction, audit, engine, roles, TX };
 }
 
 describe('createCycle', () => {
@@ -270,30 +264,30 @@ describe('createReview', () => {
     expect(repo.createReview).not.toHaveBeenCalled();
   });
 
-  it("FREEZES the employee's current position onto the review", async () => {
-    const { service, repo, positions } = makeService();
+  it("FREEZES the employee's current role onto the review", async () => {
+    const { service, repo, roles } = makeService();
     await service.createReview(
       { cycleId: 'cyc-1', employeeId: EMPLOYEE, reviewerId: ACTOR.sub },
       ACTOR,
     );
-    expect(positions.currentAssignment).toHaveBeenCalledWith(EMPLOYEE);
+    expect(roles.currentAssignment).toHaveBeenCalledWith(EMPLOYEE);
     expect(repo.createReview).toHaveBeenCalledWith(
-      expect.objectContaining({ positionId: 'pos-9' }),
+      expect.objectContaining({ roleId: 'pos-9' }),
       expect.anything(),
     );
   });
 
-  it('creates the review with no position when the employee has no assignment', async () => {
+  it('creates the review with no role when the employee has no assignment', async () => {
     // Being between roles is not a reason to refuse somebody a review.
-    const { service, repo, positions } = makeService();
-    positions.currentAssignment.mockResolvedValue(null);
+    const { service, repo, roles } = makeService();
+    roles.currentAssignment.mockResolvedValue(null);
 
     await service.createReview(
       { cycleId: 'cyc-1', employeeId: EMPLOYEE, reviewerId: ACTOR.sub },
       ACTOR,
     );
     expect(repo.createReview).toHaveBeenCalledWith(
-      expect.objectContaining({ positionId: null }),
+      expect.objectContaining({ roleId: null }),
       expect.anything(),
     );
   });

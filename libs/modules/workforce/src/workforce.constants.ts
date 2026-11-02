@@ -1,6 +1,6 @@
 /**
  * Work-from-home days per week an employee gets when their rank carries no `wfh_weekly_days` benefit, or
- * they hold no ranked position at all.
+ * they hold no ranked role at all.
  *
  * Zero on purpose: the rule is "log work from home only while the quota is above zero", so an employee
  * nobody has granted an allowance to has none. Raising this is a one-line change that gives every

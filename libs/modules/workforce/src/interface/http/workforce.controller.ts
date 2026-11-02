@@ -388,7 +388,7 @@ export class WorkforceController {
   @ApiOperation({
     summary: 'My work-from-home quota for a week',
     description:
-      "The allowance set by the rank of the caller's current position, the working days already claimed " +
+      "The allowance set by the rank of the caller's current role, the working days already claimed " +
       'by pending and approved requests in the Monday–Sunday week containing `weekOf` (the current week ' +
       'when omitted), and what remains. The quota resets every week and never carries over. An ' +
       'allowance of 0 means filing is refused (412 `WFH_QUOTA_NONE`).',

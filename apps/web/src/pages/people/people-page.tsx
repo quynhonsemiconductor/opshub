@@ -89,7 +89,7 @@ export function PeoplePage() {
   const canManage = can('employee.write');
   // The position register is its own permission: a screen that can read people cannot assume it may read
   // the org structure they sit in.
-  const canReadPositions = can('position.read');
+  const canReadPositions = can('role.read');
 
   async function removeAvatar() {
     if (!selected) return;
@@ -302,7 +302,7 @@ export function PeoplePage() {
       >
         {selected && (
           <>
-            {/* WHOSE ROLE, NOT WHICH ID. `/positions/employees/{id}/history` needs `position.read`, and
+            {/* WHOSE ROLE, NOT WHICH ID. `/positions/employees/{id}/history` needs `role.read`, and
                 its rows now carry the position's code and title — resolved in the same query that powers
                 the self-scoped `/positions/me`, so both sides read the same way. */}
             {canReadPositions && (

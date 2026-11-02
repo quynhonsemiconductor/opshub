@@ -7,8 +7,8 @@ import {
   type DbExecutor,
   type DrizzleDB,
 } from '@platform';
-import { employeePositions, positions, rankBenefits, wfhRequests } from '../../../../../db/schema';
-import { RANK_BENEFIT_CODE } from '@modules/positions';
+import { employeeRoles, roles, rankBenefits, wfhRequests } from '../../../../../db/schema';
+import { RANK_BENEFIT_CODE } from '@modules/roles';
 import {
   HO_CHI_MINH_UTC_OFFSET_HOURS,
   WFH_WEEKLY_DAYS_WITHOUT_BENEFIT,
@@ -37,7 +37,7 @@ export interface WfhWeekQuota {
 /**
  * Weekly work-from-home quota.
  *
- * THE RULES. Every employee has a weekly allowance set by the rank of their current position
+ * THE RULES. Every employee has a weekly allowance set by the rank of their current role
  * (`rank_benefits`, code `wfh_weekly_days`). The week runs Monday to Sunday. The quota resets every week and
  * is never carried over: nothing is stored, a week's usage is computed from the requests that fall in it.
  * Employees may file only while the allowance is above zero, and the days a request asks for in each week
@@ -62,24 +62,22 @@ export class WfhQuotaService {
    *   executor: Database handle to read through, so the read joins the caller's transaction.
    *
    * Returns:
-   *   The `wfh_weekly_days` benefit of the rank of the employee's current position, or
-   *   `WFH_WEEKLY_DAYS_WITHOUT_BENEFIT` when they hold no ranked position or the rank has no such benefit.
+   *   The `wfh_weekly_days` benefit of the rank of the employee's current role, or
+   *   `WFH_WEEKLY_DAYS_WITHOUT_BENEFIT` when they hold no ranked role or the rank has no such benefit.
    */
   async weeklyAllowanceFor(employeeId: string, executor?: DbExecutor): Promise<number> {
     const [row] = await (executor ?? this.db)
       .select({ allowance: rankBenefits.value })
-      .from(employeePositions)
-      .innerJoin(positions, eq(positions.id, employeePositions.positionId))
+      .from(employeeRoles)
+      .innerJoin(roles, eq(roles.id, employeeRoles.roleId))
       .innerJoin(
         rankBenefits,
         and(
-          eq(rankBenefits.rankId, positions.rankId),
+          eq(rankBenefits.rankId, roles.rankId),
           eq(rankBenefits.benefitCode, RANK_BENEFIT_CODE.WFH_WEEKLY_DAYS),
         ),
       )
-      .where(
-        and(eq(employeePositions.employeeId, employeeId), isNull(employeePositions.effectiveTo)),
-      )
+      .where(and(eq(employeeRoles.employeeId, employeeId), isNull(employeeRoles.effectiveTo)))
       .limit(1);
     return row?.allowance ?? WFH_WEEKLY_DAYS_WITHOUT_BENEFIT;
   }

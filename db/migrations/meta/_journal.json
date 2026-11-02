@@ -351,6 +351,13 @@
       "when": 1793639574922,
       "tag": "0049_rename_positions_to_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793725974922,
+      "tag": "0050_rename_position_permissions_to_role",
+      "breakpoints": true
     }
   ]
 }

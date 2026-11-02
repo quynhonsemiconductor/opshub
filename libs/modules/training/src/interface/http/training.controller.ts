@@ -75,7 +75,7 @@ function toRequirementDto(
 ): RequirementResponseDto {
   return {
     id: r.id,
-    positionId: r.positionId,
+    roleId: r.roleId,
     courseId: r.courseId,
     courseCode: r.courseCode,
     courseTitle: r.courseTitle,
@@ -174,10 +174,10 @@ export class TrainingController {
     return (await this.service.listRecordsForEmployee(user.sub)).map(toRecordDto);
   }
 
-  /** The caller's own gaps — what their current position requires and they do not hold. */
+  /** The caller's own gaps — what their current role requires and they do not hold. */
   @Get('me/gaps')
   @SelfScoped("returns the caller's own competency gaps — keyed on their own id")
-  @ApiOperation({ summary: 'Training my current position requires and I do not hold' })
+  @ApiOperation({ summary: 'Training my current role requires and I do not hold' })
   @ApiOkResponse({ type: [CompetencyGapResponseDto] })
   @ApiCommonErrors(401)
   async myGaps(@CurrentUser() user: JwtPayload): Promise<CompetencyGapResponseDto[]> {
@@ -261,33 +261,33 @@ export class TrainingController {
 
   // ── Requirements ─────────────────────────────────────────────────────────────
 
-  @Get('positions/:positionId/requirements')
+  @Get('roles/:roleId/requirements')
   @RequirePermission('training.read')
-  @ApiOperation({ summary: 'Courses a position requires' })
+  @ApiOperation({ summary: 'Courses a role requires' })
   @ApiOkResponse({ type: [RequirementResponseDto] })
   @ApiCommonErrors(401, 403)
   async listRequirements(
-    @Param('positionId', ParseUUIDPipe) positionId: string,
+    @Param('roleId', ParseUUIDPipe) roleId: string,
   ): Promise<RequirementResponseDto[]> {
-    return (await this.service.listRequirementsForPosition(positionId)).map(toRequirementDto);
+    return (await this.service.listRequirementsForRole(roleId)).map(toRequirementDto);
   }
 
-  @Post('positions/:positionId/requirements')
+  @Post('roles/:roleId/requirements')
   @RequirePermission('training.manage')
   @ApiOperation({
-    summary: 'Require a course of a position',
+    summary: 'Require a course of a role',
     description:
-      'The requirement hangs off the POSITION, not the person, so a transfer changes what ' +
+      'The requirement hangs off the ROLE, not the person, so a transfer changes what ' +
       'somebody needs with no backfill.',
   })
   @ApiCreatedResponse({ type: RequirementResponseDto })
   @ApiCommonErrors(401, 403, 404, 409, 412, 422)
   async addRequirement(
-    @Param('positionId', ParseUUIDPipe) positionId: string,
+    @Param('roleId', ParseUUIDPipe) roleId: string,
     @Body() dto: AddRequirementDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<RequirementResponseDto> {
-    const requirement = await this.service.addRequirement({ ...dto, positionId }, user);
+    const requirement = await this.service.addRequirement({ ...dto, roleId }, user);
     const course = await this.service.getCourse(requirement.courseId);
     return toRequirementDto({
       ...requirement,
@@ -299,7 +299,7 @@ export class TrainingController {
   @Delete('requirements/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission('training.manage')
-  @ApiOperation({ summary: 'Stop requiring a course of a position' })
+  @ApiOperation({ summary: 'Stop requiring a course of a role' })
   @ApiCommonErrors(401, 403, 404)
   async removeRequirement(
     @Param('id', ParseUUIDPipe) id: string,
@@ -526,7 +526,7 @@ export class TrainingController {
   @Get('gaps')
   @RequirePermission('training.read')
   @ApiOperation({
-    summary: 'Competency gaps — who is missing training their CURRENT position requires',
+    summary: 'Competency gaps — who is missing training their CURRENT role requires',
     description:
       'Mandatory only unless `includeRecommended` is set. `reason` distinguishes ' +
       '`never_completed` from `expired`, because one needs scheduling and the other rescheduling.',
@@ -537,7 +537,7 @@ export class TrainingController {
     return (
       await this.service.competencyGaps({
         employeeId: query.employeeId,
-        positionId: query.positionId,
+        roleId: query.roleId,
         asOf: query.asOf,
         includeRecommended: query.includeRecommended,
       })

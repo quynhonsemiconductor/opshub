@@ -5,7 +5,7 @@
  * WHAT THESE PIN. `/v1/positions/me` and `/v1/contracts/me` are `@SelfScoped` — no id, no permission — and
  * neither had a caller, so an employee could not see their own role history or contract anywhere. The
  * assertion that matters is that a role reads as a TITLE: the API resolves `positionCode`/`positionTitle`
- * server-side precisely because a self-scoped caller holds no `position.read` to look one up, and rendering
+ * server-side precisely because a self-scoped caller holds no `role.read` to look one up, and rendering
  * the raw `positionId` is the failure this replaced.
  *
  * AN EMPTY LIST IS AN ONBOARDING GAP, not an error — somebody on the register occupying no approved seat is

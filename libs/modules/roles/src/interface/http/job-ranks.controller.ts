@@ -54,7 +54,7 @@ export class JobRanksController {
   constructor(private readonly service: JobRanksService) {}
 
   @Get()
-  @RequirePermission('position.read')
+  @RequirePermission('role.read')
   @ApiOperation({
     summary: 'List job ranks with their benefits',
     description: 'Most junior first. A rank with no benefits carries an empty list.',
@@ -66,7 +66,7 @@ export class JobRanksController {
   }
 
   @Post()
-  @RequirePermission('position.manage')
+  @RequirePermission('role.manage')
   @ApiOperation({ summary: 'Create a job rank' })
   @ApiCreatedResponse({ type: JobRankResponseDto })
   @ApiCommonErrors(401, 403, 409, 422)
@@ -78,7 +78,7 @@ export class JobRanksController {
   }
 
   @Patch(':id')
-  @RequirePermission('position.manage')
+  @RequirePermission('role.manage')
   @ApiOperation({ summary: 'Rename a job rank or move it to another ordinal' })
   @ApiOkResponse({ type: JobRankResponseDto })
   @ApiCommonErrors(401, 403, 404, 409, 422)
@@ -94,10 +94,10 @@ export class JobRanksController {
 
   @Delete(':id')
   @HttpCode(204)
-  @RequirePermission('position.manage')
+  @RequirePermission('role.manage')
   @ApiOperation({
     summary: 'Delete a job rank',
-    description: 'Refused (409 `JOB_RANK_IN_USE`) while any position still carries the rank.',
+    description: 'Refused (409 `JOB_RANK_IN_USE`) while any role still carries the rank.',
   })
   @ApiNoContentResponse()
   @ApiCommonErrors(401, 403, 404, 409)
@@ -109,7 +109,7 @@ export class JobRanksController {
   }
 
   @Put(':id/benefits')
-  @RequirePermission('position.manage')
+  @RequirePermission('role.manage')
   @ApiOperation({
     summary: 'Replace the benefits of a job rank',
     description:

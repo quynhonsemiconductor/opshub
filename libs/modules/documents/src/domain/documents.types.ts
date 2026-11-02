@@ -51,7 +51,7 @@ export interface DocumentFilters {
    *
    * Here because pickers select a document BY NAME — an audit report, a review's minutes — and a picker
    * that can only offer the first page of a list is one that cannot find document 101. The same reason
-   * `positions` grew a search.
+   * `roles` grew a search.
    */
   search?: string;
 }

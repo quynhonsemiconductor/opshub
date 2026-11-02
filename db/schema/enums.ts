@@ -208,12 +208,12 @@ export const documentVersionStatusEnum = pgEnum('document_version_status', [
 ]);
 
 /**
- * Lifecycle of a job position.
+ * Lifecycle of a job role.
  *
- * `frozen` is the state a hiring pause needs and a boolean cannot express: the position still
+ * `frozen` is the state a hiring pause needs and a boolean cannot express: the role still
  * exists and its occupants keep it, but no new assignment may be made against it.
  */
-export const positionStatusEnum = pgEnum('role_status', ['active', 'frozen', 'closed']);
+export const roleStatusEnum = pgEnum('role_status', ['active', 'frozen', 'closed']);
 
 /**
  * A benefit a job rank entitles its holders to — the codes `rank_benefits.benefit_code` may carry.

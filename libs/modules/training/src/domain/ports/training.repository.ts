@@ -35,16 +35,16 @@ export interface ITrainingRepository {
   // ── Requirements ───────────────────────────────────────────────────────────
   addRequirement(
     input: {
-      positionId: string;
+      roleId: string;
       courseId: string;
       kind: RequirementKind;
       graceDays?: number | null;
     },
     tx?: DbExecutor,
   ): Promise<TrainingRequirement>;
-  findRequirement(positionId: string, courseId: string): Promise<TrainingRequirement | null>;
+  findRequirement(roleId: string, courseId: string): Promise<TrainingRequirement | null>;
   removeRequirement(id: string, tx?: DbExecutor): Promise<TrainingRequirement | null>;
-  listRequirementsForPosition(positionId: string): Promise<
+  listRequirementsForRole(roleId: string): Promise<
     (TrainingRequirement & {
       courseCode: string;
       courseTitle: string;
@@ -95,14 +95,14 @@ export interface ITrainingRepository {
 
   // ── The report ─────────────────────────────────────────────────────────────
   /**
-   * Mandatory courses an employee's CURRENT position requires and they do not hold.
+   * Mandatory courses an employee's CURRENT role requires and they do not hold.
    *
    * One query, not a loop: the gap report is the whole point of modelling requirements on the
-   * position, and computing it per employee in TypeScript would be an N+1 over the org chart.
+   * role, and computing it per employee in TypeScript would be an N+1 over the org chart.
    */
   competencyGaps(input: {
     employeeId?: string;
-    positionId?: string;
+    roleId?: string;
     asOf: string;
     includeRecommended: boolean;
   }): Promise<CompetencyGap[]>;

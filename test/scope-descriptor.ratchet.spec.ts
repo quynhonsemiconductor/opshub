@@ -66,7 +66,7 @@ const ROOT = join(__dirname, '..');
  * 156 after the three row-addressed routes of job ranks (rename or reorder, replace benefits, delete). A
  * rank is organisation-wide reference data, not something owned by an employee or a department, so there is
  * no row attribute a `self`/`dept` grant could be compared against; the same is true of the other
- * `position.manage` administration already counted.
+ * `role.manage` administration already counted.
  */
 const MAX_UNSCOPED_ROW_ROUTES = 156;
 

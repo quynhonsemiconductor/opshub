@@ -415,7 +415,7 @@ export class InternalAuditService {
     }
   }
 
-  /** `ck_audit_planned_window`, via the guard shared with contracts, positions and vendors. */
+  /** `ck_audit_planned_window`, via the guard shared with contracts, roles and vendors. */
   private assertPlannedWindow(
     from: string | null | undefined,
     to: string | null | undefined,

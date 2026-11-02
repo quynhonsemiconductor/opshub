@@ -12,28 +12,25 @@ import {
 } from '@platform';
 import type { Actor } from '@shared-kernel';
 import { AUDIT_ACTION, AUDIT_RESOURCE, AuditService } from '@modules/audit';
-import {
-  POSITIONS_REPOSITORY,
-  type IPositionsRepository,
-} from '../domain/ports/positions.repository';
+import { ROLES_REPOSITORY, type IRolesRepository } from '../domain/ports/roles.repository';
 import {
   JOB_RANKS_REPOSITORY,
   type IJobRanksRepository,
 } from '../domain/ports/job-ranks.repository';
 import type {
-  CreatePositionInput,
-  EmployeePosition,
-  EmployeePositionWithRole,
-  Position,
-  PositionFilters,
-} from '../domain/positions.types';
+  CreateRoleInput,
+  EmployeeRole,
+  EmployeeRoleWithDetails,
+  Role,
+  RoleFilters,
+} from '../domain/roles.types';
 
 /**
- * Positions, approved headcount, and occupancy over time.
+ * Roles, approved headcount, and occupancy over time.
  *
  * TWO RULES THIS SERVICE OWNS, because the database cannot.
  *
- * 1. HEADCOUNT. "At most `headcount` people hold this position at once" is a count across rows
+ * 1. HEADCOUNT. "At most `headcount` people hold this role at once" is a count across rows
  *    filtered by `effective_to IS NULL` — not expressible as a unique index, and invisible to a
  *    CHECK constraint, which cannot see other rows. So it is counted here, INSIDE the assignment
  *    transaction: read on the pool instead and two concurrent assignments both see the last free
@@ -41,66 +38,66 @@ import type {
  *
  * 2. TRANSFER IS ONE ACT. Moving someone closes the old assignment and opens the new one in a
  *    single transaction, in that order. The order is forced by
- *    `uq_employee_current_position`: opening first hits the index, which is the intended
+ *    `uq_employee_current_role`: opening first hits the index, which is the intended
  *    behaviour rather than an obstacle — it means a transfer cannot half-happen.
  */
 @Injectable()
-export class PositionsService {
+export class RolesService {
   constructor(
-    @Inject(POSITIONS_REPOSITORY) private readonly repo: IPositionsRepository,
+    @Inject(ROLES_REPOSITORY) private readonly repo: IRolesRepository,
     @Inject(JOB_RANKS_REPOSITORY) private readonly jobRanksRepo: IJobRanksRepository,
     @InjectDrizzle() private readonly db: DrizzleDB,
     private readonly audit: AuditService,
   ) {}
 
-  // ── Positions ────────────────────────────────────────────────────────────────
+  // ── Roles ────────────────────────────────────────────────────────────────
 
-  async createPosition(input: CreatePositionInput, actor: Actor): Promise<Position> {
+  async createRole(input: CreateRoleInput, actor: Actor): Promise<Role> {
     if (await this.repo.findByCode(input.code)) {
       throw new ConflictException(
         ErrorCodes.CONFLICT,
-        `Position code '${input.code}' is already in use`,
+        `Role code '${input.code}' is already in use`,
       );
     }
 
     await this.assertRankExists(input.rankId);
 
     return this.db.transaction(async (tx) => {
-      const position = await this.repo.create(input, tx);
+      const role = await this.repo.create(input, tx);
       await this.audit.record(
         {
           actorId: actor.sub,
           actorEmail: actor.email,
-          action: AUDIT_ACTION.POSITION_CREATED,
-          resourceType: AUDIT_RESOURCE.POSITION,
-          resourceId: position.id,
+          action: AUDIT_ACTION.JOB_ROLE_CREATED,
+          resourceType: AUDIT_RESOURCE.JOB_ROLE,
+          resourceId: role.id,
           changes: {
             after: {
-              code: position.code,
-              title: position.title,
-              department: position.department,
-              headcount: position.headcount,
+              code: role.code,
+              title: role.title,
+              department: role.department,
+              headcount: role.headcount,
             },
           },
         },
         tx,
       );
-      return position;
+      return role;
     });
   }
 
-  async getPosition(id: string): Promise<Position> {
-    const position = await this.repo.findById(id);
-    if (!position) throw new NotFoundException(ErrorCodes.NOT_FOUND, `Position ${id} not found`);
-    return position;
+  async getRole(id: string): Promise<Role> {
+    const role = await this.repo.findById(id);
+    if (!role) throw new NotFoundException(ErrorCodes.NOT_FOUND, `Role ${id} not found`);
+    return role;
   }
 
-  async listPositions(filters: PositionFilters, limit: number, offset: number) {
+  async listRoles(filters: RoleFilters, limit: number, offset: number) {
     return this.repo.list(filters, limit, offset);
   }
 
   /**
-   * Change a position's definition, including its approved headcount.
+   * Change a role's definition, including its approved headcount.
    *
    * REDUCING HEADCOUNT BELOW CURRENT OCCUPANCY IS ALLOWED, deliberately. A restructure that cuts
    * three approved seats to two while three people still hold them is a real situation, and
@@ -108,14 +105,14 @@ export class PositionsService {
    * over-occupancy is visible as `vacancies: 0` with `filled > headcount`, and no NEW assignment
    * can be made until it resolves — which is where the constraint belongs.
    */
-  async updatePosition(
+  async updateRole(
     id: string,
     input: Partial<
-      Pick<Position, 'title' | 'department' | 'rankId' | 'headcount' | 'description' | 'status'>
+      Pick<Role, 'title' | 'department' | 'rankId' | 'headcount' | 'description' | 'status'>
     >,
     actor: Actor,
-  ): Promise<Position> {
-    const before = await this.getPosition(id);
+  ): Promise<Role> {
+    const before = await this.getRole(id);
     await this.assertRankExists(input.rankId);
 
     return this.db.transaction(async (tx) => {
@@ -124,8 +121,8 @@ export class PositionsService {
         {
           actorId: actor.sub,
           actorEmail: actor.email,
-          action: AUDIT_ACTION.POSITION_UPDATED,
-          resourceType: AUDIT_RESOURCE.POSITION,
+          action: AUDIT_ACTION.JOB_ROLE_UPDATED,
+          resourceType: AUDIT_RESOURCE.JOB_ROLE,
           resourceId: id,
           changes: {
             before: { headcount: before.headcount, status: before.status, title: before.title },
@@ -142,7 +139,7 @@ export class PositionsService {
    * Refuses a rank id that names no rank, so the caller gets a 404 instead of a foreign-key failure.
    *
    * Args:
-   *   rankId: The rank a position is being given. Null or undefined means "no rank" and always passes.
+   *   rankId: The rank a role is being given. Null or undefined means "no rank" and always passes.
    *
    * Raises:
    *   NotFoundException: If a rank id is given and no such rank exists.
@@ -157,33 +154,30 @@ export class PositionsService {
   // ── Assignments ──────────────────────────────────────────────────────────────
 
   /**
-   * Put someone into a position, moving them out of their current one if they have it.
+   * Put someone into a role, moving them out of their current one if they have it.
    *
    * The whole thing is one transaction: the headcount count, the close, and the open. Splitting it
-   * would allow a transfer that vacated the old position without filling the new one.
+   * would allow a transfer that vacated the old role without filling the new one.
    */
   async assign(
-    input: { employeeId: string; positionId: string; effectiveFrom: string; endReason?: string },
+    input: { employeeId: string; roleId: string; effectiveFrom: string; endReason?: string },
     actor: Actor,
-  ): Promise<EmployeePosition> {
-    const position = await this.getPosition(input.positionId);
+  ): Promise<EmployeeRole> {
+    const role = await this.getRole(input.roleId);
 
-    // A frozen position keeps its occupants but accepts nobody new — the state a hiring pause
+    // A frozen role keeps its occupants but accepts nobody new — the state a hiring pause
     // needs, and the reason `status` is an enum rather than a boolean.
-    if (position.status !== 'active') {
+    if (role.status !== 'active') {
       throw new PreconditionFailedException(
         ErrorCodes.PRECONDITION_FAILED,
-        `Position ${position.code} is '${position.status}' and cannot accept an assignment`,
+        `Role ${role.code} is '${role.status}' and cannot accept an assignment`,
       );
     }
 
     return this.db.transaction(async (tx) => {
       const current = await this.repo.findCurrentAssignment(input.employeeId, tx);
-      if (current?.positionId === input.positionId) {
-        throw new ConflictException(
-          ErrorCodes.CONFLICT,
-          'The employee already holds this position',
-        );
+      if (current?.roleId === input.roleId) {
+        throw new ConflictException(ErrorCodes.CONFLICT, 'The employee already holds this role');
       }
 
       // Counted INSIDE the transaction. The slot being vacated by the transfer below is released
@@ -194,7 +188,7 @@ export class PositionsService {
         assertDateOrder(
           current.effectiveFrom,
           input.effectiveFrom,
-          ErrorCodes.POSITION_INVALID_WINDOW,
+          ErrorCodes.ROLE_INVALID_WINDOW,
           'An assignment cannot end before it began — cannot transfer as of this date',
         );
         await this.repo.endAssignment(
@@ -204,11 +198,11 @@ export class PositionsService {
         );
       }
 
-      const filled = await this.repo.countOpenAssignments(input.positionId, tx);
-      if (filled >= position.headcount) {
+      const filled = await this.repo.countOpenAssignments(input.roleId, tx);
+      if (filled >= role.headcount) {
         throw new PreconditionFailedException(
-          ErrorCodes.POSITION_HEADCOUNT_EXCEEDED,
-          `Position ${position.code} is at its approved headcount (${position.headcount}). ` +
+          ErrorCodes.ROLE_HEADCOUNT_EXCEEDED,
+          `Role ${role.code} is at its approved headcount (${role.headcount}). ` +
             `Raise the headcount or end an existing assignment first.`,
         );
       }
@@ -218,14 +212,14 @@ export class PositionsService {
         {
           actorId: actor.sub,
           actorEmail: actor.email,
-          action: AUDIT_ACTION.POSITION_ASSIGNED,
-          resourceType: AUDIT_RESOURCE.EMPLOYEE_POSITION,
+          action: AUDIT_ACTION.JOB_ROLE_ASSIGNED,
+          resourceType: AUDIT_RESOURCE.EMPLOYEE_ROLE,
           resourceId: assignment.id,
           changes: {
-            before: current ? { positionId: current.positionId } : null,
+            before: current ? { roleId: current.roleId } : null,
             after: {
               employeeId: input.employeeId,
-              positionId: input.positionId,
+              roleId: input.roleId,
               effectiveFrom: input.effectiveFrom,
             },
           },
@@ -241,7 +235,7 @@ export class PositionsService {
     id: string,
     input: { effectiveTo: string; endReason?: string },
     actor: Actor,
-  ): Promise<EmployeePosition> {
+  ): Promise<EmployeeRole> {
     return this.db.transaction(async (tx) => {
       // Read first only to validate the window. The authority on "is it still open" stays the
       // open-only WHERE clause below — this read could be raced, that clause cannot.
@@ -250,7 +244,7 @@ export class PositionsService {
         assertDateOrder(
           existing.effectiveFrom,
           input.effectiveTo,
-          ErrorCodes.POSITION_INVALID_WINDOW,
+          ErrorCodes.ROLE_INVALID_WINDOW,
           'An assignment cannot end before it began',
         );
       }
@@ -270,8 +264,8 @@ export class PositionsService {
         {
           actorId: actor.sub,
           actorEmail: actor.email,
-          action: AUDIT_ACTION.POSITION_UNASSIGNED,
-          resourceType: AUDIT_RESOURCE.EMPLOYEE_POSITION,
+          action: AUDIT_ACTION.JOB_ROLE_UNASSIGNED,
+          resourceType: AUDIT_RESOURCE.EMPLOYEE_ROLE,
           resourceId: id,
           changes: {
             after: { effectiveTo: input.effectiveTo, endReason: input.endReason ?? null },
@@ -284,15 +278,15 @@ export class PositionsService {
   }
 
   /** Occupancy history for one employee, newest first. */
-  async listAssignmentsForEmployee(employeeId: string): Promise<EmployeePositionWithRole[]> {
+  async listAssignmentsForEmployee(employeeId: string): Promise<EmployeeRoleWithDetails[]> {
     return this.repo.listAssignmentsForEmployee(employeeId);
   }
 
-  async listAssignmentsForPosition(
-    positionId: string,
-  ): Promise<(EmployeePosition & { employeeName: string | null })[]> {
-    await this.getPosition(positionId);
-    const rows = await this.repo.listAssignmentsForPosition(positionId);
+  async listAssignmentsForRole(
+    roleId: string,
+  ): Promise<(EmployeeRole & { employeeName: string | null })[]> {
+    await this.getRole(roleId);
+    const rows = await this.repo.listAssignmentsForRole(roleId);
     // Names for the whole list in one query: this is read to answer "who holds this role", which a
     // column of uuids cannot.
     const names = await resolveEmployeeNames(
@@ -302,8 +296,8 @@ export class PositionsService {
     return rows.map((r) => ({ ...r, employeeName: nameOf(names, r.employeeId) }));
   }
 
-  /** The position an employee holds now, or null when they hold none. */
-  async currentAssignment(employeeId: string): Promise<EmployeePosition | null> {
+  /** The role an employee holds now, or null when they hold none. */
+  async currentAssignment(employeeId: string): Promise<EmployeeRole | null> {
     return this.repo.findCurrentAssignment(employeeId);
   }
 }

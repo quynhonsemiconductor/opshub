@@ -23,7 +23,7 @@ import type {
 /**
  * Job ranks and what each rank entitles its holders to.
  *
- * A rank is the seniority a position carries. Its benefits are rows (`rank_benefits`), one per
+ * A rank is the seniority a role carries. Its benefits are rows (`rank_benefits`), one per
  * (rank, benefit), so a new benefit is a new row rather than a new column.
  */
 @Injectable()
@@ -124,7 +124,7 @@ export class JobRanksService {
   }
 
   /**
-   * Deletes a rank that no position carries.
+   * Deletes a rank that no role carries.
    *
    * Args:
    *   id: The rank to delete.
@@ -132,15 +132,15 @@ export class JobRanksService {
    *
    * Raises:
    *   NotFoundException: If the rank does not exist.
-   *   ConflictException: If a position still carries the rank.
+   *   ConflictException: If a role still carries the rank.
    */
   async deleteRank(id: string, actor: Actor): Promise<void> {
     const rank = await this.getRank(id);
-    const positionsUsingRank = await this.repo.countPositionsUsing(id);
-    if (positionsUsingRank > 0) {
+    const rolesUsingRank = await this.repo.countRolesUsing(id);
+    if (rolesUsingRank > 0) {
       throw new ConflictException(
         ErrorCodes.JOB_RANK_IN_USE,
-        `Rank '${rank.name}' is carried by ${positionsUsingRank} position(s); move them first`,
+        `Rank '${rank.name}' is carried by ${rolesUsingRank} role(s); move them first`,
       );
     }
     await this.db.transaction(async (tx) => {

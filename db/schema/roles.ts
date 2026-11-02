@@ -1,24 +1,24 @@
 /**
- * positions schema — job positions, approved headcount, and who occupies what over time.
+ * roles schema — job roles, approved headcount, and who occupies what over time.
  *
  * WHY THIS EXISTS WHEN `employees` ALREADY HAS `job_title` AND `department`
  * ------------------------------------------------------------------------
  * Those two are free text on the person. They answer "what does Mai do?" and nothing else: you
  * cannot ask how many QA Engineers were approved versus filled, what a vacancy is, or what the
- * role required when someone held it two years ago. A position is the ROLE as an entity, separate
+ * role required when someone held it two years ago. A role is the job as an entity, separate
  * from whoever currently occupies it.
  *
  * It is also the hook the rest of the roadmap needs. QMS competency is "training required for THIS
- * POSITION", and an employment contract is a contract FOR a position — both of which need the role
+ * ROLE", and an employment contract is a contract FOR a role — both of which need the role
  * to outlive its occupant. Building those against `job_title` would mean matching on a string.
  *
- * ASSIGNMENT IS A HISTORY, NOT A COLUMN. `employee_positions` is append-mostly with an open-ended
- * `effective_to`, so "who held this position in March" stays answerable after three reorganisations.
- * A `position_id` column on `employees` would overwrite that on every move.
+ * ASSIGNMENT IS A HISTORY, NOT A COLUMN. `employee_roles` is append-mostly with an open-ended
+ * `effective_to`, so "who held this role in March" stays answerable after three reorganisations.
+ * A `role_id` column on `employees` would overwrite that on every move.
  *
  * `employees.job_title` is deliberately NOT dropped. It is written by the Entra sync and read by
  * screens that predate this table, so removing it would be a second change riding along on this
- * one; the position title is authoritative where an assignment exists.
+ * one; the role title is authoritative where an assignment exists.
  */
 import { sql } from 'drizzle-orm';
 import {
@@ -33,19 +33,19 @@ import {
   uniqueIndex,
   primaryKey,
 } from 'drizzle-orm/pg-core';
-import { positionStatusEnum, rankBenefitCodeEnum } from './enums';
+import { roleStatusEnum, rankBenefitCodeEnum } from './enums';
 
-export const positionsSchema = pgSchema('roles');
+export const rolesSchema = pgSchema('roles');
 
 /**
- * Seniority ranks (1 = most junior) — what a position's `level` was as free text, made a row.
+ * Seniority ranks (1 = most junior) — what a role's `level` was as free text, made a row.
  *
  * A RANK IS A TABLE, NOT A STRING, because the things that hang off it need a key: the benefits in
  * `rank_benefits` (the weekly WFH allowance is the first) are looked up by rank, and a free-text level
  * ("Level 2", "L2", "lvl 2") cannot be matched reliably. `ordinal` orders the ranks and is unique, so
  * two ranks can never claim the same seniority.
  */
-export const jobRanks = positionsSchema.table(
+export const jobRanks = rolesSchema.table(
   'job_ranks',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -65,7 +65,7 @@ export const jobRanks = positionsSchema.table(
  * What a rank entitles its holders to: one row per (rank, benefit). The row's absence means the rank has
  * no such benefit — it is NOT the same as a value of zero that someone chose, but both answer "none".
  */
-export const rankBenefits = positionsSchema.table(
+export const rankBenefits = rolesSchema.table(
   'rank_benefits',
   {
     rankId: uuid('rank_id')
@@ -81,7 +81,7 @@ export const rankBenefits = positionsSchema.table(
   }),
 );
 
-export const positions = positionsSchema.table(
+export const roles = rolesSchema.table(
   'roles',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -89,10 +89,10 @@ export const positions = positionsSchema.table(
     code: varchar('code', { length: 32 }).notNull(),
     title: varchar('title', { length: 160 }).notNull(),
     department: varchar('department', { length: 120 }).notNull(),
-    /** Seniority rank. Null for a position nobody has ranked; RESTRICT, so a rank in use cannot be deleted. */
+    /** Seniority rank. Null for a role nobody has ranked; RESTRICT, so a rank in use cannot be deleted. */
     rankId: uuid('rank_id').references(() => jobRanks.id, { onDelete: 'restrict' }),
     /**
-     * Approved headcount — how many people may hold this position at once.
+     * Approved headcount — how many people may hold this role at once.
      *
      * Enforced in the service, NOT by a constraint, and the difference is worth stating: this is a
      * count across rows filtered by `effective_to IS NULL`, which no unique index can express. The
@@ -101,7 +101,7 @@ export const positions = positionsSchema.table(
      */
     headcount: integer('headcount').notNull().default(1),
     description: text('description'),
-    status: positionStatusEnum('status').notNull().default('active'),
+    status: roleStatusEnum('status').notNull().default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -113,14 +113,14 @@ export const positions = positionsSchema.table(
   }),
 );
 
-export const employeePositions = positionsSchema.table(
+export const employeeRoles = rolesSchema.table(
   'employee_roles',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     employeeId: uuid('employee_id').notNull(),
-    positionId: uuid('role_id')
+    roleId: uuid('role_id')
       .notNull()
-      .references(() => positions.id, { onDelete: 'restrict' }),
+      .references(() => roles.id, { onDelete: 'restrict' }),
     effectiveFrom: date('effective_from').notNull(),
     /** Open-ended while current. Set on transfer or departure — the row is never deleted. */
     effectiveTo: date('effective_to'),
@@ -130,16 +130,16 @@ export const employeePositions = positionsSchema.table(
   },
   (t) => ({
     /**
-     * ONE CURRENT POSITION PER EMPLOYEE, as a database guarantee.
+     * ONE CURRENT ROLE PER EMPLOYEE, as a database guarantee.
      *
      * Partial unique index over (employee_id) where the assignment is still open. History rows are
-     * unconstrained, so a person can hold the same position twice over a career, but cannot occupy
-     * two at once — which is what makes "their position" a question with one answer.
+     * unconstrained, so a person can hold the same role twice over a career, but cannot occupy
+     * two at once — which is what makes "their role" a question with one answer.
      */
     currentIdx: uniqueIndex('uq_employee_current_role')
       .on(t.employeeId)
       .where(sql`effective_to IS NULL`),
     employeeIdx: index('ix_employee_role_employee').on(t.employeeId, t.effectiveFrom),
-    positionIdx: index('ix_employee_role_role').on(t.positionId),
+    roleIdx: index('ix_employee_role_role').on(t.roleId),
   }),
 );

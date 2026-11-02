@@ -72,10 +72,10 @@ export const ErrorCodes = {
    * `ck_leave_single_day_portions_match` and its siblings in words. See `domain/leave-window.ts`.
    */
   LEAVE_INVALID_WINDOW: 'LEAVE_INVALID_WINDOW',
-  /** Assigning would exceed the position's approved headcount. */
-  POSITION_HEADCOUNT_EXCEEDED: 'POSITION_HEADCOUNT_EXCEEDED',
-  /** An assignment would end before it began — `ck_employee_position_window` in words. */
-  POSITION_INVALID_WINDOW: 'POSITION_INVALID_WINDOW',
+  /** Assigning would exceed the role's approved headcount. */
+  ROLE_HEADCOUNT_EXCEEDED: 'ROLE_HEADCOUNT_EXCEEDED',
+  /** An assignment would end before it began — `ck_employee_role_window` in words. */
+  ROLE_INVALID_WINDOW: 'ROLE_INVALID_WINDOW',
 
   // ── Employment contracts ───────────────────────────────────────────────────
   /** A contract date range runs backwards — `ck_contract_window` and its siblings in words. */

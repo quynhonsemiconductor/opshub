@@ -33,7 +33,7 @@ function selectResolvingTo(rows: unknown[]) {
  * Builds the service over a stub database.
  *
  * Args:
- *   weeklyAllowance: What the rank's `wfh_weekly_days` benefit says; null means no ranked position.
+ *   weeklyAllowance: What the rank's `wfh_weekly_days` benefit says; null means no ranked role.
  *   claimingRequests: The pending and approved requests the second read returns.
  */
 function makeService(
@@ -50,7 +50,7 @@ function makeService(
 }
 
 describe('assertWithinQuota', () => {
-  it('refuses when the employee holds no ranked position, so there is no allowance', async () => {
+  it('refuses when the employee holds no ranked role, so there is no allowance', async () => {
     const service = makeService(null);
 
     await expect(service.assertWithinQuota(_EMPLOYEE_ID, [_MONDAY_WEEK_ONE])).rejects.toMatchObject(

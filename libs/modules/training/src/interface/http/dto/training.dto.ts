@@ -44,7 +44,7 @@ export class ListCoursesQueryDto extends createZodDto(ListCoursesQuerySchema) {}
 export const AddRequirementSchema = z.object({
   courseId: z.string().uuid(),
   kind: requirementKind.optional(),
-  /** Days after taking up the position. Omit for "before starting". */
+  /** Days after taking up the role. Omit for "before starting". */
   graceDays: z.number().int().min(0).max(3650).nullable().optional(),
 });
 export class AddRequirementDto extends createZodDto(AddRequirementSchema) {}
@@ -89,7 +89,7 @@ export class ListRecordsQueryDto extends createZodDto(ListRecordsQuerySchema) {}
 
 export const CompetencyGapQuerySchema = z.object({
   employeeId: z.string().uuid().optional(),
-  positionId: z.string().uuid().optional(),
+  roleId: z.string().uuid().optional(),
   /** Defaults to today. Explicit so "who lapses by quarter end" is one request. */
   asOf: z.string().date().optional(),
   includeRecommended: queryBoolean().optional(),
@@ -131,7 +131,7 @@ export class CourseResponseDto {
 
 export class RequirementResponseDto {
   id!: string;
-  positionId!: string;
+  roleId!: string;
   courseId!: string;
   courseCode!: string;
   courseTitle!: string;
@@ -200,7 +200,7 @@ export class CompetencyGapResponseDto {
   employeeId!: string;
   /**
    * Who is missing the training, resolved server-side. Null when the employee row is gone; the gap
-   * report is read from `employee_positions`, so a stale assignment can outlive the directory row it
+   * report is read from `employee_roles`, so a stale assignment can outlive the directory row it
    * points at, and a left lookup keeps the finding visible instead of quietly dropping it.
    *
    * Sent because the report exists to be acted on — somebody has to be booked onto a course — and a
@@ -208,7 +208,7 @@ export class CompetencyGapResponseDto {
    * for the same reason; it just gets it from a join, because that report drives off `employees`.
    */
   employeeName!: string | null;
-  positionId!: string;
+  roleId!: string;
   courseId!: string;
   courseCode!: string;
   courseTitle!: string;

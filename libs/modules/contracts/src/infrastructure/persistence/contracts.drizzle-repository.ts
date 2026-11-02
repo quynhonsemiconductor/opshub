@@ -34,7 +34,7 @@ export class ContractsDrizzleRepository implements IContractsRepository {
       .values({
         id: newId(),
         employeeId: input.employeeId,
-        positionId: input.positionId ?? null,
+        roleId: input.roleId ?? null,
         reference: input.reference,
         contractType: input.contractType,
         startDate: input.startDate,
@@ -76,7 +76,7 @@ export class ContractsDrizzleRepository implements IContractsRepository {
       filters.employeeId ? eq(employmentContracts.employeeId, filters.employeeId) : undefined,
       filters.status ? eq(employmentContracts.status, filters.status) : undefined,
       filters.contractType ? eq(employmentContracts.contractType, filters.contractType) : undefined,
-      filters.positionId ? eq(employmentContracts.positionId, filters.positionId) : undefined,
+      filters.roleId ? eq(employmentContracts.roleId, filters.roleId) : undefined,
       // The renewal queue: only an ACTIVE contract can be renewed, so the status is implied by the
       // filter rather than left to the caller to remember.
       filters.endingOnOrBefore

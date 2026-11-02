@@ -3,9 +3,9 @@ import { and, asc, desc, eq, gte, isNotNull, isNull, lt, lte, ne, or, sql } from
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { newId, toIsoDate } from '@shared-kernel';
 import {
-  employeePositions,
+  employeeRoles,
   trainingCourses,
-  trainingPositionRequirements,
+  trainingRoleRequirements,
   trainingRecords,
 } from '../../../../../../db/schema';
 import type { ITrainingRepository } from '../../domain/ports/training.repository';
@@ -167,7 +167,7 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
 
   async addRequirement(
     input: {
-      positionId: string;
+      roleId: string;
       courseId: string;
       kind: RequirementKind;
       graceDays?: number | null;
@@ -175,10 +175,10 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
     tx?: DbExecutor,
   ): Promise<TrainingRequirement> {
     const [row] = await (tx ?? this.db)
-      .insert(trainingPositionRequirements)
+      .insert(trainingRoleRequirements)
       .values({
         id: newId(),
-        positionId: input.positionId,
+        roleId: input.roleId,
         courseId: input.courseId,
         kind: input.kind,
         graceDays: input.graceDays ?? null,
@@ -187,14 +187,14 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
     return row;
   }
 
-  async findRequirement(positionId: string, courseId: string): Promise<TrainingRequirement | null> {
+  async findRequirement(roleId: string, courseId: string): Promise<TrainingRequirement | null> {
     const [row] = await this.db
       .select()
-      .from(trainingPositionRequirements)
+      .from(trainingRoleRequirements)
       .where(
         and(
-          eq(trainingPositionRequirements.positionId, positionId),
-          eq(trainingPositionRequirements.courseId, courseId),
+          eq(trainingRoleRequirements.roleId, roleId),
+          eq(trainingRoleRequirements.courseId, courseId),
         ),
       )
       .limit(1);
@@ -203,30 +203,30 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
 
   async removeRequirement(id: string, tx?: DbExecutor): Promise<TrainingRequirement | null> {
     const [row] = await (tx ?? this.db)
-      .delete(trainingPositionRequirements)
-      .where(eq(trainingPositionRequirements.id, id))
+      .delete(trainingRoleRequirements)
+      .where(eq(trainingRoleRequirements.id, id))
       .returning();
     return row ?? null;
   }
 
-  async listRequirementsForPosition(
-    positionId: string,
+  async listRequirementsForRole(
+    roleId: string,
   ): Promise<(TrainingRequirement & { courseCode: string; courseTitle: string })[]> {
     return this.db
       .select({
-        id: trainingPositionRequirements.id,
-        positionId: trainingPositionRequirements.positionId,
-        courseId: trainingPositionRequirements.courseId,
-        kind: trainingPositionRequirements.kind,
-        graceDays: trainingPositionRequirements.graceDays,
-        createdAt: trainingPositionRequirements.createdAt,
+        id: trainingRoleRequirements.id,
+        roleId: trainingRoleRequirements.roleId,
+        courseId: trainingRoleRequirements.courseId,
+        kind: trainingRoleRequirements.kind,
+        graceDays: trainingRoleRequirements.graceDays,
+        createdAt: trainingRoleRequirements.createdAt,
         courseCode: trainingCourses.code,
         courseTitle: trainingCourses.title,
       })
-      .from(trainingPositionRequirements)
-      .innerJoin(trainingCourses, eq(trainingCourses.id, trainingPositionRequirements.courseId))
-      .where(eq(trainingPositionRequirements.positionId, positionId))
-      .orderBy(asc(trainingCourses.code), asc(trainingPositionRequirements.id));
+      .from(trainingRoleRequirements)
+      .innerJoin(trainingCourses, eq(trainingCourses.id, trainingRoleRequirements.courseId))
+      .where(eq(trainingRoleRequirements.roleId, roleId))
+      .orderBy(asc(trainingCourses.code), asc(trainingRoleRequirements.id));
   }
 
   // ── Records ──────────────────────────────────────────────────────────────────
@@ -397,7 +397,7 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
   /**
    * The competency gap report, as ONE query.
    *
-   * Reads each employee's CURRENT position from `positions.employee_positions` — the open
+   * Reads each employee's CURRENT role from `roles.employee_roles` — the open
    * assignment — rather than a copy on the record, so a transfer changes what somebody needs
    * without any backfill. Left-joins the live record for each required course; a NULL means never
    * completed, a past `expires_on` means lapsed, and both are reported with the reason because the
@@ -405,34 +405,34 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
    */
   async competencyGaps(input: {
     employeeId?: string;
-    positionId?: string;
+    roleId?: string;
     asOf: string;
     includeRecommended: boolean;
   }): Promise<CompetencyGap[]> {
     const rows = await this.db
       .select({
-        employeeId: employeePositions.employeeId,
-        positionId: trainingPositionRequirements.positionId,
-        courseId: trainingPositionRequirements.courseId,
+        employeeId: employeeRoles.employeeId,
+        roleId: trainingRoleRequirements.roleId,
+        courseId: trainingRoleRequirements.courseId,
         courseCode: trainingCourses.code,
         courseTitle: trainingCourses.title,
-        kind: trainingPositionRequirements.kind,
-        graceDays: trainingPositionRequirements.graceDays,
+        kind: trainingRoleRequirements.kind,
+        graceDays: trainingRoleRequirements.graceDays,
         recordId: trainingRecords.id,
         completedOn: trainingRecords.completedOn,
         expiresOn: trainingRecords.expiresOn,
       })
-      .from(employeePositions)
+      .from(employeeRoles)
       .innerJoin(
-        trainingPositionRequirements,
-        eq(trainingPositionRequirements.positionId, employeePositions.positionId),
+        trainingRoleRequirements,
+        eq(trainingRoleRequirements.roleId, employeeRoles.roleId),
       )
-      .innerJoin(trainingCourses, eq(trainingCourses.id, trainingPositionRequirements.courseId))
+      .innerJoin(trainingCourses, eq(trainingCourses.id, trainingRoleRequirements.courseId))
       .leftJoin(
         trainingRecords,
         and(
-          eq(trainingRecords.employeeId, employeePositions.employeeId),
-          eq(trainingRecords.courseId, trainingPositionRequirements.courseId),
+          eq(trainingRecords.employeeId, employeeRoles.employeeId),
+          eq(trainingRecords.courseId, trainingRoleRequirements.courseId),
           isNull(trainingRecords.supersededById),
           ne(trainingRecords.status, 'revoked'),
         ),
@@ -440,14 +440,12 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
       .where(
         and(
           // The CURRENT assignment only — a course required by a role somebody left is not a gap.
-          isNull(employeePositions.effectiveTo),
+          isNull(employeeRoles.effectiveTo),
           // A retired course cannot be a gap: nobody can be sent on it.
           isNull(trainingCourses.retiredAt),
-          input.employeeId ? eq(employeePositions.employeeId, input.employeeId) : undefined,
-          input.positionId
-            ? eq(trainingPositionRequirements.positionId, input.positionId)
-            : undefined,
-          input.includeRecommended ? undefined : eq(trainingPositionRequirements.kind, 'mandatory'),
+          input.employeeId ? eq(employeeRoles.employeeId, input.employeeId) : undefined,
+          input.roleId ? eq(trainingRoleRequirements.roleId, input.roleId) : undefined,
+          input.includeRecommended ? undefined : eq(trainingRoleRequirements.kind, 'mandatory'),
           // A gap is: no live record at all, OR one that has lapsed by `asOf`.
           or(
             isNull(trainingRecords.id),
@@ -457,9 +455,9 @@ export class TrainingDrizzleRepository implements ITrainingRepository {
         ),
       )
       .orderBy(
-        asc(employeePositions.employeeId),
+        asc(employeeRoles.employeeId),
         asc(trainingCourses.code),
-        asc(trainingPositionRequirements.id),
+        asc(trainingRoleRequirements.id),
       );
 
     return rows.map((r) => ({

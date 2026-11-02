@@ -36,7 +36,7 @@ export const softwareLicenses = licensesSchema.table(
      * The supplier in the ISMS vendor register, when they are in it.
      *
      * Added ALONGSIDE the free-text `vendor` above rather than replacing it, which is the same move
-     * `positions` made with `employees.job_title`: the text stays because existing screens read it
+     * `roles` made with `employees.job_title`: the text stays because existing screens read it
      * and not every line item deserves a due-diligence file. This column is what makes "what do we
      * buy from this supplier, and has anyone assessed them" a join rather than a string match — and
      * the report worth having is the anti-join, money going to suppliers nobody assessed.

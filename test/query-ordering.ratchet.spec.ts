@@ -87,7 +87,7 @@ const ROOT = join(__dirname, '..');
  *                          across reviews would be exempted by this entry and should not be.
  *
  *   - `rankBenefits.benefitCode` part of PRIMARY KEY (rank_id, benefit_code)
- *                          (db/schema/positions.ts, migration 0044). CONDITIONAL, like
+ *                          (db/schema/roles.ts, migration 0044). CONDITIONAL, like
  *                          `attachments.fileId`: unique only WITHIN one rank, and listed because every
  *                          query ordering by it ends `orderBy(rank_id, benefit_code)`, which is the whole
  *                          primary key, so the order is total.

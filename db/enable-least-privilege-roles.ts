@@ -119,7 +119,7 @@ const PROBE_SCHEMA = 'workforce';
  * DERIVED RATHER THAN LISTED, and that is the point. This check used to hold its own copy
  * of migration 0012's `app_schemas`, which meant a schema created by a LATER migration was
  * invisible to it: six of them had accumulated (`contracts`, `documents`, `isms`,
- * `positions`, `qms`, `training`) and none were being verified — the exact hole the check
+ * `roles`, `qms`, `training`) and none were being verified — the exact hole the check
  * exists to close, reopened by the list going stale. A blacklist cannot go stale in that
  * direction: a new schema is covered the moment it is created, and nobody has to remember
  * anything.

@@ -137,7 +137,14 @@ export const AUDIT_ACTION = {
   ONBOARDING_SUBMITTED: 'onboarding.submitted',
   OFFBOARDING_SUBMITTED: 'offboarding.submitted',
 
-  // ── Positions ──
+  // ── Job roles ──
+  // `job_role.*`, not `role.*`: the permission groups were called roles until 0047, so the `role.*` codes
+  // already in `audit_logs` mean groups, and reusing them for job roles would make two meanings of one code.
+  JOB_ROLE_CREATED: 'job_role.created',
+  JOB_ROLE_UPDATED: 'job_role.updated',
+  JOB_ROLE_ASSIGNED: 'job_role.assigned',
+  JOB_ROLE_UNASSIGNED: 'job_role.unassigned',
+  /** LEGACY — the same four events when job roles were called positions; rows already written carry them. */
   POSITION_CREATED: 'position.created',
   POSITION_UPDATED: 'position.updated',
   POSITION_ASSIGNED: 'position.assigned',
@@ -381,6 +388,9 @@ export const AUDIT_RESOURCE = {
   ATTENDANCE_MONTH: 'attendance_month',
   DOCUMENT: 'document',
   DOCUMENT_VERSION: 'document_version',
+  JOB_ROLE: 'job_role',
+  EMPLOYEE_ROLE: 'employee_role',
+  /** LEGACY — the same two resources when job roles were called positions; kept so existing rows stay filterable. */
   POSITION: 'position',
   EMPLOYEE_POSITION: 'employee_position',
   JOB_RANK: 'job_rank',

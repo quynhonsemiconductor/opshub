@@ -5,7 +5,7 @@ import {
   JOB_RANK_NAME_MAX_LENGTH,
   JOB_RANK_ORDINAL_MAX,
   RANK_BENEFIT_VALUE_MAX,
-} from '../../../positions.constants';
+} from '../../../roles.constants';
 
 const rankBenefitCode = z.enum(rankBenefitCodeEnum.enumValues);
 

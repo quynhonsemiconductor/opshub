@@ -36,7 +36,7 @@ const CERTIFICATE_SURFACE = 'training-certificate' as const;
 const RECORD_ENTITY = 'training_record';
 
 /**
- * Training courses, what each POSITION requires, and who has completed what.
+ * Training courses, what each ROLE requires, and who has completed what.
  *
  * WHAT THIS SERVICE OWNS THAT THE DATABASE CANNOT
  *
@@ -163,7 +163,7 @@ export class TrainingService {
 
   async addRequirement(
     input: {
-      positionId: string;
+      roleId: string;
       courseId: string;
       kind?: RequirementKind;
       graceDays?: number | null;
@@ -174,13 +174,13 @@ export class TrainingService {
     if (course.retiredAt) {
       throw new PreconditionFailedException(
         ErrorCodes.PRECONDITION_FAILED,
-        `Course ${course.code} is retired and cannot be required of a position`,
+        `Course ${course.code} is retired and cannot be required of a role`,
       );
     }
-    if (await this.repo.findRequirement(input.positionId, input.courseId)) {
+    if (await this.repo.findRequirement(input.roleId, input.courseId)) {
       throw new ConflictException(
         ErrorCodes.CONFLICT,
-        `Course ${course.code} is already required for that position`,
+        `Course ${course.code} is already required for that role`,
       );
     }
 
@@ -195,7 +195,7 @@ export class TrainingService {
         AUDIT_RESOURCE.TRAINING_REQUIREMENT,
         requirement.id,
         {
-          after: { positionId: input.positionId, courseCode: course.code, kind: requirement.kind },
+          after: { roleId: input.roleId, courseCode: course.code, kind: requirement.kind },
         },
         tx,
       );
@@ -214,14 +214,14 @@ export class TrainingService {
         AUDIT_ACTION.TRAINING_REQUIREMENT_REMOVED,
         AUDIT_RESOURCE.TRAINING_REQUIREMENT,
         id,
-        { before: { positionId: removed.positionId, courseId: removed.courseId } },
+        { before: { roleId: removed.roleId, courseId: removed.courseId } },
         tx,
       );
     });
   }
 
-  async listRequirementsForPosition(positionId: string) {
-    return this.repo.listRequirementsForPosition(positionId);
+  async listRequirementsForRole(roleId: string) {
+    return this.repo.listRequirementsForRole(roleId);
   }
 
   // ── Records ──────────────────────────────────────────────────────────────────
@@ -575,20 +575,20 @@ export class TrainingService {
   // ── The report ───────────────────────────────────────────────────────────────
 
   /**
-   * Who is missing training their CURRENT position requires.
+   * Who is missing training their CURRENT role requires.
    *
-   * The whole reason requirements hang off the position: this answers "is the org competent?"
+   * The whole reason requirements hang off the role: this answers "is the org competent?"
    * rather than "what has Mai done?", and it stays correct through a transfer without a backfill.
    */
   async competencyGaps(input: {
     employeeId?: string;
-    positionId?: string;
+    roleId?: string;
     asOf?: string;
     includeRecommended?: boolean;
   }): Promise<(CompetencyGap & { employeeName: string | null })[]> {
     const rows = await this.repo.competencyGaps({
       employeeId: input.employeeId,
-      positionId: input.positionId,
+      roleId: input.roleId,
       asOf: input.asOf ?? today(),
       includeRecommended: input.includeRecommended ?? false,
     });
@@ -596,14 +596,14 @@ export class TrainingService {
      * WHO IS MISSING THE TRAINING, by name.
      *
      * Unlike the performance module's coverage-gap report, which drives off `employees` and so gets
-     * `displayName` from the same row it already selects, this query drives off `employee_positions`
+     * `displayName` from the same row it already selects, this query drives off `employee_roles`
      * and never touches the directory. Adding an inner join to `employees` here would also change
      * what the report MEANS: a gap would disappear along with the person's row, which is the failure
      * mode `resolveEmployeeNames` is a left lookup to avoid.
      *
-     * Filtering by position is the common case — "what is my team missing" — and that returns one
+     * Filtering by role is the common case — "what is my team missing" — and that returns one
      * row per person per course, so several rows share an employee. The resolver deduplicates, so a
-     * position with twelve requirements and four holders is four ids, not forty-eight.
+     * role with twelve requirements and four holders is four ids, not forty-eight.
      */
     const names = await resolveEmployeeNames(
       this.db,

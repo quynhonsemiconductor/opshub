@@ -3,7 +3,7 @@ import { and, asc, count, countDistinct, desc, eq, inArray, isNull, sql } from '
 import { InjectDrizzle, type DbExecutor, type DrizzleDB } from '@platform';
 import { newId } from '@shared-kernel';
 import {
-  employeePositions,
+  employeeRoles,
   employees,
   performanceCycles,
   performanceGoals,
@@ -166,7 +166,7 @@ export class PerformanceDrizzleRepository implements IPerformanceRepository {
         cycleId: input.cycleId,
         employeeId: input.employeeId,
         reviewerId: input.reviewerId,
-        positionId: input.positionId,
+        roleId: input.roleId,
         createdBy: input.createdBy,
         // Explicit, not the column default: see `CreateReviewInput.status`.
         status: input.status,
@@ -418,8 +418,8 @@ export class PerformanceDrizzleRepository implements IPerformanceRepository {
      * and a report that showed only the first would call a cycle complete while half its reviews sat
      * unsigned.
      *
-     * The employee's position comes from the LIVE assignment here — this is a question about now,
-     * not a record of then, which is the opposite of `reviews.position_id`.
+     * The employee's role comes from the LIVE assignment here — this is a question about now,
+     * not a record of then, which is the opposite of `reviews.role_id`.
      */
     const [rows, [tally]] = await Promise.all([
       this.db
@@ -427,7 +427,7 @@ export class PerformanceDrizzleRepository implements IPerformanceRepository {
           employeeId: employees.id,
           employeeName: employees.displayName,
           email: employees.email,
-          positionId: employeePositions.positionId,
+          roleId: employeeRoles.roleId,
           reviewId: performanceReviews.id,
           status: performanceReviews.status,
         })
@@ -440,11 +440,8 @@ export class PerformanceDrizzleRepository implements IPerformanceRepository {
           ),
         )
         .leftJoin(
-          employeePositions,
-          and(
-            eq(employeePositions.employeeId, employees.id),
-            isNull(employeePositions.effectiveTo),
-          ),
+          employeeRoles,
+          and(eq(employeeRoles.employeeId, employees.id), isNull(employeeRoles.effectiveTo)),
         )
         .where(
           and(
@@ -469,7 +466,7 @@ export class PerformanceDrizzleRepository implements IPerformanceRepository {
        * says the cycle is nearly done.
        *
        * `countDistinct` on the employee, not `count()`: an employee with two rows in
-       * `employee_positions` — which the live-assignment join does not prevent, only narrows — would
+       * `employee_roles` — which the live-assignment join does not prevent, only narrows — would
        * otherwise be counted twice and inflate the denominator of a compliance figure.
        */
       this.db

@@ -40,15 +40,15 @@ export const PERMISSION = {
   EMPLOYEE_READ: 'employee.read',
   EMPLOYEE_WRITE: 'employee.write',
   EMPLOYEE_OFFBOARD: 'employee.offboard',
-  /** View the position catalogue, approved headcount and occupancy. */
-  POSITION_READ: 'position.read',
+  /** View the role catalogue, approved headcount and occupancy. */
+  ROLE_READ: 'role.read',
   /**
-   * Define positions and assign people to them.
+   * Define roles and assign people to them.
    *
    * Separate from `employee.write`: changing someone's contact details is an HR-admin act, while
    * approving a headcount or moving somebody between roles changes the org structure.
    */
-  POSITION_MANAGE: 'position.manage',
+  ROLE_MANAGE: 'role.manage',
   /** View employment contracts: terms, dates, notice, status — but NOT the money. */
   CONTRACT_READ: 'contract.read',
   /** Draft, activate, renew and terminate employment contracts. */
@@ -62,7 +62,7 @@ export const PERMISSION = {
    * pay is theirs, and that is a scope rule, not a permission.
    */
   CONTRACT_COMPENSATION_READ: 'contract.compensation.read',
-  /** View the course catalogue, position requirements, records and the competency gap report. */
+  /** View the course catalogue, role requirements, records and the competency gap report. */
   TRAINING_READ: 'training.read',
   /**
    * Manage the catalogue and requirements, and VERIFY or revoke a record.
@@ -361,8 +361,8 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   [PERMISSION.GROUP_ASSIGN]: 'Put employees in groups, and grant them permissions directly',
   [PERMISSION.EMPLOYEE_READ]: 'View employee directory records',
   [PERMISSION.EMPLOYEE_WRITE]: 'Create and update employee records',
-  [PERMISSION.POSITION_READ]: 'View positions, approved headcount and occupancy',
-  [PERMISSION.POSITION_MANAGE]: 'Define positions and assign employees to them',
+  [PERMISSION.ROLE_READ]: 'View roles, approved headcount and occupancy',
+  [PERMISSION.ROLE_MANAGE]: 'Define roles and assign employees to them',
   [PERMISSION.CONTRACT_READ]: 'View employment contracts (excluding pay)',
   [PERMISSION.CONTRACT_MANAGE]: 'Draft, activate, renew and terminate employment contracts',
   [PERMISSION.CONTRACT_COMPENSATION_READ]: 'See the pay figures on an employment contract',
@@ -595,8 +595,8 @@ export const GROUP_PERMISSIONS: Record<
     PERMISSION.EMPLOYEE_READ,
     PERMISSION.EMPLOYEE_WRITE,
     PERMISSION.EMPLOYEE_OFFBOARD,
-    PERMISSION.POSITION_READ,
-    PERMISSION.POSITION_MANAGE,
+    PERMISSION.ROLE_READ,
+    PERMISSION.ROLE_MANAGE,
     PERMISSION.CONTRACT_READ,
     PERMISSION.CONTRACT_MANAGE,
     PERMISSION.CONTRACT_COMPENSATION_READ,
@@ -631,7 +631,7 @@ export const GROUP_PERMISSIONS: Record<
 
   [GROUP.MANAGER]: [
     PERMISSION.EMPLOYEE_READ,
-    PERMISSION.POSITION_READ,
+    PERMISSION.ROLE_READ,
     PERMISSION.TRAINING_READ,
     // Read, but NOT `PERFORMANCE_APPROVE`: a manager writes the review, so approving it would make
     // the calibration step a formality. Rating a review they were ASSIGNED needs no code — the
@@ -665,7 +665,7 @@ export const GROUP_PERMISSIONS: Record<
     PERMISSION.SECURITY_VIEW,
     PERMISSION.EMPLOYEE_READ,
     PERMISSION.ASSET_READ,
-    PERMISSION.POSITION_READ,
+    PERMISSION.ROLE_READ,
     // Deliberately WITHOUT `CONTRACT_COMPENSATION_READ`: an auditor checks that every employee has
     // a signed contract, which does not require knowing what any of them pays.
     PERMISSION.CONTRACT_READ,

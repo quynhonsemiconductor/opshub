@@ -519,7 +519,7 @@ export class VendorService {
     }
   }
 
-  /** `ck_vendor_contract_window`, via the guard shared with positions, contracts and training. */
+  /** `ck_vendor_contract_window`, via the guard shared with roles, contracts and training. */
   private assertContractWindow(
     from: string | null | undefined,
     to: string | null | undefined,

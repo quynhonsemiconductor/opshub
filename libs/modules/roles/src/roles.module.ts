@@ -1,26 +1,26 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '@modules/audit';
 import { EmployeesModule } from '@modules/identity';
-import { PositionsService } from './application/positions.service';
+import { RolesService } from './application/roles.service';
 import { JobRanksService } from './application/job-ranks.service';
 import { JobRanksController } from './interface/http/job-ranks.controller';
 import { JobRanksDrizzleRepository } from './infrastructure/persistence/job-ranks.drizzle-repository';
 import { JOB_RANKS_REPOSITORY } from './domain/ports/job-ranks.repository';
-import { PositionsController } from './interface/http/positions.controller';
-import { PositionsDrizzleRepository } from './infrastructure/persistence/positions.drizzle-repository';
-import { POSITIONS_REPOSITORY } from './domain/ports/positions.repository';
+import { RolesController } from './interface/http/roles.controller';
+import { RolesDrizzleRepository } from './infrastructure/persistence/roles.drizzle-repository';
+import { ROLES_REPOSITORY } from './domain/ports/roles.repository';
 
 @Module({
   // EmployeesModule for EmployeeService: the controller checks an employee exists before
   // assigning, since `employee_id` carries no cross-schema FK.
   imports: [AuditModule, EmployeesModule],
-  controllers: [PositionsController, JobRanksController],
+  controllers: [RolesController, JobRanksController],
   providers: [
-    PositionsService,
+    RolesService,
     JobRanksService,
-    { provide: POSITIONS_REPOSITORY, useClass: PositionsDrizzleRepository },
+    { provide: ROLES_REPOSITORY, useClass: RolesDrizzleRepository },
     { provide: JOB_RANKS_REPOSITORY, useClass: JobRanksDrizzleRepository },
   ],
-  exports: [PositionsService, JobRanksService],
+  exports: [RolesService, JobRanksService],
 })
-export class PositionsModule {}
+export class RolesModule {}

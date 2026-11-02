@@ -15,7 +15,7 @@ import type { EmployeePositionHistory } from '@/shared/api/types';
  * had no caller at all.
  *
  * THE ROWS NAME THE ROLE. Both history routes resolve the position's code and title server-side, because the
- * self-scoped `/positions/me` shares this query and its caller holds no `position.read` to look one up. So
+ * self-scoped `/positions/me` shares this query and its caller holds no `role.read` to look one up. So
  * this panel renders a title rather than the UUID it used to be handed.
  */
 export function EmployeePositionHistoryPanel({ employeeId }: { employeeId: string }) {

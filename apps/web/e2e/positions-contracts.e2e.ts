@@ -174,7 +174,7 @@ test.describe('my own employment record', () => {
   }) => {
     /*
      * `/v1/positions/me` IS SELF-SCOPED AND HAD NO CALLER, so an employee could not see their own role
-     * history anywhere in the product — reading it through the positions register needs `position.read`.
+     * history anywhere in the product — reading it through the positions register needs `role.read`.
      *
      * THE ASSERTION IS THAT IT READS AS A TITLE. The route used to answer with a bare `positionId`, and a
      * screen showing a UUID is the "nobody knows a UUID" problem the SPA's picker exists to remove. The API

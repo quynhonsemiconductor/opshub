@@ -35,7 +35,7 @@ function contract(over: Partial<EmploymentContract> = {}): EmploymentContract {
   return {
     id: 'con-1',
     employeeId: 'emp-1',
-    positionId: null,
+    roleId: null,
     reference: 'EMP-2026-0001',
     contractType: 'fixed_term',
     startDate: '2030-01-01',

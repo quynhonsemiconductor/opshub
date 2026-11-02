@@ -83,7 +83,7 @@ function toReviewDto(
     employeeName: r.employeeName ?? null,
     reviewerId: r.reviewerId,
     reviewerName: r.reviewerName ?? null,
-    positionId: r.positionId,
+    roleId: r.roleId,
     status: r.status,
     selfAssessment: r.selfAssessment,
     selfAssessmentSubmittedAt: r.selfAssessmentSubmittedAt?.toISOString() ?? null,
@@ -405,7 +405,7 @@ export class PerformanceController {
   @ApiOperation({
     summary: 'Create the review for one employee',
     description:
-      "Freezes the employee's CURRENT position on the review: a transfer afterwards does not " +
+      "Freezes the employee's CURRENT role on the review: a transfer afterwards does not " +
       'restate what the review was about. Refused if the reviewer is the employee (412 ' +
       '`PERFORMANCE_SELF_REVIEW`) or the cycle is not open (412 `PERFORMANCE_CYCLE_NOT_OPEN`).',
   })

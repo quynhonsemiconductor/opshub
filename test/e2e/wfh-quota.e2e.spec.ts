@@ -1,11 +1,11 @@
 /**
  * The weekly work-from-home quota, end to end.
  *
- * WHAT THIS PINS. The allowance comes from the RANK of the employee's current position, the week is
+ * WHAT THIS PINS. The allowance comes from the RANK of the employee's current role, the week is
  * Monday–Sunday, the quota resets every week and never carries over, and an employee may file only while the
  * allowance is above zero and the days asked for fit the days left. A rejected request gives its days back.
  *
- * The SQL half of this — the join through `employee_positions → positions → rank_benefits` and the
+ * The SQL half of this — the join through `employee_roles → roles → rank_benefits` and the
  * pending-or-approved status filter — can only be proven against a real database, which is why this file
  * exists next to the unit tests.
  *
@@ -31,7 +31,7 @@ let app: NestFastifyApplication;
 let hr: Session;
 let requester: Session;
 
-/** Unique per run: rank names and position codes are shared across suites. */
+/** Unique per run: rank names and role codes are shared across suites. */
 const _RUN_TAG = Date.now().toString(36).slice(-6);
 
 /** How many weeks ahead the test weeks start; far enough to clear the "not in the past" rule. */
@@ -95,7 +95,7 @@ describe('weekly WFH quota', () => {
   const weekOneMonday = mondayAhead(_WEEKS_AHEAD);
   const weekTwoMonday = plusDays(weekOneMonday, 7);
 
-  it('refuses to file while the employee has no allowance (no ranked position)', async () => {
+  it('refuses to file while the employee has no allowance (no ranked role)', async () => {
     const { status, body } = await fileWfh(weekOneMonday, weekOneMonday);
 
     expect(status).toBe(412);
@@ -111,7 +111,7 @@ describe('weekly WFH quota', () => {
     expect(errorCode(body)).toBe('WFH_QUOTA_NONE');
   });
 
-  it('reports the allowance of the rank once the employee holds a ranked position', async () => {
+  it('reports the allowance of the rank once the employee holds a ranked role', async () => {
     await giveWeeklyWfhAllowance(app, hr, FIXTURE.AUDITOR.id, 2, `${_RUN_TAG}2`);
 
     const quota = await quotaOfWeekContaining(weekOneMonday);

@@ -88,10 +88,10 @@ export function PositionsPage() {
   const [selected, setSelected] = useState<Position | null>(null);
   /*
    * GATED ON THE PERMISSION THE API ENFORCES. Every write route here carries
-   * `@RequirePermission('position.manage')`, and this page offered Create, Edit, Assign and End to
-   * anyone who could READ a position — four affordances that answer 403 for a `position.read` holder.
+   * `@RequirePermission('role.manage')`, and this page offered Create, Edit, Assign and End to
+   * anyone who could READ a position — four affordances that answer 403 for a `role.read` holder.
    */
-  const canManage = usePermissions().can('position.manage');
+  const canManage = usePermissions().can('role.manage');
   const [endingId, setEndingId] = useState<string | null>(null);
   const list = useListState();
 

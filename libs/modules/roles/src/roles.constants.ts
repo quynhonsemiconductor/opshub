@@ -1,4 +1,4 @@
-/** Longest job rank name (`positions.job_ranks.name` is a varchar(80)). */
+/** Longest job rank name (`roles.job_ranks.name` is a varchar(80)). */
 export const JOB_RANK_NAME_MAX_LENGTH = 80;
 
 /** Highest ordinal a job rank may take; far above any real ladder, a bound against mistaken input. */

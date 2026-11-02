@@ -23,7 +23,7 @@ import { WebhooksModule } from '@modules/webhooks';
 import { LicenseModule } from '@modules/license';
 import { CatalogModule } from '@modules/catalog';
 import { DocumentsModule } from '@modules/documents';
-import { PositionsModule } from '@modules/positions';
+import { RolesModule } from '@modules/roles';
 import { ContractsModule } from '@modules/contracts';
 import { TrainingModule } from '@modules/training';
 import { PerformanceModule } from '@modules/performance';
@@ -52,7 +52,7 @@ import { DoorModule } from '@modules/door';
     LicenseModule,
     CatalogModule,
     DocumentsModule,
-    PositionsModule,
+    RolesModule,
     ContractsModule,
     TrainingModule,
     PerformanceModule,

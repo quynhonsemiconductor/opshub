@@ -1,8 +1,8 @@
 /**
- * PositionsService — the two rules the database cannot hold, and the refusals around them.
+ * RolesService — the two rules the database cannot hold, and the refusals around them.
  *
- * WHY UNIT TESTS WHEN THERE IS AN E2E SUITE. `positions-headcount.e2e.spec.ts` drives the real API
- * and the real partial unique index, which is the only place `uq_employee_current_position` can be
+ * WHY UNIT TESTS WHEN THERE IS AN E2E SUITE. `roles-headcount.e2e.spec.ts` drives the real API
+ * and the real partial unique index, which is the only place `uq_employee_current_role` can be
  * proven. What it cannot do cheaply is pin ORDER and ARGUMENTS: that the outgoing assignment is
  * closed BEFORE the incoming one opens, that the headcount count receives the transaction rather
  * than the pool, and that a refusal happens before any write. Each of those is a specific
@@ -13,13 +13,13 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { ConflictException, PreconditionFailedException, type DrizzleDB } from '@platform';
-import { PositionsService } from './positions.service';
-import type { EmployeePosition, Position } from '../domain/positions.types';
+import { RolesService } from './roles.service';
+import type { EmployeeRole, Role } from '../domain/roles.types';
 import { createFakeAudit } from '../../../audit/src/testing/audit.fake';
 
 const ACTOR = { sub: 'actor-1', email: 'actor@opshub.local' };
 
-function position(over: Partial<Position> = {}): Position {
+function role(over: Partial<Role> = {}): Role {
   return {
     id: 'pos-1',
     code: 'ENG-QA-01',
@@ -35,11 +35,11 @@ function position(over: Partial<Position> = {}): Position {
   };
 }
 
-function assignment(over: Partial<EmployeePosition> = {}): EmployeePosition {
+function assignment(over: Partial<EmployeeRole> = {}): EmployeeRole {
   return {
     id: 'asg-1',
     employeeId: 'emp-1',
-    positionId: 'pos-0',
+    roleId: 'pos-0',
     effectiveFrom: '2026-01-01',
     effectiveTo: null,
     endReason: null,
@@ -53,14 +53,14 @@ function makeService(
   jobRanksRepoOver: Record<string, unknown> = {},
 ) {
   const repo = {
-    create: vi.fn().mockResolvedValue(position()),
-    findById: vi.fn().mockResolvedValue(position()),
+    create: vi.fn().mockResolvedValue(role()),
+    findById: vi.fn().mockResolvedValue(role()),
     findByCode: vi.fn().mockResolvedValue(null),
     list: vi.fn().mockResolvedValue({ rows: [], total: 0 }),
     update: vi
       .fn()
-      .mockImplementation((id: string, input: Partial<Position>) =>
-        Promise.resolve(position({ id, ...input })),
+      .mockImplementation((id: string, input: Partial<Role>) =>
+        Promise.resolve(role({ id, ...input })),
       ),
     countOpenAssignments: vi.fn().mockResolvedValue(0),
     findCurrentAssignment: vi.fn().mockResolvedValue(null),
@@ -76,7 +76,7 @@ function makeService(
         Promise.resolve(assignment({ id, effectiveTo: '2026-06-30' })),
       ),
     listAssignmentsForEmployee: vi.fn().mockResolvedValue([]),
-    listAssignmentsForPosition: vi.fn().mockResolvedValue([]),
+    listAssignmentsForRole: vi.fn().mockResolvedValue([]),
     ...repoOver,
   };
   // Passthrough transaction, typed by widening once at the declaration: tsc rejects the bare stub
@@ -93,16 +93,16 @@ function makeService(
     ...jobRanksRepoOver,
   };
 
-  const service = new PositionsService(repo, jobRanksRepo as never, db, audit as never);
+  const service = new RolesService(repo, jobRanksRepo as never, db, audit as never);
   return { service, repo, jobRanksRepo, db, transaction, audit, TX };
 }
 
-describe('createPosition', () => {
+describe('createRole', () => {
   it('refuses a rank that does not exist, before writing anything', async () => {
     const { service, repo } = makeService({}, { findById: vi.fn().mockResolvedValue(null) });
 
     await expect(
-      service.createPosition(
+      service.createRole(
         { code: 'ENG-QA-03', title: 'QA', department: 'Eng', rankId: 'missing' },
         ACTOR,
       ),
@@ -110,19 +110,19 @@ describe('createPosition', () => {
     expect(repo.create).not.toHaveBeenCalled();
   });
 
-  it('does not look a rank up when the position is created without one', async () => {
+  it('does not look a rank up when the role is created without one', async () => {
     const { service, jobRanksRepo } = makeService();
 
-    await service.createPosition({ code: 'ENG-QA-04', title: 'QA', department: 'Eng' }, ACTOR);
+    await service.createRole({ code: 'ENG-QA-04', title: 'QA', department: 'Eng' }, ACTOR);
 
     expect(jobRanksRepo.findById).not.toHaveBeenCalled();
   });
 
   it('refuses a duplicate code before writing anything', async () => {
-    const { service, repo } = makeService({ findByCode: vi.fn().mockResolvedValue(position()) });
+    const { service, repo } = makeService({ findByCode: vi.fn().mockResolvedValue(role()) });
 
     await expect(
-      service.createPosition({ code: 'ENG-QA-01', title: 'QA', department: 'Eng' }, ACTOR),
+      service.createRole({ code: 'ENG-QA-01', title: 'QA', department: 'Eng' }, ACTOR),
     ).rejects.toThrow(ConflictException);
     expect(repo.create).not.toHaveBeenCalled();
   });
@@ -130,23 +130,23 @@ describe('createPosition', () => {
   it('writes the audit entry inside the transaction', async () => {
     const { service, audit, TX } = makeService();
 
-    await service.createPosition({ code: 'ENG-QA-02', title: 'QA', department: 'Eng' }, ACTOR);
+    await service.createRole({ code: 'ENG-QA-02', title: 'QA', department: 'Eng' }, ACTOR);
 
     // Second argument is the tx — a fire-and-forget audit write would survive a rolled-back create.
     expect(audit.record).toHaveBeenCalledWith(expect.anything(), TX);
   });
 });
 
-describe('updatePosition', () => {
+describe('updateRole', () => {
   it('allows reducing headcount below current occupancy', async () => {
     // Deliberate: a restructure that cuts three approved seats to two while three people hold them
     // is a real event. The constraint belongs on the NEXT assignment, not on recording the plan.
     const { service, repo } = makeService({
-      findById: vi.fn().mockResolvedValue(position({ headcount: 3 })),
+      findById: vi.fn().mockResolvedValue(role({ headcount: 3 })),
       countOpenAssignments: vi.fn().mockResolvedValue(3),
     });
 
-    const after = await service.updatePosition('pos-1', { headcount: 2 }, ACTOR);
+    const after = await service.updateRole('pos-1', { headcount: 2 }, ACTOR);
 
     expect(after.headcount).toBe(2);
     expect(repo.update).toHaveBeenCalledWith('pos-1', { headcount: 2 }, expect.anything());
@@ -154,35 +154,29 @@ describe('updatePosition', () => {
 });
 
 describe('assign', () => {
-  it('refuses a frozen position without touching the transaction', async () => {
+  it('refuses a frozen role without touching the transaction', async () => {
     const { service, repo, transaction } = makeService({
-      findById: vi.fn().mockResolvedValue(position({ status: 'frozen' })),
+      findById: vi.fn().mockResolvedValue(role({ status: 'frozen' })),
     });
 
     await expect(
-      service.assign(
-        { employeeId: 'emp-1', positionId: 'pos-1', effectiveFrom: '2026-03-01' },
-        ACTOR,
-      ),
+      service.assign({ employeeId: 'emp-1', roleId: 'pos-1', effectiveFrom: '2026-03-01' }, ACTOR),
     ).rejects.toThrow(PreconditionFailedException);
-    // A frozen position keeps its occupants but accepts nobody new; the check is cheap and needs no
+    // A frozen role keeps its occupants but accepts nobody new; the check is cheap and needs no
     // transaction, so opening one would be wasted work on a refusal path.
     expect(transaction).not.toHaveBeenCalled();
     expect(repo.assign).not.toHaveBeenCalled();
   });
 
-  it('refuses when the position is already at its approved headcount', async () => {
+  it('refuses when the role is already at its approved headcount', async () => {
     const { service, repo } = makeService({
-      findById: vi.fn().mockResolvedValue(position({ headcount: 2 })),
+      findById: vi.fn().mockResolvedValue(role({ headcount: 2 })),
       countOpenAssignments: vi.fn().mockResolvedValue(2),
     });
 
     await expect(
-      service.assign(
-        { employeeId: 'emp-1', positionId: 'pos-1', effectiveFrom: '2026-03-01' },
-        ACTOR,
-      ),
-    ).rejects.toMatchObject({ code: 'POSITION_HEADCOUNT_EXCEEDED' });
+      service.assign({ employeeId: 'emp-1', roleId: 'pos-1', effectiveFrom: '2026-03-01' }, ACTOR),
+    ).rejects.toMatchObject({ code: 'ROLE_HEADCOUNT_EXCEEDED' });
     expect(repo.assign).not.toHaveBeenCalled();
   });
 
@@ -190,7 +184,7 @@ describe('assign', () => {
     const { service, repo, TX } = makeService();
 
     await service.assign(
-      { employeeId: 'emp-1', positionId: 'pos-1', effectiveFrom: '2026-03-01' },
+      { employeeId: 'emp-1', roleId: 'pos-1', effectiveFrom: '2026-03-01' },
       ACTOR,
     );
 
@@ -202,7 +196,7 @@ describe('assign', () => {
   it('closes the outgoing assignment BEFORE opening the incoming one', async () => {
     const order: string[] = [];
     const { service } = makeService({
-      findCurrentAssignment: vi.fn().mockResolvedValue(assignment({ positionId: 'pos-0' })),
+      findCurrentAssignment: vi.fn().mockResolvedValue(assignment({ roleId: 'pos-0' })),
       endAssignment: vi.fn().mockImplementation((id: string) => {
         order.push('end');
         return Promise.resolve(assignment({ id, effectiveTo: '2026-03-01' }));
@@ -214,24 +208,24 @@ describe('assign', () => {
     });
 
     await service.assign(
-      { employeeId: 'emp-1', positionId: 'pos-1', effectiveFrom: '2026-03-01' },
+      { employeeId: 'emp-1', roleId: 'pos-1', effectiveFrom: '2026-03-01' },
       ACTOR,
     );
 
-    // Forced by `uq_employee_current_position`: the other order hits the index. Asserted here
+    // Forced by `uq_employee_current_role`: the other order hits the index. Asserted here
     // because the index makes it a 500 rather than a wrong result, and a future refactor that
     // reorders these two would only fail against a real Postgres.
     expect(order).toEqual(['end', 'assign']);
   });
 
-  it('releases the outgoing slot first, so a transfer within a full position is not self-blocked', async () => {
-    // The stub answers from actual state rather than a call sequence: the position looks full until
+  it('releases the outgoing slot first, so a transfer within a full role is not self-blocked', async () => {
+    // The stub answers from actual state rather than a call sequence: the role looks full until
     // the outgoing row is closed. Count before the close and headcount 1 refuses the transfer;
     // count after and it succeeds. So this fails if the two are ever reordered.
     let closed = false;
     const { service, repo } = makeService({
-      findById: vi.fn().mockResolvedValue(position({ headcount: 1 })),
-      findCurrentAssignment: vi.fn().mockResolvedValue(assignment({ positionId: 'pos-0' })),
+      findById: vi.fn().mockResolvedValue(role({ headcount: 1 })),
+      findCurrentAssignment: vi.fn().mockResolvedValue(assignment({ roleId: 'pos-0' })),
       countOpenAssignments: vi.fn().mockImplementation(() => Promise.resolve(closed ? 0 : 1)),
       endAssignment: vi.fn().mockImplementation((id: string) => {
         closed = true;
@@ -240,26 +234,20 @@ describe('assign', () => {
     });
 
     await expect(
-      service.assign(
-        { employeeId: 'emp-1', positionId: 'pos-1', effectiveFrom: '2026-03-01' },
-        ACTOR,
-      ),
+      service.assign({ employeeId: 'emp-1', roleId: 'pos-1', effectiveFrom: '2026-03-01' }, ACTOR),
     ).resolves.toMatchObject({ id: 'asg-new' });
     expect(repo.endAssignment).toHaveBeenCalled();
   });
 
-  it('refuses re-assigning someone to the position they already hold', async () => {
+  it('refuses re-assigning someone to the role they already hold', async () => {
     const { service, repo } = makeService({
-      findCurrentAssignment: vi.fn().mockResolvedValue(assignment({ positionId: 'pos-1' })),
+      findCurrentAssignment: vi.fn().mockResolvedValue(assignment({ roleId: 'pos-1' })),
     });
 
     await expect(
-      service.assign(
-        { employeeId: 'emp-1', positionId: 'pos-1', effectiveFrom: '2026-03-01' },
-        ACTOR,
-      ),
+      service.assign({ employeeId: 'emp-1', roleId: 'pos-1', effectiveFrom: '2026-03-01' }, ACTOR),
     ).rejects.toThrow(ConflictException);
-    // Without this, a transfer to the same position would close and reopen the row, rewriting its
+    // Without this, a transfer to the same role would close and reopen the row, rewriting its
     // start date and losing when the person actually took the job.
     expect(repo.endAssignment).not.toHaveBeenCalled();
     expect(repo.assign).not.toHaveBeenCalled();
@@ -269,16 +257,13 @@ describe('assign', () => {
     const { service, repo } = makeService({
       findCurrentAssignment: vi
         .fn()
-        .mockResolvedValue(assignment({ positionId: 'pos-0', effectiveFrom: '2026-06-01' })),
+        .mockResolvedValue(assignment({ roleId: 'pos-0', effectiveFrom: '2026-06-01' })),
     });
 
     await expect(
-      service.assign(
-        { employeeId: 'emp-1', positionId: 'pos-1', effectiveFrom: '2026-01-01' },
-        ACTOR,
-      ),
-    ).rejects.toMatchObject({ code: 'POSITION_INVALID_WINDOW' });
-    // Found live: without the guard this reached `ck_employee_position_window` and the caller got a
+      service.assign({ employeeId: 'emp-1', roleId: 'pos-1', effectiveFrom: '2026-01-01' }, ACTOR),
+    ).rejects.toMatchObject({ code: 'ROLE_INVALID_WINDOW' });
+    // Found live: without the guard this reached `ck_employee_role_window` and the caller got a
     // 500 with no indication of what was wrong.
     expect(repo.endAssignment).not.toHaveBeenCalled();
   });
@@ -289,24 +274,21 @@ describe('assign', () => {
     const { service } = makeService({
       findCurrentAssignment: vi
         .fn()
-        .mockResolvedValue(assignment({ positionId: 'pos-0', effectiveFrom: '2026-06-01' })),
+        .mockResolvedValue(assignment({ roleId: 'pos-0', effectiveFrom: '2026-06-01' })),
     });
 
     await expect(
-      service.assign(
-        { employeeId: 'emp-1', positionId: 'pos-1', effectiveFrom: '2026-06-01' },
-        ACTOR,
-      ),
+      service.assign({ employeeId: 'emp-1', roleId: 'pos-1', effectiveFrom: '2026-06-01' }, ACTOR),
     ).resolves.toBeTruthy();
   });
 
   it("defaults the outgoing row's end reason to 'transfer'", async () => {
     const { service, repo } = makeService({
-      findCurrentAssignment: vi.fn().mockResolvedValue(assignment({ positionId: 'pos-0' })),
+      findCurrentAssignment: vi.fn().mockResolvedValue(assignment({ roleId: 'pos-0' })),
     });
 
     await service.assign(
-      { employeeId: 'emp-1', positionId: 'pos-1', effectiveFrom: '2026-03-01' },
+      { employeeId: 'emp-1', roleId: 'pos-1', effectiveFrom: '2026-03-01' },
       ACTOR,
     );
 
@@ -326,7 +308,7 @@ describe('endAssignment', () => {
 
     await expect(
       service.endAssignment('asg-1', { effectiveTo: '2026-08-01' }, ACTOR),
-    ).rejects.toMatchObject({ code: 'POSITION_INVALID_WINDOW' });
+    ).rejects.toMatchObject({ code: 'ROLE_INVALID_WINDOW' });
     expect(repo.endAssignment).not.toHaveBeenCalled();
   });
 
@@ -357,12 +339,12 @@ describe('endAssignment', () => {
   });
 });
 
-describe('listAssignmentsForPosition', () => {
-  it('404s for an unknown position rather than returning an empty history', async () => {
+describe('listAssignmentsForRole', () => {
+  it('404s for an unknown role rather than returning an empty history', async () => {
     // An empty array would read as "nobody has ever held it", which is a different fact.
     const { service } = makeService({ findById: vi.fn().mockResolvedValue(null) });
 
-    await expect(service.listAssignmentsForPosition('nope')).rejects.toMatchObject({
+    await expect(service.listAssignmentsForRole('nope')).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
   });

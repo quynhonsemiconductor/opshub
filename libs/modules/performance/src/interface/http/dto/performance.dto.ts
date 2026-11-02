@@ -156,7 +156,7 @@ export class ReviewResponseDto {
   /** Resolved server-side. Null when the reviewer has left — which is why reassignment exists. */
   reviewerName!: string | null;
   /** The role the employee was reviewed IN, frozen at creation. Null when unassigned then. */
-  positionId!: string | null;
+  roleId!: string | null;
   status!: string;
   selfAssessment!: string | null;
   selfAssessmentSubmittedAt!: string | null;
@@ -198,8 +198,8 @@ export class CoverageGapResponseDto {
   employeeId!: string;
   employeeName!: string;
   email!: string;
-  /** The employee's CURRENT position — this is a question about now, not a record of then. */
-  positionId!: string | null;
+  /** The employee's CURRENT role — this is a question about now, not a record of then. */
+  roleId!: string | null;
   /** Null when no review exists at all, which is the case the report exists for. */
   reviewId!: string | null;
   status!: string | null;
