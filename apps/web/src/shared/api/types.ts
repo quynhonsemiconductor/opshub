@@ -53,6 +53,7 @@ export type OffboardingResponse = components['schemas']['OffboardingResponseDto'
 export type GroupResponse = components['schemas']['GroupResponseDto'];
 export type PermissionResponse = components['schemas']['PermissionResponseDto'];
 export type EmployeeGroupResponse = components['schemas']['EmployeeGroupResponseDto'];
+export type EmployeePermissionResponse = components['schemas']['EmployeePermissionResponseDto'];
 export type DelegationResponse = components['schemas']['DelegationResponseDto'];
 
 // Roles — the HISTORY shape carries the role it refers to, unlike the plain assignment dto.

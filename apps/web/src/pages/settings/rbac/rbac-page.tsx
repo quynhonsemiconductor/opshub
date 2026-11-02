@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { PageHeader, TabPanel, Tabs } from '@/shared/ui';
 import { GroupsTab } from './groups-tab';
 import { EmployeeGroupsTab } from './employee-groups-tab';
+import { DirectPermissionsTab } from './direct-permissions-tab';
 import { DelegationsTab } from './delegations-tab';
 
 /*
@@ -20,11 +21,12 @@ import { DelegationsTab } from './delegations-tab';
  * is now four modules plus a shared one.
  */
 
-type RbacTab = 'groups' | 'memberships' | 'delegations';
+type RbacTab = 'groups' | 'memberships' | 'direct-permissions' | 'delegations';
 
 const RBAC_TABS: { value: RbacTab; label: string }[] = [
   { value: 'groups', label: 'Groups' },
   { value: 'memberships', label: 'Memberships' },
+  { value: 'direct-permissions', label: 'Direct permissions' },
   { value: 'delegations', label: 'Delegations' },
 ];
 
@@ -35,7 +37,7 @@ export function RbacPage() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Access Control"
-        description="Groups and their permissions, who belongs to which group, and approval delegations."
+        description="Groups and their permissions, who belongs to which group, permissions granted directly, and approval delegations."
       />
 
       <Tabs items={RBAC_TABS} value={tab} onChange={setTab} idPrefix="rbac" />
@@ -44,6 +46,7 @@ export function RbacPage() {
       <TabPanel idPrefix="rbac" value={tab}>
         {tab === 'groups' && <GroupsTab />}
         {tab === 'memberships' && <EmployeeGroupsTab />}
+        {tab === 'direct-permissions' && <DirectPermissionsTab />}
         {tab === 'delegations' && <DelegationsTab />}
       </TabPanel>
     </div>
