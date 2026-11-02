@@ -22,6 +22,7 @@ import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { formatDate, orDash, todayIso } from '@/shared/lib/format';
 import { AssignPositionModal, PositionModal } from './position-modals';
+import { rankNamesById, useJobRanks } from './use-job-ranks';
 import type { Position, PositionAssignment } from './position.types';
 
 /**
@@ -94,6 +95,7 @@ export function PositionsPage() {
   const [endingId, setEndingId] = useState<string | null>(null);
   const list = useListState();
 
+  const rankNames = rankNamesById(useJobRanks().data);
   const positions = usePositions(list.search, statusFilter, list.limit, list.offset);
   const assignments = useAssignments(selected?.id ?? null);
   const invalidate = () => qc.invalidateQueries({ queryKey: ['positions'] });
@@ -131,7 +133,12 @@ export function PositionsPage() {
         </div>
       ),
     },
-    { key: 'level', header: 'Level', cell: (p) => orDash(p.level), hideOnMobile: true },
+    {
+      key: 'rank',
+      header: 'Rank',
+      cell: (p) => orDash(p.rankId ? rankNames.get(p.rankId) : null),
+      hideOnMobile: true,
+    },
     {
       key: 'headcount',
       header: 'Filled',
@@ -300,7 +307,10 @@ export function PositionsPage() {
                   ),
                 },
                 { label: 'Department', value: selected.department },
-                { label: 'Level', value: selected.level },
+                {
+                  label: 'Rank',
+                  value: selected.rankId ? rankNames.get(selected.rankId) : null,
+                },
                 { label: 'Headcount', value: `${selected.filled} of ${selected.headcount} filled` },
                 { label: 'Vacancies', value: selected.vacancies },
                 { label: 'Created', value: formatDate(selected.createdAt) },

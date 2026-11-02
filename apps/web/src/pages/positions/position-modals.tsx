@@ -16,6 +16,7 @@ import {
 import { activeEmployeeOptions } from '@/shared/api/picker-sources';
 import { todayIso } from '@/shared/lib/format';
 import type { Position } from './position.types';
+import { useJobRanks } from './use-job-ranks';
 
 /**
  * Create or edit a position.
@@ -40,12 +41,13 @@ export function PositionModal({
     code: position?.code ?? '',
     title: position?.title ?? '',
     department: position?.department ?? '',
-    level: position?.level ?? '',
+    rankId: position?.rankId ?? '',
     headcount: String(position?.headcount ?? 1),
     description: position?.description ?? '',
     status: position?.status ?? 'active',
   });
   const [error, setError] = useState('');
+  const jobRanks = useJobRanks();
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -55,7 +57,7 @@ export function PositionModal({
           body: {
             title: form.title,
             department: form.department,
-            level: form.level || null,
+            rankId: form.rankId || null,
             headcount: Number(form.headcount),
             description: form.description || null,
             status: form.status as 'active' | 'frozen' | 'closed',
@@ -69,7 +71,7 @@ export function PositionModal({
           code: form.code,
           title: form.title,
           department: form.department,
-          level: form.level || undefined,
+          rankId: form.rankId || undefined,
           headcount: Number(form.headcount),
           description: form.description || undefined,
         },
@@ -135,13 +137,19 @@ export function PositionModal({
               placeholder="Engineering"
             />
           </FormField>
-          <FormField label="Level" htmlFor="pos-level">
-            <Input
-              id="pos-level"
-              value={form.level}
-              onChange={(e) => set('level', e.target.value)}
-              placeholder="Senior"
-            />
+          <FormField label="Rank" htmlFor="pos-rank">
+            <Select
+              id="pos-rank"
+              value={form.rankId}
+              onChange={(e) => set('rankId', e.target.value)}
+            >
+              <option value="">No rank</option>
+              {(jobRanks.data ?? []).map((rank) => (
+                <option key={rank.id} value={rank.id}>
+                  {rank.name}
+                </option>
+              ))}
+            </Select>
           </FormField>
         </div>
 

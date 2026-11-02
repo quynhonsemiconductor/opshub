@@ -13,3 +13,6 @@ export type Position = components['schemas']['PositionOccupancyResponseDto'];
  * supplied an employee id does not need it resolved back.
  */
 export type PositionAssignment = components['schemas']['PositionAssignmentResponseDto'];
+
+/** A seniority rank with the benefits it carries. */
+export type JobRank = components['schemas']['JobRankResponseDto'];

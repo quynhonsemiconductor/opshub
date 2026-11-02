@@ -390,6 +390,60 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/v1/authz/employees/{employeeId}/permissions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the permissions granted straight to an employee */
+    get: operations['AuthzController_listEmployeePermissions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/authz/employee-permissions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Grant one permission straight to an employee
+     * @description The exception path, outside any group: a `reason` is required, and the caller must hold the permission globally themselves (no privilege escalation).
+     */
+    post: operations['AuthzController_grantEmployeePermission'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/authz/employee-permissions/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Revoke a permission granted straight to an employee */
+    delete: operations['AuthzController_revokeEmployeePermission'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/v1/authz/delegations': {
     parameters: {
       query?: never;
@@ -2311,6 +2365,68 @@ export interface paths {
     /** One employee's position history, newest first */
     get: operations['PositionsController_employeeHistory'];
     put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/job-ranks': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List job ranks with their benefits
+     * @description Most junior first. A rank with no benefits carries an empty list.
+     */
+    get: operations['JobRanksController_list'];
+    put?: never;
+    /** Create a job rank */
+    post: operations['JobRanksController_create'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/v1/job-ranks/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete a job rank
+     * @description Refused (409 `JOB_RANK_IN_USE`) while any position still carries the rank.
+     */
+    delete: operations['JobRanksController_remove'];
+    options?: never;
+    head?: never;
+    /** Rename a job rank or move it to another ordinal */
+    patch: operations['JobRanksController_update'];
+    trace?: never;
+  };
+  '/v1/job-ranks/{id}/benefits': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Replace the benefits of a job rank
+     * @description The whole set at once: a benefit code left out is removed. `wfh_weekly_days` is the number of work-from-home days an employee of the rank may take in one Monday–Sunday week.
+     */
+    put: operations['JobRanksController_setBenefits'];
     post?: never;
     delete?: never;
     options?: never;
@@ -5598,6 +5714,31 @@ export interface components {
       /** Format: date-time */
       expiresAt?: string | null;
     };
+    EmployeePermissionResponseDto: {
+      id: string;
+      employeeId: string;
+      permissionKey: string;
+      scopeType: string;
+      scopeId: string | null;
+      grantedBy: string;
+      reason: string;
+      expiresAt: string | null;
+      createdAt: string;
+    };
+    GrantEmployeePermissionDto: {
+      /** Format: uuid */
+      employeeId: string;
+      permissionKey: string;
+      /**
+       * @default global
+       * @enum {string}
+       */
+      scopeType: 'global' | 'self' | 'team' | 'dept' | 'region';
+      scopeId?: string | null;
+      reason: string;
+      /** Format: date-time */
+      expiresAt?: string | null;
+    };
     CreateDelegationDto: {
       /** Format: uuid */
       toUserId: string;
@@ -6557,7 +6698,7 @@ export interface components {
       code: string;
       title: string;
       department: string;
-      level: string | null;
+      rankId: string | null;
       headcount: number;
       description: string | null;
       status: string;
@@ -6568,7 +6709,7 @@ export interface components {
       code: string;
       title: string;
       department: string;
-      level: string | null;
+      rankId: string | null;
       headcount: number;
       description: string | null;
       status: string;
@@ -6589,14 +6730,16 @@ export interface components {
       code: string;
       title: string;
       department: string;
-      level?: string;
+      /** Format: uuid */
+      rankId?: string;
       headcount?: number;
       description?: string;
     };
     UpdatePositionDto: {
       title?: string;
       department?: string;
-      level?: string | null;
+      /** Format: uuid */
+      rankId?: string | null;
       headcount?: number;
       description?: string | null;
       /** @enum {string} */
@@ -6622,6 +6765,33 @@ export interface components {
       /** Format: date */
       effectiveTo: string;
       endReason?: string;
+    };
+    RankBenefitResponseDto: {
+      benefitCode: string;
+      value: number;
+    };
+    JobRankResponseDto: {
+      id: string;
+      ordinal: number;
+      name: string;
+      benefits: components['schemas']['RankBenefitResponseDto'][];
+      createdAt: string;
+      updatedAt: string;
+    };
+    CreateJobRankDto: {
+      ordinal: number;
+      name: string;
+    };
+    UpdateJobRankDto: {
+      ordinal?: number;
+      name?: string;
+    };
+    SetRankBenefitsDto: {
+      benefits: {
+        /** @enum {string} */
+        benefitCode: 'wfh_weekly_days';
+        value: number;
+      }[];
     };
     CompensationResponseDto: {
       baseSalary: string;
@@ -8451,6 +8621,7 @@ export interface operations {
         resourceType?:
           | 'role'
           | 'role_assignment'
+          | 'employee_permission'
           | 'delegation'
           | 'access_request'
           | 'access_grant'
@@ -8477,6 +8648,7 @@ export interface operations {
           | 'document_version'
           | 'position'
           | 'employee_position'
+          | 'job_rank'
           | 'employment_contract'
           | 'training_course'
           | 'training_requirement'
@@ -9529,6 +9701,132 @@ export interface operations {
     };
   };
   AuthzController_revokeAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AuthzController_listEmployeePermissions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        employeeId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EmployeePermissionResponseDto'][];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AuthzController_grantEmployeePermission: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['GrantEmployeePermissionDto'];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['EmployeePermissionResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  AuthzController_revokeEmployeePermission: {
     parameters: {
       query?: never;
       header?: never;
@@ -15207,6 +15505,250 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  JobRanksController_list: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobRankResponseDto'][];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  JobRanksController_create: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateJobRankDto'];
+      };
+    };
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobRankResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Conflict — duplicate record or state conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  JobRanksController_remove: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Conflict — duplicate record or state conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  JobRanksController_update: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateJobRankDto'];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobRankResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Conflict — duplicate record or state conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  JobRanksController_setBenefits: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetRankBenefitsDto'];
+      };
+    };
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['JobRankResponseDto'];
+        };
+      };
+      /** @description Unauthorized — missing or invalid authentication */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden — insufficient permissions */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unprocessable — business rule violation */
+      422: {
         headers: {
           [name: string]: unknown;
         };
