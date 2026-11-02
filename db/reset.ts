@@ -51,6 +51,9 @@ export const FIXTURE_TABLES = [
   // `identity.user` and `identity.account` are deliberately NOT here: the users ARE the fixture set.
   'identity.session',
   'identity.verification',
+  // authz — only what the suites ADD on top of the seeded catalogue: grants made straight to an employee.
+  // The groups, their permissions and the membership fixtures stay, as the note above says.
+  'authz.employee_permissions',
   // door — what the door suites create on every run (events especially: every terminal-sim run)
   'door.events',
   'door.cards',
@@ -114,6 +117,8 @@ export const FIXTURE_TABLES = [
    */
   'positions.employee_positions',
   'positions.positions',
+  'positions.rank_benefits',
+  'positions.job_ranks',
   // employment contracts — `uq_employee_active_contract` is per employee, so one left active by a
   // previous run makes the next run's first activation a 409 that names a contract nobody wrote.
   'contracts.employment_contracts',

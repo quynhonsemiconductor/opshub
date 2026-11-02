@@ -93,6 +93,42 @@ export const userRoleAssignments = authzSchema.table(
 );
 
 /**
+ * A permission granted to ONE employee directly, outside any group — the exception path.
+ *
+ * Group membership is how almost everyone gets their permissions. This table is for the one-off: a single
+ * extra permission that does not justify a group of its own. It carries what `user_role_assignments`
+ * carries — a scope, an optional expiry, who granted it — plus a `reason`, because a grant that bypasses
+ * the groups has to say why it exists.
+ */
+export const employeePermissions = authzSchema.table(
+  'employee_permissions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    employeeId: uuid('employee_id').notNull(),
+    permissionKey: varchar('permission_key', { length: 120 })
+      .notNull()
+      .references(() => permissions.key, { onDelete: 'cascade' }),
+    scopeType: scopeTypeEnum('scope_type').notNull().default('global'),
+    scopeId: varchar('scope_id', { length: 120 }),
+    grantedBy: uuid('granted_by').notNull(),
+    /** Why this employee holds the permission outside a group. Required: an exception is explained. */
+    reason: text('reason').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Same pair of partial indexes as `user_role_assignments`: NULL scope_id is distinct in a unique index.
+    uniqGlobal: uniqueIndex('uq_employee_permission_global')
+      .on(t.employeeId, t.permissionKey, t.scopeType)
+      .where(sql`scope_id IS NULL`),
+    uniqScoped: uniqueIndex('uq_employee_permission_scoped')
+      .on(t.employeeId, t.permissionKey, t.scopeType, t.scopeId)
+      .where(sql`scope_id IS NOT NULL`),
+    employeeIdx: index('ix_employee_permission_employee').on(t.employeeId),
+  }),
+);
+
+/**
  * Temporary transfer of a user's approval authority to a delegate over a window
  * (e.g. while on leave). Consumed by the request/approval engine.
  */
