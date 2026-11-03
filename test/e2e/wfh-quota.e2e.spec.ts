@@ -25,6 +25,7 @@ import {
   unwrap,
   type Session,
 } from './support/harness';
+import { mondayAhead, plusDays } from './support/week-dates';
 import { giveWeeklyWfhAllowance } from './support/wfh-allowance';
 
 let app: NestFastifyApplication;
@@ -36,7 +37,6 @@ const _RUN_TAG = Date.now().toString(36).slice(-6);
 
 /** How many weeks ahead the test weeks start; far enough to clear the "not in the past" rule. */
 const _WEEKS_AHEAD = 6;
-const _MILLISECONDS_PER_DAY = 86_400_000;
 
 interface WeekQuota {
   weekStart: string;
@@ -44,26 +44,6 @@ interface WeekQuota {
   weeklyAllowance: number;
   usedDays: number;
   remainingDays: number;
-}
-
-/**
- * The Monday of the week `weeksAhead` weeks from now, in Asia/Ho_Chi_Minh, as `YYYY-MM-DD`.
- *
- * Args:
- *   weeksAhead: How many whole weeks from the current week.
- */
-function mondayAhead(weeksAhead: number): string {
-  const nowInHoChiMinh = new Date(Date.now() + 7 * 3_600_000);
-  const isoWeekday = nowInHoChiMinh.getUTCDay() === 0 ? 7 : nowInHoChiMinh.getUTCDay();
-  const thisMonday = nowInHoChiMinh.getTime() - (isoWeekday - 1) * _MILLISECONDS_PER_DAY;
-  return new Date(thisMonday + weeksAhead * 7 * _MILLISECONDS_PER_DAY).toISOString().slice(0, 10);
-}
-
-/** The date `days` after a `YYYY-MM-DD` date. */
-function plusDays(date: string, days: number): string {
-  return new Date(new Date(`${date}T00:00:00Z`).getTime() + days * _MILLISECONDS_PER_DAY)
-    .toISOString()
-    .slice(0, 10);
 }
 
 async function fileWfh(startDate: string, endDate: string) {
