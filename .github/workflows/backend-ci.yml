@@ -91,7 +91,7 @@ jobs:
       run: ${{ steps.paths.outputs.run }}
     steps:
       - id: paths
-        uses: quynhonsemiconductor/ci/actions/changed-paths@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+        uses: quynhonsemiconductor/ci/actions/changed-paths@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           ignore: |
             **/*.md
@@ -118,7 +118,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -185,7 +185,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -284,7 +284,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -387,7 +387,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -547,7 +547,7 @@ jobs:
             echo "No backward-incompatible DDL detected."
           fi
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -640,7 +640,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -743,7 +743,7 @@ jobs:
       # CRITICAL blocks this job, hence `Backend CI required`; HIGH is reported. This used to be its own job in the security
       # workflow that rebuilt the same image from scratch.
       - name: Container CVE scan (Trivy)
-        uses: quynhonsemiconductor/ci/actions/scan-image@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+        uses: quynhonsemiconductor/ci/actions/scan-image@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           image-ref: opshub-api:scan
 
@@ -802,7 +802,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
@@ -848,7 +848,7 @@ jobs:
       # that must still be checked. Web CI builds and runs the same API, so it has the same spec.
 
       - name: Upload OpenAPI spec artifact
-        uses: quynhonsemiconductor/ci/actions/publish-openapi-spec@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+        uses: quynhonsemiconductor/ci/actions/publish-openapi-spec@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           spec-path: openapi.json
           artifact-name: openapi-spec-${{ github.sha }}
@@ -865,13 +865,13 @@ jobs:
       # (warning, naming it), or FAILS. See its README in quynhonsemiconductor/ci.
       - name: Fetch the base spec
         if: github.event_name == 'pull_request'
-        uses: quynhonsemiconductor/ci/actions/fetch-openapi-base-spec@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+        uses: quynhonsemiconductor/ci/actions/fetch-openapi-base-spec@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           workflow: backend-ci.yml
 
       - name: Check for breaking API changes (PR only)
         if: github.event_name == 'pull_request'
-        uses: quynhonsemiconductor/ci/actions/validate-openapi-contract@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+        uses: quynhonsemiconductor/ci/actions/validate-openapi-contract@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           current-spec-path: openapi.json
           base-spec-path: base-spec/openapi.json
@@ -907,18 +907,18 @@ jobs:
       #    push; the explicit list below mirrors `needs` minus `build`.
       - name: Every job must have succeeded
         if: ${{ needs.changes.outputs.run == 'true' && github.event_name != 'push' }}
-        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           results: ${{ join(needs.*.result, ',') }}
 
       - name: "Every job but the Docker build must have succeeded (push: GHCR publish is the image build)"
         if: ${{ needs.changes.outputs.run == 'true' && github.event_name == 'push' }}
-        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           results: ${{ needs.changes.result }},${{ needs.quality.result }},${{ needs.test.result }},${{ needs.e2e.result }},${{ needs.migrations.result }},${{ needs['fresh-db'].result }},${{ needs.openapi.result }}
 
       - name: Nothing here to test (every changed file is ignorable)
         if: ${{ needs.changes.outputs.run != 'true' }}
-        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+        uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           results: ${{ needs.changes.result }}
