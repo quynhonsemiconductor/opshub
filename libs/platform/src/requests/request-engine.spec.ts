@@ -162,7 +162,13 @@ function buildEngine(opts: {
    * distinct idempotency key, which is the property that stops the relay collapsing them into one.
    */
   const authz = {
-    check: vi.fn().mockResolvedValue(actorHasPermission),
+    // The override permission is denied unless a case grants it: otherwise "holds everything" would
+    // quietly lift the assignee guard in every test that only means to give the step permission.
+    check: vi
+      .fn()
+      .mockImplementation((_userId: string, permission: string) =>
+        Promise.resolve(permission === 'request.decide_any' ? false : actorHasPermission),
+      ),
     globalHoldersOf: vi.fn().mockResolvedValue([APPROVER_A, APPROVER_B]),
   };
 
@@ -864,7 +870,11 @@ describe('RequestEngine assignee guard', () => {
   ) {
     const answer = (userId: string, permission: string): Promise<boolean> =>
       Promise.resolve(
-        permission === 'workforce.manage' ? hrUsers.includes(userId) : userId !== 'user-manager',
+        permission === 'request.decide_any'
+          ? false
+          : permission === 'workforce.manage'
+            ? hrUsers.includes(userId)
+            : userId !== 'user-manager',
       );
     authz.check.mockImplementation(answer);
   }
@@ -914,6 +924,99 @@ describe('RequestEngine assignee guard', () => {
       actorHasPermission: false,
     });
     await expect(engine.reject('req-1', null, OTHER)).rejects.toThrow(PermissionDeniedException);
+  });
+
+  describe('the override permission (request.decide_any)', () => {
+    const OVERRIDER = { sub: 'user-approver-x', email: 'approver-x@test.com' };
+    const STEP_PERMISSION = 'workforce.approve';
+    const OVERRIDE_PERMISSION = 'request.decide_any';
+
+    /** Who holds what, by permission — the answer `AuthzService.check` gives for each (user, permission). */
+    function grants(
+      authz: {
+        check: { mockImplementation(fn: (u: string, p: string) => Promise<boolean>): unknown };
+      },
+      holders: Record<string, string[]>,
+    ) {
+      authz.check.mockImplementation((userId: string, permission: string) =>
+        Promise.resolve((holders[permission] ?? []).includes(userId)),
+      );
+    }
+
+    /** The note written on the approval row for the first decision of a case. */
+    function recordedNote(insertChain: Record<string, unknown>): string | null {
+      const values = insertChain['values'] as ReturnType<typeof vi.fn>;
+      return (values.mock.calls[0][0] as { note: string | null }).note;
+    }
+
+    it('lets a holder decide while the assignee is available, and records that they were passed over', async () => {
+      for (const decision of ['approve', 'reject'] as const) {
+        const { engine, db, authz } = engineWithAssignee('active');
+        grants(authz, {
+          [STEP_PERMISSION]: ['user-manager', OVERRIDER.sub],
+          [OVERRIDE_PERMISSION]: [OVERRIDER.sub],
+        });
+        const insertChain = makeQueryChain([{ id: 'approval-1' }]);
+        db.insert.mockReturnValue(insertChain);
+        db.update.mockReturnValue(
+          makeQueryChain([
+            makeRequest({ status: decision === 'approve' ? 'approved' : 'rejected' }),
+          ]),
+        );
+
+        await expect(engine[decision]('req-1', 'ok', OVERRIDER)).resolves.toBeDefined();
+        expect(recordedNote(insertChain)).toBe(
+          '[override decision: assignee user-manager was available] ok',
+        );
+      }
+    });
+
+    it('is not a decision permission: without the step permission it is refused', async () => {
+      const { engine, db, authz } = engineWithAssignee('active');
+      grants(authz, {
+        [STEP_PERMISSION]: ['user-manager'],
+        [OVERRIDE_PERMISSION]: [OVERRIDER.sub],
+      });
+      await expect(engine.approve('req-1', null, OVERRIDER)).rejects.toThrow(
+        PermissionDeniedException,
+      );
+      expect(db.transaction).not.toHaveBeenCalled();
+    });
+
+    it('does not widen anything for a holder of the step permission alone', async () => {
+      const { engine, authz } = engineWithAssignee('active');
+      grants(authz, { [STEP_PERMISSION]: ['user-manager', OTHER.sub] });
+      await expect(engine.approve('req-1', null, OTHER)).rejects.toThrow(/waiting on user-manager/);
+    });
+
+    it('tags the decision as a fallback, not an override, when the assignee has left', async () => {
+      const { engine, db, authz } = engineWithAssignee('offboarded');
+      grants(authz, {
+        [STEP_PERMISSION]: [OVERRIDER.sub],
+        [OVERRIDE_PERMISSION]: [OVERRIDER.sub],
+      });
+      const insertChain = makeQueryChain([{ id: 'approval-1' }]);
+      db.insert.mockReturnValue(insertChain);
+      db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'approved' })]));
+
+      await engine.approve('req-1', null, OVERRIDER);
+      expect(recordedNote(insertChain)).toBe(
+        '[fallback decision: assignee user-manager unavailable]',
+      );
+    });
+
+    it('reaches a delegate of the holder, as the step permission itself does', async () => {
+      const built = buildEngine({
+        requestRow: makeRequest({ assigneeId: 'user-manager' }),
+        activeDelegation: { fromUserId: OVERRIDER.sub },
+      });
+      grants(built.authz, {
+        [STEP_PERMISSION]: ['user-manager', OVERRIDER.sub],
+        [OVERRIDE_PERMISSION]: [OVERRIDER.sub],
+      });
+      built.db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'approved' })]));
+      await expect(built.engine.approve('req-1', null, OTHER)).resolves.toBeDefined();
+    });
   });
 });
 

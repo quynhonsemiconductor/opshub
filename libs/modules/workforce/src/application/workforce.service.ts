@@ -636,8 +636,9 @@ export class WorkforceService {
       reason: request.reason,
     };
     // The decision is WAITING ON the requester's manager when there is a usable one (active, holds
-    // the review permission): the engine refuses any other holder while an assignee is set. No
-    // usable manager leaves it unassigned, which hands it to any holder — the HR/admin fallback.
+    // the review permission): the engine refuses any other holder while an assignee is set, except
+    // a holder of `request.decide_any` (the `approver` group). No usable manager leaves it
+    // unassigned, which hands it to any holder — the HR/admin fallback.
     const engineItem = await this.engine.submit('wfh_request', enginePayload, actor, {
       expiresAt: new Date(Date.now() + 72 * MS_PER_HOUR), // 3-day review window
       assigneeId: (await this.managerOf(actor.sub, 'workforce.wfh.review')) ?? undefined,

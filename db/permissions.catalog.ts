@@ -241,6 +241,11 @@ export const PERMISSION = {
    * codes at all, so self-service works entirely through that narrowing.
    */
   REQUEST_READ: 'request.read',
+  /**
+   * Decide a request assigned to someone else who is still available (a WFH ticket pinned to the
+   * requester's manager). Only lifts that refusal: the type's own review code is still required.
+   */
+  REQUEST_DECIDE_ANY: 'request.decide_any',
   ACCESS_REQUEST_APPROVE: 'access_request.approve',
   ACCESS_REQUEST_SECURITY_APPROVE: 'access_request.security_approve',
 
@@ -399,6 +404,8 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   [PERMISSION.ASSET_REASSIGN]: 'Reassign assets between employees',
   [PERMISSION.ACCESS_REQUEST_READ]: 'View privileged-access requests',
   [PERMISSION.REQUEST_READ]: 'View requests you are not the requester or approver of',
+  [PERMISSION.REQUEST_DECIDE_ANY]:
+    'Decide requests assigned to someone else (still needs the request type’s own review permission)',
   [PERMISSION.ACCESS_REQUEST_APPROVE]: 'Step-1 approval for access requests (manager tier)',
   [PERMISSION.ACCESS_REQUEST_SECURITY_APPROVE]: 'Step-2 IT-Security approval for access requests',
   [PERMISSION.COMPLIANCE_READ]: 'View compliance findings and software catalog',
@@ -669,6 +676,7 @@ export const GROUP_PERMISSIONS: Record<
     PERMISSION.WORKFORCE_WFH_REVIEW,
     PERMISSION.WORKFORCE_ATTENDANCE_REVIEW,
     PERMISSION.REQUEST_READ,
+    PERMISSION.REQUEST_DECIDE_ANY,
   ],
 
   [GROUP.HELPDESK]: [

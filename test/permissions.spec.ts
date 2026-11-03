@@ -106,6 +106,7 @@ describe('roles', () => {
         PERMISSION.WORKFORCE_OVERTIME_REVIEW,
         PERMISSION.WORKFORCE_WFH_REVIEW,
         PERMISSION.WORKFORCE_ATTENDANCE_REVIEW,
+        PERMISSION.REQUEST_DECIDE_ANY,
       ]),
     );
     // What `manager` and `hr` add on top is deliberately NOT here: the group is for deciding, and a
@@ -118,6 +119,16 @@ describe('roles', () => {
     ]) {
       expect(approver, `approver must not hold ${readOnly}`).not.toContain(readOnly);
     }
+  });
+
+  it('keeps the assignee override to the approver group: managers and HR decide their own, not everyone’s', () => {
+    // A manager holding it could decide other teams' tickets, which the assignee guard exists to stop.
+    const holders = Object.entries(GROUP_PERMISSIONS)
+      .filter(([, granted]) =>
+        (granted as readonly string[]).includes(PERMISSION.REQUEST_DECIDE_ANY),
+      )
+      .map(([group]) => group);
+    expect(holders).toEqual([GROUP.APPROVER]);
   });
 
   it('leaves the base employee role empty', () => {
