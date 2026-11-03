@@ -144,10 +144,8 @@ jobs:
   # narrowed to `main` so a tag or a branch run of the same file cannot be found
   # instead. Fails closed when no run exists.
   #
-  # `wait-for-run` first ships in ci v1.29.0; the rest of opshub still pins
-  # v1.24.3, which does not have it. This workflow therefore pins v1.29.0 for its
-  # own two ci actions — the release that provides the gate — rather than
-  # pretending the older pin can.
+  # `wait-for-run` first shipped in ci v1.29.0; the whole repo now pins v1.31.2,
+  # which provides it.
   # ───────────────────────────────────────────────────────────────────────────
   wait-for-ci:
     name: Wait for Web · CI
@@ -159,7 +157,7 @@ jobs:
       actions: read
     steps:
       - name: Wait for Web · CI on this commit
-        uses: quynhonsemiconductor/ci/actions/wait-for-run@3b998f73d2fd4648aa1d22f1c2c3354c323de590 # v1.29.0
+        uses: quynhonsemiconductor/ci/actions/wait-for-run@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
         with:
           workflow: web-ci.yml
           branch: main
@@ -204,7 +202,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@3b998f73d2fd4648aa1d22f1c2c3354c323de590 # v1.29.0
+      - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
