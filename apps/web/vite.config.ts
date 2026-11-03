@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Connect, type Plugin } from 'vite';
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -22,6 +22,42 @@ const securityHeadersPlugin: Plugin = {
   },
 };
 
+/**
+ * `/config.json` for the dev server and for `vite preview`.
+ *
+ * A deployment mounts the real file next to the build (the web image serves it from `/srv`); there
+ * is nothing to mount locally, and a checked-in copy would be one accident away from being deployed
+ * as if it were real. So the dev server answers the same path. `apply: 'serve'` covers `vite` and
+ * `vite preview`; a build never contains this file.
+ *
+ * The values match what the old build-time defaults produced: same-origin, development, no dev
+ * login (OpsHub signs in through Entra only).
+ */
+export const DEV_CONFIG = {
+  apiBaseUrl: '',
+  appEnv: 'development',
+  devLoginEnabled: false,
+};
+
+const devConfigMiddleware: Connect.NextHandleFunction = (req, res, next) => {
+  if ((req.url ?? '').split('?')[0] !== '/config.json') return next();
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.end(JSON.stringify(DEV_CONFIG));
+};
+
+const devConfigPlugin: Plugin = {
+  name: 'dev-config',
+  apply: 'serve',
+  configureServer(server) {
+    server.middlewares.use(devConfigMiddleware);
+  },
+  configurePreviewServer(server) {
+    server.middlewares.use(devConfigMiddleware);
+  },
+};
+
 export default defineConfig(({ mode, command }) => ({
   // One root `.env` serves every process, the dev server included: `envDir` points Vite's own
   // VITE_* loading at the repo root (the same file `loadEnv` above already reads). Two safety
@@ -31,7 +67,7 @@ export default defineConfig(({ mode, command }) => ({
   // bundle. See the `[web]` section of .env.example for the flags the dev server picks up.
   envDir:
     command === 'serve' && mode === 'development' ? path.resolve(__dirname, '../..') : undefined,
-  plugins: [react(), tailwindcss(), securityHeadersPlugin],
+  plugins: [react(), tailwindcss(), securityHeadersPlugin, devConfigPlugin],
   server: {
     host: '0.0.0.0',
     // 5174 (WEB_DEV_PORT in .env) is the origin the rest of the stack is wired to: .env.example CORS_ORIGINS and APP_URL,

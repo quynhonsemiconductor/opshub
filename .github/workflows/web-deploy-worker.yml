@@ -172,10 +172,9 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   # Build and deploy.
   #
-  # The build is SAME-ORIGIN: no VITE_API_URL, so `API_BASE_URL` stays relative
-  # and the SPA calls its own host (`/v1/*`, `/api/auth/*`), which the edge routes
-  # to the API. The repo has no VITE_* variables, so nothing else can bake an
-  # absolute origin into the bundle.
+  # The build is SAME-ORIGIN: the runtime config written into dist/ below has an empty
+  # `apiBaseUrl`, so the SPA calls its own host (`/v1/*`, `/api/auth/*`), which the edge routes
+  # to the API. Nothing in the bundle reads an API origin or a Pages variable.
   #
   # wrangler is an EXACT devDependency of opshub-web (4.149.0) and is run from
   # the workspace, never `npx wrangler@latest`: the deploy must ship with the
@@ -225,11 +224,28 @@ jobs:
           }
 
       - name: Build the SPA for the same-origin edge
-        env:
-          # Relative API base. An absolute origin baked in here would send the
-          # SPA's cookies cross-site and defeat the one-host design.
-          VITE_API_URL: ''
         run: pnpm --filter opshub-web build
+
+      # The SPA reads /config.json at boot and a Workers Static Assets deploy serves only files in
+      # dist/. The cluster image gets that file from a ConfigMap; the Worker has no mount, so the
+      # deploy writes the same contract per target here. It is NOT committed: a file in the repo
+      # would be served to whichever environment built it.
+      #
+      # apiBaseUrl is empty and devLoginEnabled false, reproducing what the old build-time
+      # VITE_API_URL='' / absent VITE_DEV_LOGIN produced for this deploy: same-origin, dev login off.
+      - name: Write the runtime config into the bundle
+        env:
+          WRANGLER_ENV: ${{ needs.target.outputs.wrangler_env }}
+        run: |
+          set -euo pipefail
+          case "${WRANGLER_ENV}" in
+            dev) app_env=development ;;
+            prod) app_env=production ;;
+            *) echo "::error::unknown wrangler env '${WRANGLER_ENV}'"; exit 1 ;;
+          esac
+          jq -n --arg app_env "${app_env}" \
+            '{apiBaseUrl: "", appEnv: $app_env, devLoginEnabled: false}' \
+            > apps/web/dist/config.json
 
       - name: Deploy ${{ needs.target.outputs.script }}
         # `pnpm --filter` runs inside apps/web, where wrangler discovers

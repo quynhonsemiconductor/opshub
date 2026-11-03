@@ -12,24 +12,23 @@
 #
 # ── ONE IMAGE PER DOCKERFILE STAGE ────────────────────────────────────────────
 # The reusable passes `build-target: <service>`, which the Dockerfile REQUIRES:
-# it has one stage per service (`api`, `worker`, `migrator`), and with no
-# target Docker builds the LAST one — k8s-deploy.yml records the incident where
-# every repository silently held three copies of the migrator.
+# the root Dockerfile has one stage per service (`api`, `worker`, `migrator`), and
+# with no target Docker builds the LAST one — k8s-deploy.yml records the incident
+# where every repository silently held three copies of the migrator. The web image
+# is its own Dockerfile (apps/web/Dockerfile, target `web`) and its own call below.
 # =============================================================================
 name: GHCR · Publish
 
 on:
   push:
     branches: [main]
-    # Same develop-path filter as backend-deploy.yml, in lockstep: skip when a
-    # merge touches ONLY paths this product does not ship (docs and the web
-    # app). paths-ignore fires only if EVERY changed file matches — a shared
-    # change still builds, so under-deploy is impossible.
+    # Skip when a merge touches ONLY paths this product does not ship (docs). paths-ignore fires only
+    # if EVERY changed file matches — a shared change still builds, so under-deploy is impossible.
+    # apps/web is NOT ignored any more: the SPA is an image too (publish-web below).
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
       - '.claude/**'
-      - 'apps/web/**'
 
   # Manual run of whatever main currently holds.
   workflow_dispatch:
@@ -55,5 +54,29 @@ jobs:
       services-json: '["api","worker","migrator"]'
       # The on-prem k3s host is amd64; native amd64 runner (a QEMU build of
       # this pnpm + Nest compile fails — see the reusable's build_runner note).
+      platforms: linux/amd64
+      build_runner: ubuntu-24.04
+
+  # The SPA as an image (DELIVERY-DESIGN-2026-11 §3.1): the Vite bundle in a read-only Caddy. It is
+  # a SECOND call to the same reusable rather than another entry in the matrix above, because the
+  # reusable takes ONE `dockerfile` per call and the web has its own (apps/web/Dockerfile; the root
+  # Dockerfile has one stage per Node service). Same workflow, same scan-before-push, same digest.
+  #
+  # Not wired into any gitops bump yet: values/opshub has no `web` image until D's chart lands, and a
+  # value its chart does not know would be noise in every dev bump. It joins at the dev cutover.
+  #
+  # Permissions and registry token MATCH the `publish` job above exactly (contents: read, packages:
+  # write). There is deliberately no `id-token: write` and no attestation input: the reusable
+  # attests nothing for ANY service yet (design §3.6 is phase 4), so asking for more here would not
+  # produce provenance — it would only widen this job beyond the API's.
+  publish-web:
+    permissions:
+      contents: read
+      packages: write
+    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
+    with:
+      product: opshub
+      services-json: '["web"]'
+      dockerfile: apps/web/Dockerfile
       platforms: linux/amd64
       build_runner: ubuntu-24.04
