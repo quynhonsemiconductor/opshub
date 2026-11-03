@@ -276,12 +276,13 @@ describe('DrizzleProvider pool heals in place', () => {
       await expect(provider.rawPool.query('SELECT 1')).rejects.toThrow();
       expect(db.dials()).toBe(afterWarmUp);
 
-      vi.useFakeTimers({ toFake: ['Date'] });
-      vi.setSystemTime(Date.now() + 5_001);
+      // guardPool times its backoff on the monotonic clock (performance.now), not Date.
+      const later = performance.now() + 5_001;
+      vi.spyOn(performance, 'now').mockReturnValue(later);
       await expect(provider.rawPool.query('SELECT 1')).rejects.toThrow();
       expect(db.dials()).toBe(afterWarmUp + 1);
     } finally {
-      vi.useRealTimers();
+      vi.restoreAllMocks();
       await provider.rawPool.end();
       await db.close();
     }
