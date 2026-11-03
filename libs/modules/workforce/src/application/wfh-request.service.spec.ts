@@ -302,6 +302,46 @@ describe('withdrawals go through the engine', () => {
     expect(mockEngine.cancel).toHaveBeenCalledWith('req-9', SELF);
   });
 
+  describe('reviewWfh decision note', () => {
+    const pendingWithTicket = {
+      id: 'wfh-1',
+      employeeId: 'emp-2',
+      startDate: '2026-11-02',
+      endDate: '2026-11-03',
+      workingDays: 2,
+      reason: null,
+      status: 'pending',
+      reviewerId: null,
+      reviewedAt: null,
+      createdAt: new Date(),
+      requestId: 'req-1',
+    };
+
+    beforeEach(() => {
+      mockRepo.findWfhById.mockResolvedValue(pendingWithTicket);
+      mockEngine.approve.mockResolvedValue({});
+      mockEngine.reject.mockResolvedValue({});
+    });
+
+    it('hands the reason for a rejection to the engine, which puts it in the requester’s notification', async () => {
+      await service().reviewWfh('wfh-1', false, SELF, 'the team is short that week');
+
+      expect(mockEngine.reject).toHaveBeenCalledWith('req-1', 'the team is short that week', SELF);
+    });
+
+    it('hands the note of an approval to the engine too', async () => {
+      await service().reviewWfh('wfh-1', true, SELF, 'enjoy');
+
+      expect(mockEngine.approve).toHaveBeenCalledWith('req-1', 'enjoy', SELF);
+    });
+
+    it('sends no note when none was given', async () => {
+      await service().reviewWfh('wfh-1', false, SELF);
+
+      expect(mockEngine.reject).toHaveBeenCalledWith('req-1', null, SELF);
+    });
+  });
+
   it('reviewWfh refuses an orphan row whose engine item never landed', async () => {
     mockRepo.findWfhById.mockResolvedValue({
       id: 'wfh-1',

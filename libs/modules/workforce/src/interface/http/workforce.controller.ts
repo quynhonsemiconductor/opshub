@@ -66,6 +66,7 @@ import {
   ListShiftLogsQueryDto,
   ShiftLogResponseDto,
   ReviewDto,
+  ReviewWithNoteDto,
   SubmitOnboardingDto,
   OnboardingResponseDto,
   SubmitOffboardingDto,
@@ -339,10 +340,10 @@ export class WorkforceController {
   @ApiCommonErrors(401, 403, 404, 412)
   async reviewLeave(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ReviewDto,
+    @Body() dto: ReviewWithNoteDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<LeaveResponseDto> {
-    const leave = await this.service.reviewLeave(id, dto.approve, user);
+    const leave = await this.service.reviewLeave(id, dto.approve, user, dto.note);
     return toLeaveDto(leave);
   }
 
@@ -461,10 +462,10 @@ export class WorkforceController {
   @ApiCommonErrors(401, 403, 404, 412)
   async reviewWfh(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ReviewDto,
+    @Body() dto: ReviewWithNoteDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<WfhResponseDto> {
-    const wfh = await this.service.reviewWfh(id, dto.approve, user);
+    const wfh = await this.service.reviewWfh(id, dto.approve, user, dto.note);
     return toWfhDto(wfh);
   }
 
@@ -547,10 +548,10 @@ export class WorkforceController {
   @ApiCommonErrors(401, 403, 404, 412)
   async reviewOvertime(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ReviewDto,
+    @Body() dto: ReviewWithNoteDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<OvertimeResponseDto> {
-    const entry = await this.service.reviewOvertime(id, dto.approve, user);
+    const entry = await this.service.reviewOvertime(id, dto.approve, user, dto.note);
     return toOvertimeDto(entry);
   }
 

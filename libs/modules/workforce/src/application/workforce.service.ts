@@ -402,7 +402,12 @@ export class WorkforceService {
     return this.repo.listLeave(await this.narrowToActor(filters, actor), limit, offset);
   }
 
-  async reviewLeave(id: string, approve: boolean, actor: Actor): Promise<LeaveRequest> {
+  async reviewLeave(
+    id: string,
+    approve: boolean,
+    actor: Actor,
+    note: string | null = null,
+  ): Promise<LeaveRequest> {
     const l = await this.getLeave(id);
     await this.attendance.assertMonthsOpen(l.startDate, l.endDate, 'Deciding a leave request');
     if (l.status !== 'pending') {
@@ -414,9 +419,9 @@ export class WorkforceService {
 
     if (l.requestId) {
       if (approve) {
-        await this.engine.approve(l.requestId, null, actor);
+        await this.engine.approve(l.requestId, note, actor);
       } else {
-        await this.engine.reject(l.requestId, null, actor);
+        await this.engine.reject(l.requestId, note, actor);
       }
     } else {
       /*
@@ -681,7 +686,12 @@ export class WorkforceService {
     return this.repo.listWfh(await this.narrowToActor(filters, actor), limit, offset);
   }
 
-  async reviewWfh(id: string, approve: boolean, actor: Actor): Promise<WfhRequest> {
+  async reviewWfh(
+    id: string,
+    approve: boolean,
+    actor: Actor,
+    note: string | null = null,
+  ): Promise<WfhRequest> {
     const w = await this.getWfh(id);
     await this.attendance.assertMonthsOpen(w.startDate, w.endDate, 'Deciding a WFH request');
     if (w.status !== 'pending') {
@@ -700,9 +710,9 @@ export class WorkforceService {
       );
     }
     if (approve) {
-      await this.engine.approve(w.requestId, null, actor);
+      await this.engine.approve(w.requestId, note, actor);
     } else {
-      await this.engine.reject(w.requestId, null, actor);
+      await this.engine.reject(w.requestId, note, actor);
     }
     return this.getWfh(id);
   }
@@ -777,7 +787,12 @@ export class WorkforceService {
     return this.repo.listOvertime(await this.narrowToActor(filters, actor), limit, offset);
   }
 
-  async reviewOvertime(id: string, approve: boolean, actor: Actor): Promise<OvertimeEntry> {
+  async reviewOvertime(
+    id: string,
+    approve: boolean,
+    actor: Actor,
+    note: string | null = null,
+  ): Promise<OvertimeEntry> {
     const o = await this.getOvertime(id);
     if (o.status !== 'pending') {
       throw new PreconditionFailedException(
@@ -788,9 +803,9 @@ export class WorkforceService {
 
     if (o.requestId) {
       if (approve) {
-        await this.engine.approve(o.requestId, null, actor);
+        await this.engine.approve(o.requestId, note, actor);
       } else {
-        await this.engine.reject(o.requestId, null, actor);
+        await this.engine.reject(o.requestId, note, actor);
       }
     } else {
       /*

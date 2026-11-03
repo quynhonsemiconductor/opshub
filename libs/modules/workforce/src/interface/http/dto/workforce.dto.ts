@@ -345,6 +345,16 @@ export class ShiftLogResponseDto {
 export const ReviewSchema = z.object({ approve: z.boolean() });
 export class ReviewDto extends createZodDto(ReviewSchema) {}
 
+/**
+ * A decision with the reason for it, for the requests that go through the approval engine (leave, WFH and
+ * overtime). The note travels with the decision to the requester's notification; a timesheet review has no
+ * engine behind it and keeps the plain `ReviewDto`.
+ */
+export const ReviewWithNoteSchema = ReviewSchema.extend({
+  note: z.string().trim().max(1000).optional(),
+});
+export class ReviewWithNoteDto extends createZodDto(ReviewWithNoteSchema) {}
+
 // ── Onboarding ───────────────────────────────────────────────────────────────
 export const SubmitOnboardingSchema = z.object({
   /** UUID of the employee being onboarded. */
