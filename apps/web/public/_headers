@@ -3,16 +3,19 @@
 # move Workers Static Assets reads the same file. Matching is order-sensitive and MERGED:
 # /* carries the security headers, and the asset rules below only add Cache-Control.
 #
-# connect-src is 'self' PLUS the uploads bucket: the SPA is same-origin by design (the
-# Pages Functions proxy today, no-Worker routes through the edge after the move), but
-# the file-upload widget PUTs bytes DIRECTLY to presigned S3 URLs (use-upload.ts), so
-# those requests are fetches, not navigations, and 'self' alone blocks every upload.
-# Attachments render from time-limited presigned GETs on the same bucket: AWS S3 in
-# every deployed environment (STORAGE_ENDPOINT is set only for the local Garage
-# stand-in), virtual-hosted style, so the policy names the regional S3 host rather than
-# a wildcard over qnsc.vn. AT THE ON-PREM MOVE both hosts switch to R2 (M-6 renames the
-# bucket and carries its custom domain) — this static file cannot specialise, so that
-# is an edit in the move PR, not here.
+# connect-src and img-src are 'self' PLUS the R2 S3 endpoint that the presigned URLs
+# point at. The SPA is same-origin by design, but the file-upload widget PUTs bytes
+# DIRECTLY to the presigned URL (use-upload.ts), so that request is a fetch, not a
+# navigation, and 'self' alone blocks every upload; attachments render from time-limited
+# presigned GETs on the same endpoint. Every deployed environment (dev and prod) stores
+# to Cloudflare R2 and connects path-style to one account-scoped S3 host — the exact host
+# below, with no wildcard, so only this storage account is reachable. The host comes from
+# STORAGE_ENDPOINT in gitops values/opshub/{dev,prod}.yaml; change both together. Local
+# development uses the Vite dev server, which applies no CSP, so Garage needs no entry.
+#
+# The Caddyfile carries the same policy header-for-header (scripts/web-image-test.sh
+# compares every value), and src/test/csp-storage-origin.test.ts proves the presigned
+# origin is in both directives of both files.
 
 /*
   X-Content-Type-Options: nosniff
@@ -20,7 +23,7 @@
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=()
   Strict-Transport-Security: max-age=31536000; includeSubDomains
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://*.s3.ap-southeast-1.amazonaws.com https://*.s3.amazonaws.com; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.s3.ap-southeast-1.amazonaws.com; frame-src 'self' blob:; worker-src 'self' blob:;
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://69e52835cf2d08edde5b6ebd741d30fa.r2.cloudflarestorage.com; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://69e52835cf2d08edde5b6ebd741d30fa.r2.cloudflarestorage.com; frame-src 'self' blob:; worker-src 'self' blob:;
   Cache-Control: no-cache
 
 # Content-hashed filenames: the bytes behind a given URL never change.
