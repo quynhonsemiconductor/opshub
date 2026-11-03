@@ -10,6 +10,14 @@ import { boot } from './app/boot';
 // The stylesheet is static so the build links it in index.html: the first paint (and the config error
 // screen) then has the app's colours instead of waiting for the app chunk.
 import './app/styles/globals.css';
+import { initTheme } from '@/shared/lib/theme';
+import { registerPreloadErrorReload } from '@/shared/lib/preload-error';
+
+// Neither reads the runtime config, and both must be in place BEFORE boot():
+// the theme class before first paint (no flash of the wrong theme) and the
+// stale-chunk reload listener before the app chunk is imported.
+initTheme();
+registerPreloadErrorReload();
 
 const root = document.getElementById('root');
 

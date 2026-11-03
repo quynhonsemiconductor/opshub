@@ -7,13 +7,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AppProviders } from '@/app/providers/app-providers';
-import { initTheme } from '@/shared/lib/theme';
-import { registerPreloadErrorReload } from '@/shared/lib/preload-error';
-
-// Apply the theme class before first paint to avoid a flash of the wrong theme.
-initTheme();
-
-registerPreloadErrorReload();
 
 export function render(root: HTMLElement): void {
   createRoot(root).render(

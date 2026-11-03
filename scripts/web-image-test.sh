@@ -121,14 +121,30 @@ expect_header "/$asset is immutable" cache-control "public, max-age=31536000, im
 expect_status "a missing asset is a 404" 404 "$base/assets/nope.js"
 expect_no_header "a missing asset promises nothing (no immutable)" cache-control "$base/assets/nope.js"
 
-echo "== headers (Worker _headers parity)"
-app_csp="default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://*.s3.ap-southeast-1.amazonaws.com https://*.s3.amazonaws.com; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.s3.ap-southeast-1.amazonaws.com; frame-src 'self' blob:; worker-src 'self' blob:;"
-expect_header "nosniff" x-content-type-options "nosniff" "$base/"
-expect_header "clickjacking" x-frame-options "DENY" "$base/"
-expect_header "referrer" referrer-policy "no-referrer" "$base/"
-expect_header "permissions" permissions-policy "camera=(), microphone=(), geolocation=()" "$base/"
-expect_header "HSTS" strict-transport-security "max-age=31536000; includeSubDomains" "$base/"
-expect_header "CSP" content-security-policy "$app_csp" "$base/"
+echo "== headers (Worker _headers parity, every header under /*)"
+# The Cloudflare manifest is the source of truth: read the headers the Worker serves under `/*` and
+# require the image to answer each one with the same value, so a Caddyfile edit that forgets
+# `_headers` (or the reverse) fails here. Parsing the file, not a copy in this script, is the point.
+headers_file="$REPO_ROOT/apps/web/public/_headers"
+declared="$(awk '
+  /^\/\*$/ { in_block = 1; next }
+  in_block && /^[[:space:]]*$/ { exit }
+  in_block && /^[[:space:]]+[A-Za-z0-9-]+:/ {
+    sub(/^[[:space:]]+/, "")
+    print
+  }
+' "$headers_file")"
+if [ -n "$declared" ]; then
+  ok "the _headers /* block parsed"
+else
+  bad "_headers /* block" "no headers found in $headers_file"
+fi
+while IFS= read -r declared_header; do
+  [ -n "$declared_header" ] || continue
+  name="${declared_header%%:*}"
+  want="${declared_header#*: }"
+  expect_header "_headers parity: $name" "$name" "$want" "$base/"
+done <<< "$declared"
 expect_no_header "no Server fingerprint" Server "$base/"
 
 echo "== a deployment that forgot the config"
