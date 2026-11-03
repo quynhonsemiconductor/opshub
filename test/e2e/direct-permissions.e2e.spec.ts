@@ -208,43 +208,95 @@ describe('the form of a grant', () => {
   });
 });
 
+/**
+ * Runs a body as the MANAGER fixture after giving them a custom group that carries `group.assign` and `asset.read`.
+ *
+ * The MANAGER fixture holds neither on its own, nor `audit.read`. `group.assign` is what lets them REACH the
+ * endpoints; the no-escalation rule is what must stop them handing out something they do not hold. The group and
+ * the membership are removed afterwards, along with anything the body granted.
+ *
+ * Args:
+ *   run: The body to run once the manager holds the group.
+ */
+async function asAssigner(run: () => Promise<void>): Promise<void> {
+  const created = await apiRequest(app, admin, 'POST', '/authz/groups', {
+    key: `e2e-assigner-${_RUN_TAG}`,
+    name: `E2E assigner ${_RUN_TAG}`,
+    permissions: ['group.assign', 'asset.read'],
+  });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const groupId = unwrap<{ id: string }>(created.body).id;
+  const membership = await apiRequest(app, admin, 'POST', '/authz/employee-groups', {
+    employeeId: FIXTURE.MANAGER.id,
+    groupId,
+  });
+  expect(membership.status, JSON.stringify(membership.body)).toBe(201);
+  const membershipId = unwrap<{ id: string }>(membership.body).id;
+
+  try {
+    await run();
+  } finally {
+    for (const id of createdGrantIds) {
+      await apiRequest(app, admin, 'DELETE', `/authz/employee-permissions/${id}`);
+    }
+    createdGrantIds = [];
+    for (const id of createdMembershipIds) {
+      await apiRequest(app, admin, 'DELETE', `/authz/employee-groups/${id}`);
+    }
+    createdMembershipIds = [];
+    await apiRequest(app, admin, 'DELETE', `/authz/employee-groups/${membershipId}`);
+    await apiRequest(app, admin, 'DELETE', `/authz/groups/${groupId}`);
+  }
+}
+
 describe('who may grant', () => {
   it('stops a holder of group.assign handing out a permission they do not hold', async () => {
-    /*
-     * A custom group that carries `group.assign` and one harmless permission, given to the MANAGER fixture, who
-     * holds neither `audit.read` nor `group.assign` on their own. `group.assign` lets them reach the endpoint;
-     * the no-escalation rule is what must stop them granting `audit.read`, which they do not hold. The permission
-     * they DO hold through the group may be passed on.
-     */
-    const key = `e2e-assigner-${_RUN_TAG}`;
-    const created = await apiRequest(app, admin, 'POST', '/authz/groups', {
-      key,
-      name: `E2E assigner ${_RUN_TAG}`,
-      permissions: ['group.assign', 'asset.read'],
-    });
-    expect(created.status, JSON.stringify(created.body)).toBe(201);
-    const groupId = unwrap<{ id: string }>(created.body).id;
-    const membership = await apiRequest(app, admin, 'POST', '/authz/employee-groups', {
-      employeeId: FIXTURE.MANAGER.id,
-      groupId,
-    });
-    expect(membership.status, JSON.stringify(membership.body)).toBe(201);
-    const membershipId = unwrap<{ id: string }>(membership.body).id;
-
-    try {
+    await asAssigner(async () => {
       const refused = await grantDirect(manager, { permissionKey: 'audit.read' });
       expect(refused.status, JSON.stringify(refused.body)).toBe(403);
 
       const allowed = await grantDirect(manager, { permissionKey: 'asset.read' });
       expect(allowed.status, JSON.stringify(allowed.body)).toBe(201);
-    } finally {
-      for (const id of createdGrantIds) {
-        await apiRequest(app, admin, 'DELETE', `/authz/employee-permissions/${id}`);
+    });
+  });
+
+  it('stops a holder of group.assign putting someone in a group whose permissions they do not all hold', async () => {
+    // The same rule on the other door: a membership hands out a group's WHOLE bundle, so the grantor must hold
+    // every permission in it. `auditor` carries `audit.read`, which the MANAGER fixture lacks.
+    const groups = unwrap<{ id: string; key: string }[]>(
+      (await apiRequest(app, admin, 'GET', '/authz/groups')).body,
+    );
+    const auditorGroup = groups.find((g) => g.key === 'auditor');
+    expect(auditorGroup, 'the seeded auditor group is missing').toBeDefined();
+
+    await asAssigner(async () => {
+      const refused = await apiRequest(app, manager, 'POST', '/authz/employee-groups', {
+        employeeId: FIXTURE.NO_PERMISSIONS.id,
+        groupId: auditorGroup!.id,
+      });
+      expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+      // Nothing was handed out.
+      expect((await probe()).statusCode).toBe(403);
+
+      // A group whose bundle the grantor DOES hold may be handed out.
+      const own = await apiRequest(app, admin, 'POST', '/authz/groups', {
+        key: `e2e-readers-${_RUN_TAG}`,
+        name: `E2E readers ${_RUN_TAG}`,
+        permissions: ['asset.read'],
+      });
+      expect(own.status, JSON.stringify(own.body)).toBe(201);
+      const ownId = unwrap<{ id: string }>(own.body).id;
+      try {
+        const allowed = await apiRequest(app, manager, 'POST', '/authz/employee-groups', {
+          employeeId: FIXTURE.NO_PERMISSIONS.id,
+          groupId: ownId,
+        });
+        expect(allowed.status, JSON.stringify(allowed.body)).toBe(201);
+      } finally {
+        // Deleting the group cascades the membership.
+        await apiRequest(app, admin, 'DELETE', `/authz/groups/${ownId}`);
       }
-      createdGrantIds = [];
-      await apiRequest(app, admin, 'DELETE', `/authz/employee-groups/${membershipId}`);
-      await apiRequest(app, admin, 'DELETE', `/authz/groups/${groupId}`);
-    }
+    });
   });
 
   it('lets a reader see the grants and their reasons, and nothing more', async () => {

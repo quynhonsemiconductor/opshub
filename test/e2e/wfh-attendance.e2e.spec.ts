@@ -33,6 +33,7 @@ let app: NestFastifyApplication;
 let hr: Session;
 let admin: Session;
 let approver: Session;
+let manager: Session;
 let requester: Session;
 
 /** Unique per run: rank names and role codes are shared across suites. */
@@ -122,6 +123,7 @@ beforeAll(async () => {
   hr = await login(app, FIXTURE.HR);
   admin = await login(app, FIXTURE.ADMIN);
   approver = await login(app, FIXTURE.APPROVER);
+  manager = await login(app, FIXTURE.MANAGER);
   requester = await login(app, FIXTURE.SECURITY);
   // Five days a week: the allowance is not what these tests are about, only that the requester may file.
   await giveWeeklyWfhAllowance(app, hr, FIXTURE.SECURITY.id, 5, `att${_RUN_TAG}`);
@@ -210,6 +212,41 @@ describe('a WFH request and the day it changes', () => {
       status: 'wfh',
       workedMinutes: _FULL_DAY_MINUTES,
     });
+  });
+
+  it('pins a request to the requester’s manager: the approver group may not decide it, the manager may', async () => {
+    /*
+     * WHAT THE GENERAL GROUP DOES AND DOES NOT DO. A ticket is decided by its ASSIGNEE: when the requester's
+     * manager is active and holds `workforce.wfh.review`, the engine names them and refuses every other holder
+     * while they are available (a delegate, or HR/admin when they are not, excepted). So `approver` decides the
+     * tickets that have NO named assignee — a requester without a manager, or whose manager lacks the review
+     * permission — and not the tickets of people who have a qualifying manager. Asserted so that nobody reads the
+     * group as a way to take decisions away from a manager.
+     */
+    const setManager = (managerId: string | null) =>
+      apiRequest(app, admin, 'PATCH', `/employees/${FIXTURE.SECURITY.id}`, { managerId });
+    const pinned = await setManager(FIXTURE.MANAGER.id);
+    expect(pinned.status, JSON.stringify(pinned.body)).toBeLessThan(300);
+    try {
+      const requestId = await fileWfh(plusDays(monday, 4));
+
+      const asApprover = await decide(requestId, true);
+      expect(asApprover.status, JSON.stringify(asApprover.body)).toBe(403);
+      expect(JSON.stringify(asApprover.body)).toMatch(/waiting on/);
+
+      const asManager = await apiRequest(
+        app,
+        manager,
+        'POST',
+        `/workforce/wfh/${requestId}/review`,
+        {
+          approve: true,
+        },
+      );
+      expect(asManager.status, JSON.stringify(asManager.body)).toBeLessThan(300);
+    } finally {
+      await setManager(null);
+    }
   });
 
   it('refuses a decision from someone who holds no review permission', async () => {
