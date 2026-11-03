@@ -355,7 +355,9 @@ describe('the README and the "local quickstart" CI job run the same commands', (
   });
 
   it('the job gates the PR: it is a dependency of `Web CI required`', () => {
-    expect(workflow).toMatch(/needs: \[changes, quality, test, build, e2e, quickstart\]/);
+    expect(workflow).toMatch(
+      /needs: \[changes, quality, test, build, e2e, container, quickstart\]/,
+    );
   });
 });
 

@@ -7,20 +7,26 @@
 # =============================================================================
 
 # ── Installed packages (re-installed inside container) ───────────────────────
+# Both forms: `node_modules` binds the root and `**/node_modules` every workspace member (apps/web's
+# dependency tree is never needed — the image installs its own).
 node_modules
+**/node_modules
 .pnpm-store
 
 # ── Compiled output (generated inside container) ─────────────────────────────
 dist
+apps/web/dist
 
 # ── Secrets — NEVER in an image ──────────────────────────────────────────────
+# Every level: a workstation's root .env AND a checked-out member's (.env.local in apps/web).
+# .env.example is excluded too now: nothing in a build reads it, and it is not worth the exception.
 .env
+**/.env*
 .env.local
 .env.*.local
 .env.development
 .env.test
 .env.production
-# .env.example is intentionally NOT excluded (useful reference, no secrets)
 
 # ── Git internals ─────────────────────────────────────────────────────────────
 .git

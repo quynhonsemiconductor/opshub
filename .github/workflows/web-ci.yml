@@ -283,7 +283,6 @@ jobs:
           --health-timeout 3s
           --health-retries 5
 
-
     env:
       # Playwright's documented container setting: the image user is root and
       # without HOME some tooling misbehaves (@swc/core ERR_SWC_NATIVE_CACHE).
@@ -449,6 +448,32 @@ jobs:
         run: cat /tmp/api.log || true
 
   # ─────────────────────────────────────────────────────────────────────────
+  # 4b. Web image — the container test of apps/web/Dockerfile.
+  #
+  # Builds the image and runs it the way the chart runs it (read-only root filesystem, only /tmp
+  # writable, config.json mounted at /srv/config.json, an arbitrary non-root uid, port 8080) and
+  # asserts the serving contract: health, the SPA fallback, cache rules and every header of the
+  # Worker's `_headers`. `scripts/web-image-test.sh` is the single definition of those assertions;
+  # read it for the list.
+  # ─────────────────────────────────────────────────────────────────────────
+  container:
+    name: Web image (container test)
+    needs: [changes]
+    if: ${{ needs.changes.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # The image's pnpm install pulls @quynhonsemiconductor/* from GitHub Packages.
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and test the image
+        run: bash scripts/web-image-test.sh
+
+  # ─────────────────────────────────────────────────────────────────────────
   # 5. Local quickstart — the README's "Local stack", executed.
   #
   # A clean clone must run with `cp .env.example .env` and the README's commands, nothing else. This job IS that
@@ -592,7 +617,7 @@ jobs:
   ci-required:
     name: Web CI required
     if: always()
-    needs: [changes, quality, test, build, e2e, quickstart]
+    needs: [changes, quality, test, build, e2e, container, quickstart]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -614,7 +639,7 @@ jobs:
         if: ${{ needs.changes.outputs.run == 'true' && needs.changes.outputs.quickstart == 'false' }}
         uses: quynhonsemiconductor/ci/actions/assert-jobs-succeeded@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
         with:
-          results: ${{ needs.changes.result }},${{ needs.quality.result }},${{ needs.test.result }},${{ needs.build.result }},${{ needs.e2e.result }}
+          results: ${{ needs.changes.result }},${{ needs.quality.result }},${{ needs.test.result }},${{ needs.build.result }},${{ needs.e2e.result }},${{ needs.container.result }}
 
       - name: The quickstart was skipped by its path filter (and only by that)
         if: ${{ needs.changes.outputs.run == 'true' && needs.changes.outputs.quickstart == 'false' }}
