@@ -25,6 +25,7 @@
  * neighbouring provider specs take.
  */
 import { writeFileSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -236,5 +237,65 @@ describe('databaseClientConfig TLS', () => {
       }),
     );
     expect(config.ssl).toBeUndefined();
+  });
+});
+
+/**
+ * The pool heals in place (rova's 2026-11-03 node reboot: the API booted before PostgreSQL): after a
+ * failed warm-up it dials again once the backoff passes, nothing failed is cached, and an idle
+ * client dropped by a database restart does not end the process.
+ */
+describe('DrizzleProvider pool heals in place', () => {
+  /** A "database" that accepts TCP and hangs up at once, counting every connection attempt. */
+  async function hangUpServer() {
+    let dials = 0;
+    const server = createServer((socket) => {
+      dials += 1;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    return {
+      url: `postgresql://test:test@127.0.0.1:${port}/opshub_test`,
+      dials: () => dials,
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  }
+
+  it('fails fast inside the backoff, then dials for real again after it', async () => {
+    const db = await hangUpServer();
+    const provider = new DrizzleProvider(
+      makeConfig({ DATABASE_URL: db.url, DATABASE_POOL_MIN: 1 }),
+    );
+    vi.spyOn((provider as unknown as { logger: { warn: () => void } }).logger, 'warn');
+    try {
+      await provider.onModuleInit(); // warm-up fails, boot continues
+      const afterWarmUp = db.dials();
+      expect(afterWarmUp).toBe(1);
+
+      await expect(provider.rawPool.query('SELECT 1')).rejects.toThrow();
+      expect(db.dials()).toBe(afterWarmUp);
+
+      // guardPool times its backoff on the monotonic clock (performance.now), not Date.
+      const later = performance.now() + 5_001;
+      vi.spyOn(performance, 'now').mockReturnValue(later);
+      await expect(provider.rawPool.query('SELECT 1')).rejects.toThrow();
+      expect(db.dials()).toBe(afterWarmUp + 1);
+    } finally {
+      vi.restoreAllMocks();
+      await provider.rawPool.end();
+      await db.close();
+    }
+  });
+
+  it('survives an idle client error (a database restart) instead of throwing it', async () => {
+    const provider = new DrizzleProvider(makeConfig());
+    try {
+      expect(() =>
+        provider.rawPool.emit('error', new Error('terminating connection (57P01)')),
+      ).not.toThrow();
+    } finally {
+      await provider.rawPool.end();
+    }
   });
 });
