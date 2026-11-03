@@ -38,6 +38,8 @@ let hr: Session;
 /** The employee created for this spec, offboarded by it, and referenced by nothing else. */
 let employeeId: string;
 let assignmentId: string;
+/** A permission granted to the leaver directly, outside any group: offboarding has to strip it too. */
+let directGrantId: string;
 
 beforeAll(async () => {
   app = await createTestApp();
@@ -109,6 +111,14 @@ describe('offboarding leaves evidence', () => {
     });
     assignmentId = assignment.id as string;
 
+    // A permission outside any group, which removing the memberships alone would leave in the leaver's hands.
+    const directGrant = await post(admin, '/v1/authz/employee-permissions', {
+      employeeId,
+      permissionKey: 'audit.read',
+      reason: 'e2e: offboarding must strip direct grants too',
+    });
+    directGrantId = directGrant.id as string;
+
     /*
      * THE LEAVER SIGNS IN, so there is a session to revoke.
      *
@@ -148,6 +158,22 @@ describe('offboarding leaves evidence', () => {
       entries.map((e) => e.action),
       JSON.stringify(entries),
     ).toContain('group.revoked');
+  });
+
+  it('strips the permissions granted directly, and records each one', async () => {
+    const entries = await auditEntries('employee_permission', directGrantId);
+    expect(
+      entries.map((e) => e.action),
+      JSON.stringify(entries),
+    ).toContain('employee_permission.revoked');
+
+    const remaining = await app.inject({
+      method: 'GET',
+      url: `/v1/authz/employees/${employeeId}/permissions`,
+      headers: authHeaders(admin),
+    });
+    expect(remaining.statusCode, remaining.body).toBe(200);
+    expect(JSON.parse(remaining.body)).toEqual([]);
   });
 
   it('records the forced logout as a revocation, not as a logout', async () => {
