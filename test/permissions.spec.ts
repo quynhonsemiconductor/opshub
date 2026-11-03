@@ -95,6 +95,31 @@ describe('roles', () => {
     }
   });
 
+  it('keeps the general approver group to decisions: both halves of each, and no reading of the organisation', () => {
+    // A workforce decision needs the route's `workforce.approve` AND the engine's `*.review` code for its
+    // type, so a group missing either half would look able to approve and be refused at the last step.
+    const approver = GROUP_PERMISSIONS[GROUP.APPROVER] as readonly string[];
+    expect(approver).toEqual(
+      expect.arrayContaining([
+        PERMISSION.WORKFORCE_APPROVE,
+        PERMISSION.WORKFORCE_LEAVE_REVIEW,
+        PERMISSION.WORKFORCE_OVERTIME_REVIEW,
+        PERMISSION.WORKFORCE_WFH_REVIEW,
+        PERMISSION.WORKFORCE_ATTENDANCE_REVIEW,
+      ]),
+    );
+    // What `manager` and `hr` add on top is deliberately NOT here: the group is for deciding, and a
+    // permission wanted for one person is granted to that person directly instead.
+    for (const readOnly of [
+      PERMISSION.EMPLOYEE_READ,
+      PERMISSION.WORKFORCE_READ,
+      PERMISSION.CONTRACT_READ,
+      PERMISSION.REPORTS_READ,
+    ]) {
+      expect(approver, `approver must not hold ${readOnly}`).not.toContain(readOnly);
+    }
+  });
+
   it('leaves the base employee role empty', () => {
     // Self-service access is expressed by the `self` SCOPE on a grant, not by a
     // permission code. An entry creeping in here means someone modelled

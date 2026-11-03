@@ -230,6 +230,7 @@ const GROUP_LABEL: Record<string, string> = {
   security: 'Security',
   hr: 'HR',
   manager: 'Manager',
+  approver: 'Approver',
   auditor: 'Auditor',
   helpdesk: 'Helpdesk',
   employee: 'Employee',

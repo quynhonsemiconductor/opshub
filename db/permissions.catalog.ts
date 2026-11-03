@@ -486,6 +486,7 @@ export const GROUP = {
   HR: 'hr',
   MANAGER: 'manager',
   HELPDESK: 'helpdesk',
+  APPROVER: 'approver',
   AUDITOR: 'auditor',
   EMPLOYEE: 'employee',
 } as const;
@@ -500,6 +501,7 @@ export const GROUP_NAMES: Record<GroupKey, string> = {
   [GROUP.HR]: 'HR Manager',
   [GROUP.MANAGER]: 'People Manager',
   [GROUP.HELPDESK]: 'Help Desk',
+  [GROUP.APPROVER]: 'Approver',
   [GROUP.AUDITOR]: 'Auditor (read-only)',
   [GROUP.EMPLOYEE]: 'Employee',
 };
@@ -648,6 +650,25 @@ export const GROUP_PERMISSIONS: Record<
     PERMISSION.REQUEST_READ,
     PERMISSION.REPORTS_READ,
     PERMISSION.ONBOARDING_APPROVE,
+  ],
+
+  /**
+   * The general approval group: whoever decides requests for the people they answer for.
+   *
+   * GENERAL ON PURPOSE, not "wfh-approver". A group is named for the kind of person it holds, so a new
+   * approval permission is one more line here and nobody has to be moved between groups; a permission that
+   * is wanted for ONE person is granted to that person directly (`employee_permissions`), not by inventing a
+   * group for them. It carries the decisions only: no directory, contract, training or report access, which
+   * `manager` adds on top. Both halves of a workforce decision are here — `workforce.approve` is what the
+   * review routes ask for, and the `*.review` codes are what the request engine asks of the decider.
+   */
+  [GROUP.APPROVER]: [
+    PERMISSION.WORKFORCE_APPROVE,
+    PERMISSION.WORKFORCE_LEAVE_REVIEW,
+    PERMISSION.WORKFORCE_OVERTIME_REVIEW,
+    PERMISSION.WORKFORCE_WFH_REVIEW,
+    PERMISSION.WORKFORCE_ATTENDANCE_REVIEW,
+    PERMISSION.REQUEST_READ,
   ],
 
   [GROUP.HELPDESK]: [

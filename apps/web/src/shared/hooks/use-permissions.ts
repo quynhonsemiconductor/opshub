@@ -34,13 +34,22 @@ const GROUP_PRIORITY: Record<string, number> = {
   helpdesk: 7,
   auditor: 6,
   manager: 5,
+  approver: 4,
   employee: 1,
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type GroupKey =
-  'admin' | 'it-admin' | 'security' | 'hr' | 'helpdesk' | 'auditor' | 'manager' | 'employee';
+  | 'admin'
+  | 'it-admin'
+  | 'security'
+  | 'hr'
+  | 'helpdesk'
+  | 'auditor'
+  | 'manager'
+  | 'approver'
+  | 'employee';
 
 export interface PermissionHelpers {
   /**

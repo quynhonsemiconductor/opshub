@@ -269,6 +269,11 @@ export const PERSONAS: Record<GroupKey, PersonaDef> = {
     ],
   },
 
+  approver: {
+    tiles: [TILE.myQueue, TILE.pendingLeave],
+    sections: [{ title: 'Approvals', icon: CheckCircle, links: [LINK.requests, LINK.workforce] }],
+  },
+
   hr: {
     tiles: [
       { ...TILE.pendingLeave, label: 'Pending leave requests' },
@@ -335,6 +340,7 @@ export const GROUP_TITLE: Record<GroupKey, string> = {
   'it-admin': 'IT Admin',
   security: 'Security',
   manager: 'Manager',
+  approver: 'Approver',
   hr: 'HR',
   auditor: 'Auditor',
   helpdesk: 'Helpdesk',

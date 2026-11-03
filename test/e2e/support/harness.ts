@@ -62,6 +62,15 @@ export const FIXTURE = {
     email: 'manager@opshub.local',
   },
   /**
+   * The general approval group: decides workforce requests and nothing else — no directory, contract or
+   * report access. The tier that separates "may decide" from "may read the organisation", which `HR` and
+   * `MANAGER` both hold together.
+   */
+  APPROVER: {
+    id: '00000000-0000-7000-8000-000000000010',
+    email: 'approver@opshub.local',
+  },
+  /**
    * Read-only across the platform, and the tier for FIELD-LEVEL redaction.
    *
    * Holds `contract.read` but NOT `contract.compensation.read` — deliberately, in the catalogue: an

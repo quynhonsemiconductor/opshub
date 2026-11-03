@@ -193,6 +193,12 @@ const DEMO_EMPLOYEES: Array<{
     roleKey: 'auditor',
   },
   {
+    id: '00000000-0000-7000-8000-000000000010',
+    email: 'approver@opshub.local',
+    displayName: 'Approver',
+    roleKey: 'approver',
+  },
+  {
     id: '00000000-0000-7000-8000-000000000008',
     email: 'employee@opshub.local',
     displayName: 'Regular Employee',
