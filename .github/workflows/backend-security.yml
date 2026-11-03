@@ -3,8 +3,9 @@
 #
 # One org-wide security standard: Trivy (container CVEs, CRITICAL blocks),
 # Semgrep (SAST — replaces CodeQL, no GHAS needed), Gitleaks (secrets) and
-# osv-scanner (dependency CVEs — replaces dependency-review). Runs on every PR,
-# every push to main, and weekly to catch newly disclosed CVEs between pushes.
+# osv-scanner (dependency CVEs — replaces dependency-review). Runs on every PR
+# and every push to main; newly disclosed CVEs between pushes are caught by
+# Scheduled · Security Scan — ONE schedule per repo.
 #
 # actions-security (zizmor) replaces Code Scanning Default Setup's
 # `Analyze (actions)` as the GitHub Actions workflow security gate — Default
@@ -29,8 +30,6 @@ on:
     #
     # `main` is this repo's only long-lived branch, so the filter skipped nothing anyone
     # wanted skipped. No upside, one silent failure mode.
-  schedule:
-    - cron: "0 4 * * 1" # weekly Monday 04:00 UTC — catch new CVEs between pushes
 
 concurrency:
   # A PUSH TO MAIN IS NEVER CANCELLED, and that takes a group of its own per commit. The group used to be
@@ -68,9 +67,8 @@ jobs:
       # `security / Security scans (Gitleaks, osv-scanner, Semgrep)`.
       combine: true
       # Trivy runs in `Backend CI`'s Docker build job, on the image that job already builds, instead of building it again here.
-      # EXCEPT on the weekly schedule: Backend CI never runs on a schedule, so without this a new CVE in an unchanged image would
-      # go unseen until the next code change. The scheduled run builds and scans the image itself, as before.
-      scan_container: ${{ github.event_name == 'schedule' }}
+      # The daily Scheduled · Security Scan builds and scans the image too; that is the periodic container-CVE net now.
+      scan_container: false
       # Semgrep runs report-only for now: findings are in shared infra/config
       # (workflow action tags, dependabot/pnpm/npm supply-chain hardening, pg-ssl
       # TLS, editor sanitisation) and are being addressed org-wide separately.
