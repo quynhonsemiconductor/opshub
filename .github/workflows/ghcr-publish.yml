@@ -36,9 +36,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # One GHCR publish per product at a time (the reusable declares the same
-  # group); a push racing a workflow_dispatch serialises instead of racing.
-  group: ghcr-publish-backend-opshub
+  # One GHCR publish per product PER COMMIT. A product-wide group lets a newer
+  # main push replace the queued run for the previous commit (GitHub keeps one
+  # pending run per group, even with cancel-in-progress false), and that commit
+  # would never be published.
+  group: ghcr-publish-backend-opshub-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -55,7 +57,7 @@ jobs:
       attestations: write
     # SHA-pinned, NOT @v1 — ci's v1 tag moves on every merge, and a moving ref
     # would let a ci merge change this product's publish pipeline unseen.
-    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
     with:
       product: opshub
       services-json: '["api","worker","migrator"]'
@@ -81,10 +83,60 @@ jobs:
       packages: write
       id-token: write
       attestations: write
-    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
+    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
     with:
       product: opshub
       services-json: '["web"]'
       dockerfile: apps/web/Dockerfile
       platforms: linux/amd64
       build_runner: ubuntu-24.04
+
+  # opshub-dev follows main: ONE dev bump per product.
+  #
+  # Two reusable bump-dev calls (services + web) would both target the same
+  # bump/opshub-dev-<tag> branch for the same commit; the action pushes it
+  # without force, so the second would be rejected. One job that needs both
+  # calls and merges their digest maps is the single-bump option.
+  #
+  # Only services present in gitops values/opshub are written: web is built and
+  # published but gitops has no web image yet (D's chart). It joins the list
+  # when the chart lands; extra digests in the map are harmless.
+  bump-dev:
+    needs: [publish, publish-web]
+    if: ${{ github.ref == 'refs/heads/main' && needs.publish.result == 'success' && needs.publish-web.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    concurrency:
+      group: gitops-bump-opshub-dev
+      cancel-in-progress: false
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
+        with:
+          app-id: ${{ vars.QNSC_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.QNSC_AUTOMATION_PRIVATE_KEY }}
+          owner: quynhonsemiconductor
+          repositories: gitops
+          permission-contents: write
+          permission-pull-requests: write
+      # api/worker/migrator and web never share a key, so `*` merges them.
+      - id: digests
+        env:
+          SERVICES_DIGESTS: ${{ needs.publish.outputs.digests }}
+          WEB_DIGESTS: ${{ needs.publish-web.outputs.digests }}
+        run: |
+          set -euo pipefail
+          merged=$(jq -c -n --argjson a "${SERVICES_DIGESTS:-{}}" --argjson b "${WEB_DIGESTS:-{}}" '$a * $b')
+          echo "digests=$merged" >> "$GITHUB_OUTPUT"
+      - uses: quynhonsemiconductor/ci/actions/bump-gitops-tag@400b7e9868e9ba6d172d956a08041ba19b574689  # v1.33.1
+        with:
+          product: opshub
+          env: dev
+          services: api worker migrator
+          tag: ${{ needs.publish.outputs.tag }}
+          digests: ${{ steps.digests.outputs.digests }}
+          mode: pull-request
+          auto-merge: 'true'
+          gitops-token: ${{ steps.app.outputs.token }}
