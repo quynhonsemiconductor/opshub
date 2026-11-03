@@ -6013,6 +6013,10 @@ export interface components {
       endPortion?: 'full_day' | 'morning' | 'afternoon';
       reason?: string;
     };
+    ReviewWithNoteDto: {
+      approve: boolean;
+      note?: string;
+    };
     WfhPreviewResponseDto: {
       startDate: string;
       endDate: string;
@@ -11548,7 +11552,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ReviewDto'];
+        'application/json': components['schemas']['ReviewWithNoteDto'];
       };
     };
     responses: {
@@ -11821,7 +11825,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ReviewDto'];
+        'application/json': components['schemas']['ReviewWithNoteDto'];
       };
     };
     responses: {
@@ -12009,7 +12013,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ReviewDto'];
+        'application/json': components['schemas']['ReviewWithNoteDto'];
       };
     };
     responses: {
