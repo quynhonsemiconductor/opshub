@@ -217,10 +217,18 @@ describe('AuthzService.globalHoldersOf', () => {
  * shapes the real queries produce: group rows come through a join, direct rows straight from the table.
  */
 describe('AuthzService.resolve', () => {
-  function resolverWith(
-    groupRows: { permissionKey: string; scopeType: string; scopeId: string | null }[],
-    directRows: { permissionKey: string; scopeType: string; scopeId: string | null }[],
-  ) {
+  interface GrantRow {
+    permissionKey: string;
+    scopeType: string;
+    scopeId: string | null;
+    expiresAt?: Date | null;
+  }
+
+  function resolverWith(groupRowsIn: GrantRow[], directRowsIn: GrantRow[]) {
+    // The query always returns an expiry (null for a grant that never expires); fixtures may leave it out.
+    const withExpiry = (rows: GrantRow[]) => rows.map((row) => ({ expiresAt: null, ...row }));
+    const groupRows = withExpiry(groupRowsIn);
+    const directRows = withExpiry(directRowsIn);
     const db = {
       select: vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
@@ -234,11 +242,11 @@ describe('AuthzService.resolve', () => {
       setJson: vi.fn().mockResolvedValue(undefined),
       del: vi.fn(),
     };
-    return new AuthzService(db as never, cache as never, new ScopeEvaluator());
+    return { service: new AuthzService(db as never, cache as never, new ScopeEvaluator()), cache };
   }
 
   it('returns a permission that only a direct grant carries', async () => {
-    const service = resolverWith(
+    const { service } = resolverWith(
       [],
       [{ permissionKey: 'door.manage', scopeType: 'global', scopeId: null }],
     );
@@ -248,7 +256,7 @@ describe('AuthzService.resolve', () => {
   });
 
   it('keeps both scopes when a group and a direct grant name the same permission', async () => {
-    const service = resolverWith(
+    const { service } = resolverWith(
       [{ permissionKey: 'asset.write', scopeType: 'dept', scopeId: 'QA' }],
       [{ permissionKey: 'asset.write', scopeType: 'global', scopeId: null }],
     );
@@ -257,5 +265,42 @@ describe('AuthzService.resolve', () => {
       { type: 'dept', id: 'QA' },
       { type: 'global', id: null },
     ]);
+  });
+
+  it('caches the set for the normal lifetime when no grant in it expires', async () => {
+    const { service, cache } = resolverWith(
+      [{ permissionKey: 'asset.read', scopeType: 'global', scopeId: null, expiresAt: null }],
+      [],
+    );
+
+    await service.resolve('user-1');
+
+    expect(cache.setJson).toHaveBeenCalledWith('authz:perms:user-1', expect.anything(), 300);
+  });
+
+  it('stops caching at a grant’s expiry, so a time-boxed permission ends when it says it does', async () => {
+    /*
+     * Without this the set was cached for the full five minutes from the moment it was resolved, so a
+     * grant expiring in ten seconds stayed effective for nearly five minutes after it expired. The expiry
+     * filter in the query runs only when the cache is empty.
+     */
+    const inTenSeconds = new Date(Date.now() + 10_000);
+    const { service, cache } = resolverWith(
+      [{ permissionKey: 'asset.read', scopeType: 'global', scopeId: null, expiresAt: null }],
+      [
+        {
+          permissionKey: 'door.manage',
+          scopeType: 'global',
+          scopeId: null,
+          expiresAt: inTenSeconds,
+        },
+      ],
+    );
+
+    await service.resolve('user-1');
+
+    const ttl = cache.setJson.mock.calls[0][2] as number;
+    expect(ttl).toBeGreaterThanOrEqual(9);
+    expect(ttl).toBeLessThanOrEqual(10);
   });
 });

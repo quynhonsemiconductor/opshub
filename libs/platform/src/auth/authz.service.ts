@@ -4,6 +4,7 @@ import { InjectDrizzle, type DrizzleDB } from '../database/drizzle.provider';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { employeePermissions, groupPermissions, employeeGroups } from '../../../../db/schema';
 import { ScopeEvaluator } from './scope-evaluator';
+import { permissionCacheTtlSeconds } from './permission-cache-ttl.helper';
 import { permissionGrants } from '@shared-kernel';
 import {
   type EffectivePermissions,
@@ -53,6 +54,7 @@ export class AuthzService {
             permissionKey: groupPermissions.permissionKey,
             scopeType: employeeGroups.scopeType,
             scopeId: employeeGroups.scopeId,
+            expiresAt: employeeGroups.expiresAt,
           })
           .from(employeeGroups)
           .innerJoin(groupPermissions, eq(groupPermissions.groupId, employeeGroups.groupId))
@@ -67,6 +69,7 @@ export class AuthzService {
             permissionKey: employeePermissions.permissionKey,
             scopeType: employeePermissions.scopeType,
             scopeId: employeePermissions.scopeId,
+            expiresAt: employeePermissions.expiresAt,
           })
           .from(employeePermissions)
           .where(
@@ -86,7 +89,14 @@ export class AuthzService {
         (effective[row.permissionKey] ??= []).push(scope);
       }
 
-      await this.cache.setJson(key, effective, AuthzService.CACHE_TTL_SECONDS);
+      // Bounded by the earliest expiry in the set, so a time-boxed grant ends when it says it does rather than
+      // up to one cache lifetime later.
+      const ttlSeconds = permissionCacheTtlSeconds(
+        AuthzService.CACHE_TTL_SECONDS,
+        [...groupRows, ...directRows].map((row) => row.expiresAt),
+        new Date(),
+      );
+      await this.cache.setJson(key, effective, ttlSeconds);
       return effective;
     } catch (err) {
       // Fail closed — never grant access when resolution fails.
