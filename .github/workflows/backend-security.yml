@@ -61,7 +61,7 @@ permissions:
 
 jobs:
   security:
-    uses: quynhonsemiconductor/ci/.github/workflows/security.yml@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
+    uses: quynhonsemiconductor/ci/.github/workflows/security.yml@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
     with:
       product: opshub
       # Gitleaks + osv-scanner + Semgrep as ONE job; the required check is now
@@ -83,7 +83,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: quynhonsemiconductor/ci/.github/workflows/actions-security.yml@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
+    uses: quynhonsemiconductor/ci/.github/workflows/actions-security.yml@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
     with:
       blocking: true
       combine: true # actionlint + zizmor as ONE job; the required check is now `actions-security / Workflow security (actionlint, zizmor)`

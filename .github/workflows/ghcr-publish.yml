@@ -45,12 +45,17 @@ jobs:
   publish:
     # Ceiling for the reusable's inner grants: packages: write is the GHCR
     # push AND the Dockerfile's pull of private @quynhonsemiconductor/*.
+    # id-token and attestations: ci v1.31.x attests the pushed digest (build
+    # provenance + SBOM) and a called workflow's permissions are CAPPED by this
+    # job's, so without them the reusable's build job fails at startup.
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     # SHA-pinned, NOT @v1 — ci's v1 tag moves on every merge, and a moving ref
     # would let a ci merge change this product's publish pipeline unseen.
-    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@2a85ef7bb3c793edbc9b424ba2abeaed8080aab6 # v1.24.3
+    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
     with:
       product: opshub
       services-json: '["api","worker","migrator"]'
@@ -67,15 +72,16 @@ jobs:
   # Not wired into any gitops bump yet: values/opshub has no `web` image until D's chart lands, and a
   # value its chart does not know would be noise in every dev bump. It joins at the dev cutover.
   #
-  # Permissions and registry token MATCH the `publish` job above exactly (contents: read, packages:
-  # write). There is deliberately no `id-token: write` and no attestation input: the reusable
-  # attests nothing for ANY service yet (design §3.6 is phase 4), so asking for more here would not
-  # produce provenance — it would only widen this job beyond the API's.
+  # Permissions and registry token MATCH the `publish` job above exactly: the
+  # reusable attests every digest it pushes as of ci v1.31.x, so both jobs
+  # grant id-token: write and attestations: write.
   publish-web:
     permissions:
       contents: read
       packages: write
-    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@7e8f6136a017c7b1f57a2e9a288dae3cd008950f # v1.31.1
+      id-token: write
+      attestations: write
+    uses: quynhonsemiconductor/ci/.github/workflows/ghcr-publish.yml@ee14a6ba62dd5da4f30eb13c6887ff0cc1f9c0c4 # v1.31.2
     with:
       product: opshub
       services-json: '["web"]'
