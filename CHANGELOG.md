@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.6](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.5...v0.4.6) (2026-11-03)
+
+
+### ✨ Features
+
+* **web:** runtime config and a web image for the cluster ([#533](https://github.com/quynhonsemiconductor/opshub/issues/533)) ([d3ea6d3](https://github.com/quynhonsemiconductor/opshub/commit/d3ea6d3addf1b70ef61cd5ea110031629eb55e66))
+
 ## [0.4.5](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.4...v0.4.5) (2026-11-03)
 
 
