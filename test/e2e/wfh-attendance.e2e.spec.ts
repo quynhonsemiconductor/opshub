@@ -10,7 +10,8 @@
  * AND WHO DECIDES. The decider is the general `approver` group, which holds the decision permissions and
  * nothing else: no directory, no contract, no reports. If that group were missing either half of a decision
  * (the route's `workforce.approve` or the engine's `workforce.wfh.review`) the approval below would be
- * refused, so this is also the proof that the group is wired the way its bundle says.
+ * refused, so this is also the proof that the group is wired the way its bundle says. It also holds
+ * `request.decide_any`, so it can decide a ticket pinned to the requester's manager; HR cannot.
  *
  * Prereqs: `docker compose -f docker-compose.dev.yml up -d`, `pnpm db:migrate` and `pnpm db:seed`.
  */
@@ -57,6 +58,17 @@ interface AttendanceDay {
 interface WfhRow {
   id: string;
   status: string;
+}
+
+/** The engine's view of a ticket: what the inbox lists and what the request read returns. */
+interface QueuedTicket {
+  id: string;
+  requesterId: string;
+  assigneeId: string | null;
+  status: string;
+  viewerMayDecide?: boolean;
+  payload?: { wfhRequestId?: string };
+  approvals?: { approverId: string; note: string | null }[];
 }
 
 const monday = mondayAhead(_WEEKS_AHEAD);
@@ -214,39 +226,116 @@ describe('a WFH request and the day it changes', () => {
     });
   });
 
-  it('pins a request to the requester’s manager: the approver group may not decide it, the manager may', async () => {
-    /*
-     * WHAT THE GENERAL GROUP DOES AND DOES NOT DO. A ticket is decided by its ASSIGNEE: when the requester's
-     * manager is active and holds `workforce.wfh.review`, the engine names them and refuses every other holder
-     * while they are available (a delegate, or HR/admin when they are not, excepted). So `approver` decides the
-     * tickets that have NO named assignee — a requester without a manager, or whose manager lacks the review
-     * permission — and not the tickets of people who have a qualifying manager. Asserted so that nobody reads the
-     * group as a way to take decisions away from a manager.
-     */
+  describe('a ticket pinned to the requester’s manager', () => {
+    // With an active manager who holds `workforce.wfh.review`, the ticket is the manager's to decide: every
+    // other holder (HR included) is refused. `approver` is the exception, via `request.decide_any`.
     const setManager = (managerId: string | null) =>
       apiRequest(app, admin, 'PATCH', `/employees/${FIXTURE.SECURITY.id}`, { managerId });
-    const pinned = await setManager(FIXTURE.MANAGER.id);
-    expect(pinned.status, JSON.stringify(pinned.body)).toBeLessThan(300);
-    try {
-      const requestId = await fileWfh(plusDays(monday, 4));
 
-      const asApprover = await decide(requestId, true);
-      expect(asApprover.status, JSON.stringify(asApprover.body)).toBe(403);
-      expect(JSON.stringify(asApprover.body)).toMatch(/waiting on/);
-
-      const asManager = await apiRequest(
+    /** The engine's ticket for one WFH request, if `session`'s "My queue" lists it. */
+    async function queuedTicket(
+      session: Session,
+      wfhRequestId: string,
+    ): Promise<QueuedTicket | undefined> {
+      const { status, body } = await apiRequest(
         app,
-        manager,
-        'POST',
-        `/workforce/wfh/${requestId}/review`,
-        {
-          approve: true,
-        },
+        session,
+        'GET',
+        '/requests?myQueue=true&limit=100',
       );
-      expect(asManager.status, JSON.stringify(asManager.body)).toBeLessThan(300);
-    } finally {
-      await setManager(null);
+      expect(status, JSON.stringify(body)).toBe(200);
+      return unwrap<QueuedTicket[]>(body).find((row) => row.payload?.wfhRequestId === wfhRequestId);
     }
+
+    /** The engine's own record of the ticket, with the approval rows that say who decided and how. */
+    async function ticketRecord(session: Session, ticketId: string): Promise<QueuedTicket> {
+      const { status, body } = await apiRequest(app, session, 'GET', `/requests/${ticketId}`);
+      expect(status, JSON.stringify(body)).toBe(200);
+      return unwrap<QueuedTicket>(body);
+    }
+
+    it('is decided by the approver group too, and the approval records that the manager was passed over', async () => {
+      const pinned = await setManager(FIXTURE.MANAGER.id);
+      expect(pinned.status, JSON.stringify(pinned.body)).toBeLessThan(300);
+      try {
+        const day = plusDays(monday, 7);
+        const requestId = await fileWfh(day);
+
+        // Assigned to the manager, so this is the pinned case and not an unassigned ticket.
+        const queued = await queuedTicket(approver, requestId);
+        expect(queued, 'a pinned ticket is missing from the approver queue').toBeDefined();
+        expect(queued?.assigneeId).toBe(FIXTURE.MANAGER.id);
+        expect(queued?.viewerMayDecide, 'the queue lists a ticket the group is then refused').toBe(
+          true,
+        );
+
+        const decided = await decide(requestId, true, 'e2e: the approver group decides');
+        expect(decided.status, JSON.stringify(decided.body)).toBeLessThan(300);
+        expect(await myDay(day)).toMatchObject({ status: 'wfh', workedMinutes: _FULL_DAY_MINUTES });
+
+        const approvals = (await ticketRecord(approver, queued!.id)).approvals ?? [];
+        expect(approvals[0]?.approverId).toBe(FIXTURE.APPROVER.id);
+        expect(approvals[0]?.note).toContain(
+          `[override decision: assignee ${FIXTURE.MANAGER.id} was available]`,
+        );
+        expect(approvals[0]?.note).toContain('e2e: the approver group decides');
+      } finally {
+        await setManager(null);
+      }
+    });
+
+    it('is still the manager’s to decide, with nothing recorded about anyone being passed over', async () => {
+      const pinned = await setManager(FIXTURE.MANAGER.id);
+      expect(pinned.status, JSON.stringify(pinned.body)).toBeLessThan(300);
+      try {
+        const requestId = await fileWfh(plusDays(monday, 8));
+        const queued = await queuedTicket(manager, requestId);
+        expect(queued?.assigneeId).toBe(FIXTURE.MANAGER.id);
+
+        const asManager = await apiRequest(
+          app,
+          manager,
+          'POST',
+          `/workforce/wfh/${requestId}/review`,
+          { approve: true },
+        );
+        expect(asManager.status, JSON.stringify(asManager.body)).toBeLessThan(300);
+
+        const approvals = (await ticketRecord(manager, queued!.id)).approvals ?? [];
+        expect(approvals[0]?.approverId).toBe(FIXTURE.MANAGER.id);
+        expect(approvals[0]?.note ?? '').not.toContain('override decision');
+      } finally {
+        await setManager(null);
+      }
+    });
+
+    it('is refused to HR while the manager is available: holding the review permission is not enough', async () => {
+      const pinned = await setManager(FIXTURE.MANAGER.id);
+      expect(pinned.status, JSON.stringify(pinned.body)).toBeLessThan(300);
+      try {
+        const requestId = await fileWfh(plusDays(monday, 9));
+        const asHr = await apiRequest(app, hr, 'POST', `/workforce/wfh/${requestId}/review`, {
+          approve: true,
+        });
+        expect(asHr.status, JSON.stringify(asHr.body)).toBe(403);
+        expect(JSON.stringify(asHr.body)).toMatch(/waiting on/);
+
+        // The queue agrees with the refusal.
+        expect(await queuedTicket(hr, requestId)).toBeUndefined();
+
+        // Close the ticket so it does not stay undecided.
+        const asManager = await apiRequest(
+          app,
+          manager,
+          'POST',
+          `/workforce/wfh/${requestId}/review`,
+          { approve: false, note: 'e2e: cleanup' },
+        );
+        expect(asManager.status, JSON.stringify(asManager.body)).toBeLessThan(300);
+      } finally {
+        await setManager(null);
+      }
+    });
   });
 
   it('refuses a decision from someone who holds no review permission', async () => {
