@@ -517,6 +517,16 @@ export class RequestEngine {
         await def.onExpire(request.payload, requestId, tx);
       }
 
+      // Tell the requester it LAPSED. An unanswered request is neither approved nor refused, and silence reads
+      // as either: a person who filed for next week and heard nothing has to find out by looking.
+      await this.notifScheduler.schedule(tx, {
+        type: 'request.expired',
+        vars: { requestType: request.type, requestId },
+        recipientId: request.requesterId,
+        resourceId: requestId,
+        idempotencyKey: `request_expired:${requestId}`,
+      });
+
       const expiredPayload = { requestId, type: request.type };
       await this.webhookEnqueue.fanout(tx, 'request.expired', expiredPayload);
     });

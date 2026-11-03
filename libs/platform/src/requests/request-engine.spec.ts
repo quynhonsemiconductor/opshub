@@ -997,12 +997,30 @@ describe('RequestEngine.expire()', () => {
     );
   });
 
+  it('tells the requester it lapsed, in the same transaction as the status change', async () => {
+    const { engine, db, notifScheduler } = buildEngine({
+      requestRow: makeRequest({ status: 'pending', requesterId: REQUESTER.sub }),
+    });
+    db.update.mockReturnValue(makeQueryChain([makeRequest({ status: 'expired' })]));
+
+    await engine.expire('req-1');
+
+    expect(scheduledNotifications(notifScheduler)).toEqual([
+      expect.objectContaining({
+        type: 'request.expired',
+        recipientId: REQUESTER.sub,
+        idempotencyKey: 'request_expired:req-1',
+      }),
+    ]);
+  });
+
   it('is a no-op when request is already resolved', async () => {
-    const { engine, webhookEnqueue } = buildEngine({
+    const { engine, webhookEnqueue, notifScheduler } = buildEngine({
       requestRow: makeRequest({ status: 'approved' }),
     });
 
     await engine.expire('req-1');
+    expect(notifScheduler.schedule).not.toHaveBeenCalled();
     // Was asserted against the outbox enqueue, which is gone; the webhook fan-out is the
     // remaining observable side effect, so its absence is what "no-op" now means.
     expect(webhookEnqueue.fanout).not.toHaveBeenCalled();
