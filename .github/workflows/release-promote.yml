@@ -2,7 +2,8 @@
 # Release · Promote — a vX.Y.Z tag RETAGS the digests already published for that
 # commit and opens the reviewed gitops prod PR. It builds NOTHING.
 #
-# The work lives in ci's reusable (v1.33.1). The tag can be pushed while the
+# The work lives in ci's reusable, pinned below to the merged commit that writes
+# the SPA image to web.image (ci#305). The tag can be pushed while the
 # same commit's GHCR · Publish run is still building, and release-retag looks for
 # sha-<12> once, so wait for that run first and propagate its conclusion.
 #
@@ -51,9 +52,10 @@ jobs:
       contents: read
       packages: write
       attestations: read
-    # Pins the merged ci commit that writes web to web.image (#305); the last
-    # release before it, v1.34.0, writes web to services.web, which the values
-    # schema rejects. Re-pin to the release that ships the fix once cut.
+    # Pins the merged ci commit that writes web to web.image (#305). The newest
+    # release, v1.34.0, predates that fix and writes web to services.web, which the
+    # values schema rejects; every older tag does the same. Re-pin to the release
+    # that ships the fix once cut.
     uses: quynhonsemiconductor/ci/.github/workflows/release-promote.yml@355d3c2c5893cb3b60fc68977d19e87554ed8648  # merged main, ci#305
     with:
       product: opshub
