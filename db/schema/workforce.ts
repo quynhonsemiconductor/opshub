@@ -256,6 +256,8 @@ export const wfhRequests = workforceSchema.table(
     endDate: date('end_date').notNull(),
     /** Working days the window covers, computed at submit and then frozen. Whole days only. */
     workingDays: integer('working_days').notNull(),
+    /** WHICH working days the window covers, computed at submit and then frozen with the count: the weekly quota needs the dates, and the holiday calendar is editable. */
+    workingDates: date('working_dates').array().notNull().default([]),
     reason: text('reason'),
     status: wfhStatusEnum('status').notNull().default('pending'),
     reviewerId: uuid('reviewer_id'),

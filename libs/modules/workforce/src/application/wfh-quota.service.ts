@@ -13,9 +13,7 @@ import {
   HO_CHI_MINH_UTC_OFFSET_HOURS,
   WFH_WEEKLY_DAYS_WITHOUT_BENEFIT,
 } from '../workforce.constants';
-import { workingDatesInRange } from '../domain/working-days';
 import { countDatesPerWeek, weekEndOf, weekStartOf } from '../domain/wfh-week.helper';
-import { LeaveBalanceService } from './leave-balance.service';
 
 /** WFH requests that still claim quota: filed and waiting, or approved. Rejected and cancelled give it back. */
 const _QUOTA_CLAIMING_STATUSES = ['pending', 'approved'] as const;
@@ -49,10 +47,7 @@ export interface WfhWeekQuota {
  */
 @Injectable()
 export class WfhQuotaService {
-  constructor(
-    @InjectDrizzle() private readonly db: DrizzleDB,
-    private readonly balances: LeaveBalanceService,
-  ) {}
+  constructor(@InjectDrizzle() private readonly db: DrizzleDB) {}
 
   /**
    * Looks up the weekly allowance an employee's rank gives them.
@@ -174,7 +169,7 @@ export class WfhQuotaService {
     const rangeEnd = weekEndOf(sortedWeekStarts[sortedWeekStarts.length - 1]);
 
     const claimingRequests = await (executor ?? this.db)
-      .select({ startDate: wfhRequests.startDate, endDate: wfhRequests.endDate })
+      .select({ workingDates: wfhRequests.workingDates })
       .from(wfhRequests)
       .where(
         and(
@@ -184,15 +179,10 @@ export class WfhQuotaService {
           gte(wfhRequests.endDate, rangeStart),
         ),
       );
-    if (claimingRequests.length === 0) return new Map();
-
-    const holidays = await this.balances.holidaysBetween(rangeStart, rangeEnd, executor);
+    // The days frozen on each request at submit, not the days between its dates under today's holiday
+    // calendar: declaring a holiday later must not change what a request already claimed.
     const claimedDates = claimingRequests.flatMap((request) =>
-      workingDatesInRange(
-        request.startDate > rangeStart ? request.startDate : rangeStart,
-        request.endDate < rangeEnd ? request.endDate : rangeEnd,
-        holidays,
-      ),
+      request.workingDates.filter((date) => date >= rangeStart && date <= rangeEnd),
     );
     const wantedWeeks = new Set(weekStarts);
     const claimedPerWeek = countDatesPerWeek(claimedDates);

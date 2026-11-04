@@ -256,6 +256,7 @@ export class WorkforceDrizzleRepository implements IWorkforceRepository {
         startDate: input.startDate,
         endDate: input.endDate,
         workingDays: input.workingDays,
+        workingDates: input.workingDates,
         reason: input.reason ?? null,
       })
       .returning();

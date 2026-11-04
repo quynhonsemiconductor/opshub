@@ -105,6 +105,8 @@ export interface WfhRequest {
   endDate: string;
   /** Working days the window covers, frozen at submit. An integer: WFH is whole days only. */
   workingDays: number;
+  /** Which working days (`YYYY-MM-DD`), frozen at submit with the count; the weekly quota is counted from these. */
+  workingDates: string[];
   reason: string | null;
   status: WfhStatus;
   reviewerId: string | null;
@@ -119,6 +121,7 @@ export interface CreateWfhInput {
   startDate: string;
   endDate: string;
   workingDays: number;
+  workingDates: string[];
   reason?: string | null;
 }
 

@@ -571,7 +571,7 @@ export class WorkforceService {
   }
 
   async createWfh(
-    input: Omit<CreateWfhInput, 'employeeId' | 'workingDays'>,
+    input: Omit<CreateWfhInput, 'employeeId' | 'workingDays' | 'workingDates'>,
     actor: Actor,
   ): Promise<WfhRequest> {
     await this.attendance.assertMonthsOpen(input.startDate, input.endDate, 'A WFH request');
@@ -622,7 +622,12 @@ export class WorkforceService {
       // requests filed at once cannot both pass against the last remaining day.
       await this.wfhQuota.assertWithinQuota(actor.sub, workingDays, tx);
       return this.repo.createWfh(
-        { ...input, employeeId: actor.sub, workingDays: workingDays.length },
+        {
+          ...input,
+          employeeId: actor.sub,
+          workingDays: workingDays.length,
+          workingDates: workingDays,
+        },
         tx,
       );
     });

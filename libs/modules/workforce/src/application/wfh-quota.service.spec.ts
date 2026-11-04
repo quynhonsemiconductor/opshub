@@ -34,19 +34,19 @@ function selectResolvingTo(rows: unknown[]) {
  *
  * Args:
  *   weeklyAllowance: What the rank's `wfh_weekly_days` benefit says; null means no ranked role.
- *   claimingRequests: The pending and approved requests the second read returns.
+ *   claimingRequests: The pending and approved requests the second read returns, as the working dates
+ *     each froze when it was filed.
  */
 function makeService(
   weeklyAllowance: number | null,
-  claimingRequests: { startDate: string; endDate: string }[] = [],
+  claimingRequests: { workingDates: string[] }[] = [],
 ) {
   const allowanceRows = weeklyAllowance === null ? [] : [{ allowance: weeklyAllowance }];
   const select = vi
     .fn()
     .mockReturnValueOnce(selectResolvingTo(allowanceRows))
     .mockReturnValueOnce(selectResolvingTo(claimingRequests));
-  const balances = { holidaysBetween: vi.fn().mockResolvedValue(new Set<string>()) };
-  return new WfhQuotaService({ select } as never, balances as never);
+  return new WfhQuotaService({ select } as never);
 }
 
 describe('assertWithinQuota', () => {
@@ -88,7 +88,7 @@ describe('assertWithinQuota', () => {
 
   it('counts days a pending or approved request already claims in the same week', async () => {
     // Two of the two allowed days are already claimed, so one more day has nowhere to go.
-    const service = makeService(2, [{ startDate: _MONDAY_WEEK_ONE, endDate: _TUESDAY_WEEK_ONE }]);
+    const service = makeService(2, [{ workingDates: [_MONDAY_WEEK_ONE, _TUESDAY_WEEK_ONE] }]);
 
     await expect(
       service.assertWithinQuota(_EMPLOYEE_ID, [_WEDNESDAY_WEEK_ONE]),
@@ -98,7 +98,7 @@ describe('assertWithinQuota', () => {
   it('judges each week on its own, so unused days never carry into the next week', async () => {
     // The allowance is 2 a week. Two days in each of two weeks is within quota even though it is four
     // days in total — and nothing claimed last week reduces this week.
-    const service = makeService(2, [{ startDate: _MONDAY_WEEK_ONE, endDate: _TUESDAY_WEEK_ONE }]);
+    const service = makeService(2, [{ workingDates: [_MONDAY_WEEK_ONE, _TUESDAY_WEEK_ONE] }]);
 
     await expect(
       service.assertWithinQuota(_EMPLOYEE_ID, [_MONDAY_WEEK_TWO, _TUESDAY_WEEK_TWO]),
@@ -106,7 +106,7 @@ describe('assertWithinQuota', () => {
   });
 
   it('names the week and the days left when a request goes over', async () => {
-    const service = makeService(2, [{ startDate: _MONDAY_WEEK_ONE, endDate: _MONDAY_WEEK_ONE }]);
+    const service = makeService(2, [{ workingDates: [_MONDAY_WEEK_ONE] }]);
 
     await expect(
       service.assertWithinQuota(_EMPLOYEE_ID, [_TUESDAY_WEEK_ONE, _WEDNESDAY_WEEK_ONE]),
@@ -116,7 +116,7 @@ describe('assertWithinQuota', () => {
 
 describe('getWeekQuota', () => {
   it('reports the allowance, the days used and what remains for the week containing the date', async () => {
-    const service = makeService(3, [{ startDate: _MONDAY_WEEK_ONE, endDate: _TUESDAY_WEEK_ONE }]);
+    const service = makeService(3, [{ workingDates: [_MONDAY_WEEK_ONE, _TUESDAY_WEEK_ONE] }]);
 
     const quota = await service.getWeekQuota(_EMPLOYEE_ID, _WEDNESDAY_WEEK_ONE);
 
@@ -130,16 +130,28 @@ describe('getWeekQuota', () => {
   });
 
   it('never reports a negative remainder when the allowance was lowered below what is claimed', async () => {
-    const service = makeService(1, [{ startDate: _MONDAY_WEEK_ONE, endDate: _TUESDAY_WEEK_ONE }]);
+    const service = makeService(1, [{ workingDates: [_MONDAY_WEEK_ONE, _TUESDAY_WEEK_ONE] }]);
 
     const quota = await service.getWeekQuota(_EMPLOYEE_ID, _MONDAY_WEEK_ONE);
 
     expect(quota.remainingDays).toBe(0);
   });
 
+  it('counts the days frozen on a request, not every weekday between its dates', async () => {
+    // Filed for Monday to Wednesday with Tuesday a public holiday at the time: two days claimed. A holiday
+    // declared AFTER filing changes nothing here, because the days were fixed when the request was made.
+    const service = makeService(5, [{ workingDates: [_MONDAY_WEEK_ONE, _WEDNESDAY_WEEK_ONE] }]);
+
+    const quota = await service.getWeekQuota(_EMPLOYEE_ID, _MONDAY_WEEK_ONE);
+
+    expect(quota.usedDays).toBe(2);
+  });
+
   it('counts only the working days a claiming request has inside the asked-about week', async () => {
     // A request running Friday of week one to Tuesday of week two claims one day in week one.
-    const service = makeService(5, [{ startDate: '2026-11-06', endDate: _TUESDAY_WEEK_TWO }]);
+    const service = makeService(5, [
+      { workingDates: ['2026-11-06', _MONDAY_WEEK_TWO, _TUESDAY_WEEK_TWO] },
+    ]);
 
     const quota = await service.getWeekQuota(_EMPLOYEE_ID, _MONDAY_WEEK_ONE);
 

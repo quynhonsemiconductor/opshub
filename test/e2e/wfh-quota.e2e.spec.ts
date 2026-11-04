@@ -152,3 +152,46 @@ describe('weekly WFH quota', () => {
     expect(refiled.status, JSON.stringify(refiled.body)).toBe(201);
   });
 });
+
+describe('a holiday declared after a request was filed', () => {
+  const weekThreeMonday = plusDays(mondayAhead(_WEEKS_AHEAD), 14);
+  const tuesday = plusDays(weekThreeMonday, 1);
+  const wednesday = plusDays(weekThreeMonday, 2);
+
+  it('does not change what the request claimed, so no day is quietly handed back', async () => {
+    /*
+     * The days a request covers are fixed when it is filed. The quota used to recount them from today's
+     * holiday calendar, so declaring Tuesday a holiday turned a two-day request into a one-day one and gave
+     * a day back that the employee had already spent.
+     */
+    const filed = await fileWfh(weekThreeMonday, tuesday);
+    expect(filed.status, JSON.stringify(filed.body)).toBe(201);
+    expect(await quotaOfWeekContaining(weekThreeMonday)).toMatchObject({
+      usedDays: 2,
+      remainingDays: 0,
+    });
+
+    const declared = await apiRequest(app, hr, 'POST', '/workforce/holidays', {
+      date: tuesday,
+      name: `e2e: declared after filing ${_RUN_TAG}`,
+    });
+    expect(declared.status, JSON.stringify(declared.body)).toBe(201);
+    try {
+      expect(await quotaOfWeekContaining(weekThreeMonday)).toMatchObject({
+        usedDays: 2,
+        remainingDays: 0,
+      });
+      const overflow = await fileWfh(wednesday, wednesday);
+      expect(overflow.status).toBe(412);
+      expect(errorCode(overflow.body)).toBe('WFH_QUOTA_EXCEEDED');
+    } finally {
+      const removed = await apiRequest(
+        app,
+        hr,
+        'DELETE',
+        `/workforce/holidays/${unwrap<{ id: string }>(declared.body).id}`,
+      );
+      expect(removed.status).toBe(204);
+    }
+  });
+});
