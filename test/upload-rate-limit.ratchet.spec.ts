@@ -3,7 +3,7 @@
  *
  * A presign hands out a signed S3 PUT and a confirm issues a HeadObject, so both cost object-storage
  * requests rather than database time — which is exactly why `RATE_LIMIT_TIERS.UPLOAD` exists (30/min per
- * user, against the 200/min DEFAULT). Assets carried it from the start. Employee avatars, leave documents
+ * user, against the 600/min DEFAULT). Assets carried it from the start. Employee avatars, leave documents
  * and training certificates did not: the tier existed and two thirds of the product's uploads ignored it,
  * which is the kind of gap nothing notices because the endpoints still work — they are just billed at the
  * wrong tier and unprotected against a loop.

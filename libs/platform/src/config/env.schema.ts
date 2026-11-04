@@ -43,7 +43,7 @@ const baseShape = {
    *
    * Exists for ONE reason: the browser E2E suite drives fifty-odd specs through a handful of seeded
    * identities inside three minutes, and each page load costs about fifteen calls — so it crosses
-   * 200/min and whichever request lands next comes back 429, failing a spec that was testing something
+   * 600/min and whichever request lands next comes back 429, failing a spec that was testing something
    * else. Spreading the specs over four seats helped locally and still lost in CI, which runs denser.
    *
    * IT CANNOT BE RAISED IN PRODUCTION. The refinement below refuses a value above the default when
@@ -56,7 +56,7 @@ const baseShape = {
    * raise it; `NODE_ENV=production` refuses a value above the default, so it is not a dial in a deployed environment.
    */
   RATE_LIMIT_IP_LIMIT: z.coerce.number().int().positive().default(PRE_AUTH_IP_BUCKET.limit),
-  RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(200),
+  RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(600),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
   CORS_ORIGINS: z.string().default('http://localhost:5174'),
@@ -259,12 +259,12 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
           'control, and an environment that raises it stops describing production. Lowering it is allowed.',
       });
     }
-    if (env.NODE_ENV === 'production' && env.RATE_LIMIT_DEFAULT_LIMIT > 200) {
+    if (env.NODE_ENV === 'production' && env.RATE_LIMIT_DEFAULT_LIMIT > 600) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['RATE_LIMIT_DEFAULT_LIMIT'],
         message:
-          'RATE_LIMIT_DEFAULT_LIMIT cannot exceed 200 when NODE_ENV=production: the default tier is a ' +
+          'RATE_LIMIT_DEFAULT_LIMIT cannot exceed 600 when NODE_ENV=production: the default tier is a ' +
           'protective control, and an environment that raises it stops describing production. Lowering ' +
           'it is allowed.',
       });

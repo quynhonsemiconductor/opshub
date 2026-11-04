@@ -16,8 +16,14 @@ export interface RateLimitTier {
  * change to every declaration that uses it.
  */
 export const RATE_LIMIT_TIERS = {
-  /** Default: most read/write endpoints — 200 req/min per user. Configurable downwards in production. */
-  DEFAULT: { name: 'DEFAULT', windowMs: 60_000, limit: 200 },
+  /** Default: most read/write endpoints — 600 req/min per user. Configurable downwards in production. */
+  DEFAULT: { name: 'DEFAULT', windowMs: 60_000, limit: 600 },
+  /**
+   * The session bootstrap — GET /v1/auth/me. Its own tier on purpose: it runs once per page load,
+   * before anything else, so a screen that fans out many reads must not be able to spend the bucket
+   * that decides whether the user is signed in. Two page loads a second is already far beyond a person.
+   */
+  AUTH_ME: { name: 'AUTH_ME', windowMs: 60_000, limit: 120 },
   /** Strict: expensive search/list endpoints — 60 req/min per user */
   STRICT: { name: 'STRICT', windowMs: 60_000, limit: 60 },
   /** AI chat — LLM calls are expensive; 10 req/min per user to cap inference cost. */

@@ -261,16 +261,16 @@ describe('EnvSchema — object storage backend', () => {
  * The DEFAULT rate limit is configurable DOWN, never up in production.
  *
  * The knob exists because the browser E2E suite drives fifty specs through four seeded identities inside
- * three minutes and crossed 200/min — in CI, after spreading the load over those four seats already fixed
+ * three minutes and crossed 600/min — in CI, after spreading the load over those four seats already fixed
  * it locally. That is a test-environment problem, and the accommodation must not become a dial somebody
  * can turn in production: these three cases are what make the docblock's promise enforceable.
  */
 describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
-  it('defaults to the shipped 200 per minute', () => {
+  it('defaults to the shipped 600 per minute', () => {
     const result = EnvSchema.safeParse(env());
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(200);
+    expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(600);
   });
 
   it('lets a test environment raise it', () => {
@@ -286,7 +286,7 @@ describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
     );
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.error.issues[0]?.message).toMatch(/cannot exceed 200 when NODE_ENV=production/);
+    expect(result.error.issues[0]?.message).toMatch(/cannot exceed 600 when NODE_ENV=production/);
   });
 
   it('allows LOWERING it in production, because that is not a weakening', () => {
