@@ -9,6 +9,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   comment:
     uses: quynhonsemiconductor/ci/.github/workflows/release-commenter.yml@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1

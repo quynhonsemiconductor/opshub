@@ -43,6 +43,9 @@ concurrency:
   group: ghcr-publish-backend-opshub-${{ github.sha }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   publish:
     # Ceiling for the reusable's inner grants: packages: write is the GHCR
