@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.8](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.7...v0.4.8) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **web:** answer /livez explicitly for the chart's liveness probe ([#543](https://github.com/quynhonsemiconductor/opshub/issues/543)) ([6133392](https://github.com/quynhonsemiconductor/opshub/commit/6133392ebeeded0e3de6f4d1cab7d2a02df533c7))
+
 ## [0.4.7](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.6...v0.4.7) (2026-11-04)
 
 
