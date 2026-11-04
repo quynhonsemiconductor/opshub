@@ -37,6 +37,12 @@ test.describe('access control', () => {
     await expect(page.getByText(/enter an employee id/i)).toBeVisible();
 
     await page.keyboard.press('ArrowRight');
+    await expect(page.getByRole('tab', { name: 'Direct permissions' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('tab', { name: 'Delegations' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -99,7 +105,7 @@ test.describe('access control', () => {
     await page.getByRole('button', { name: `Delete ${name}` }).click();
     const confirm = page.getByRole('alertdialog');
     await expect(confirm.getByText(/cannot be undone/i)).toBeVisible();
-    await confirm.getByRole('button', { name: /delete role/i }).click();
+    await confirm.getByRole('button', { name: /delete group/i }).click();
 
     await expect(page.locator('tbody tr', { hasText: key })).toHaveCount(0, { timeout: 10_000 });
   });

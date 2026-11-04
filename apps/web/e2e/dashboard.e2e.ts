@@ -48,6 +48,6 @@ test.describe('dashboard', () => {
     await gotoInShell(page, '/');
     await page.getByText('Groups, permissions and memberships').click();
     await expect(page).toHaveURL(/\/settings\/access-control$/);
-    await expect(page.getByRole('tab', { name: 'Roles' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Groups' })).toBeVisible();
   });
 });
