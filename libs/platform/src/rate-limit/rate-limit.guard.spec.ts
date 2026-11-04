@@ -3,7 +3,12 @@ import { HttpException } from '@nestjs/common';
 import { requestContextStorage } from '@quynhonsemiconductor/observability';
 import { GlobalExceptionFilter, KEYED_BY_ADDRESS } from '@quynhonsemiconductor/platform-http';
 import { describe, expect, it, vi } from 'vitest';
-import { PRE_AUTH_IP_BUCKET, RATE_LIMIT_TIER, SKIP_RATE_LIMIT } from './rate-limit.constants';
+import {
+  PRE_AUTH_IP_BUCKET,
+  RATE_LIMIT_TIER,
+  RATE_LIMIT_TIERS,
+  SKIP_RATE_LIMIT,
+} from './rate-limit.constants';
 import { RateLimitGuard, UserRateLimitGuard } from './rate-limit.guard';
 
 /**
@@ -521,5 +526,18 @@ describe('UserRateLimitGuard (authenticated, per user)', () => {
     );
     await asUser('emp-1', () => aiGuard.canActivate(contextFor().context));
     expect(cache.consumeRateLimit.mock.calls[1][1]).toBe(10);
+  });
+});
+
+describe('the shipped tiers', () => {
+  it('gives a signed-in user 600 DEFAULT requests a minute', () => {
+    // Pinned rather than implied by whichever config the caller happened to build: a silently smaller
+    // DEFAULT is the difference between a busy screen working and it answering 429.
+    expect(RATE_LIMIT_TIERS.DEFAULT.limit).toBe(600);
+  });
+
+  it('gives /v1/auth/me its own bucket, so page-load reads cannot spend the DEFAULT one', () => {
+    expect(RATE_LIMIT_TIERS.AUTH_ME).toMatchObject({ windowMs: 60_000, limit: 120 });
+    expect(RATE_LIMIT_TIERS.AUTH_ME).not.toBe(RATE_LIMIT_TIERS.DEFAULT);
   });
 });

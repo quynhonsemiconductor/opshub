@@ -3,7 +3,7 @@ import { expect, request, type APIRequestContext, type Locator, type Page } from
 /**
  * ONE SIGNED-IN STATE PER SEAT, AND A SEAT PER TEST.
  *
- * The DEFAULT rate-limit tier allows 200 requests a minute keyed on the USER id, and it is one bucket
+ * The DEFAULT rate-limit tier allows 600 requests a minute keyed on the USER id, and it is one bucket
  * across every route that tier covers — so a whole spec's traffic lands in one place.
  *
  * WHAT WAS WRONG WITH FOUR SEATS PER FILE. Spec files were spread across four seats round-robin, which

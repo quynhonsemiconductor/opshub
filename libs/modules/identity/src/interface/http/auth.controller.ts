@@ -7,6 +7,7 @@ import {
   AuthzService,
   SESSION_COOKIE,
   SelfScoped,
+  RateLimit,
 } from '@platform';
 import type { JwtPayload } from '@platform';
 import type { FastifyRequest, FastifyReply } from 'fastify';
@@ -39,6 +40,9 @@ export class AuthController {
   @Get('me')
   @SelfScoped("returns the caller's own principal")
   @Auth()
+  // Its own tier: this is the first request of every page load, and it decides whether the shell can
+  // render at all. A screen fanning out dozens of DEFAULT reads must not spend this bucket.
+  @RateLimit('AUTH_ME')
   @ApiOperation({ summary: 'Return the authenticated principal and its effective permissions' })
   @ApiOkResponse({ type: MeResponseDto })
   @ApiCommonErrors(401)

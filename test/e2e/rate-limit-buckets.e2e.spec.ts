@@ -49,6 +49,21 @@ describe('rate-limit buckets', () => {
     expect(await windowSize(addressKey)).toBe(addressBefore);
   });
 
+  it('counts /v1/auth/me against its own tier, not DEFAULT', async () => {
+    // The bootstrap runs before anything else on every page load. Sharing DEFAULT with it would let a
+    // screen that fans out reads 429 the very request that decides whether the shell can render.
+    const authMeKey = `rl:AUTH_ME:uid:${admin.userId}`;
+    const defaultKey = `rl:DEFAULT:uid:${admin.userId}`;
+    const authMeBefore = await windowSize(authMeKey);
+    const defaultBefore = await windowSize(defaultKey);
+
+    const res = await apiRequest(app, admin, 'GET', '/auth/me');
+
+    expect(res.status).toBe(200);
+    expect(await windowSize(authMeKey)).toBe(authMeBefore + 1);
+    expect(await windowSize(defaultKey)).toBe(defaultBefore);
+  });
+
   it('keeps the address slot of a request identity does not verify (a 401)', async () => {
     const addressKey = 'rl:IP:127.0.0.1';
     const before = await windowSize(addressKey);

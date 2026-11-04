@@ -72,7 +72,7 @@ const ADMIN_EMPLOYEE_ID = '00000000-0000-7000-8000-000000000001';
 /**
  * A SECOND admin, for the browser suite only.
  *
- * The rate limiter keys the DEFAULT tier (200 req/min) on the user id, and the Playwright suite signs in
+ * The rate limiter keys the DEFAULT tier (600 req/min) on the user id, and the Playwright suite signs in
  * as one principal for every spec — around 15 API calls per page load, times forty-odd specs inside two
  * minutes, which crosses that line and fails whichever request lands next with a 429. Measured, twice,
  * once as an "upload broken" report that was nothing of the kind.

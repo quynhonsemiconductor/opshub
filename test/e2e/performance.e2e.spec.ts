@@ -1018,7 +1018,7 @@ describe('coverage and closing', () => {
      *
      * BOUNDED TO THE FIRST FEW ROWS, one at a time. My first version walked every row at `limit=1`,
      * which on a database with 848 active employees is 848 requests and earned a real 429 — the DEFAULT
-     * tier is 200/minute — that then cascaded into five later tests in this file. `limit=1` is still the
+     * tier is 600/minute — that then cascaded into five later tests in this file. `limit=1` is still the
      * point, because one row per page maximises the number of BOUNDARIES, which is where a partial
      * order goes wrong; ten boundaries prove the ordering just as well as eight hundred and are a test
      * rather than a load generator.
