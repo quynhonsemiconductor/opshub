@@ -3,8 +3,8 @@
 # Container test for the web image (apps/web/Dockerfile + apps/web/Caddyfile).
 #
 # Builds the image from the repo root, runs it the way the chart runs it (read-only root filesystem,
-# a writable /tmp, config.json mounted at /srv/config.json, an arbitrary non-root uid, port 8080),
-# and exercises the serving contract.
+# a writable /tmp, ALL capabilities dropped, no-new-privileges, config.json mounted at
+# /srv/config.json, an arbitrary non-root uid, port 8080), and exercises the serving contract.
 #
 #   contract      /healthz and /livez 200; doc root /srv; the process runs as the uid asked for;
 #                 the SPA fallback answers an unknown client-side route
@@ -88,8 +88,15 @@ echo "== build the image"
 docker build -q -f apps/web/Dockerfile --target web \
   --secret id=node_auth_token,env=NODE_AUTH_TOKEN -t "$image" . >/dev/null
 
-echo "== start the image (read-only root, uid 12345, config mounted)"
+echo "== start the image (read-only root, uid 12345, no capabilities, config mounted)"
+# The chart runs the pod with ALL capabilities dropped, no-new-privileges and a read-only root
+# filesystem. `--cap-drop ALL` is the assertion that matters here: a binary carrying a FILE
+# capability (older Caddy images set cap_net_bind_service) cannot be exec'd under that policy, and
+# the pod dies with `exec /usr/bin/caddy: operation not permitted`. Without these flags this test
+# starts the image as Docker's default (capabilities available), so it would stay green while the
+# cluster refused to boot it.
 docker run -d --name "$web" --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges \
   --user 12345 -p 127.0.0.1::8080 \
   -v "$tmpdir/config.json:/srv/config.json:ro" "$image" >/dev/null
 
@@ -158,6 +165,7 @@ expect_no_header "no Server fingerprint" Server "$base/"
 
 echo "== a deployment that forgot the config"
 docker run -d --name "$web_noconfig" --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges \
   --user 12345 -p 127.0.0.1::8080 "$image" >/dev/null
 for _ in $(seq 1 30); do
   noconfig_port="$(docker port "$web_noconfig" 8080/tcp 2>/dev/null | awk -F: 'NR==1{print $NF}')"

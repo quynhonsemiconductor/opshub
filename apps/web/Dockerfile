@@ -68,6 +68,17 @@ FROM caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079e
 # and libssl move faster than the tag.
 RUN apk upgrade --no-cache && rm -rf /var/cache/apk/*
 
+# The upstream image ships Caddy with a FILE capability (cap_net_bind_service=ep) so root can bind
+# port 80/443. This image listens on 8080 and runs as an unprivileged user, so it needs none — and
+# the capability is worse than useless here: a runtime that drops ALL capabilities (the chart's
+# securityContext, or `docker run --cap-drop ALL`) cannot exec a binary carrying one, and the pod
+# dies with `exec /usr/bin/caddy: operation not permitted`. Removing the xattr is what lets it run
+# under that policy; the assertion fails the BUILD if a base-image bump brings the cap back.
+RUN apk add --no-cache --virtual .caddy-cap libcap && \
+    setcap -r /usr/bin/caddy && \
+    test -z "$(getcap /usr/bin/caddy)" && \
+    apk del .caddy-cap
+
 COPY --from=build /app/apps/web/dist /srv
 COPY apps/web/Caddyfile /etc/caddy/Caddyfile
 
