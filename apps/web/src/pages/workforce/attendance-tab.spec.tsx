@@ -223,6 +223,23 @@ describe('the month close', () => {
 });
 
 describe('the CSVs', () => {
+  // jsdom 30.1 changed Blob's internals, and vitest 4.1.12's compat URL.createObjectURL reads
+  // them (`makeCompatBlob` -> `_buffer` of undefined), which surfaces as an unhandled rejection:
+  // `downloadCsv` finishes after the assertion below, so the throw has nowhere to go. The contract
+  // under test is the GET, not the object-URL store — stub it, as export-csv.spec does.
+  beforeEach(() => {
+    Object.defineProperty(URL, 'createObjectURL', {
+      value: () => 'blob:csv-mock',
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      value: () => {},
+      configurable: true,
+      writable: true,
+    });
+  });
+
   it('an attendance reader gets both downloads, fetched as text', async () => {
     can.mockImplementation((p: string) => p === 'workforce.attendance.read');
     renderTab();
