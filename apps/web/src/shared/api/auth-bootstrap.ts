@@ -11,8 +11,25 @@ import { ME_QUERY_KEY } from '@/shared/hooks/use-current-user';
 import { queryClient } from './query-client';
 import { setCsrfToken } from './csrf';
 import { useAuthStore, type SessionUser } from './auth-store';
+import { RATE_LIMIT_MAX_RETRIES, rateLimitDelayMs, sleep } from './rate-limit-retry';
 
 let _bootstrapPromise: Promise<void> | null = null;
+
+/** Shown when the session could not be resolved, but the caller may still be signed in. */
+const UNAVAILABLE =
+  'OpsHub could not verify your session. This is usually temporary — try again in a moment.';
+
+/** Shown when no response arrived at all. Distinct from a 5xx, so the advice is different. */
+const UNREACHABLE = 'OpsHub could not be reached. Check your connection and try again.';
+
+/** Temporary failures are retried; every other non-ok answer is reported, never treated as a logout. */
+function isTransient(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+function unavailableMessage(status: number): string {
+  return status === 429 ? 'OpsHub is busy right now. Wait a moment and try again.' : UNAVAILABLE;
+}
 
 /** Idempotent: React StrictMode's double-invoke shares one in-flight promise. */
 export function bootstrapAuth(): Promise<void> {
@@ -35,27 +52,67 @@ export function bootstrapAuth(): Promise<void> {
 export function resetBootstrap(): void {
   _bootstrapPromise = null;
   queryClient.clear();
+  useAuthStore.getState().setError(null);
 }
 
 async function _run(): Promise<void> {
-  const { clear, setReady, setUser } = useAuthStore.getState();
+  const { clear, setError, setReady, setUser } = useAuthStore.getState();
   try {
-    // `credentials: 'include'` is what sends the session cookie. Same-origin in every
-    // environment — locally via the Vite proxy, deployed via the Cloudflare Pages
-    // Function — so this is not a cross-site request and needs no CORS.
-    const res = await fetch(`${ENV.API_BASE_URL}/v1/auth/me`, {
-      credentials: 'include',
-      referrerPolicy: 'no-referrer',
-      headers: { accept: 'application/json' },
-    });
+    /*
+     * A 429 IS NOT A LOGOUT. This used to call `clear()` on any non-ok answer, so one busy minute on
+     * the API sent a perfectly valid session to the login page — and every page load re-ran the
+     * bootstrap, so the same busy minute logged them out again on the way back. The same was true of
+     * a 502 from the proxy and of being offline.
+     *
+     * Only 401 and 403 mean "there is no session": the cookie is absent/expired (401) or the server
+     * refuses this identity (403). Everything else is reported, and the router is not allowed to
+     * assume the user is signed out.
+     */
+    let res: Response | null = null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        // `credentials: 'include'` is what sends the session cookie. Same-origin in every
+        // environment — locally via the Vite proxy, deployed via the Cloudflare Pages
+        // Function — so this is not a cross-site request and needs no CORS.
+        res = await fetch(`${ENV.API_BASE_URL}/v1/auth/me`, {
+          credentials: 'include',
+          referrerPolicy: 'no-referrer',
+          headers: { accept: 'application/json' },
+        });
+      } catch {
+        if (attempt < RATE_LIMIT_MAX_RETRIES) {
+          await sleep(rateLimitDelayMs(attempt));
+          continue;
+        }
+        setError(UNREACHABLE);
+        return;
+      }
 
-    if (!res.ok) {
-      // 401 is the ordinary "not signed in yet" answer, not an error worth surfacing.
-      clear();
+      if (res.status === 401 || res.status === 403) {
+        // The ordinary "not signed in yet" answer, and the only answers that mean so.
+        clear();
+        return;
+      }
+
+      if (res.ok) break;
+
+      if (isTransient(res.status) && attempt < RATE_LIMIT_MAX_RETRIES) {
+        // The API sends `Retry-After` on 429; on a 5xx it is usually absent, so back off.
+        await sleep(rateLimitDelayMs(attempt, res));
+        continue;
+      }
+
+      setError(unavailableMessage(res.status));
       return;
     }
 
-    const user = (await res.json()) as SessionUser & { csrfToken?: string };
+    let user: SessionUser & { csrfToken?: string };
+    try {
+      user = (await res.json()) as SessionUser & { csrfToken?: string };
+    } catch {
+      setError(UNAVAILABLE);
+      return;
+    }
     /*
      * HANDED TO THE QUERY CACHE, not thrown away.
      *
@@ -80,10 +137,6 @@ async function _run(): Promise<void> {
       roles: user.roles,
       permissions: user.permissions,
     });
-  } catch {
-    // Network failure — treated as unauthenticated so the router can show the login
-    // page rather than a blank shell.
-    clear();
   } finally {
     setReady(true);
   }

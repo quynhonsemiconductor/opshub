@@ -30,8 +30,28 @@ const ME = {
   csrfToken: 'csrf-1',
 };
 
-function stubMe(body: unknown = ME, ok = true) {
-  const spy = vi.fn().mockResolvedValue({ ok, json: () => Promise.resolve(body) });
+function response(body: unknown = ME, status = 200, retryAfter?: string) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(retryAfter === undefined ? {} : { 'retry-after': retryAfter }),
+    json: () => Promise.resolve(body),
+  };
+}
+
+function stubMe(body: unknown = ME, status = 200) {
+  const spy = vi.fn().mockResolvedValue(response(body, status));
+  vi.stubGlobal('fetch', spy);
+  return spy;
+}
+
+/** Fail `failures.length` times with these responses, then answer 200 with ME. */
+function stubThenOk(...failures: Array<{ status: number; retryAfter?: string }>) {
+  const spy = vi.fn();
+  for (const failure of failures) {
+    spy.mockResolvedValueOnce(response({}, failure.status, failure.retryAfter));
+  }
+  spy.mockResolvedValue(response(ME));
   vi.stubGlobal('fetch', spy);
   return spy;
 }
@@ -41,7 +61,9 @@ beforeEach(() => {
   // than reaching into the module's private promise.
   resetBootstrap();
   useAuthStore.getState().clear();
+  useAuthStore.getState().setReady(false);
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('bootstrapAuth', () => {
@@ -76,21 +98,120 @@ describe('bootstrapAuth', () => {
   it('caches nothing when the caller is not signed in', async () => {
     // A 401 is the ordinary "not signed in yet" answer. Caching it would hand the hook a non-answer it
     // would then treat as data.
-    stubMe({}, false);
+    stubMe({}, 401);
 
     await bootstrapAuth();
 
     expect(queryClient.getQueryData(ME_QUERY_KEY)).toBeUndefined();
     expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().error).toBeNull();
+  });
+
+  it('caches nothing and reports rather than clears on a transient failure', async () => {
+    // The bug: a 500 used to be treated as "signed out", so the login page appeared over a valid cookie.
+    stubThenOk({ status: 500 }, { status: 500 }, { status: 500 });
+    vi.useFakeTimers();
+
+    const pending = bootstrapAuth();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+
+    expect(queryClient.getQueryData(ME_QUERY_KEY)).toBeUndefined();
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().error).toMatch(/could not verify your session/i);
+    // And the router still gets an answer: the shell must be able to render the retry screen.
+    expect(useAuthStore.getState().ready).toBe(true);
+  });
+
+  it('keeps an established identity when the re-check is temporarily unavailable', async () => {
+    useAuthStore.getState().setUser({
+      sub: 'emp-1',
+      email: 'jane@acme.com',
+      name: 'Jane Doe',
+      roles: [],
+      permissions: [],
+    });
+    stubThenOk({ status: 503 }, { status: 503 }, { status: 503 });
+    vi.useFakeTimers();
+
+    const pending = bootstrapAuth();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+
+    // Unproven is not gone: only a 401/403 may clear the session.
+    expect(useAuthStore.getState().user?.sub).toBe('emp-1');
+    expect(useAuthStore.getState().error).toBeTruthy();
+  });
+
+  it('honours Retry-After on a 429, then signs in when the retry succeeds', async () => {
+    const fetchSpy = stubThenOk({ status: 429, retryAfter: '2' });
+    vi.useFakeTimers();
+
+    const pending = bootstrapAuth();
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fetchSpy).toHaveBeenCalledOnce(); // still waiting
+
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(useAuthStore.getState().user?.sub).toBe('emp-1');
+    expect(useAuthStore.getState().error).toBeNull();
+  });
+
+  it('caps a Retry-After a proxy could send, so one boot cannot wait an hour', async () => {
+    const fetchSpy = stubThenOk({ status: 429, retryAfter: '3600' });
+    vi.useFakeTimers();
+
+    const pending = bootstrapAuth();
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a network failure, and reports it after the cap instead of logging out', async () => {
+    const fetchSpy = vi.fn().mockRejectedValue(new Error('offline'));
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.useFakeTimers();
+
+    const pending = bootstrapAuth();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().error).toMatch(/could not be reached/i);
+  });
+
+  it('clears the session on a 403, which is a definite refusal', async () => {
+    useAuthStore.getState().setUser({
+      sub: 'emp-1',
+      email: 'jane@acme.com',
+      name: 'Jane Doe',
+      roles: [],
+      permissions: [],
+    });
+    stubMe({}, 403);
+
+    await bootstrapAuth();
+
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().error).toBeNull();
   });
 
   it('caches nothing when the network fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    vi.useFakeTimers();
 
-    await bootstrapAuth();
+    const pending = bootstrapAuth();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
 
     expect(queryClient.getQueryData(ME_QUERY_KEY)).toBeUndefined();
-    // And it still finishes: the router has to be able to render the login page.
+    // And it still finishes: the router has to be able to render the retry screen.
     expect(useAuthStore.getState().ready).toBe(true);
   });
 
