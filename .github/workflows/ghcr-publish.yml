@@ -98,9 +98,11 @@ jobs:
   # without force, so the second would be rejected. One job that needs both
   # calls and merges their digest maps is the single-bump option.
   #
-  # Only services present in gitops values/opshub are written: web is built and
-  # published but gitops has no web image yet (D's chart). It joins the list
-  # when the chart lands; extra digests in the map are harmless.
+  # `web` IS in the list: the SPA image is published by the second call from the
+  # SAME commit, and the action writes it to top-level `web.image` in the same
+  # machine-owned tags file — where the chart reads it (templates/web.yaml), not
+  # under services. A digest there is harmless until values/opshub/<env>.yaml
+  # sets `web.enabled: true`.
   bump-dev:
     needs: [publish, publish-web]
     if: ${{ github.ref == 'refs/heads/main' && needs.publish.result == 'success' && needs.publish-web.result == 'success' }}
@@ -134,11 +136,11 @@ jobs:
           b=${WEB_DIGESTS-}; [ -n "$b" ] || b='{}'
           merged=$(jq -c -n --argjson a "$a" --argjson b "$b" '$a * $b')
           echo "digests=$merged" >> "$GITHUB_OUTPUT"
-      - uses: quynhonsemiconductor/ci/actions/bump-gitops-tag@400b7e9868e9ba6d172d956a08041ba19b574689  # v1.33.1
+      - uses: quynhonsemiconductor/ci/actions/bump-gitops-tag@b696a7d77e650057b4ee1de16be84bcce3936566  # v1.34.0
         with:
           product: opshub
           env: dev
-          services: api worker migrator
+          services: api worker migrator web
           tag: ${{ needs.publish.outputs.tag }}
           digests: ${{ steps.digests.outputs.digests }}
           mode: pull-request
