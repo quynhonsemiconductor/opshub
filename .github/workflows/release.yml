@@ -17,6 +17,9 @@ concurrency:
   group: release-please
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   release:
     permissions:
