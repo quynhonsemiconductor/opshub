@@ -6,8 +6,8 @@
 # a writable /tmp, config.json mounted at /srv/config.json, an arbitrary non-root uid, port 8080),
 # and exercises the serving contract.
 #
-#   contract      /healthz 200; doc root /srv; the process runs as the uid asked for; the SPA
-#                 fallback answers an unknown client-side route
+#   contract      /healthz and /livez 200; doc root /srv; the process runs as the uid asked for;
+#                 the SPA fallback answers an unknown client-side route
 #   caching       /, /config.json and SPA routes no-cache; an existing /assets/* immutable; a MISSING
 #                 asset 404 with no Cache-Control promise
 #   headers       every value of the Worker's `_headers`; no Server fingerprint anywhere
@@ -108,6 +108,15 @@ if [ "$uid" = "12345" ]; then ok "the server runs as the uid the pod asked for (
 root="$(docker exec --user 0 "$web" sh -c 'test -f /srv/index.html && echo /srv')"
 if [ "$root" = "/srv" ]; then ok "doc root /srv holds index.html"; else bad "doc root" "/srv/index.html is missing"; fi
 expect_status "/healthz" 200 "$base/healthz"
+# The chart hardcodes liveness to /livez (admission rejects any other path). Both assertions matter:
+# status alone would also pass against the SPA fallback, so require the probe's own one-word answer.
+expect_status "/livez" 200 "$base/livez"
+livez_body="$(curl -sS --max-time 10 "$base/livez")"
+if [ "$livez_body" = "ok" ]; then
+  ok "/livez answers the probe, not the SPA fallback"
+else
+  bad "/livez body" "expected 'ok', got '$(printf '%.40s' "$livez_body")'"
+fi
 expect_status "/" 200 "$base/"
 expect_status "/config.json (mounted)" 200 "$base/config.json"
 expect_status "unknown path falls back to the SPA" 200 "$base/some/spa/route"

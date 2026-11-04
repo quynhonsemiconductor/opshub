@@ -3,7 +3,7 @@
 #
 # Why Caddy over nginx-unprivileged: one static binary that parses and validates its own config
 # (`caddy validate`, run at image build) instead of a root-master/worker process model, no writable
-# directory it insists on owning, and a single `/healthz` to answer. The image runs with a read-only
+# directory it insists on owning, and the probe endpoints to answer. The image runs with a read-only
 # root filesystem; Caddy's only writes go to the `XDG_*` directories under /tmp, which a deployment
 # mounts as emptyDir (see the Dockerfile).
 #
@@ -12,7 +12,7 @@
 #   listens on 8080             (web.port)
 #   doc root   /srv             (dist/ at its root)
 #   config     /srv/config.json (ConfigMap, mounted with subPath — replacing this one file)
-#   health     /healthz         (both probes)
+#   health     /livez, /healthz (liveness and readiness)
 #   /tmp        the ONLY writable path (read-only root filesystem, any non-root uid)
 #
 # It serves what the Cloudflare Worker served, so the cutover changes the deploy system and nothing
@@ -21,7 +21,7 @@
 #   /config.json            the runtime config a deployment mounts (gitops ConfigMap), no-cache
 #   /assets/*               content-hashed build output, immutable
 #   everything else         the built files; an unknown path falls back to index.html (SPA route)
-#   /healthz                liveness/readiness for the probes
+#   /livez, /healthz        liveness/readiness for the probes
 #
 # HEADERS: apps/web/public/_headers is the Cloudflare manifest of the same policy. Both files must
 # change together while the Worker is the fallback; the CSP and its long "why" comment live there.
@@ -49,9 +49,17 @@
 		Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; img-src 'self' data: blob: https://69e52835cf2d08edde5b6ebd741d30fa.r2.cloudflarestorage.com; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://69e52835cf2d08edde5b6ebd741d30fa.r2.cloudflarestorage.com; frame-src 'self' blob:; worker-src 'self' blob:;"
 	}
 
-	# Probe endpoint. No log line, no dependency: a probe must say "the process answers", not "the
+	# Probe endpoints. No log line, no dependency: a probe must say "the process answers", not "the
 	# API is healthy" (ArgoCD and the API have their own).
+	#
+	# `/healthz` answers both probes locally, but the chart hardcodes liveness to `/livez` for every
+	# service and admission rejects anything else (§9j), so `/livez` must answer here explicitly.
+	# Without this block the SPA fallback below would still return 200 — by serving index.html to a
+	# probe that should get one word.
 	handle /healthz {
+		respond "ok" 200
+	}
+	handle /livez {
 		respond "ok" 200
 	}
 
