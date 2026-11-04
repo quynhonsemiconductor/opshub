@@ -6,8 +6,11 @@
 # same commit's GHCR · Publish run is still building, and release-retag looks for
 # sha-<12> once, so wait for that run first and propagate its conclusion.
 #
-# `web` is NOT in `services`: gitops values/opshub has no web image yet (D's
-# chart). It joins here when the chart lands.
+# `web` IS in `services`: gitops values/opshub now carries the top-level
+# `web.image` (the chart's SPA component), and ghcr-publish's second call
+# publishes the SPA image from the SAME release commit (build-once). The
+# reusable and the bump action write it to `web.image.{tag,digest}`, not under
+# `services.web`.
 # =============================================================================
 name: Release · Promote
 
@@ -48,12 +51,15 @@ jobs:
       contents: read
       packages: write
       attestations: read
-    uses: quynhonsemiconductor/ci/.github/workflows/release-promote.yml@400b7e9868e9ba6d172d956a08041ba19b574689  # v1.33.1
+    # Pins ci's fix/release-promote-web commit: v1.33.1 writes web to services.web,
+    # which the values schema rejects. Re-pin to the release that ships that fix
+    # (v1.35.0) once it is cut.
+    uses: quynhonsemiconductor/ci/.github/workflows/release-promote.yml@5ce43f4b36002267bc24fad8cd6b734f9914dfdd  # fix/release-promote-web
     with:
       product: opshub
       gitops-product: opshub
       release-tag: ${{ github.ref_name }}
       commit: ${{ github.sha }}
-      services: api worker migrator
+      services: api worker migrator web
     secrets:
       QNSC_AUTOMATION_PRIVATE_KEY: ${{ secrets.QNSC_AUTOMATION_PRIVATE_KEY }}
