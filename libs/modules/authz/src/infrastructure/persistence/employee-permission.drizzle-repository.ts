@@ -3,8 +3,11 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { InjectDrizzle, type DbExecutor, type DrizzleDB, type EmployeePermission } from '@platform';
 import { newId } from '@shared-kernel';
 import { employeePermissions } from '../../../../../../db/schema';
+import { isGrantExpired } from '../../domain/grant-expiry.helper';
+import { GRANT_OUTCOME } from '../../domain/grant-outcome';
 import type {
   GrantEmployeePermissionInput,
+  GrantEmployeePermissionResult,
   IEmployeePermissionRepository,
 } from '../../domain/ports/employee-permission.repository';
 
@@ -46,13 +49,37 @@ export class EmployeePermissionDrizzleRepository implements IEmployeePermissionR
     return row ? this.toDomain(row) : null;
   }
 
-  async grant(input: GrantEmployeePermissionInput, tx?: DbExecutor): Promise<EmployeePermission> {
-    // Check-then-insert: the unique indexes guard each scope shape, but a global grant has a NULL scope id,
+  async grant(
+    input: GrantEmployeePermissionInput,
+    tx?: DbExecutor,
+  ): Promise<GrantEmployeePermissionResult> {
+    const executor = tx ?? this.db;
+    // Check-then-write: the unique indexes guard each scope shape, but a global grant has a NULL scope id,
     // which Postgres treats as distinct, so the equivalent row is looked up explicitly.
-    const existing = await this.findEquivalent(input);
-    if (existing) return existing;
+    const existing = await this.findEquivalent(input, executor);
+    if (existing && !isGrantExpired(existing.expiresAt, new Date())) {
+      return { grant: existing, outcome: GRANT_OUTCOME.UNCHANGED, previous: null };
+    }
+    if (existing) {
+      // Expired: confers nothing, and the unique index allows no second row, so it is renewed in place.
+      const [renewed] = await executor
+        .update(employeePermissions)
+        .set({
+          grantedBy: input.grantedBy,
+          reason: input.reason,
+          expiresAt: input.expiresAt,
+          createdAt: new Date(),
+        })
+        .where(eq(employeePermissions.id, existing.id))
+        .returning();
+      return {
+        grant: this.toDomain(renewed),
+        outcome: GRANT_OUTCOME.RENEWED,
+        previous: existing,
+      };
+    }
 
-    const [row] = await (tx ?? this.db)
+    const [row] = await executor
       .insert(employeePermissions)
       .values({
         id: newId(),
@@ -65,13 +92,14 @@ export class EmployeePermissionDrizzleRepository implements IEmployeePermissionR
         expiresAt: input.expiresAt,
       })
       .returning();
-    return this.toDomain(row);
+    return { grant: this.toDomain(row), outcome: GRANT_OUTCOME.CREATED, previous: null };
   }
 
   private async findEquivalent(
     input: GrantEmployeePermissionInput,
+    executor: DbExecutor,
   ): Promise<EmployeePermission | null> {
-    const [row] = await this.db
+    const [row] = await executor
       .select()
       .from(employeePermissions)
       .where(

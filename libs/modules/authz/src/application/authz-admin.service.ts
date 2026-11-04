@@ -36,6 +36,7 @@ import {
   EMPLOYEE_PERMISSION_REPOSITORY,
   type IEmployeePermissionRepository,
 } from '../domain/ports/employee-permission.repository';
+import { GRANT_OUTCOME } from '../domain/grant-outcome';
 import { resolveGrantScope } from './grant-scope.helper';
 import { mayGrantPermission } from './permission-grant.helper';
 
@@ -381,8 +382,8 @@ export class AuthzAdminService {
       throw new ValidationException('VALIDATION_FAILED', 'expiresAt must be in the future');
     }
 
-    const grant = await this.db.transaction(async (tx) => {
-      const created = await this.employeePermissionRepo.grant(
+    const { grant } = await this.db.transaction(async (tx) => {
+      const result = await this.employeePermissionRepo.grant(
         {
           employeeId: command.employeeId,
           permissionKey: command.permissionKey,
@@ -394,23 +395,32 @@ export class AuthzAdminService {
         },
         tx,
       );
-      await this.employeePermissionTrail.record(
-        AUDIT_ACTION.EMPLOYEE_PERMISSION_GRANTED,
-        created.id,
-        actor,
-        tx,
-        {
-          after: {
-            employeeId: command.employeeId,
-            permissionKey: command.permissionKey,
-            scopeType,
-            scopeId,
-            reason: command.reason,
-            expiresAt: created.expiresAt?.toISOString() ?? null,
+      // A live grant that was already held changed nothing, so it leaves no entry claiming it did.
+      if (result.outcome !== GRANT_OUTCOME.UNCHANGED) {
+        await this.employeePermissionTrail.record(
+          AUDIT_ACTION.EMPLOYEE_PERMISSION_GRANTED,
+          result.grant.id,
+          actor,
+          tx,
+          {
+            ...(result.previous && {
+              before: {
+                reason: result.previous.reason,
+                expiresAt: result.previous.expiresAt?.toISOString() ?? null,
+              },
+            }),
+            after: {
+              employeeId: command.employeeId,
+              permissionKey: command.permissionKey,
+              scopeType,
+              scopeId,
+              reason: result.grant.reason,
+              expiresAt: result.grant.expiresAt?.toISOString() ?? null,
+            },
           },
-        },
-      );
-      return created;
+        );
+      }
+      return result;
     });
 
     await this.authz.invalidate(command.employeeId);

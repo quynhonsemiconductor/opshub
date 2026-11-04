@@ -145,6 +145,27 @@ describe('a permission granted directly', () => {
     expect((await probe()).statusCode).toBe(403);
   }, 20_000);
 
+  it('can be granted again once it has expired, and the new grant takes effect', async () => {
+    /*
+     * An expired grant stays in the table and the same (permission, scope) may hold only one row, so granting
+     * again used to hand back the expired row: a success answer, the new expiry and reason dropped, and a
+     * grant recorded that conferred nothing.
+     */
+    const first = await grantDirect(admin, {
+      expiresAt: new Date(Date.now() + _SHORT_GRANT_MS).toISOString(),
+    });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const { id } = unwrap<GrantRow>(first.body);
+    await new Promise((resolve) => setTimeout(resolve, _WAIT_PAST_EXPIRY_MS));
+    expect((await probe()).statusCode).toBe(403);
+
+    const reason = 'e2e: granted again after it lapsed';
+    const again = await grantDirect(admin, { reason });
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(unwrap<GrantRow>(again.body)).toMatchObject({ id, reason });
+    expect((await probe()).statusCode).toBe(200);
+  }, 20_000);
+
   it('is kept by a group that grants the same permission until that membership goes too', async () => {
     const groups = unwrap<{ id: string; key: string }[]>(
       (await apiRequest(app, admin, 'GET', '/authz/groups')).body,

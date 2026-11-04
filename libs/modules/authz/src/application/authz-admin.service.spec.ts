@@ -315,12 +315,20 @@ describe('AuthzAdminService — direct employee permissions', () => {
     createdAt: new Date(),
   };
 
+  /** What the repository answers for `storedGrant`: a fresh insert, unless a case says otherwise. */
+  function grantResult(
+    outcome: 'created' | 'renewed' | 'unchanged' = 'created',
+    previous: (Omit<typeof storedGrant, 'expiresAt'> & { expiresAt: Date | null }) | null = null,
+  ) {
+    return { grant: storedGrant, outcome, previous };
+  }
+
   it('records the grant inside its transaction and drops the employee’s cached permissions', async () => {
     const { service, authz, employeePermissionRepo, audit, TX } = build();
     authz.resolve.mockResolvedValue({
       'asset.read': [{ type: 'global', id: null }],
     });
-    employeePermissionRepo.grant.mockResolvedValue(storedGrant);
+    employeePermissionRepo.grant.mockResolvedValue(grantResult());
 
     await service.grantEmployeePermission(grantCommand, actor);
 
@@ -337,6 +345,42 @@ describe('AuthzAdminService — direct employee permissions', () => {
       TX,
     );
     expect(authz.invalidate).toHaveBeenCalledWith('emp-1');
+  });
+
+  it('audits a renewal with the expired grant it replaced', async () => {
+    const { service, authz, employeePermissionRepo, audit, TX } = build();
+    authz.resolve.mockResolvedValue({ 'asset.read': [{ type: 'global', id: null }] });
+    const expired = {
+      ...storedGrant,
+      reason: 'last quarter',
+      expiresAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    employeePermissionRepo.grant.mockResolvedValue(grantResult('renewed', expired));
+
+    await service.grantEmployeePermission(grantCommand, actor);
+
+    const [entry, entryTx] = audit.record.mock.calls[0] as [
+      { action: string; changes: { before: unknown; after: { reason: string } } },
+      unknown,
+    ];
+    expect(entry.action).toBe('employee_permission.granted');
+    expect(entry.changes.before).toEqual({
+      reason: 'last quarter',
+      expiresAt: '2026-01-01T00:00:00.000Z',
+    });
+    expect(entry.changes.after.reason).toBe(grantCommand.reason);
+    expect(entryTx).toBe(TX);
+    expect(authz.invalidate).toHaveBeenCalledWith('emp-1');
+  });
+
+  it('writes no entry when a live grant was already held, because nothing changed', async () => {
+    const { service, authz, employeePermissionRepo, audit } = build();
+    authz.resolve.mockResolvedValue({ 'asset.read': [{ type: 'global', id: null }] });
+    employeePermissionRepo.grant.mockResolvedValue(grantResult('unchanged'));
+
+    await expect(service.grantEmployeePermission(grantCommand, actor)).resolves.toBe(storedGrant);
+
+    expect(audit.record).not.toHaveBeenCalled();
   });
 
   it('refuses to grant a permission the grantor does not hold', async () => {
@@ -367,7 +411,7 @@ describe('AuthzAdminService — direct employee permissions', () => {
     authz.resolve.mockResolvedValue({
       '*': [{ type: 'global', id: null }],
     });
-    employeePermissionRepo.grant.mockResolvedValue(storedGrant);
+    employeePermissionRepo.grant.mockResolvedValue(grantResult());
 
     await expect(service.grantEmployeePermission(grantCommand, actor)).resolves.toBe(storedGrant);
   });
