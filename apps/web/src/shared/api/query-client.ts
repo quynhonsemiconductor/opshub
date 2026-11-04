@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { STALE } from './cache';
+import { RATE_LIMIT_MAX_RETRIES, retryDelayFromError } from './rate-limit-retry';
 
 /**
  * The one query client.
@@ -16,8 +17,26 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: (failureCount, error) => {
-        if ((error as { status?: number })?.status === 401) return false;
+        const status = (error as { status?: number })?.status;
+        // A 401 means the session is gone; a 403 means this identity may not have it. Neither gets
+        // better by asking again, and retrying them only delays the login redirect or the message.
+        if (status === 401 || status === 403) return false;
+
+        /*
+         * A 429 is a delay, not a failure. Two more attempts. The generated client already retries
+         * 429 reads at the transport layer; this covers errors thrown by queryFns that carry a
+         * status, so both paths obey one rule.
+         */
+        if (status === 429) return failureCount < RATE_LIMIT_MAX_RETRIES;
+
         return failureCount < 1;
+      },
+      // The 429 half honours the server's `Retry-After` (or backoff when it sent none), capped by
+      // the shared policy. Everything else keeps TanStack's exponential default.
+      retryDelay: (failureCount, error) => {
+        const status = (error as { status?: number })?.status;
+        if (status === 429) return retryDelayFromError(failureCount, error);
+        return Math.min(1_000 * 2 ** failureCount, 30_000);
       },
       refetchOnWindowFocus: false,
       /*

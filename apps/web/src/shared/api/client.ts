@@ -2,6 +2,8 @@ import createClient, { type Middleware } from 'openapi-fetch';
 import type { paths } from './generated/api';
 import { useAuthStore } from './auth-store';
 import { withCsrfHeader } from './csrf';
+import { RATE_LIMIT_MAX_RETRIES, rateLimitDelayMs, sleep } from './rate-limit-retry';
+import { REQUEST_TIMEOUT_MS } from './request-timeout';
 import { ENV } from '@/shared/config/env';
 
 /**
@@ -26,7 +28,26 @@ const sessionMiddleware: Middleware = {
     return request;
   },
 
-  onResponse({ response }) {
+  async onResponse({ request, response, options }) {
+    /*
+     * A 429 is temporary. Retry a READ here, before TanStack sees it, so every query in the app
+     * (they all go through this client) honours `Retry-After` without each queryFn knowing the
+     * header exists. Only GET/HEAD: repeating a mutation because the server was busy can duplicate a
+     * write, and the query client's retry policy is the wrong place to discover that.
+     *
+     * `request` already carries the CSRF header the onRequest middleware added, so the retry is the
+     * same authenticated read, not a fresh unauthenticated one.
+     */
+    if (response.status === 429 && (request.method === 'GET' || request.method === 'HEAD')) {
+      let latest = response;
+      for (let attempt = 0; attempt < RATE_LIMIT_MAX_RETRIES; attempt++) {
+        await sleep(rateLimitDelayMs(attempt, latest));
+        latest = await options.fetch(request.clone());
+        if (latest.status !== 429) break;
+      }
+      return latest;
+    }
+
     // A 401 now means the session is gone server-side — expired, revoked, or logged out
     // in another tab. There is no local credential to renew, so the only correct move is
     // to send the user back to the login page.
@@ -55,5 +76,13 @@ const sessionMiddleware: Middleware = {
 export const api = createClient<paths>({
   baseUrl: ENV.API_BASE_URL,
   credentials: 'include',
+  // Resolve `fetch` per call instead of capturing it at module load: tests replace the global, and the
+  // retry in `sessionMiddleware` must use the same one the first attempt did.
+  //
+  // The deadline goes here rather than at each call site so the retry gets it too: `sessionMiddleware`
+  // re-enters through this same wrapper, and a fresh signal per call means the first attempt's abort
+  // cannot cancel its retry. A stalled connection otherwise never rejects, and a query that never
+  // settles is a spinner with no error to show.
+  fetch: (input) => globalThis.fetch(input, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
 });
 api.use(sessionMiddleware);

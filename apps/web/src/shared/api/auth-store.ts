@@ -18,8 +18,15 @@ interface AuthState {
   user: SessionUser | null;
   /** False until the bootstrap has finished, so the router waits rather than guesses. */
   ready: boolean;
+  /**
+   * Why the session could not be resolved, when it could not be. A transient failure (429, 5xx,
+   * offline) lands here instead of clearing `user`: the browser still holds the session cookie, and
+   * only a 401/403 proves it is gone.
+   */
+  error: string | null;
   setUser: (user: SessionUser | null) => void;
   setReady: (ready: boolean) => void;
+  setError: (error: string | null) => void;
   clear: () => void;
 }
 
@@ -40,9 +47,11 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()((set) => ({
   user: null,
   ready: false,
-  setUser: (user) => set({ user }),
+  error: null,
+  setUser: (user) => set({ user, error: null }),
   setReady: (ready) => set({ ready }),
-  clear: () => set({ user: null }),
+  setError: (error) => set({ error }),
+  clear: () => set({ user: null, error: null }),
 }));
 
 /** Whether a session is established. Read by the router guard. */
