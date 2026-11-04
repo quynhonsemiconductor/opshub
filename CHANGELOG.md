@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.7](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.6...v0.4.7) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** merge the dev digest maps without a stray brace ([#541](https://github.com/quynhonsemiconductor/opshub/issues/541)) ([edbeae6](https://github.com/quynhonsemiconductor/opshub/commit/edbeae6c81fe75c6f44fc28af2a00b530f8c912d))
+* **door,workforce:** align door modal padding and button, translate workforce UI to English ([#516](https://github.com/quynhonsemiconductor/opshub/issues/516)) ([fa10a5c](https://github.com/quynhonsemiconductor/opshub/commit/fa10a5cbafe1c85a6ff8377dd291c66deec7898e))
+* **web:** allow the r2 presigned storage origin in the csp ([#536](https://github.com/quynhonsemiconductor/opshub/issues/536)) ([7bb04ff](https://github.com/quynhonsemiconductor/opshub/commit/7bb04ff50ea9f4a600257a5b404acba55e34db7c))
+
 ## [0.4.6](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.5...v0.4.6) (2026-11-03)
 
 
