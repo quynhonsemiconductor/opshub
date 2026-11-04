@@ -54,11 +54,9 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
   // Assert at the DECLARATION, not at each call site: these are partial doubles, so
   // the cast belongs where the shape is narrowed, and the constructor call below
   // stays free of noise.
-  const authz = {
-    invalidate: vi.fn().mockResolvedValue(undefined),
-    resolve: vi.fn(),
-  } as unknown as AuthzService & {
-    invalidate: ReturnType<typeof vi.fn>;
+  const invalidate = vi.fn().mockResolvedValue(undefined);
+  const resolve = vi.fn();
+  const authz = { invalidate, resolve } as unknown as AuthzService & {
     resolve: ReturnType<typeof vi.fn>;
   };
   const audit = createFakeAudit();
@@ -97,6 +95,8 @@ function build(overrides: { holders?: string[]; system?: boolean } = {}) {
     employeeGroupRepo,
     employeePermissionRepo,
     authz,
+    invalidate,
+    resolve,
     holders,
     audit,
     TX,
@@ -143,14 +143,14 @@ describe('AuthzAdminService — the audit entry rides the mutation', () => {
 
 describe('AuthzAdminService — group-definition changes', () => {
   it('invalidates every holder when a group’s permissions change', async () => {
-    const { service, authz, holders } = build();
+    const { service, holders, invalidate } = build();
 
     await service.setGroupPermissions('group-1', ['asset.read'], actor);
 
     for (const employeeId of holders) {
-      expect(authz.invalidate).toHaveBeenCalledWith(employeeId);
+      expect(invalidate).toHaveBeenCalledWith(employeeId);
     }
-    expect(authz.invalidate).toHaveBeenCalledTimes(holders.length);
+    expect(invalidate).toHaveBeenCalledTimes(holders.length);
   });
 
   it('does not re-sync group claims when only permissions change', async () => {
@@ -166,12 +166,12 @@ describe('AuthzAdminService — group-definition changes', () => {
   it('invalidates AND re-syncs claims when a group is deleted', async () => {
     // Deleting a group makes both caches wrong: the permission cache still grants its
     // codes, and `employees.groups` still lists its key.
-    const { service, authz, employeeGroupRepo, holders } = build();
+    const { service, employeeGroupRepo, holders, invalidate } = build();
 
     await service.deleteGroup('group-1', actor);
 
     for (const employeeId of holders) {
-      expect(authz.invalidate).toHaveBeenCalledWith(employeeId);
+      expect(invalidate).toHaveBeenCalledWith(employeeId);
       expect(employeeGroupRepo.syncEmployeeGroupKeys).toHaveBeenCalledWith(employeeId);
     }
   });
@@ -196,21 +196,21 @@ describe('AuthzAdminService — group-definition changes', () => {
   });
 
   it('refuses to delete a system group, and touches no cache', async () => {
-    const { service, groupRepo, authz } = build({ system: true });
+    const { service, groupRepo, invalidate } = build({ system: true });
 
     await expect(service.deleteGroup('group-1', actor)).rejects.toMatchObject({
       code: 'GROUP_IMMUTABLE',
     });
     expect(groupRepo.delete).not.toHaveBeenCalled();
-    expect(authz.invalidate).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it('is a no-op on caches when a group has no holders', async () => {
-    const { service, authz } = build({ holders: [] });
+    const { service, invalidate } = build({ holders: [] });
 
     await service.setGroupPermissions('group-1', ['asset.read'], actor);
 
-    expect(authz.invalidate).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });
 
@@ -357,7 +357,7 @@ describe('AuthzAdminService — direct employee permissions', () => {
   }
 
   it('records the grant inside its transaction and drops the employee’s cached permissions', async () => {
-    const { service, authz, employeePermissionRepo, audit, TX } = build();
+    const { service, authz, employeePermissionRepo, audit, TX, invalidate } = build();
     authz.resolve.mockResolvedValue({
       'asset.read': [{ type: 'global', id: null }],
     });
@@ -377,11 +377,11 @@ describe('AuthzAdminService — direct employee permissions', () => {
       expect.objectContaining({ action: 'employee_permission.granted' }),
       TX,
     );
-    expect(authz.invalidate).toHaveBeenCalledWith('emp-1');
+    expect(invalidate).toHaveBeenCalledWith('emp-1');
   });
 
   it('audits a renewal with the expired grant it replaced', async () => {
-    const { service, authz, employeePermissionRepo, audit, TX } = build();
+    const { service, authz, employeePermissionRepo, audit, TX, invalidate } = build();
     authz.resolve.mockResolvedValue({ 'asset.read': [{ type: 'global', id: null }] });
     const expired = {
       ...storedGrant,
@@ -403,7 +403,7 @@ describe('AuthzAdminService — direct employee permissions', () => {
     });
     expect(entry.changes.after.reason).toBe(grantCommand.reason);
     expect(entryTx).toBe(TX);
-    expect(authz.invalidate).toHaveBeenCalledWith('emp-1');
+    expect(invalidate).toHaveBeenCalledWith('emp-1');
   });
 
   it('writes no entry when a live grant was already held, because nothing changed', async () => {
@@ -450,7 +450,7 @@ describe('AuthzAdminService — direct employee permissions', () => {
   });
 
   it('refuses an unknown permission key before touching the grantor’s permissions', async () => {
-    const { service, authz } = build();
+    const { service, resolve } = build();
 
     await expect(
       service.grantEmployeePermission(
@@ -458,7 +458,7 @@ describe('AuthzAdminService — direct employee permissions', () => {
         actor,
       ),
     ).rejects.toThrow(/Unknown permission keys/);
-    expect(authz.resolve).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
   });
 
   it('refuses an expiry in the past', async () => {
@@ -483,7 +483,7 @@ describe('AuthzAdminService — direct employee permissions', () => {
   });
 
   it('records a revocation inside its transaction and drops the cached permissions', async () => {
-    const { service, authz, employeePermissionRepo, audit, TX } = build();
+    const { service, employeePermissionRepo, audit, TX, invalidate } = build();
     employeePermissionRepo.findById.mockResolvedValue(storedGrant);
 
     await service.revokeEmployeePermission('grant-1', actor);
@@ -493,7 +493,7 @@ describe('AuthzAdminService — direct employee permissions', () => {
       expect.objectContaining({ action: 'employee_permission.revoked' }),
       TX,
     );
-    expect(authz.invalidate).toHaveBeenCalledWith('emp-1');
+    expect(invalidate).toHaveBeenCalledWith('emp-1');
   });
 
   it('answers 404 when the grant to revoke does not exist', async () => {
