@@ -186,6 +186,35 @@ describe('bootstrapAuth', () => {
     expect(useAuthStore.getState().error).toMatch(/could not be reached/i);
   });
 
+  it('gives the session check a deadline, so a stall cannot hold the loading screen', async () => {
+    const fetchSpy = stubMe();
+
+    await bootstrapAuth();
+
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    // A connection that opens and stalls never rejects, so the `catch` that reports UNREACHABLE is
+    // never reached without this. The deadline makes that stall a rejection.
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init?.signal?.aborted).toBe(false);
+  });
+
+  it('treats an aborted attempt as unreachable and retries it, not as a logout', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException('The operation timed out.', 'AbortError'))
+      .mockResolvedValue(response(ME));
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.useFakeTimers();
+
+    const pending = bootstrapAuth();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(useAuthStore.getState().user?.sub).toBe('emp-1');
+    expect(useAuthStore.getState().error).toBeNull();
+  });
+
   it('clears the session on a 403, which is a definite refusal', async () => {
     useAuthStore.getState().setUser({
       sub: 'emp-1',

@@ -3,6 +3,7 @@ import type { paths } from './generated/api';
 import { useAuthStore } from './auth-store';
 import { withCsrfHeader } from './csrf';
 import { RATE_LIMIT_MAX_RETRIES, rateLimitDelayMs, sleep } from './rate-limit-retry';
+import { REQUEST_TIMEOUT_MS } from './request-timeout';
 import { ENV } from '@/shared/config/env';
 
 /**
@@ -77,6 +78,11 @@ export const api = createClient<paths>({
   credentials: 'include',
   // Resolve `fetch` per call instead of capturing it at module load: tests replace the global, and the
   // retry in `sessionMiddleware` must use the same one the first attempt did.
-  fetch: (input) => globalThis.fetch(input),
+  //
+  // The deadline goes here rather than at each call site so the retry gets it too: `sessionMiddleware`
+  // re-enters through this same wrapper, and a fresh signal per call means the first attempt's abort
+  // cannot cancel its retry. A stalled connection otherwise never rejects, and a query that never
+  // settles is a spinner with no error to show.
+  fetch: (input) => globalThis.fetch(input, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
 });
 api.use(sessionMiddleware);

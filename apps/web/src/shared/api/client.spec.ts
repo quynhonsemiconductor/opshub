@@ -68,6 +68,47 @@ describe('sessionMiddleware — rate-limited reads', () => {
     expect(error).toMatchObject({ message: 'Too many requests' });
   });
 
+  it('gives every attempt a deadline, so a stalled connection cannot hang the query', async () => {
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonBody({ message: 'Too many requests' }, 429, { 'retry-after': '0' }),
+      )
+      .mockResolvedValueOnce(jsonBody(ME));
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.useFakeTimers();
+
+    const pending = api.GET('/v1/auth/me', { baseUrl: 'http://localhost' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await pending;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const signals = fetchSpy.mock.calls.map(
+      (call) => (call[1] as RequestInit | undefined)?.signal ?? null,
+    );
+    // Both the first attempt and the retry carry one: a stalled connection never rejects, so without a
+    // deadline the query stays pending and the screen shows a spinner that can never fail.
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[1]).toBeInstanceOf(AbortSignal);
+    // A fresh deadline per attempt: one shared signal, aborted with the first attempt, would cancel the
+    // retry it was meant to protect.
+    expect(signals[0]).not.toBe(signals[1]);
+    expect(signals[0]?.aborted).toBe(false);
+  });
+
+  it('surfaces a timed-out attempt as a real error instead of hanging', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new DOMException('The operation timed out.', 'AbortError')),
+    );
+
+    // What the deadline produces. TanStack receives a rejection it can retry or report; it never sits
+    // on a promise that no answer can settle.
+    await expect(api.GET('/v1/auth/me', { baseUrl: 'http://localhost' })).rejects.toThrow(
+      /timed out/i,
+    );
+  });
+
   it('does not replay a POST when the server is busy', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(jsonBody({ message: 'Too many requests' }, 429));
     vi.stubGlobal('fetch', fetchSpy);

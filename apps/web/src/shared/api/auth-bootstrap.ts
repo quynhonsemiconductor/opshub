@@ -12,6 +12,7 @@ import { queryClient } from './query-client';
 import { setCsrfToken } from './csrf';
 import { useAuthStore, type SessionUser } from './auth-store';
 import { RATE_LIMIT_MAX_RETRIES, rateLimitDelayMs, sleep } from './rate-limit-retry';
+import { REQUEST_TIMEOUT_MS } from './request-timeout';
 
 let _bootstrapPromise: Promise<void> | null = null;
 
@@ -74,10 +75,15 @@ async function _run(): Promise<void> {
         // `credentials: 'include'` is what sends the session cookie. Same-origin in every
         // environment — locally via the Vite proxy, deployed via the Cloudflare Pages
         // Function — so this is not a cross-site request and needs no CORS.
+        //
+        // The deadline matters as much as the cookie: a connection that stalls never rejects, so
+        // without it the `catch` below is never reached and the shell waits on the loading screen
+        // forever. A timeout rejects as `AbortError`, which lands in the same UNREACHABLE path.
         res = await fetch(`${ENV.API_BASE_URL}/v1/auth/me`, {
           credentials: 'include',
           referrerPolicy: 'no-referrer',
           headers: { accept: 'application/json' },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
       } catch {
         if (attempt < RATE_LIMIT_MAX_RETRIES) {
