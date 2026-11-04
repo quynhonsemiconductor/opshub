@@ -130,7 +130,7 @@ test.describe('training', () => {
     await page.getByRole('button', { name: /require a course/i }).click();
     dialog = page.getByRole('dialog');
     // The modal names the role, which it can only do because the picker reports the chosen option.
-    await expect(dialog.getByRole('heading', { name: new RegExp(role.title) })).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: role.title })).toBeVisible();
     await chooseFromPicker(page, dialog, 'Course', courseTitle);
     await dialog.getByRole('button', { name: /add requirement/i }).click();
     await expect(dialog).toBeHidden();
