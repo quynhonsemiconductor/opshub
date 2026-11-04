@@ -2,16 +2,18 @@
 # Web · Deploy Worker — publish the SPA to Cloudflare Workers Static Assets
 # (the on-prem edge, ONPREM-PLAN §8.2).
 #
-# WHY IT EXISTS: the on-prem design serves opshub-dev.qnsc.vn SAME-ORIGIN. A
-# Worker named `opshub-dev-web` holds `<host>/*`; `/api/auth/*`, `/v1/*` and
+# WHY IT EXISTS: the on-prem design serves opshub.qnsc.vn SAME-ORIGIN. A
+# Worker named `opshub-prod-web` holds `<host>/*`; `/api/auth/*`, `/v1/*` and
 # `/readyz` are Workers routes WITHOUT a script, so Cloudflare sends them
 # through the qnsc-apps tunnel to the API (infra `live/edge/onprem.tf`). The
-# old Pages deploy was removed with the AWS exit (opshub#515), so without this
-# workflow nothing deploys the web app at all.
+# old Pages deploy was removed with the AWS exit (opshub#515).
+#
+# DEV RETIRED (2026-11-04): opshub-dev.qnsc.vn is served from the cluster since
+# infra#355 (`web = "cluster"` — no Workers routes), so this workflow no longer
+# deploys on push to main. The `opshub-dev-web` script stays deployed in
+# Cloudflare as the rollback until 2026-11-11, then the owner deletes it.
 #
 # TRIGGERS
-#   develop → push to main, after `Web · CI` passes on the same commit, and
-#             workflow_dispatch (default target).
 #   prod    → workflow_dispatch with environment=production ONLY, and only while
 #             the repository variable WEB_WORKER_PROD_ENABLED is `true`. That
 #             variable stays unset until the prod move (ONPREM-PLAN M-11): prod
@@ -27,40 +29,19 @@
 name: Web · Deploy Worker
 
 on:
-  push:
-    branches: [main]
-    # Same ignore list as backing CI, and for the same reason: a merge that
-    # touches only docs or the backend cannot change the SPA bundle. Anything
-    # shared (root lockfile, package.json) or web-adjacent (apps/web/**,
-    # public/_headers, the wrangler config) is NOT ignored, so under-deploy is
-    # impossible; `infra/**` is not ignored either — an infra merge can change
-    # what the edge routes.
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - '.claude/**'
-      - 'apps/api/**'
-      - 'apps/worker/**'
-      - 'libs/**'
-      - 'db/**'
-      - 'Dockerfile'
-      - 'nest-cli.json'
-      - 'tsconfig.migrator.json'
   workflow_dispatch:
     inputs:
       environment:
         description: >-
-          Cloudflare target. `production` is refused unless the
+          Cloudflare target. Only `production` remains; it is refused unless the
           WEB_WORKER_PROD_ENABLED repository variable is true (the prod move).
         type: choice
-        options: [develop, production]
-        default: develop
+        options: [production]
+        default: production
 
 concurrency:
-  # One deploy per TARGET environment; never cancel a running one. Keyed on the
-  # environment, not the ref, so a dispatch and a merge cannot ship the same
-  # script at once.
-  group: deploy-web-worker-${{ inputs.environment || 'develop' }}
+  # One deploy per target; never cancel a running one.
+  group: deploy-web-worker-production
   cancel-in-progress: false
 
 permissions:
@@ -94,29 +75,13 @@ jobs:
       - id: resolve
         name: Resolve the script name, and refuse prod while it is off
         env:
-          EVENT: ${{ github.event_name }}
-          REF: ${{ github.ref }}
           INPUT_ENV: ${{ inputs.environment }}
           PROD_ENABLED: ${{ vars.WEB_WORKER_PROD_ENABLED }}
         run: |
           set -euo pipefail
-          if [ "${EVENT}" = "push" ]; then
-            # A push to main is ALWAYS the dev host. (`paths-ignore` keeps docs
-            # and backend merges from triggering it at all.)
-            [ "${REF}" = "refs/heads/main" ] || {
-              echo "::error::push deploys are only defined for main."
-              exit 1
-            }
-            environment=develop
-          else
-            environment="${INPUT_ENV:-develop}"
-          fi
+          environment="${INPUT_ENV:-production}"
 
           case "${environment}" in
-            develop)
-              wrangler_env=dev
-              script=opshub-dev-web
-              ;;
             production)
               if [ "${PROD_ENABLED}" != "true" ]; then
                 echo "::error::production is refused: the on-prem prod move has not happened. Set the vars.WEB_WORKER_PROD_ENABLED repository variable to true only in the prod-move change (ONPREM-PLAN M-11), after live/edge routes the prod host to opshub-prod-web."
@@ -126,7 +91,7 @@ jobs:
               script=opshub-prod-web
               ;;
             *)
-              echo "::error::unknown environment '${environment}' (expected develop or production)."
+              echo "::error::unknown environment '${environment}' (expected production; dev is served from the cluster since infra#355)."
               exit 1
               ;;
           esac
@@ -237,7 +202,6 @@ jobs:
         run: |
           set -euo pipefail
           case "${WRANGLER_ENV}" in
-            dev) app_env=development ;;
             prod) app_env=production ;;
             *) echo "::error::unknown wrangler env '${WRANGLER_ENV}'"; exit 1 ;;
           esac
@@ -248,8 +212,8 @@ jobs:
       - name: Deploy ${{ needs.target.outputs.script }}
         # `pnpm --filter` runs inside apps/web, where wrangler discovers
         # wrangler.jsonc and resolves `assets.directory = ./dist`. `--env` picks
-        # the script (`opshub-dev-web` / `opshub-prod-web`); never omit it — the
-        # top-level name in the config is not a deploy target.
+        # the script (`opshub-prod-web`); never omit it — the top-level name in
+        # the config is not a deploy target.
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
