@@ -51,10 +51,10 @@ jobs:
       contents: read
       packages: write
       attestations: read
-    # Pins ci's fix/release-promote-web commit: v1.33.1 writes web to services.web,
-    # which the values schema rejects. Re-pin to the release that ships that fix
-    # (v1.35.0) once it is cut.
-    uses: quynhonsemiconductor/ci/.github/workflows/release-promote.yml@5ce43f4b36002267bc24fad8cd6b734f9914dfdd  # fix/release-promote-web
+    # Pins the merged ci commit that writes web to web.image (#305); the last
+    # release before it, v1.34.0, writes web to services.web, which the values
+    # schema rejects. Re-pin to the release that ships the fix once cut.
+    uses: quynhonsemiconductor/ci/.github/workflows/release-promote.yml@355d3c2c5893cb3b60fc68977d19e87554ed8648  # merged main, ci#305
     with:
       product: opshub
       gitops-product: opshub
