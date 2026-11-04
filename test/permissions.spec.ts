@@ -116,6 +116,8 @@ describe('roles', () => {
       PERMISSION.WORKFORCE_READ,
       PERMISSION.CONTRACT_READ,
       PERMISSION.REPORTS_READ,
+      // Every request in the company, of every type and state; deciding a ticket already implies reading it.
+      PERMISSION.REQUEST_READ,
     ]) {
       expect(approver, `approver must not hold ${readOnly}`).not.toContain(readOnly);
     }

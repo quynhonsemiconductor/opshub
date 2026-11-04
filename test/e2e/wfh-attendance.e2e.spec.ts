@@ -304,6 +304,13 @@ describe('a WFH request and the day it changes', () => {
         const approvals = (await ticketRecord(manager, queued!.id)).approvals ?? [];
         expect(approvals[0]?.approverId).toBe(FIXTURE.MANAGER.id);
         expect(approvals[0]?.note ?? '').not.toContain('override decision');
+
+        // The approver group holds no `request.read`: a ticket someone else already decided is not
+        // open to it, so it is neither readable by id nor in its list.
+        const hidden = await apiRequest(app, approver, 'GET', `/requests/${queued!.id}`);
+        expect(hidden.status, JSON.stringify(hidden.body)).toBe(403);
+        const listed = await apiRequest(app, approver, 'GET', '/requests?limit=100');
+        expect(unwrap<QueuedTicket[]>(listed.body).map((row) => row.id)).not.toContain(queued!.id);
       } finally {
         await setManager(null);
       }

@@ -570,7 +570,7 @@ export class RequestEngine {
   // ── Query ──────────────────────────────────────────────────────────────────
 
   /**
-   * Read one request, if the actor is a party to it or holds `request.read`.
+   * Read one request, if the actor is a party to it, holds `request.read`, or may decide it.
    *
    * Performed no check at all before: any authenticated caller could read any request by id,
    * including its approval chain and the requester's justification.
@@ -585,26 +585,48 @@ export class RequestEngine {
     const item = await this.loadUnchecked(id);
     if (!item) return null;
 
-    await this.actorScope.assertParty(
-      [item.requesterId, item.assigneeId],
-      actor,
-      'request.read',
-      'request',
-    );
-
     /*
      * DECIDABILITY ON THE SINGLE READ TOO, computed here rather than inside `loadUnchecked`. That one
      * has no actor on purpose — the transitions use it and gate on their own permission — and a
      * default of `false` would be a lie to an approver reading a request they are perfectly able to
-     * decide.
+     * decide. It is also what admits that approver: see `assertMayRead`.
      */
     const decidable = await this.decidability([item], actor.sub);
     const verdict = decidable.get(item.id);
+    await this.assertMayRead(item, actor, verdict?.may === true);
     return {
       ...item,
       viewerMayDecide: verdict?.may ?? false,
       viewerCannotDecideReason: verdict?.reason ?? null,
     };
+  }
+
+  /**
+   * Refuses a read unless the actor is a party to the request, holds `request.read`, may decide it, or
+   * already decided it.
+   *
+   * Deciding implies reading: an approver who can approve a ticket must see what they are approving, and
+   * granting them `request.read` for that would show them every request in the company, whatever its type
+   * and state. This admits the open requests of the types they review, and keeps what they decided
+   * readable afterwards, so their decisions do not vanish from their own history.
+   *
+   * Args:
+   *   request: The request being read.
+   *   actor: Who is reading it.
+   *   mayDecide: Whether the engine's decidability rule lets the actor decide it right now.
+   */
+  private async assertMayRead(
+    request: RequestItem,
+    actor: Actor,
+    mayDecide: boolean,
+  ): Promise<void> {
+    if (mayDecide || (await this.hasDecided(request.id, actor.sub))) return;
+    await this.actorScope.assertParty(
+      [request.requesterId, request.assigneeId],
+      actor,
+      'request.read',
+      'request',
+    );
   }
 
   /** The raw read, with no authorization: for transitions that gate on their own permission. */
@@ -656,7 +678,9 @@ export class RequestEngine {
    * as a principal without permissions.
    *
    * A party to a request is its requester OR its assignee, so the narrowed form is that
-   * disjunction rather than `requesterId = actor` — an approver must still see their queue.
+   * disjunction rather than `requesterId = actor` — an approver must still see their queue. A request
+   * the actor may decide is readable too (see `assertMayRead`), which is how an approver sees the
+   * unassigned and overridable tickets without holding `request.read`, and so is one they already decided.
    */
   async list(
     filters: RequestFilters,
@@ -665,6 +689,9 @@ export class RequestEngine {
     offset: number,
   ): Promise<{ rows: RequestItemWithApprovals[]; total: number }> {
     const unrestricted = await this.authz.check(actorId, 'request.read');
+    // Computed once: it is both the "My queue" filter and, for a caller without `request.read`, what they may read.
+    const decidableRows =
+      filters.myQueue || !unrestricted ? await this.decidableByPredicate(actorId) : undefined;
 
     const conditions = [
       filters.type ? eq(requestItems.type, filters.type) : undefined,
@@ -672,7 +699,7 @@ export class RequestEngine {
       filters.status ? eq(requestItems.status, filters.status) : undefined,
       // "My queue" = what I can actually decide. See `decidableByPredicate` for what it used to mean.
       filters.myQueue
-        ? await this.decidableByPredicate(actorId)
+        ? decidableRows
         : filters.assigneeId
           ? eq(requestItems.assigneeId, filters.assigneeId)
           : undefined,
@@ -680,7 +707,13 @@ export class RequestEngine {
       // than by rewriting `filters` so a caller cannot widen it back out with `requesterId`.
       unrestricted
         ? undefined
-        : or(eq(requestItems.requesterId, actorId), eq(requestItems.assigneeId, actorId)),
+        : or(
+            eq(requestItems.requesterId, actorId),
+            eq(requestItems.assigneeId, actorId),
+            decidableRows,
+            // What I decided stays readable to me once it is no longer open.
+            sql`${requestItems.id} in (select ${requestApprovals.requestId} from ${requestApprovals} where ${requestApprovals.approverId} = ${actorId})`,
+          ),
     ].filter(Boolean);
 
     const where = conditions.length ? and(...conditions) : undefined;
@@ -1079,12 +1112,7 @@ export class RequestEngine {
     const request = await this.getOrFail(requestId);
     // Commenting used to require only that the request EXISTED, so any authenticated caller
     // could post onto anyone's request — a write, on a record they cannot otherwise read.
-    await this.actorScope.assertParty(
-      [request.requesterId, request.assigneeId],
-      actor,
-      'request.read',
-      'request',
-    );
+    await this.assertMayRead(request, actor, await this.mayDecide(request, actor));
 
     const [row] = await this.db
       .insert(requestComments)
@@ -1100,15 +1128,10 @@ export class RequestEngine {
   }
 
   /** List comments for a request, ordered oldest-first. */
-  /** Comments are readable by the request's parties, or a holder of `request.read`. */
+  /** Comments are readable by the request's parties, a holder of `request.read`, or whoever may decide it. */
   async listComments(requestId: string, actor: Actor): Promise<RequestComment[]> {
     const request = await this.getOrFail(requestId);
-    await this.actorScope.assertParty(
-      [request.requesterId, request.assigneeId],
-      actor,
-      'request.read',
-      'request',
-    );
+    await this.assertMayRead(request, actor, await this.mayDecide(request, actor));
 
     const rows = await this.db
       .select()
@@ -1119,6 +1142,24 @@ export class RequestEngine {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /** Whether this person has already recorded a decision on the request. */
+  private async hasDecided(requestId: string, actorId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: requestApprovals.id })
+      .from(requestApprovals)
+      .where(
+        and(eq(requestApprovals.requestId, requestId), eq(requestApprovals.approverId, actorId)),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
+  /** Whether the engine's decidability rule lets the actor decide this one request right now. */
+  private async mayDecide(request: RequestItem, actor: Actor): Promise<boolean> {
+    const verdicts = await this.decidability([request], actor.sub);
+    return verdicts.get(request.id)?.may === true;
+  }
 
   private async getOrFail(id: string): Promise<RequestItem> {
     const item = await this.loadUnchecked(id);

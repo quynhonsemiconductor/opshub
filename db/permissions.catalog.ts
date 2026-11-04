@@ -668,6 +668,9 @@ export const GROUP_PERMISSIONS: Record<
    * group for them. It carries the decisions only: no directory, contract, training or report access, which
    * `manager` adds on top. Both halves of a workforce decision are here — `workforce.approve` is what the
    * review routes ask for, and the `*.review` codes are what the request engine asks of the decider.
+   *
+   * No `request.read`: that would show every request in the company, whatever its type and state. The engine
+   * lets whoever may decide a request read it, so this group sees the open tickets it can decide and no more.
    */
   [GROUP.APPROVER]: [
     PERMISSION.WORKFORCE_APPROVE,
@@ -675,7 +678,6 @@ export const GROUP_PERMISSIONS: Record<
     PERMISSION.WORKFORCE_OVERTIME_REVIEW,
     PERMISSION.WORKFORCE_WFH_REVIEW,
     PERMISSION.WORKFORCE_ATTENDANCE_REVIEW,
-    PERMISSION.REQUEST_READ,
     PERMISSION.REQUEST_DECIDE_ANY,
   ],
 
