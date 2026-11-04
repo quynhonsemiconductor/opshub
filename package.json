@@ -1,13 +1,13 @@
 {
   "name": "opshub",
-  "packageManager": "pnpm@11.28.9",
+  "packageManager": "pnpm@12.16.1",
   "version": "0.4.9",
   "private": true,
   "license": "UNLICENSED",
   "description": "OpsHub — internal IT/HR operations platform (Zone B2). Monorepo: apps/{api,worker,web}",
   "engines": {
     "node": ">=22.0.0",
-    "pnpm": ">=11"
+    "pnpm": ">=12"
   },
   "scripts": {
     "build:api": "nest build api",
