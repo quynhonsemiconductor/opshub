@@ -581,8 +581,8 @@ jobs:
           curl -sf -c "$LOGS/jar.txt" -H 'content-type: application/json' \
             -d '{"email":"admin@opshub.local"}' http://localhost:5174/api/auth/test-login
           me=$(curl -sf -b "$LOGS/jar.txt" http://localhost:5174/v1/auth/me)
-          echo "$me" | jq '{email, roles}'
-          echo "$me" | jq -e '.email == "admin@opshub.local" and (.roles | index("admin"))'
+          echo "$me" | jq '{email, groups}'
+          echo "$me" | jq -e '.email == "admin@opshub.local" and (.groups | index("admin"))'
           curl -sf -b "$LOGS/jar.txt" -o /dev/null -w 'GET /v1/assets -> %{http_code}\n' http://localhost:5174/v1/assets
 
       - name: Logs
