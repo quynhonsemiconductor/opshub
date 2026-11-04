@@ -29,7 +29,7 @@ type WorkforceTab =
 const WORKFORCE_TABS: { value: WorkforceTab; label: string }[] = [
   { value: 'timesheets', label: 'Timesheets' },
   // Beside Timesheets: the door swipes timesheets are hand-entered from, derived into days.
-  { value: 'attendance', label: 'Chấm công' },
+  { value: 'attendance', label: 'Attendance' },
   // Both answer "where is everyone working"; this one for the days ahead.
   { value: 'wio', label: 'WIO Calendar' },
   { value: 'leave', label: 'Leave' },

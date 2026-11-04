@@ -77,7 +77,7 @@ describe('the ladder', () => {
       result({ status: 'office', workedMinutes: 480 }),
     ],
     [
-      'no swipes and no request is absent — "vắng không phép"',
+      'no swipes and no request is absent — "unexcused absence"',
       day({}),
       result({ status: 'absent', workedMinutes: 0, flags: ['absent'] }),
     ],

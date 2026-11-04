@@ -64,7 +64,7 @@ export function RegisterTerminalModal(props: { open: boolean; onClose: () => voi
       }
     >
       {token ? (
-        <div className="space-y-3">
+        <div className="space-y-3 p-5">
           <p className="text-sm text-fg">
             Copy it now — opshub stores only its hash, so this is the last time it is ever shown.
           </p>
@@ -76,7 +76,7 @@ export function RegisterTerminalModal(props: { open: boolean; onClose: () => voi
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 p-5">
           <FormField label="Name" htmlFor="terminal-name">
             <Input
               id="terminal-name"
@@ -165,7 +165,7 @@ export function AddCardModal(props: { open: boolean; onClose: () => void; preset
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-3 p-5">
         <FormField label="Employee" htmlFor="card-employee">
           {/* BY NAME, not by UUID (the EntityPicker docblock says why a UUID box never worked). */}
           <EntityPicker
@@ -286,7 +286,7 @@ export function RegenerateTokenModal(props: {
       }
     >
       {token ? (
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-2 p-5">
           <code className="block flex-1 overflow-x-auto rounded bg-surface-raised p-3 font-mono text-xs break-all text-fg">
             {token}
           </code>
@@ -342,7 +342,7 @@ export function CardEditModal(props: { card: DoorCard | null; onClose: () => voi
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-3 p-5">
         <FormField label="Label" htmlFor="edit-card-label">
           <Input
             id="edit-card-label"

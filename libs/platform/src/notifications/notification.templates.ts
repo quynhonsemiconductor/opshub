@@ -232,16 +232,16 @@ const templates: {
     // The morning sweep's one job: put yesterday's unresolved flags in front of the person while a
     // justification can still be filed, so the wording points at the filing action.
     const labels: Record<string, string> = {
-      late: 'đi muộn',
-      early: 'về sớm',
-      missing_checkout: 'không quét thẻ khi ra về',
-      absent: 'vắng không phép',
+      late: 'late',
+      early: 'left early',
+      missing_checkout: 'missed check-out',
+      absent: 'unexcused absence',
     };
     return {
-      title: `Chấm công ${v.date}: ${v.flags.length} mục cần giải trình`,
+      title: `Attendance ${v.date}: ${v.flags.length} item(s) to explain`,
       body:
-        `Hôm qua bạn có: ${v.flags.map((f) => labels[f] ?? f).join(', ')}. ` +
-        'Hãy nộp đơn giải trình để quản lý duyệt.',
+        `Yesterday you had: ${v.flags.map((f) => labels[f] ?? f).join(', ')}. ` +
+        'Please submit a justification for your manager to review.',
     };
   },
   'request.delegation_created'(v) {
