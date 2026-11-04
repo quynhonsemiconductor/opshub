@@ -73,7 +73,6 @@ env:
   # Measured on 24 before bumping: statements 22.27 / branches 18.71 / functions 15.58 /
   # lines 22.35 — every one above its floor and within the 3-point drift tolerance.
   NODE_VERSION: '24'
-  PNPM_VERSION: '11.28.6'
 
 jobs:
   # Does this pull request change anything this workflow tests? A change that touches only files the matching DEPLOY workflow ignores
@@ -121,7 +120,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @quynhonsemiconductor/* from GitHub Packages
 
@@ -188,7 +186,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Generate a self-signed CA, a rogue CA, and a server certificate (SAN localhost)
         run: |
@@ -287,7 +284,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @quynhonsemiconductor/* from GitHub Packages
 
@@ -390,7 +386,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @quynhonsemiconductor/* from GitHub Packages
 
@@ -550,7 +545,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       # Baseline: check out main's ENTIRE db/ tree (migrations, seed AND the
       # Drizzle schema) and run it end-to-end, so the DB mirrors a real deployed
@@ -643,7 +637,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       # ── Scenario 1: rebuild from zero, CNPG shape ─────────────────────────
       - name: Provision the platform's roles and a fresh database (the CNPG shape)
@@ -805,7 +798,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # pull @quynhonsemiconductor/* from GitHub Packages
 

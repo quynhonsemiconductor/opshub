@@ -69,7 +69,6 @@ permissions:
 env:
   # 24, matching .nvmrc, web-ci.yml and the Dockerfile.
   NODE_VERSION: '24'
-  PNPM_VERSION: '11.28.6'
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
@@ -205,7 +204,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Require the Workers token for this environment
         # Fail here, naming the secret and the environment, rather than inside

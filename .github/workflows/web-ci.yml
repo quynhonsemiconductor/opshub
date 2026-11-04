@@ -60,7 +60,6 @@ permissions:
 
 env:
   NODE_VERSION: '24'
-  PNPM_VERSION: '11.28.6'
 
 jobs:
   # Does this pull request change anything this workflow tests? A change that touches only files the matching DEPLOY workflow ignores
@@ -144,7 +143,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Lint
         run: pnpm --filter opshub-web lint
@@ -174,7 +172,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Detect unit tests
         id: detect
@@ -226,7 +223,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Build
         run: pnpm --filter opshub-web build
@@ -348,7 +344,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       # `pnpm db:migrate` always ensures the RBAC catalogue, but the login-able DEMO EMPLOYEES
       # are fixtures behind `SEED_ON_DEPLOY` — and `admin@opshub.local`, the principal
@@ -505,7 +500,6 @@ jobs:
       - uses: quynhonsemiconductor/ci/actions/setup-node-pnpm@400b7e9868e9ba6d172d956a08041ba19b574689 # v1.33.1
         with:
           node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: cp .env.example .env
         run: |
