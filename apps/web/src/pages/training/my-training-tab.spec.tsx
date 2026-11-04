@@ -122,7 +122,7 @@ describe('MyTrainingTab', () => {
     vi.clearAllMocks();
     /*
      * A PERMISSION-LESS EMPLOYEE — the tier that cannot be seated in Playwright. `permissions: []` and
-     * `roles: []` is the whole point: nothing below may pass because the reader happened to hold a code.
+     * `groups: []` is the whole point: nothing below may pass because the reader happened to hold a code.
      * The real store rather than a mock, because the ownership comparison reads `user.sub` from it and a
      * mock would let some other field satisfy the assertion.
      */

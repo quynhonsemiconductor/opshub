@@ -128,7 +128,7 @@ describe('bootstrapAuth', () => {
       sub: 'emp-1',
       email: 'jane@acme.com',
       name: 'Jane Doe',
-      roles: [],
+      groups: [],
       permissions: [],
     });
     stubThenOk({ status: 503 }, { status: 503 }, { status: 503 });
@@ -220,7 +220,7 @@ describe('bootstrapAuth', () => {
       sub: 'emp-1',
       email: 'jane@acme.com',
       name: 'Jane Doe',
-      roles: [],
+      groups: [],
       permissions: [],
     });
     stubMe({}, 403);
