@@ -1,5 +1,5 @@
 import type { DbExecutor } from '@platform';
-import type { EmployeeGroup, ScopeType } from '@platform';
+import type { EmployeeGroup, MembershipSource, ScopeType } from '@platform';
 
 export const EMPLOYEE_GROUP_REPOSITORY = Symbol('EMPLOYEE_GROUP_REPOSITORY');
 
@@ -9,6 +9,8 @@ export interface AssignGroupInput {
   scopeType: ScopeType;
   scopeId: string | null;
   grantedBy: string;
+  /** Who is making the membership; a person unless the sign-in sync says otherwise. */
+  source?: MembershipSource;
   expiresAt: Date | null;
 }
 

@@ -358,6 +358,13 @@
       "when": 1793725974922,
       "tag": "0050_rename_position_permissions_to_role",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1793812374922,
+      "tag": "0051_employee_group_source",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, desc, eq, gt, isNull, or } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB, type DbExecutor } from '@platform';
-import type { EmployeeGroup } from '@platform';
+import { MEMBERSHIP_SOURCE, type EmployeeGroup } from '@platform';
 import { newId } from '@shared-kernel';
 import { employees, groups, employeeGroups } from '../../../../../../db/schema';
 import type {
@@ -23,6 +23,7 @@ export class EmployeeGroupDrizzleRepository implements IEmployeeGroupRepository 
       scopeType: row.scopeType,
       scopeId: row.scopeId,
       grantedBy: row.grantedBy,
+      source: row.source,
       expiresAt: row.expiresAt,
       createdAt: row.createdAt,
     };
@@ -69,6 +70,7 @@ export class EmployeeGroupDrizzleRepository implements IEmployeeGroupRepository 
         scopeType: input.scopeType,
         scopeId: input.scopeId,
         grantedBy: input.grantedBy,
+        source: input.source ?? MEMBERSHIP_SOURCE.MANUAL,
         expiresAt: input.expiresAt,
       })
       .returning();

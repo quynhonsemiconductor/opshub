@@ -3,6 +3,7 @@ import {
   AuthzService,
   ConflictException,
   InjectDrizzle,
+  MEMBERSHIP_SOURCE,
   NotFoundException,
   PermissionDeniedException,
   ValidationException,
@@ -254,14 +255,15 @@ export class AuthzAdminService {
   }
 
   /**
-   * Reconcile an employee's GLOBAL group memberships to exactly match `groupKeys`
+   * Reconcile the GLOBAL group memberships the identity provider is responsible for to match `groupKeys`
    * (grant missing, revoke extra), then refresh the JWT claim cache and
    * permission cache. This is the single mechanism by which external identity
    * providers (Entra App Roles) become OpsHub permissions — the assignments
    * table stays the source of truth, and `employees.groups` is derived from it.
    *
    * Unknown group keys are ignored (fail-safe: an unmapped Entra App Role never
-   * grants access). Scoped (non-global) assignments are left untouched.
+   * grants access). Scoped (non-global) assignments are left untouched, and so are memberships a person
+   * granted by hand (`source = 'manual'`): only rows an earlier sync wrote are revoked here.
    *
    * `fallbackKey` is what the person holds when NONE of `groupKeys` names a group that exists (an empty claim, or
    * only groups opshub has never heard of). It is a floor, never an addition: it applies only when the
@@ -291,6 +293,9 @@ export class AuthzAdminService {
     const current = await this.employeeGroupRepo.listForEmployee(employeeId);
     const currentGlobal = current.filter((a) => a.scopeType === 'global');
     const currentGroupIds = new Set(currentGlobal.map((a) => a.groupId));
+    // Only what a previous sign-in wrote may be taken back by this one: a membership a person granted by
+    // hand is theirs to revoke, and the token not naming it says nothing about it.
+    const revocable = currentGlobal.filter((a) => a.source === MEMBERSHIP_SOURCE.IDP);
 
     const granted = [...desiredGroupIds].map((id) => keyById.get(id)).filter(Boolean);
 
@@ -306,13 +311,14 @@ export class AuthzAdminService {
               scopeType: 'global',
               scopeId: null,
               grantedBy: actor.sub,
+              source: MEMBERSHIP_SOURCE.IDP,
               expiresAt: null,
             },
             tx,
           );
         }
       }
-      for (const a of currentGlobal) {
+      for (const a of revocable) {
         if (!desiredGroupIds.has(a.groupId)) {
           await this.employeeGroupRepo.revoke(a.id, tx);
         }

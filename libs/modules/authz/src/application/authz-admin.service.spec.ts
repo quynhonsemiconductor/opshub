@@ -215,8 +215,11 @@ describe('AuthzAdminService — group-definition changes', () => {
 });
 
 describe('AuthzAdminService.syncEmployeeGroupsByKeys — the Entra App Role reconcile', () => {
-  /** Groups `employee`, `hr` and `admin` exist; `current` is what the person holds globally. */
-  function buildSync(current: Array<{ id: string; groupId: string }>) {
+  /**
+   * Groups `employee`, `hr` and `admin` exist; `current` is what the person holds globally. A membership
+   * is one an earlier sign-in wrote (`idp`) unless the case says a person granted it (`manual`).
+   */
+  function buildSync(current: Array<{ id: string; groupId: string; source?: 'manual' | 'idp' }>) {
     const t = build();
     const groups = [
       { id: 'r-employee', key: 'employee' },
@@ -225,7 +228,7 @@ describe('AuthzAdminService.syncEmployeeGroupsByKeys — the Entra App Role reco
     ];
     t.groupRepo.list.mockResolvedValue(groups);
     t.employeeGroupRepo.listForEmployee.mockResolvedValue(
-      current.map((a) => ({ ...a, scopeType: 'global' })),
+      current.map((a) => ({ source: 'idp', ...a, scopeType: 'global' })),
     );
     t.employeeGroupRepo.assign.mockResolvedValue({ id: 'new' });
     t.employeeGroupRepo.revoke.mockResolvedValue(undefined);
@@ -270,6 +273,36 @@ describe('AuthzAdminService.syncEmployeeGroupsByKeys — the Entra App Role reco
 
     expect(revoked(t).sort()).toEqual(['a-admin', 'a-hr']);
     expect(assigned(t)).toEqual(['r-employee']);
+  });
+
+  it('keeps a membership a person granted by hand: the token not naming it takes nothing back', async () => {
+    const t = buildSync([{ id: 'a-approver-by-hand', groupId: 'r-hr', source: 'manual' }]);
+
+    await t.service.syncEmployeeGroupsByKeys('u', [], actor, 'employee');
+
+    expect(revoked(t)).toEqual([]);
+    expect(assigned(t)).toEqual(['r-employee']);
+  });
+
+  it('revokes only what an earlier sign-in wrote when the person holds both kinds', async () => {
+    const t = buildSync([
+      { id: 'a-admin', groupId: 'r-admin', source: 'idp' },
+      { id: 'a-hr-by-hand', groupId: 'r-hr', source: 'manual' },
+    ]);
+
+    await t.service.syncEmployeeGroupsByKeys('u', [], actor, 'employee');
+
+    expect(revoked(t)).toEqual(['a-admin']);
+  });
+
+  it('writes what it grants as the identity provider’s, so a later sign-in may take it back', async () => {
+    const t = buildSync([]);
+
+    await t.service.syncEmployeeGroupsByKeys('u', ['hr'], actor, 'employee');
+
+    expect(
+      t.employeeGroupRepo.assign.mock.calls.map((c) => (c[0] as { source: string }).source),
+    ).toEqual(['idp']);
   });
 
   it('without a floor, an empty claim leaves no group (the original contract is unchanged)', async () => {

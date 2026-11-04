@@ -2,6 +2,7 @@
  * Authorization domain types shared by the enforcement layer (PolicyGuard,
  * AuthzService, ScopeEvaluator) and the authz management module.
  */
+import type { MembershipSource } from './membership-source';
 import type { JwtPayload } from './principal';
 
 /** Scope dimensions a group assignment can be constrained to. */
@@ -106,6 +107,8 @@ export interface EmployeeGroup {
   scopeType: ScopeType;
   scopeId: string | null;
   grantedBy: string;
+  /** Whether a person or the identity provider's sign-in sync made this membership. */
+  source: MembershipSource;
   expiresAt: Date | null;
   createdAt: Date;
 }

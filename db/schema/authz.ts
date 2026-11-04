@@ -16,7 +16,7 @@ import {
   primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { scopeTypeEnum } from './enums';
+import { membershipSourceEnum, scopeTypeEnum } from './enums';
 
 export const authzSchema = pgSchema('authz');
 
@@ -74,6 +74,8 @@ export const employeeGroups = authzSchema.table(
     scopeType: scopeTypeEnum('scope_type').notNull().default('global'),
     scopeId: varchar('scope_id', { length: 120 }),
     grantedBy: uuid('granted_by').notNull(),
+    /** `idp` rows follow the identity provider's claims at each sign-in; `manual` rows are only ever changed by a person. */
+    source: membershipSourceEnum('source').notNull().default('manual'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

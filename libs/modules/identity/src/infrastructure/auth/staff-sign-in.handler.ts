@@ -65,7 +65,8 @@ export interface StaffSignIn {
  *     group memberships by `AuthzAdminService.syncEmployeeGroupsByKeys` (an App Role names a group by its key).
  *     A person is never granted more than the token names: with no role claim (or only roles opshub does not
  *     know) they are in the `employee` group and nothing else, and a role removed in Entra is revoked here at
- *     their next sign-in. Authorization itself is not read from the
+ *     their next sign-in. A membership a person granted by hand in the admin UI is not the token's to take
+ *     back, so it survives the reconcile. Authorization itself is not read from the
  *     token: `PolicyGuard` resolves permissions from the database on every request.
  *
  * A failure of any step fails the sign-in, which is the right way round: a session with stale roles is the

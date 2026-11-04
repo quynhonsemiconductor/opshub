@@ -14,6 +14,9 @@ export const doorEventResultEnum = pgEnum('door_event_result', ['allow', 'deny']
 // ── Authorization (RBAC scopes) ──────────────────────────────────────────────
 export const scopeTypeEnum = pgEnum('scope_type', ['global', 'self', 'team', 'dept', 'region']);
 
+/** Who put an employee in a group: a person (`manual`) or the identity provider's sign-in sync (`idp`). */
+export const membershipSourceEnum = pgEnum('membership_source', ['manual', 'idp']);
+
 // ── Universal Request Engine ─────────────────────────────────────────────────
 export const requestStatusEnum = pgEnum('request_status', [
   'pending',

@@ -4,6 +4,7 @@ export * from './session-cookie';
 export * from './session-revoker';
 export * from './decorators';
 export * from './authz.types';
+export * from './membership-source';
 export * from './scope-evaluator';
 export * from './authz.service';
 export * from './actor-scope.service';
