@@ -34,7 +34,7 @@ jobs:
       contents: read
       actions: read # wait-for-run reads the run list
     steps:
-      - uses: quynhonsemiconductor/ci/actions/wait-for-run@400b7e9868e9ba6d172d956a08041ba19b574689  # v1.33.1
+      - uses: quynhonsemiconductor/ci/actions/wait-for-run@956804ad4aa2dcf930909553d306d72b3708fd5d # v1.34.1+ci#308
         with:
           workflow: ghcr-publish.yml
           sha: ${{ github.sha }}
@@ -56,7 +56,7 @@ jobs:
     # release, v1.34.0, predates that fix and writes web to services.web, which the
     # values schema rejects; every older tag does the same. Re-pin to the release
     # that ships the fix once cut.
-    uses: quynhonsemiconductor/ci/.github/workflows/release-promote.yml@355d3c2c5893cb3b60fc68977d19e87554ed8648  # merged main, ci#305
+    uses: quynhonsemiconductor/ci/.github/workflows/release-promote.yml@956804ad4aa2dcf930909553d306d72b3708fd5d # v1.34.1+ci#308
     with:
       product: opshub
       gitops-product: opshub
