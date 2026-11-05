@@ -120,6 +120,17 @@ const baseShape = {
   STORAGE_FORCE_PATH_STYLE: booleanish(false),
 
   // ── Observability ──────────────────────────────────────────────────────────
+  /**
+   * What is actually running, as the chart injects it (qnsc-service 0.19.3): the API/worker image tag —
+   * `vX.Y.Z` on a release, `sha-<commit>` on a dev build. Read by `GET /v1/meta`; absent (a digest-only
+   * pin, or a laptop) means unknown, which the endpoint reports as its `dev` fallback.
+   */
+  APP_VERSION: z.string().optional(),
+  /**
+   * The commit an image tag names, when it names one. The chart sets it only for a `sha-<commit>` tag;
+   * a release tag names no commit. `null` in `/v1/meta` means unknown, never "dev".
+   */
+  APP_COMMIT: z.string().optional(),
   SERVICE_VERSION: z.string().default('dev'),
   // The DEPLOYMENT environment (develop | production), distinct from NODE_ENV, which is production in every deployed environment on purpose.
   // Read by the shared observability package for the OTel resource and the log `env` field; the stack sets it (var.env).

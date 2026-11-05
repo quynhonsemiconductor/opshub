@@ -33,6 +33,13 @@ export interface Env {
   IS_DEV: boolean;
   /** The passwordless dev-login affordance. Off for OpsHub, which signs in through Entra only. */
   DEV_LOGIN_ENABLED: boolean;
+  /**
+   * The running web image tag and commit, when the chart rendered them into `/config.json`
+   * (qnsc-service 0.19.3). Undefined under an older chart, and then the footer says only what it
+   * knows rather than inventing a version.
+   */
+  APP_VERSION?: string;
+  APP_COMMIT?: string;
 }
 
 export const ENV: Env = {
@@ -47,4 +54,6 @@ export function applyConfig(config: AppConfig): void {
   ENV.API_BASE_URL = config.apiBaseUrl;
   ENV.APP_ENV = config.appEnv;
   ENV.DEV_LOGIN_ENABLED = config.devLoginEnabled;
+  ENV.APP_VERSION = config.appVersion;
+  ENV.APP_COMMIT = config.appCommit;
 }
