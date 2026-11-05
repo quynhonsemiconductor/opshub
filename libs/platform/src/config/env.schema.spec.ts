@@ -258,19 +258,19 @@ describe('EnvSchema — object storage backend', () => {
 });
 
 /**
- * The DEFAULT rate limit is configurable DOWN, never up in production.
+ * The DEFAULT rate limit may be raised for CI but never lowered below the staffing floor in production.
  *
- * The knob exists because the browser E2E suite drives fifty specs through four seeded identities inside
- * three minutes and crossed 600/min — in CI, after spreading the load over those four seats already fixed
- * it locally. That is a test-environment problem, and the accommodation must not become a dial somebody
- * can turn in production: these three cases are what make the docblock's promise enforceable.
+ * Normal work must never be throttled (owner, 2026-11-05), so the production schema refuses a value
+ * below `AUTHENTICATED_MINUTE_FLOOR`. The knob still exists because the browser E2E suite drives fifty
+ * specs through a handful of seeded identities inside three minutes, dense enough to cross any per-user
+ * ceiling; that is a test-environment problem and must not become a production dial.
  */
 describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
-  it('defaults to the shipped 600 per minute', () => {
+  it('defaults to the shipped staffing floor', () => {
     const result = EnvSchema.safeParse(env());
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(600);
+    expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(1200);
   });
 
   it('lets a test environment raise it', () => {
@@ -280,20 +280,11 @@ describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
     expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(5000);
   });
 
-  it('REFUSES to raise it in production, and says why', () => {
-    const result = EnvSchema.safeParse(
-      env({ NODE_ENV: 'production', RATE_LIMIT_DEFAULT_LIMIT: '5000' }),
-    );
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    expect(result.error.issues[0]?.message).toMatch(/cannot exceed 600 when NODE_ENV=production/);
-  });
-
-  it('allows LOWERING it in production, because that is not a weakening', () => {
+  it('allows raising it in production: a bigger budget for staff is never a weakening', () => {
     const result = EnvSchema.safeParse(
       env({
         NODE_ENV: 'production',
-        RATE_LIMIT_DEFAULT_LIMIT: '50',
+        RATE_LIMIT_DEFAULT_LIMIT: '5000',
         APP_URL: 'https://opshub.example.test',
         ENTRA_TENANT_ID: '11111111-1111-4111-8111-111111111111',
         ENTRA_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
@@ -303,7 +294,18 @@ describe('EnvSchema — the DEFAULT rate-limit ceiling', () => {
     );
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(50);
+    expect(result.data.RATE_LIMIT_DEFAULT_LIMIT).toBe(5000);
+  });
+
+  it('REFUSES to lower it below the staffing floor in production, and says why', () => {
+    const result = EnvSchema.safeParse(
+      env({ NODE_ENV: 'production', RATE_LIMIT_DEFAULT_LIMIT: '50' }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.message).toMatch(
+      /cannot be below 1200 when NODE_ENV=production/,
+    );
   });
 
   it('REFUSES to raise the pre-auth address ceiling in production, and says why', () => {

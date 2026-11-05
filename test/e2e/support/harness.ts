@@ -107,7 +107,7 @@ export async function createTestApp(): Promise<NestFastifyApplication> {
  *     identity has not verified. Signed-in traffic gives its slot back, so the bucket fills from unverified requests
  *     (401s, forged cookies). The suite
  *     runs serially (see vitest.e2e.config.ts), and the e2e config raises the ceiling for the run.
- *   • `DEFAULT` allows 600 requests per minute per userId. One full suite pass is well over
+ *   • `DEFAULT` allows 1200 requests per minute per userId. One full suite pass is well over
  *     100 requests as `hr` alone, so a SECOND pass started inside the same minute 429s partway
  *     in, on whichever spec happens to be running. Clearing only the login tier left this half
  *     of the problem in place, and it cost a debugging round today.

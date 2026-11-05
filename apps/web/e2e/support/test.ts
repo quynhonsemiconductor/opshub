@@ -5,7 +5,7 @@ import { AUTH_STATES } from './fixtures';
  * `test`, with a rate-limit seat of its own.
  *
  * WHY SPECS IMPORT `test` FROM HERE rather than from `@playwright/test`. The API's DEFAULT rate-limit
- * tier allows 200 requests a minute keyed on the user id, in one bucket across every route it covers. The
+ * tier allows 1200 requests a minute keyed on the user id, in one bucket across every route it covers. The
  * suite used to assign one of four seats per spec FILE, which spread the load between files and did
  * nothing about the load inside one — and with `workers: 1` a file runs alone, so a file's burst is one
  * identity's burst. Measured on a full run: 268 requests in a single 60-second window on one seat.

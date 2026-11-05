@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { FastifyRequest, FastifyReply } from 'fastify';
+import { metrics } from '@opentelemetry/api';
 import { AppConfigService } from '../config/app-config.service';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { KEYED_BY_ADDRESS, clientIp, currentUserId } from '@quynhonsemiconductor/platform-http';
@@ -19,7 +20,23 @@ import {
   type RateLimitTier,
   type RateLimitTierName,
 } from './rate-limit.constants';
-import { failOpenLog } from '@quynhonsemiconductor/observability';
+import { failOpenLog, normalizeRoute } from '@quynhonsemiconductor/observability';
+
+/**
+ * A 429 to a signed-in user is a SIGNAL, not routine back-pressure: these tiers are sized so that normal
+ * work never reaches them. Emitted only by the per-user guard, so any value means an authenticated person
+ * was refused. The alert is `increase(rate_limit_authenticated_429_total{deployment_environment_name="prod"}[5m]) > 0`
+ * — see docs/runbooks/alerts/authenticated-rate-limited.md.
+ *
+ * Labels are bounded (tier name, route template). The user id is NOT a label: it would mint a series per
+ * person. It goes in the warning log line instead.
+ */
+const authenticated429 = metrics
+  .getMeter('opshub-api')
+  .createCounter('rate_limit.authenticated_429', {
+    description:
+      'A signed-in user was answered 429 by a rate-limit tier. Any value in production means the tier is shaping normal work.',
+  });
 
 /**
  * Two buckets, and neither is keyed by a cookie.
@@ -240,35 +257,61 @@ export class UserRateLimitGuard implements CanActivate {
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const userId = currentUserId();
+    const req = context.switchToHttp().getRequest<FastifyRequest & Record<symbol, unknown>>();
+
+    // Identity has verified the caller, so the address slot taken before identity ran is no longer needed. Giving it
+    // back now (not when the reply finishes) keeps an open SSE stream or an aborted signed-in request from holding it.
+    // This runs BEFORE the skip check: a signed-in request to a @SkipRateLimit() route is still signed-in traffic and
+    // must not be left in an address bucket shared with unauthenticated callers.
+    if (userId) {
+      const reservation = req[PRE_AUTH_RESERVATION] as Reservation | undefined;
+      if (reservation) refundReservation(this.cache, this.logger, reservation);
+    }
+
     if (skipped(this.reflector, context)) return true;
 
-    const userId = currentUserId();
     if (!userId) {
       // No principal. On a public route that is expected. On a route that needs one it means this guard ran BEFORE identity's
       // SessionGuard, so the per-user bucket could not key the caller. The marker lets identity say so (its "too-late"
       // warning), and only when a principal is written after it: a public route never reaches that line.
-      const req = context.switchToHttp().getRequest<Record<symbol, unknown>>();
       req[KEYED_BY_ADDRESS] = true;
       return true;
     }
 
-    const req = context.switchToHttp().getRequest<Record<symbol, unknown>>();
-    // Identity has verified the caller, so the address slot taken before identity ran is no longer needed. Giving it
-    // back now (not when the reply finishes) keeps an open SSE stream or an aborted signed-in request from holding it.
-    const reservation = req[PRE_AUTH_RESERVATION] as Reservation | undefined;
-    if (reservation) refundReservation(this.cache, this.logger, reservation);
-
     const tierName = tierOf(this.reflector, context);
     const tier = RATE_LIMIT_TIERS[tierName] as RateLimitTier;
+    const limit = this.limitFor(tierName, tier);
     const res = context.switchToHttp().getResponse<FastifyReply>();
 
-    return consume(
-      this.cache,
-      this.logger,
-      res,
-      `${tierName}:uid:${userId}`,
-      tier,
-      this.limitFor(tierName, tier),
+    try {
+      return await consume(this.cache, this.logger, res, `${tierName}:uid:${userId}`, tier, limit);
+    } catch (err) {
+      // Only a tier refusal reaches here; a cache failure fails open inside `consume`. A signed-in 429 is
+      // reported with the user and route so SA/G can see WHICH person and WHICH screen were throttled.
+      if (
+        err instanceof HttpException &&
+        err.getStatus() === Number(HttpStatus.TOO_MANY_REQUESTS)
+      ) {
+        this.reportAuthenticatedRefusal(req, userId, tierName, limit);
+      }
+      throw err;
+    }
+  }
+
+  /** A signed-in user was refused: one counter increment (bounded labels) and one warning line (with the user). */
+  private reportAuthenticatedRefusal(
+    req: FastifyRequest,
+    userId: string,
+    tier: string,
+    limit: number,
+  ): void {
+    // The route TEMPLATE, never the concrete path: an id in a label mints a series per value.
+    const route = req.routeOptions?.url ?? normalizeRoute(req.url ?? '/');
+    authenticated429.add(1, { tier, route });
+    this.logger.warn(
+      { event: 'rate_limit.authenticated_429', userId, tier, route, limit },
+      'RateLimitGuard: a signed-in user was rate-limited',
     );
   }
 }

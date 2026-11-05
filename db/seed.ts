@@ -72,14 +72,14 @@ const ADMIN_EMPLOYEE_ID = '00000000-0000-7000-8000-000000000001';
 /**
  * A SECOND admin, for the browser suite only.
  *
- * The rate limiter keys the DEFAULT tier (600 req/min) on the user id, and the Playwright suite signs in
- * as one principal for every spec — around 15 API calls per page load, times forty-odd specs inside two
- * minutes, which crosses that line and fails whichever request lands next with a 429. Measured, twice,
- * once as an "upload broken" report that was nothing of the kind.
+ * The rate limiter keys the DEFAULT tier on the user id, and the Playwright suite used to sign in as one
+ * principal for every spec — around 15 API calls per page load, times forty-odd specs inside two minutes.
+ * That crossed the old 200/min ceiling and failed whichever request landed next with a 429. Measured,
+ * twice, once as an "upload broken" report that was nothing of the kind.
  *
- * Two admins let the suite split its spec files between them and stay inside a limit that protects
- * production. The alternative was making the limit configurable, which is a control weakened for the
- * convenience of tests.
+ * Two admins let the suite split its spec files between them. The second seat is no longer strictly
+ * needed at the 1200/min staffing floor, but it keeps the suite's peak well inside the limit on a dense
+ * CI run, and the seeded identity costs nothing.
  */
 const E2E_ADMIN_EMPLOYEE_ID = '00000000-0000-7000-8000-000000000009';
 /*

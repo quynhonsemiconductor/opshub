@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { getProcessRole, type ProcessRole } from './process-role';
-import { PRE_AUTH_IP_BUCKET } from '../rate-limit/rate-limit.constants';
+import { AUTHENTICATED_MINUTE_FLOOR, PRE_AUTH_IP_BUCKET } from '../rate-limit/rate-limit.constants';
 
 const booleanish = (defaultValue: boolean) =>
   z
@@ -39,24 +39,21 @@ const refusePlaceholder = (ctx: z.RefinementCtx, name: string, value: string | u
 const baseShape = {
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   /**
-   * The DEFAULT rate-limit tier's ceiling, in requests per minute per user.
-   *
-   * Exists for ONE reason: the browser E2E suite drives fifty-odd specs through a handful of seeded
-   * identities inside three minutes, and each page load costs about fifteen calls — so it crosses
-   * 600/min and whichever request lands next comes back 429, failing a spec that was testing something
-   * else. Spreading the specs over four seats helped locally and still lost in CI, which runs denser.
-   *
-   * IT CANNOT BE RAISED IN PRODUCTION. The refinement below refuses a value above the default when
-   * `NODE_ENV=production`, so this is a test-environment accommodation and not a control with a dial on
-   * it. Lowering it is always allowed.
-   */
-  /**
    * The pre-auth ceiling per client address (the first bucket every request passes through). The default is the
    * shipped `PRE_AUTH_IP_BUCKET` limit. CI's e2e suites drive every request from one loopback address, so they
    * raise it; `NODE_ENV=production` refuses a value above the default, so it is not a dial in a deployed environment.
    */
   RATE_LIMIT_IP_LIMIT: z.coerce.number().int().positive().default(PRE_AUTH_IP_BUCKET.limit),
-  RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(600),
+  /**
+   * The DEFAULT rate-limit tier's ceiling, in requests per minute per user.
+   *
+   * OpsHub never throttles staff doing normal work: production traffic peaks far below
+   * `AUTHENTICATED_MINUTE_FLOOR`, and the refinement below REFUSES a production value below that floor
+   * (lowering was allowed before 2026-11-05 and is exactly the mistake this now prevents). The knob is
+   * still useful in CI: the browser E2E suite drives fifty-odd specs through a handful of seeded
+   * identities inside three minutes, dense enough to cross any per-user ceiling, so it raises this.
+   */
+  RATE_LIMIT_DEFAULT_LIMIT: z.coerce.number().int().positive().default(AUTHENTICATED_MINUTE_FLOOR),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
   CORS_ORIGINS: z.string().default('http://localhost:5174'),
@@ -245,9 +242,11 @@ type Common = z.infer<z.ZodObject<typeof baseShape>>;
  */
 const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
   {
-    // A RATE LIMIT TESTS CAN RAISE IS NOT A CONTROL. The knob exists for CI; production keeps the
-    // shipped ceiling, and this refusal is what makes that a rule rather than a comment. Deliberately
-    // placed above the early return below, for the reason that comment gives.
+    // A RATE LIMIT TESTS CAN RAISE IS NOT A CONTROL. The pre-auth knob exists for CI; production keeps
+    // the shipped ceiling, and this refusal is what makes that a rule rather than a comment. The DEFAULT
+    // knob is the mirror image: it may go UP for CI but never BELOW the staffing floor in production,
+    // because a lowered DEFAULT is a rate limit shaping normal work. Deliberately placed above the early
+    // return below, for the reason that comment gives.
     if (env.NODE_ENV === 'production' && env.RATE_LIMIT_IP_LIMIT > PRE_AUTH_IP_BUCKET.limit) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -259,14 +258,18 @@ const refineEnv = (env: Common, ctx: z.RefinementCtx): void => {
           'control, and an environment that raises it stops describing production. Lowering it is allowed.',
       });
     }
-    if (env.NODE_ENV === 'production' && env.RATE_LIMIT_DEFAULT_LIMIT > 600) {
+    if (
+      env.NODE_ENV === 'production' &&
+      env.RATE_LIMIT_DEFAULT_LIMIT < AUTHENTICATED_MINUTE_FLOOR
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['RATE_LIMIT_DEFAULT_LIMIT'],
         message:
-          'RATE_LIMIT_DEFAULT_LIMIT cannot exceed 600 when NODE_ENV=production: the default tier is a ' +
-          'protective control, and an environment that raises it stops describing production. Lowering ' +
-          'it is allowed.',
+          'RATE_LIMIT_DEFAULT_LIMIT cannot be below ' +
+          AUTHENTICATED_MINUTE_FLOOR +
+          ' when NODE_ENV=production: the default tier counts one signed-in person doing normal ' +
+          'work, and the owner requires that work is never throttled. Raising it is allowed.',
       });
     }
 
