@@ -56,6 +56,15 @@ export const configSchema = z.object({
     ),
   appEnv: z.enum(['development', 'staging', 'production']),
   devLoginEnabled: z.boolean(),
+  /**
+   * The running web image tag, which the chart adds when it renders this ConfigMap (qnsc-service
+   * 0.19.3). Optional on purpose: an older chart renders no tag, and the footer then shows only what
+   * it knows. The chart's value wins over anything a product writes into `web.config` — the tag is
+   * the fact, a copied string drifts.
+   */
+  appVersion: z.string().min(1).optional(),
+  /** The commit a `sha-<commit>` web tag names; absent for a release tag or a digest-only pin. */
+  appCommit: z.string().min(1).optional(),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;
