@@ -32,6 +32,7 @@ import { QmsModule } from '@modules/qms';
 import { AiModule } from '@modules/ai';
 import { SecurityPostureModule } from '@modules/security-posture';
 import { DoorModule } from '@modules/door';
+import { MetaController } from './meta/meta.controller';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { DoorModule } from '@modules/door';
     SecurityPostureModule,
     DoorModule,
   ],
+  controllers: [MetaController],
   providers: [
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
     { provide: APP_GUARD, useClass: RateLimitGuard },

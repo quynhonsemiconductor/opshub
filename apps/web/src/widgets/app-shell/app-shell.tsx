@@ -24,6 +24,7 @@ import { Button } from '@/shared/ui';
 import { ThemeToggle } from '@/shared/ui/theme-toggle';
 import { FEATURES } from '@/shared/config/features';
 import { navGroups } from './nav-groups';
+import { VersionFooter } from './version-footer';
 
 function OpsHubMark() {
   return (
@@ -235,7 +236,9 @@ export function AppShell() {
             </Button>
           </div>
           {/* Text-only company credit — no logo, kept small and out of the way. */}
-          <p className="px-4 pb-3 pt-1 text-2xs text-sidebar-label">QNSC Co., Ltd.</p>
+          <p className="px-4 pt-1 text-2xs text-sidebar-label">QNSC Co., Ltd.</p>
+          {/* The running version(s), directly under the credit. Commit on hover. */}
+          <VersionFooter />
         </aside>
       )}
 

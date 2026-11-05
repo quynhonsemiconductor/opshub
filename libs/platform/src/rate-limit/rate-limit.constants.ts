@@ -11,24 +11,47 @@ export interface RateLimitTier {
 }
 
 /**
+ * The floor for every bucket that counts a signed-in person doing normal work: 1200 requests a minute.
+ *
+ * OpsHub is an internal tool, and the owner's requirement is that it never rate-limits the company while
+ * people work fast (2026-11-05). Measured production traffic is tiny — the busiest user-minute in the
+ * production API access logs was 4 requests, and the browser E2E suite's synthetic full run peaks at 268
+ * on one seat — so 1200 is far above anything a person generates, while still bounding a runaway loop.
+ * The buckets that stay tight are the ones where abuse, not speed, is the risk: PRE_AUTH_IP_BUCKET,
+ * AI and UPLOAD.
+ */
+export const AUTHENTICATED_MINUTE_FLOOR = 1200;
+
+/**
  * Named tiers for intent-based rate limiting. Each is applied PER AUTHENTICATED USER (`uid:<userId>`), after
  * identity has verified the session. Each name is used by `@RateLimit(...)` declarations: renaming or removing one is a
  * change to every declaration that uses it.
+ *
+ * A tier is a BUDGET FOR ONE PERSON, not a security control. Anything that must resist abuse (sign-in,
+ * inference, object-storage writes) has its own tight bucket; these do not throttle normal use.
  */
 export const RATE_LIMIT_TIERS = {
-  /** Default: most read/write endpoints — 600 req/min per user. Configurable downwards in production. */
-  DEFAULT: { name: 'DEFAULT', windowMs: 60_000, limit: 600 },
   /**
-   * The session bootstrap — GET /v1/auth/me. Its own tier on purpose: it runs once per page load,
-   * before anything else, so a screen that fans out many reads must not be able to spend the bucket
-   * that decides whether the user is signed in. Two page loads a second is already far beyond a person.
+   * Default: most read/write endpoints — 1200 req/min per user. The env knob can raise it in a test
+   * environment and cannot take it below the floor in production (env.schema.ts enforces that).
    */
-  AUTH_ME: { name: 'AUTH_ME', windowMs: 60_000, limit: 120 },
-  /** Strict: expensive search/list endpoints — 60 req/min per user */
-  STRICT: { name: 'STRICT', windowMs: 60_000, limit: 60 },
-  /** AI chat — LLM calls are expensive; 10 req/min per user to cap inference cost. */
+  DEFAULT: { name: 'DEFAULT', windowMs: 60_000, limit: AUTHENTICATED_MINUTE_FLOOR },
+  /**
+   * The session bootstrap — GET /v1/auth/me. Its own bucket on purpose: it runs once per page load,
+   * before anything else, so a screen that fans out many reads must not be able to spend the bucket
+   * that decides whether the user is signed in. The LIMIT is the DEFAULT floor, not a smaller number:
+   * the bootstrap must never be the request that 429s a signed-in person.
+   */
+  AUTH_ME: { name: 'AUTH_ME', windowMs: 60_000, limit: AUTHENTICATED_MINUTE_FLOOR },
+  /**
+   * Strict: routes marked as expensive (searches, admin lists, door terminals). It keeps its own bucket
+   * so one screen's fan-out cannot spend another's, but the ceiling is the same as DEFAULT: the old
+   * 60/min throttled bulk edits and fast navigation, which are normal work.
+   */
+  STRICT: { name: 'STRICT', windowMs: 60_000, limit: AUTHENTICATED_MINUTE_FLOOR },
+  /** AI chat — LLM calls are expensive; 10 req/min per user to cap inference cost. Tight on purpose. */
   AI: { name: 'AI', windowMs: 60_000, limit: 10 },
-  /** File upload presign/confirm — S3 PUT costs; 30 req/min per user. */
+  /** File upload presign/confirm — S3 PUT costs; 30 req/min per user. Tight on purpose. */
   UPLOAD: { name: 'UPLOAD', windowMs: 60_000, limit: 30 },
 } as const satisfies Record<string, RateLimitTier>;
 

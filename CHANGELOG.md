@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.10](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.9...v0.4.10) (2026-11-05)
+
+
+### ✨ Features
+
+* **meta:** show the running version in the API and the sidebar ([#557](https://github.com/quynhonsemiconductor/opshub/issues/557)) ([230c3a5](https://github.com/quynhonsemiconductor/opshub/commit/230c3a5bbbf1012a63947d2e3db1bdb9c1e51d57))
+
+
+### 🐛 Bug Fixes
+
+* **api:** stop rate limits from throttling staff on normal work ([#555](https://github.com/quynhonsemiconductor/opshub/issues/555)) ([3ee4e5c](https://github.com/quynhonsemiconductor/opshub/commit/3ee4e5c9d33ff581ad7eb2d23305a4f38dc040e0))
+
 ## [0.4.9](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.8...v0.4.9) (2026-11-04)
 
 

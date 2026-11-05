@@ -2,12 +2,16 @@
 # Release · Promote — a vX.Y.Z tag RETAGS the digests already published for that
 # commit and opens the reviewed gitops prod PR. It builds NOTHING.
 #
-# The work lives in ci's reusable (v1.33.1). The tag can be pushed while the
+# The work lives in ci's reusable, pinned below to the merged commit that writes
+# the SPA image to web.image (ci#305). The tag can be pushed while the
 # same commit's GHCR · Publish run is still building, and release-retag looks for
 # sha-<12> once, so wait for that run first and propagate its conclusion.
 #
-# `web` is NOT in `services`: gitops values/opshub has no web image yet (D's
-# chart). It joins here when the chart lands.
+# `web` IS in `services`: gitops values/opshub now carries the top-level
+# `web.image` (the chart's SPA component), and ghcr-publish's second call
+# publishes the SPA image from the SAME release commit (build-once). The
+# reusable and the bump action write it to `web.image.{tag,digest}`, not under
+# `services.web`.
 # =============================================================================
 name: Release · Promote
 
@@ -30,7 +34,7 @@ jobs:
       contents: read
       actions: read # wait-for-run reads the run list
     steps:
-      - uses: quynhonsemiconductor/ci/actions/wait-for-run@400b7e9868e9ba6d172d956a08041ba19b574689  # v1.33.1
+      - uses: quynhonsemiconductor/ci/actions/wait-for-run@956804ad4aa2dcf930909553d306d72b3708fd5d # v1.34.1+ci#308
         with:
           workflow: ghcr-publish.yml
           sha: ${{ github.sha }}
@@ -48,12 +52,16 @@ jobs:
       contents: read
       packages: write
       attestations: read
-    uses: quynhonsemiconductor/ci/.github/workflows/release-promote.yml@400b7e9868e9ba6d172d956a08041ba19b574689  # v1.33.1
+    # Pins the merged ci commit that writes web to web.image (#305). The newest
+    # release, v1.34.0, predates that fix and writes web to services.web, which the
+    # values schema rejects; every older tag does the same. Re-pin to the release
+    # that ships the fix once cut.
+    uses: quynhonsemiconductor/ci/.github/workflows/release-promote.yml@956804ad4aa2dcf930909553d306d72b3708fd5d # v1.34.1+ci#308
     with:
       product: opshub
       gitops-product: opshub
       release-tag: ${{ github.ref_name }}
       commit: ${{ github.sha }}
-      services: api worker migrator
+      services: api worker migrator web
     secrets:
       QNSC_AUTOMATION_PRIVATE_KEY: ${{ secrets.QNSC_AUTOMATION_PRIVATE_KEY }}

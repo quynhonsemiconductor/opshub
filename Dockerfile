@@ -15,12 +15,12 @@
 
 ARG NODE_VERSION=24
 ARG ALPINE_VERSION=3.22
-ARG PNPM_VERSION=11.28.6
+# pnpm is NOT pinned here: corepack reads `packageManager` from package.json (single source of
+# truth), the same as rova. A second pin cannot drift from the one CI and developers use.
 
 # ── deps: all packages (dev+prod) for the builder ────────────────────────────
 FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS deps
-ARG PNPM_VERSION
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY patches ./patches
@@ -40,8 +40,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
 
 # ── prod-deps: production-only node_modules for runtime images ────────────────
 FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS prod-deps
-ARG PNPM_VERSION
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY patches ./patches
@@ -56,8 +55,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
 
 # ── builder: compile the NestJS monorepo ─────────────────────────────────────
 FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS builder
-ARG PNPM_VERSION
-RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+RUN corepack enable
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
