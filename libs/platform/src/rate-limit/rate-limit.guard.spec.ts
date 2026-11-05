@@ -3,6 +3,20 @@ import { HttpException } from '@nestjs/common';
 import { requestContextStorage } from '@quynhonsemiconductor/observability';
 import { GlobalExceptionFilter, KEYED_BY_ADDRESS } from '@quynhonsemiconductor/platform-http';
 import { describe, expect, it, vi } from 'vitest';
+
+// The counter is created when the guard module loads, so the mock must be in place before the import
+// below (vitest hoists `vi.mock`, which is what makes the hoisted spy necessary).
+const { authenticated429Add } = vi.hoisted(() => ({ authenticated429Add: vi.fn() }));
+vi.mock('@opentelemetry/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@opentelemetry/api')>();
+  return {
+    ...actual,
+    metrics: {
+      ...actual.metrics,
+      getMeter: () => ({ createCounter: () => ({ add: authenticated429Add }) }),
+    },
+  };
+});
 import {
   PRE_AUTH_IP_BUCKET,
   RATE_LIMIT_TIER,
@@ -47,6 +61,8 @@ function contextFor(over: Overrides = {}) {
     ip: over.ip ?? '203.0.113.9',
     user: over.user,
     cookies: over.cookies ?? {},
+    url: '/v1/assets?limit=1',
+    routeOptions: { url: '/v1/assets' },
   };
   const raw = new EventEmitter();
   const response = { header: vi.fn(), statusCode: 200, raw };
@@ -137,6 +153,21 @@ describe('RateLimitGuard (pre-auth, per verified address: kept unless identity v
     expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(0);
     finish(200);
     expect(cache.refundRateLimit).toHaveBeenCalledTimes(1); // and never twice
+  });
+
+  it('gives the address slot back even on a @SkipRateLimit() route once identity has verified the caller', async () => {
+    // A signed-in request is not unauthenticated traffic. Leaving its reservation in the address bucket
+    // would let a skipped route (a health probe the SPA can also reach) consume the NAT-sized pre-auth window.
+    const cache = windowCache();
+    const pre = new RateLimitGuard(reflectorFor() as never, cache as never);
+    const user = new UserRateLimitGuard(reflectorFor({ skip: true }) as never, cache as never);
+    const { context } = contextFor({ cookies: { session_token: 'valid' } });
+
+    await pre.canActivate(context);
+    await asUser('emp-1', () => user.canActivate(context));
+
+    expect(cache.live('IP:203.0.113.9', 0)).toHaveLength(0);
+    expect(cache.consumeRateLimit).toHaveBeenCalledTimes(1); // only the pre-auth bucket, no user bucket
   });
 
   it('gives the slot back ONCE, however many times the per-user guard runs for one request', async () => {
@@ -465,6 +496,7 @@ describe('UserRateLimitGuard (authenticated, per user)', () => {
   });
 
   it('refuses the AI tier after its own ceiling, per user', async () => {
+    authenticated429Add.mockClear();
     const cache = countingCache();
     const guard = new UserRateLimitGuard(reflectorFor({ tier: 'AI' }) as never, cache as never);
 
@@ -479,6 +511,10 @@ describe('UserRateLimitGuard (authenticated, per user)', () => {
 
     expect((refused as HttpException).getStatus()).toBe(429);
     expect(cache.counts.get('AI:uid:emp-1')).toBe(11);
+    // A 429 to a signed-in user is a signal: one counter increment with bounded labels, nothing on the
+    // ten admitted requests. The alert fires on any value in production.
+    expect(authenticated429Add).toHaveBeenCalledTimes(1);
+    expect(authenticated429Add).toHaveBeenCalledWith(1, { tier: 'AI', route: '/v1/assets' });
   });
 
   it('marks a request with no principal, so identity can warn when this guard ran before its SessionGuard', async () => {
@@ -530,14 +566,33 @@ describe('UserRateLimitGuard (authenticated, per user)', () => {
 });
 
 describe('the shipped tiers', () => {
-  it('gives a signed-in user 600 DEFAULT requests a minute', () => {
+  it('gives a signed-in user the 1200-request staffing floor on DEFAULT', () => {
     // Pinned rather than implied by whichever config the caller happened to build: a silently smaller
-    // DEFAULT is the difference between a busy screen working and it answering 429.
-    expect(RATE_LIMIT_TIERS.DEFAULT.limit).toBe(600);
+    // DEFAULT is the difference between a busy screen working and it answering 429. The owner requires
+    // that normal staff work is never throttled (2026-11-05).
+    expect(RATE_LIMIT_TIERS.DEFAULT).toMatchObject({ windowMs: 60_000, limit: 1200 });
   });
 
-  it('gives /v1/auth/me its own bucket, so page-load reads cannot spend the DEFAULT one', () => {
-    expect(RATE_LIMIT_TIERS.AUTH_ME).toMatchObject({ windowMs: 60_000, limit: 120 });
+  it('never sets an interactive tier below the staffing floor', () => {
+    // STRICT used to be 60/min, which throttled bulk edits and fast navigation — normal work, not abuse.
+    for (const tier of ['DEFAULT', 'STRICT', 'AUTH_ME'] as const) {
+      expect(
+        RATE_LIMIT_TIERS[tier].limit,
+        `${tier} must not throttle normal work`,
+      ).toBeGreaterThanOrEqual(1200);
+    }
+  });
+
+  it('keeps /v1/auth/me in its own bucket, with no ceiling beyond DEFAULT', () => {
+    expect(RATE_LIMIT_TIERS.AUTH_ME).toMatchObject({ windowMs: 60_000, limit: 1200 });
     expect(RATE_LIMIT_TIERS.AUTH_ME).not.toBe(RATE_LIMIT_TIERS.DEFAULT);
+  });
+
+  it('keeps the abuse-facing buckets tight', () => {
+    // These are where a limit is a control rather than a convenience: inference cost, object-storage
+    // writes, and the unauthenticated sign-in path.
+    expect(RATE_LIMIT_TIERS.AI.limit).toBe(10);
+    expect(RATE_LIMIT_TIERS.UPLOAD.limit).toBe(30);
+    expect(PRE_AUTH_IP_BUCKET.limit).toBe(1000);
   });
 });

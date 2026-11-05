@@ -64,6 +64,31 @@ describe('rate-limit buckets', () => {
     expect(await windowSize(defaultKey)).toBe(defaultBefore);
   });
 
+  it('admits a 300-request burst from ONE signed-in user inside a minute', async () => {
+    // The owner's requirement in executable form: a person working fast (or a screen fanning out reads)
+    // never sees a 429. 300 in 60 s is several times the console's own page-load fan-out and still a
+    // quarter of the shipped 1200 cap. The e2e config raises DEFAULT to 5000 for the suite, so this
+    // asserts the SHAPE (per-user, unimpeded) while rate-limit.guard.spec.ts pins the shipped number.
+    const userKey = `rl:DEFAULT:uid:${admin.userId}`;
+    const before = await windowSize(userKey);
+    const startedAt = Date.now();
+    const BURST = 300;
+    const statuses: number[] = [];
+
+    for (let sent = 0; sent < BURST; sent += 10) {
+      const batch = await Promise.all(
+        Array.from({ length: Math.min(10, BURST - sent) }, () =>
+          apiRequest(app, admin, 'GET', '/assets?limit=1'),
+        ),
+      );
+      statuses.push(...batch.map((res) => res.status));
+    }
+
+    expect(statuses.filter((status) => status !== 200)).toEqual([]);
+    expect(Date.now() - startedAt).toBeLessThan(60_000);
+    expect(await windowSize(userKey)).toBe(before + BURST);
+  });
+
   it('keeps the address slot of a request identity does not verify (a 401)', async () => {
     const addressKey = 'rl:IP:127.0.0.1';
     const before = await windowSize(addressKey);
