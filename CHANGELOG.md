@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.9](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.8...v0.4.9) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **api:** raise the user rate limit and give /auth/me its own tier ([#546](https://github.com/quynhonsemiconductor/opshub/issues/546)) ([bbee7a9](https://github.com/quynhonsemiconductor/opshub/commit/bbee7a950759aef5ed3edc8471ae0753f050c8cd))
+* **web:** drop caddy's file capability so the pod can exec it ([#547](https://github.com/quynhonsemiconductor/opshub/issues/547)) ([65e6afa](https://github.com/quynhonsemiconductor/opshub/commit/65e6afa60905732c6ce9ff9f0e1fb92124c5af10))
+* **web:** keep the session when /auth/me is rate-limited ([#545](https://github.com/quynhonsemiconductor/opshub/issues/545)) ([5010bcd](https://github.com/quynhonsemiconductor/opshub/commit/5010bcd803246ef74d23f137d34d3f42475868c8))
+
 ## [0.4.8](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.7...v0.4.8) (2026-11-04)
 
 
