@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AlertTriangle, ShieldCheck } from 'lucide-react';
-import { activeEmployeeOptions, positionOptions } from '@/shared/api/picker-sources';
+import { activeEmployeeOptions, roleOptions } from '@/shared/api/picker-sources';
 import {
   Badge,
   Button,
@@ -18,7 +18,7 @@ import { useGaps } from './use-training';
 import type { CompetencyGap } from './training.types';
 
 /**
- * The competency gap report: who is missing training their position requires.
+ * The competency gap report: who is missing training their role requires.
  *
  * COMPUTED BY THE API, NOT HERE. The join is requirements × records × grace period × today, and doing it
  * client-side would mean fetching every record for every employee and reimplementing the expiry rule —
@@ -31,10 +31,10 @@ import type { CompetencyGap } from './training.types';
  */
 export function GapsTab() {
   const [employeeId, setEmployeeId] = useState('');
-  const [positionId, setPositionId] = useState('');
+  const [roleId, setRoleId] = useState('');
   const [includeRecommended, setIncludeRecommended] = useState(false);
 
-  const gaps = useGaps({ employeeId, positionId, includeRecommended });
+  const gaps = useGaps({ employeeId, roleId, includeRecommended });
   const rows = gaps.data ?? [];
   const mandatory = rows.filter((gap) => gap.kind === 'mandatory').length;
 
@@ -50,7 +50,7 @@ export function GapsTab() {
     {
       key: 'employee',
       header: 'Employee',
-      // The NAME. This report is filtered by POSITION as often as by employee, and in that shape it
+      // The NAME. This report is filtered by ROLE as often as by employee, and in that shape it
       // is a list of different people against the same course — so the column that says which of
       // them is the whole output, and it cannot be a uuid.
       cell: (gap) => <span className="text-xs text-fg-muted">{orDash(gap.employeeName)}</span>,
@@ -92,7 +92,7 @@ export function GapsTab() {
     },
   ];
 
-  const chosen = !!(employeeId || positionId);
+  const chosen = !!(employeeId || roleId);
 
   return (
     <div className="flex flex-col gap-4">
@@ -111,12 +111,12 @@ export function GapsTab() {
             </div>
             <div className="w-56">
               <EntityPicker
-                ariaLabel="Filter by position"
-                queryKey="positions"
-                value={positionId}
-                onChange={setPositionId}
-                fetchOptions={positionOptions}
-                placeholder="By position…"
+                ariaLabel="Filter by role"
+                queryKey="roles"
+                value={roleId}
+                onChange={setRoleId}
+                fetchOptions={roleOptions}
+                placeholder="By role…"
               />
             </div>
             <Button
@@ -145,7 +145,7 @@ export function GapsTab() {
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-12 text-center">
           <AlertTriangle className="h-6 w-6 text-fg-subtle" strokeWidth={1.5} />
           <p className="text-sm text-fg-muted">
-            Choose an employee or a position to see what training is missing.
+            Choose an employee or a role to see what training is missing.
           </p>
         </div>
       ) : (

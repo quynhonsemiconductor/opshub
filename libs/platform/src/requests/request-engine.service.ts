@@ -13,11 +13,16 @@ import { ErrorCodes } from '../errors/error-codes';
 import { WebhookEnqueueService } from '../webhooks/webhook-enqueue.service';
 import { employees, requestItems, requestApprovals, requestComments } from '../../../../db/schema';
 import { RequestRegistry } from './request-registry';
+import {
+  ASSIGNEE_FALLBACK_PERMISSION,
+  ASSIGNEE_OVERRIDE_PERMISSION,
+} from './request-engine.constants';
 import { nameOf, resolveEmployeeNames } from '../directory/employee-names';
 import { DelegationService } from '../authz/delegation.service';
 import { NotificationSchedulerService } from '../notifications/notification-scheduler.service';
 import type { NotificationTemplateVars } from '../notifications/notification.templates';
 import type {
+  AssigneeGateOutcome,
   RequestFilters,
   RequestItem,
   RequestItemWithApprovals,
@@ -39,8 +44,8 @@ import type {
  * TypeDef hooks are called INSIDE the transaction so domain side-effects
  * (e.g. creating access_grants, updating leave status) are atomic.
  */
-/** Who may decide a request whose assignee is unavailable: hr + admin only (managers lack it). */
-const ASSIGNEE_FALLBACK_PERMISSION = 'workforce.manage';
+/** The gate outcome when nobody was passed over: the assignee (or their delegate) decided, or none was named. */
+const _GATE_OPEN: AssigneeGateOutcome = { fallbackFor: null, overriddenFor: null };
 
 @Injectable()
 export class RequestEngine {
@@ -157,26 +162,31 @@ export class RequestEngine {
    * offboarded, or no longer holds the step's permission, HR or an administrator (and only they: see
    * `ASSIGNEE_FALLBACK_PERMISSION`; the caller has also passed the step permission check) may decide. The returned `fallbackFor` names the
    * unavailable assignee; callers record it on the approval row and it is logged.
+   *
+   * An available assignee can be passed over by a holder of `ASSIGNEE_OVERRIDE_PERMISSION` (the `approver`
+   * group, admin by wildcard) who also holds the step permission. `overriddenFor` names who was passed over.
    */
   private async resolveAssigneeGate(
     request: RequestItem,
     actor: Actor,
     activeDelegation: { fromUserId: string } | null,
     requiredPermission: string,
-  ): Promise<{ fallbackFor: string | null }> {
+  ): Promise<AssigneeGateOutcome> {
     const assigneeId = request.assigneeId;
-    if (assigneeId === null || assigneeId === actor.sub) return { fallbackFor: null };
-    if (activeDelegation && activeDelegation.fromUserId === assigneeId)
-      return { fallbackFor: null };
+    if (assigneeId === null || assigneeId === actor.sub) return _GATE_OPEN;
+    if (activeDelegation && activeDelegation.fromUserId === assigneeId) return _GATE_OPEN;
+    const mayOverride = await this.holdsOverride(actor.sub, activeDelegation);
     if (await this.assigneeUnavailable(assigneeId, requiredPermission)) {
       // HR/ADMIN ONLY. Holding the step's permission is not enough: managers hold the review
       // permission too, and a manager of another team must not decide someone else's report's request
       // just because the assignee left. `workforce.manage` is granted to hr (admin by wildcard) only.
-      const mayOverride =
+      // An override holder passes too: the assignee leaving must not make the request harder to decide.
+      const mayFallBack =
+        mayOverride ||
         (await this.authz.check(actor.sub, ASSIGNEE_FALLBACK_PERMISSION)) ||
         (activeDelegation !== null &&
           (await this.authz.check(activeDelegation.fromUserId, ASSIGNEE_FALLBACK_PERMISSION)));
-      if (!mayOverride) {
+      if (!mayFallBack) {
         throw new PermissionDeniedException(
           `This request is waiting on ${assigneeId}, who is unavailable; only HR or an administrator may decide it`,
         );
@@ -185,10 +195,29 @@ export class RequestEngine {
         { requestId: request.id, assigneeId, actorId: actor.sub },
         'Assignee unavailable (offboarded or lacks permission); HR/admin fallback decision',
       );
-      return { fallbackFor: assigneeId };
+      return { fallbackFor: assigneeId, overriddenFor: null };
+    }
+    if (mayOverride) {
+      this.logger.log(
+        { requestId: request.id, assigneeId, actorId: actor.sub },
+        'Assigned request decided by an override holder, not by its assignee',
+      );
+      return { fallbackFor: null, overriddenFor: assigneeId };
     }
     throw new PermissionDeniedException(
       `This request is waiting on ${assigneeId}; only they (or their delegate) may decide it`,
+    );
+  }
+
+  /** Whether the caller, or whoever delegated to them, may decide a request assigned to someone else. */
+  private async holdsOverride(
+    actorId: string,
+    activeDelegation: { fromUserId: string } | null,
+  ): Promise<boolean> {
+    if (await this.authz.check(actorId, ASSIGNEE_OVERRIDE_PERMISSION)) return true;
+    return (
+      activeDelegation !== null &&
+      (await this.authz.check(activeDelegation.fromUserId, ASSIGNEE_OVERRIDE_PERMISSION))
     );
   }
 
@@ -202,10 +231,14 @@ export class RequestEngine {
     return !(await this.authz.check(assigneeId, permission));
   }
 
-  /** The approval note, tagged when the decision was a fallback so the audit trail shows why. */
-  private fallbackNote(note: string | null, fallbackFor: string | null): string | null {
-    if (!fallbackFor) return note;
-    const tag = `[fallback decision: assignee ${fallbackFor} unavailable]`;
+  /** The approval note, tagged when the decision got past the assignee so the audit trail shows why. */
+  private decisionNote(note: string | null, gate: AssigneeGateOutcome): string | null {
+    const tag = gate.fallbackFor
+      ? `[fallback decision: assignee ${gate.fallbackFor} unavailable]`
+      : gate.overriddenFor
+        ? `[override decision: assignee ${gate.overriddenFor} was available]`
+        : null;
+    if (!tag) return note;
     return note ? `${tag} ${note}` : tag;
   }
 
@@ -246,7 +279,7 @@ export class RequestEngine {
         `Missing permission for step ${currentStep}: ${requiredPermission}`,
       );
     }
-    const { fallbackFor } = await this.resolveAssigneeGate(
+    const gate = await this.resolveAssigneeGate(
       request,
       actor,
       activeDelegation,
@@ -285,7 +318,7 @@ export class RequestEngine {
         step: currentStep,
         approverId: actor.sub,
         decision: 'approved',
-        note: this.fallbackNote(note, fallbackFor),
+        note: this.decisionNote(note, gate),
         delegatedFromId: activeDelegation?.fromUserId ?? null,
       });
 
@@ -408,7 +441,7 @@ export class RequestEngine {
         `Missing permission for step ${currentStep}: ${requiredPermission}`,
       );
     }
-    const { fallbackFor } = await this.resolveAssigneeGate(
+    const gate = await this.resolveAssigneeGate(
       request,
       actor,
       activeDelegation,
@@ -429,7 +462,7 @@ export class RequestEngine {
         step: currentStep,
         approverId: actor.sub,
         decision: 'rejected',
-        note: this.fallbackNote(note, fallbackFor),
+        note: this.decisionNote(note, gate),
         delegatedFromId: activeDelegation?.fromUserId ?? null,
       });
 
@@ -517,6 +550,16 @@ export class RequestEngine {
         await def.onExpire(request.payload, requestId, tx);
       }
 
+      // Tell the requester it LAPSED. An unanswered request is neither approved nor refused, and silence reads
+      // as either: a person who filed for next week and heard nothing has to find out by looking.
+      await this.notifScheduler.schedule(tx, {
+        type: 'request.expired',
+        vars: { requestType: request.type, requestId },
+        recipientId: request.requesterId,
+        resourceId: requestId,
+        idempotencyKey: `request_expired:${requestId}`,
+      });
+
       const expiredPayload = { requestId, type: request.type };
       await this.webhookEnqueue.fanout(tx, 'request.expired', expiredPayload);
     });
@@ -527,7 +570,7 @@ export class RequestEngine {
   // ── Query ──────────────────────────────────────────────────────────────────
 
   /**
-   * Read one request, if the actor is a party to it or holds `request.read`.
+   * Read one request, if the actor is a party to it, holds `request.read`, or may decide it.
    *
    * Performed no check at all before: any authenticated caller could read any request by id,
    * including its approval chain and the requester's justification.
@@ -542,26 +585,48 @@ export class RequestEngine {
     const item = await this.loadUnchecked(id);
     if (!item) return null;
 
-    await this.actorScope.assertParty(
-      [item.requesterId, item.assigneeId],
-      actor,
-      'request.read',
-      'request',
-    );
-
     /*
      * DECIDABILITY ON THE SINGLE READ TOO, computed here rather than inside `loadUnchecked`. That one
      * has no actor on purpose — the transitions use it and gate on their own permission — and a
      * default of `false` would be a lie to an approver reading a request they are perfectly able to
-     * decide.
+     * decide. It is also what admits that approver: see `assertMayRead`.
      */
     const decidable = await this.decidability([item], actor.sub);
     const verdict = decidable.get(item.id);
+    await this.assertMayRead(item, actor, verdict?.may === true);
     return {
       ...item,
       viewerMayDecide: verdict?.may ?? false,
       viewerCannotDecideReason: verdict?.reason ?? null,
     };
+  }
+
+  /**
+   * Refuses a read unless the actor is a party to the request, holds `request.read`, may decide it, or
+   * already decided it.
+   *
+   * Deciding implies reading: an approver who can approve a ticket must see what they are approving, and
+   * granting them `request.read` for that would show them every request in the company, whatever its type
+   * and state. This admits the open requests of the types they review, and keeps what they decided
+   * readable afterwards, so their decisions do not vanish from their own history.
+   *
+   * Args:
+   *   request: The request being read.
+   *   actor: Who is reading it.
+   *   mayDecide: Whether the engine's decidability rule lets the actor decide it right now.
+   */
+  private async assertMayRead(
+    request: RequestItem,
+    actor: Actor,
+    mayDecide: boolean,
+  ): Promise<void> {
+    if (mayDecide || (await this.hasDecided(request.id, actor.sub))) return;
+    await this.actorScope.assertParty(
+      [request.requesterId, request.assigneeId],
+      actor,
+      'request.read',
+      'request',
+    );
   }
 
   /** The raw read, with no authorization: for transitions that gate on their own permission. */
@@ -613,7 +678,9 @@ export class RequestEngine {
    * as a principal without permissions.
    *
    * A party to a request is its requester OR its assignee, so the narrowed form is that
-   * disjunction rather than `requesterId = actor` — an approver must still see their queue.
+   * disjunction rather than `requesterId = actor` — an approver must still see their queue. A request
+   * the actor may decide is readable too (see `assertMayRead`), which is how an approver sees the
+   * unassigned and overridable tickets without holding `request.read`, and so is one they already decided.
    */
   async list(
     filters: RequestFilters,
@@ -622,6 +689,9 @@ export class RequestEngine {
     offset: number,
   ): Promise<{ rows: RequestItemWithApprovals[]; total: number }> {
     const unrestricted = await this.authz.check(actorId, 'request.read');
+    // Computed once: it is both the "My queue" filter and, for a caller without `request.read`, what they may read.
+    const decidableRows =
+      filters.myQueue || !unrestricted ? await this.decidableByPredicate(actorId) : undefined;
 
     const conditions = [
       filters.type ? eq(requestItems.type, filters.type) : undefined,
@@ -629,7 +699,7 @@ export class RequestEngine {
       filters.status ? eq(requestItems.status, filters.status) : undefined,
       // "My queue" = what I can actually decide. See `decidableByPredicate` for what it used to mean.
       filters.myQueue
-        ? await this.decidableByPredicate(actorId)
+        ? decidableRows
         : filters.assigneeId
           ? eq(requestItems.assigneeId, filters.assigneeId)
           : undefined,
@@ -637,7 +707,13 @@ export class RequestEngine {
       // than by rewriting `filters` so a caller cannot widen it back out with `requesterId`.
       unrestricted
         ? undefined
-        : or(eq(requestItems.requesterId, actorId), eq(requestItems.assigneeId, actorId)),
+        : or(
+            eq(requestItems.requesterId, actorId),
+            eq(requestItems.assigneeId, actorId),
+            decidableRows,
+            // What I decided stays readable to me once it is no longer open.
+            sql`${requestItems.id} in (select ${requestApprovals.requestId} from ${requestApprovals} where ${requestApprovals.approverId} = ${actorId})`,
+          ),
     ].filter(Boolean);
 
     const where = conditions.length ? and(...conditions) : undefined;
@@ -894,15 +970,18 @@ export class RequestEngine {
 
     // The assignee clause — see `resolveAssigneeGate` for the rule this mirrors.
     const delegation = await this.delegation.findActiveDelegationTo(actorId);
-    const assigneeMayBe = or(
-      isNull(requestItems.assigneeId),
-      eq(requestItems.assigneeId, actorId),
-      delegation ? eq(requestItems.assigneeId, delegation.fromUserId) : undefined,
-      // An offboarded assignee opens the fallback for HR/admin only.
-      (await this.authz.check(actorId, ASSIGNEE_FALLBACK_PERMISSION))
-        ? sql`${requestItems.assigneeId} in (select ${employees.id} from ${employees} where ${employees.status} = 'offboarded')`
-        : undefined,
-    );
+    const assigneeMayBe = (await this.holdsOverride(actorId, delegation))
+      ? // Not bound to the assignee; the step permission above still applies.
+        sql`true`
+      : or(
+          isNull(requestItems.assigneeId),
+          eq(requestItems.assigneeId, actorId),
+          delegation ? eq(requestItems.assigneeId, delegation.fromUserId) : undefined,
+          // An offboarded assignee opens the fallback for HR/admin only.
+          (await this.authz.check(actorId, ASSIGNEE_FALLBACK_PERMISSION))
+            ? sql`${requestItems.assigneeId} in (select ${employees.id} from ${employees} where ${employees.status} = 'offboarded')`
+            : undefined,
+        );
 
     const decidablePairs = or(
       ...pairs.map((pair) =>
@@ -988,12 +1067,14 @@ export class RequestEngine {
       const required = stepDef?.requiredPermission ?? def.requiredApprovalPermission;
       let may = await mayUse(required);
       // An assigned request is the assignee's (or their delegate's) to decide; offboarded or
-      // permission-less assignees open the HR/admin fallback. Reads as "not yours to decide".
+      // permission-less assignees open the HR/admin fallback, and an override holder is not bound to
+      // the assignee. Reads as "not yours to decide".
       if (
         may &&
         row.assigneeId !== null &&
         row.assigneeId !== actorId &&
         row.assigneeId !== activeDelegation?.fromUserId &&
+        !(await mayUse(ASSIGNEE_OVERRIDE_PERMISSION)) &&
         !(
           (await this.assigneeUnavailable(row.assigneeId, required)) &&
           (await mayUse(ASSIGNEE_FALLBACK_PERMISSION))
@@ -1031,12 +1112,7 @@ export class RequestEngine {
     const request = await this.getOrFail(requestId);
     // Commenting used to require only that the request EXISTED, so any authenticated caller
     // could post onto anyone's request — a write, on a record they cannot otherwise read.
-    await this.actorScope.assertParty(
-      [request.requesterId, request.assigneeId],
-      actor,
-      'request.read',
-      'request',
-    );
+    await this.assertMayRead(request, actor, await this.mayDecide(request, actor));
 
     const [row] = await this.db
       .insert(requestComments)
@@ -1052,15 +1128,10 @@ export class RequestEngine {
   }
 
   /** List comments for a request, ordered oldest-first. */
-  /** Comments are readable by the request's parties, or a holder of `request.read`. */
+  /** Comments are readable by the request's parties, a holder of `request.read`, or whoever may decide it. */
   async listComments(requestId: string, actor: Actor): Promise<RequestComment[]> {
     const request = await this.getOrFail(requestId);
-    await this.actorScope.assertParty(
-      [request.requesterId, request.assigneeId],
-      actor,
-      'request.read',
-      'request',
-    );
+    await this.assertMayRead(request, actor, await this.mayDecide(request, actor));
 
     const rows = await this.db
       .select()
@@ -1071,6 +1142,24 @@ export class RequestEngine {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /** Whether this person has already recorded a decision on the request. */
+  private async hasDecided(requestId: string, actorId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: requestApprovals.id })
+      .from(requestApprovals)
+      .where(
+        and(eq(requestApprovals.requestId, requestId), eq(requestApprovals.approverId, actorId)),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
+  /** Whether the engine's decidability rule lets the actor decide this one request right now. */
+  private async mayDecide(request: RequestItem, actor: Actor): Promise<boolean> {
+    const verdicts = await this.decidability([request], actor.sub);
+    return verdicts.get(request.id)?.may === true;
+  }
 
   private async getOrFail(id: string): Promise<RequestItem> {
     const item = await this.loadUnchecked(id);

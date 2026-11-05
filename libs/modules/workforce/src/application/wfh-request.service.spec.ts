@@ -75,6 +75,11 @@ const mockBalances = {
   assertSufficientBalance: vi.fn().mockResolvedValue(undefined),
 };
 
+const mockWfhQuota = {
+  assertWithinQuota: vi.fn().mockResolvedValue(undefined),
+  getWeekQuota: vi.fn(),
+};
+
 const SELF = { sub: 'emp-1', email: 'emp1@test.com' };
 
 function service(): WorkforceService {
@@ -87,6 +92,7 @@ function service(): WorkforceService {
     new ActorScope(mockAuthz as never),
     mockBalances as never,
     { assertMonthsOpen: vi.fn().mockResolvedValue(undefined) } as never,
+    mockWfhQuota as never,
     mockDb as never,
   );
 }
@@ -127,6 +133,35 @@ describe('createWfh', () => {
       { startDate: FUTURE().startDate, endDate: FUTURE().startDate },
     ]);
     await expect(service().createWfh(FUTURE(), SELF)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('refuses a window the weekly quota cannot cover, before inserting anything', async () => {
+    mockWfhQuota.assertWithinQuota.mockRejectedValueOnce(
+      new PreconditionFailedException('WFH_QUOTA_EXCEEDED', 'no days left'),
+    );
+
+    await expect(service().createWfh(FUTURE(), SELF)).rejects.toBeInstanceOf(
+      PreconditionFailedException,
+    );
+    expect(mockRepo.createWfh).not.toHaveBeenCalled();
+    expect(mockEngine.submit).not.toHaveBeenCalled();
+  });
+
+  it('asks the quota about the window’s working days, inside the transaction', async () => {
+    mockEngine.submit.mockResolvedValue({ id: 'req-1' });
+    const { startDate } = FUTURE();
+
+    await service().createWfh({ startDate, endDate: startDate }, SELF);
+
+    // The third argument is the transaction that also holds the per-employee lock and the insert.
+    const [employeeId, workingDates, executor] = mockWfhQuota.assertWithinQuota.mock.calls[0] as [
+      string,
+      string[],
+      object,
+    ];
+    expect(employeeId).toBe('emp-1');
+    expect(workingDates).toEqual([startDate]);
+    expect(executor).toHaveProperty('execute');
   });
 
   it('submits with the manager as assignee, so the engine can pin the decision on them', async () => {
@@ -265,6 +300,46 @@ describe('withdrawals go through the engine', () => {
     });
     await service().cancelWfh('wfh-1', SELF);
     expect(mockEngine.cancel).toHaveBeenCalledWith('req-9', SELF);
+  });
+
+  describe('reviewWfh decision note', () => {
+    const pendingWithTicket = {
+      id: 'wfh-1',
+      employeeId: 'emp-2',
+      startDate: '2026-11-02',
+      endDate: '2026-11-03',
+      workingDays: 2,
+      reason: null,
+      status: 'pending',
+      reviewerId: null,
+      reviewedAt: null,
+      createdAt: new Date(),
+      requestId: 'req-1',
+    };
+
+    beforeEach(() => {
+      mockRepo.findWfhById.mockResolvedValue(pendingWithTicket);
+      mockEngine.approve.mockResolvedValue({});
+      mockEngine.reject.mockResolvedValue({});
+    });
+
+    it('hands the reason for a rejection to the engine, which puts it in the requester’s notification', async () => {
+      await service().reviewWfh('wfh-1', false, SELF, 'the team is short that week');
+
+      expect(mockEngine.reject).toHaveBeenCalledWith('req-1', 'the team is short that week', SELF);
+    });
+
+    it('hands the note of an approval to the engine too', async () => {
+      await service().reviewWfh('wfh-1', true, SELF, 'enjoy');
+
+      expect(mockEngine.approve).toHaveBeenCalledWith('req-1', 'enjoy', SELF);
+    });
+
+    it('sends no note when none was given', async () => {
+      await service().reviewWfh('wfh-1', false, SELF);
+
+      expect(mockEngine.reject).toHaveBeenCalledWith('req-1', null, SELF);
+    });
   });
 
   it('reviewWfh refuses an orphan row whose engine item never landed', async () => {

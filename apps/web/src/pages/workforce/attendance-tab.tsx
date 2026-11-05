@@ -40,7 +40,7 @@ import { RequestJustificationModal } from './request-justification-modal';
  */
 export function AttendanceTab() {
   const qc = useQueryClient();
-  const { can, hasRole } = usePermissions();
+  const { can, hasGroup } = usePermissions();
   const today = new Date();
   const [view, setView] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [selected, setSelected] = useState<string | null>(null);
@@ -156,7 +156,7 @@ export function AttendanceTab() {
           ) : (
             <span className="text-xs text-fg-subtle">Month not closed.</span>
           )}
-          {(can('workforce.attendance.read') || hasRole('manager')) && (
+          {(can('workforce.attendance.read') || hasGroup('manager')) && (
             <>
               <Button
                 size="sm"

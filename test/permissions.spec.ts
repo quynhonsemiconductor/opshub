@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest';
 import {
   PERMISSION,
   PERMISSION_DESCRIPTIONS,
-  ROLE,
-  ROLE_NAMES,
-  ROLE_PERMISSIONS,
+  GROUP,
+  GROUP_NAMES,
+  GROUP_PERMISSIONS,
   WILDCARD_PERMISSION,
   moduleOf,
   permissionGrants,
@@ -60,9 +60,9 @@ describe('permission codes', () => {
 
 describe('roles', () => {
   it('every role has a display name and a bundle', () => {
-    const keys = Object.values(ROLE).sort();
-    expect(Object.keys(ROLE_NAMES).sort()).toEqual(keys);
-    expect(Object.keys(ROLE_PERMISSIONS).sort()).toEqual(keys);
+    const keys = Object.values(GROUP).sort();
+    expect(Object.keys(GROUP_NAMES).sort()).toEqual(keys);
+    expect(Object.keys(GROUP_PERMISSIONS).sort()).toEqual(keys);
   });
 
   it('grant only codes that exist', () => {
@@ -70,7 +70,7 @@ describe('roles', () => {
     // does not define seeds a row nothing can ever satisfy, so the role looks
     // privileged and is not.
     const valid = new Set<string>([...ALL_CODES, WILDCARD_PERMISSION]);
-    for (const [role, granted] of Object.entries(ROLE_PERMISSIONS)) {
+    for (const [role, granted] of Object.entries(GROUP_PERMISSIONS)) {
       for (const code of granted) {
         expect(valid.has(code), `${role} grants unknown permission ${code}`).toBe(true);
       }
@@ -78,14 +78,14 @@ describe('roles', () => {
   });
 
   it('grant no duplicates within a bundle', () => {
-    for (const [role, granted] of Object.entries(ROLE_PERMISSIONS)) {
+    for (const [role, granted] of Object.entries(GROUP_PERMISSIONS)) {
       expect(new Set<string>(granted).size, `${role} has duplicate grants`).toBe(granted.length);
     }
   });
 
   it('reserve the wildcard for admin alone', () => {
-    for (const [role, granted] of Object.entries(ROLE_PERMISSIONS)) {
-      if (role === ROLE.ADMIN) {
+    for (const [role, granted] of Object.entries(GROUP_PERMISSIONS)) {
+      if (role === GROUP.ADMIN) {
         expect(granted).toEqual([WILDCARD_PERMISSION]);
       } else {
         expect(granted as readonly string[], `${role} must not hold '*'`).not.toContain(
@@ -95,11 +95,49 @@ describe('roles', () => {
     }
   });
 
+  it('keeps the general approver group to decisions: both halves of each, and no reading of the organisation', () => {
+    // A workforce decision needs the route's `workforce.approve` AND the engine's `*.review` code for its
+    // type, so a group missing either half would look able to approve and be refused at the last step.
+    const approver = GROUP_PERMISSIONS[GROUP.APPROVER] as readonly string[];
+    expect(approver).toEqual(
+      expect.arrayContaining([
+        PERMISSION.WORKFORCE_APPROVE,
+        PERMISSION.WORKFORCE_LEAVE_REVIEW,
+        PERMISSION.WORKFORCE_OVERTIME_REVIEW,
+        PERMISSION.WORKFORCE_WFH_REVIEW,
+        PERMISSION.WORKFORCE_ATTENDANCE_REVIEW,
+        PERMISSION.REQUEST_DECIDE_ANY,
+      ]),
+    );
+    // What `manager` and `hr` add on top is deliberately NOT here: the group is for deciding, and a
+    // permission wanted for one person is granted to that person directly instead.
+    for (const readOnly of [
+      PERMISSION.EMPLOYEE_READ,
+      PERMISSION.WORKFORCE_READ,
+      PERMISSION.CONTRACT_READ,
+      PERMISSION.REPORTS_READ,
+      // Every request in the company, of every type and state; deciding a ticket already implies reading it.
+      PERMISSION.REQUEST_READ,
+    ]) {
+      expect(approver, `approver must not hold ${readOnly}`).not.toContain(readOnly);
+    }
+  });
+
+  it('keeps the assignee override to the approver group: managers and HR decide their own, not everyone’s', () => {
+    // A manager holding it could decide other teams' tickets, which the assignee guard exists to stop.
+    const holders = Object.entries(GROUP_PERMISSIONS)
+      .filter(([, granted]) =>
+        (granted as readonly string[]).includes(PERMISSION.REQUEST_DECIDE_ANY),
+      )
+      .map(([group]) => group);
+    expect(holders).toEqual([GROUP.APPROVER]);
+  });
+
   it('leaves the base employee role empty', () => {
     // Self-service access is expressed by the `self` SCOPE on a grant, not by a
     // permission code. An entry creeping in here means someone modelled
     // "my own records" as a capability, which every user would then hold globally.
-    expect(ROLE_PERMISSIONS[ROLE.EMPLOYEE]).toEqual([]);
+    expect(GROUP_PERMISSIONS[GROUP.EMPLOYEE]).toEqual([]);
   });
 });
 

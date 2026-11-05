@@ -29,7 +29,7 @@ export const RECORD_STATUS_FILTERS = [
 ] as const;
 
 /**
- * Mandatory or recommended, per position.
+ * Mandatory or recommended, per role.
  *
  * The distinction is what makes a gap report actionable: a missing MANDATORY course is a compliance
  * finding, a missing recommended one is a suggestion, and the gap endpoint leaves the recommended ones

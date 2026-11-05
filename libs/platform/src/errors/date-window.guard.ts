@@ -6,10 +6,10 @@ import { PreconditionFailedException } from './exceptions';
  *
  * WHY THIS IS SHARED RATHER THAN A PRIVATE METHOD PER MODULE
  * ---------------------------------------------------------
- * Several tables carry a `[from, to]` window guarded by a CHECK — `ck_employee_position_window`,
+ * Several tables carry a `[from, to]` window guarded by a CHECK — `ck_employee_role_window`,
  * `ck_contract_window`, `ck_contract_probation_window`, `ck_contract_terminated_window` — and a bare
  * CHECK violation reaches the caller as a **500 with no error code**. So every one of them needs the
- * same refusal in front of it, and the positions module had already grown a private copy before
+ * same refusal in front of it, and the roles module had already grown a private copy before
  * contracts needed a second. One implementation, a code per caller.
  *
  * DATES ARE ISO `YYYY-MM-DD` STRINGS and compared as strings, deliberately. In that format

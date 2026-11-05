@@ -34,21 +34,21 @@ export const PERMISSION = {
   // ── meta / rbac ────────────────────────────────────────────────────────────
   RBAC_READ: 'rbac.read',
   RBAC_MANAGE: 'rbac.manage',
-  ROLE_ASSIGN: 'role.assign',
+  GROUP_ASSIGN: 'group.assign',
 
   // ── identity / people ──────────────────────────────────────────────────────
   EMPLOYEE_READ: 'employee.read',
   EMPLOYEE_WRITE: 'employee.write',
   EMPLOYEE_OFFBOARD: 'employee.offboard',
-  /** View the position catalogue, approved headcount and occupancy. */
-  POSITION_READ: 'position.read',
+  /** View the role catalogue, approved headcount and occupancy. */
+  ROLE_READ: 'role.read',
   /**
-   * Define positions and assign people to them.
+   * Define roles and assign people to them.
    *
    * Separate from `employee.write`: changing someone's contact details is an HR-admin act, while
    * approving a headcount or moving somebody between roles changes the org structure.
    */
-  POSITION_MANAGE: 'position.manage',
+  ROLE_MANAGE: 'role.manage',
   /** View employment contracts: terms, dates, notice, status — but NOT the money. */
   CONTRACT_READ: 'contract.read',
   /** Draft, activate, renew and terminate employment contracts. */
@@ -62,7 +62,7 @@ export const PERMISSION = {
    * pay is theirs, and that is a scope rule, not a permission.
    */
   CONTRACT_COMPENSATION_READ: 'contract.compensation.read',
-  /** View the course catalogue, position requirements, records and the competency gap report. */
+  /** View the course catalogue, role requirements, records and the competency gap report. */
   TRAINING_READ: 'training.read',
   /**
    * Manage the catalogue and requirements, and VERIFY or revoke a record.
@@ -241,6 +241,11 @@ export const PERMISSION = {
    * codes at all, so self-service works entirely through that narrowing.
    */
   REQUEST_READ: 'request.read',
+  /**
+   * Decide a request assigned to someone else who is still available (a WFH ticket pinned to the
+   * requester's manager). Only lifts that refusal: the type's own review code is still required.
+   */
+  REQUEST_DECIDE_ANY: 'request.decide_any',
   ACCESS_REQUEST_APPROVE: 'access_request.approve',
   ACCESS_REQUEST_SECURITY_APPROVE: 'access_request.security_approve',
 
@@ -356,13 +361,13 @@ export const WILDCARD_PERMISSION = '*';
 
 /** Human-readable purpose per code. Seeded into `authz.permissions.description`. */
 export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
-  [PERMISSION.RBAC_READ]: 'View roles, permissions and assignments',
-  [PERMISSION.RBAC_MANAGE]: 'Create / edit / delete roles and permissions',
-  [PERMISSION.ROLE_ASSIGN]: 'Grant and revoke role assignments',
+  [PERMISSION.RBAC_READ]: 'View groups, permissions and group memberships',
+  [PERMISSION.RBAC_MANAGE]: 'Create / edit / delete groups and permissions',
+  [PERMISSION.GROUP_ASSIGN]: 'Put employees in groups, and grant them permissions directly',
   [PERMISSION.EMPLOYEE_READ]: 'View employee directory records',
   [PERMISSION.EMPLOYEE_WRITE]: 'Create and update employee records',
-  [PERMISSION.POSITION_READ]: 'View positions, approved headcount and occupancy',
-  [PERMISSION.POSITION_MANAGE]: 'Define positions and assign employees to them',
+  [PERMISSION.ROLE_READ]: 'View roles, approved headcount and occupancy',
+  [PERMISSION.ROLE_MANAGE]: 'Define roles and assign employees to them',
   [PERMISSION.CONTRACT_READ]: 'View employment contracts (excluding pay)',
   [PERMISSION.CONTRACT_MANAGE]: 'Draft, activate, renew and terminate employment contracts',
   [PERMISSION.CONTRACT_COMPENSATION_READ]: 'See the pay figures on an employment contract',
@@ -399,6 +404,8 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   [PERMISSION.ASSET_REASSIGN]: 'Reassign assets between employees',
   [PERMISSION.ACCESS_REQUEST_READ]: 'View privileged-access requests',
   [PERMISSION.REQUEST_READ]: 'View requests you are not the requester or approver of',
+  [PERMISSION.REQUEST_DECIDE_ANY]:
+    'Decide requests assigned to someone else (still needs the request type’s own review permission)',
   [PERMISSION.ACCESS_REQUEST_APPROVE]: 'Step-1 approval for access requests (manager tier)',
   [PERMISSION.ACCESS_REQUEST_SECURITY_APPROVE]: 'Step-2 IT-Security approval for access requests',
   [PERMISSION.COMPLIANCE_READ]: 'View compliance findings and software catalog',
@@ -477,35 +484,37 @@ export function permissionGrants(held: readonly string[] | undefined, required: 
   return held.includes(`${moduleOf(required)}.*`);
 }
 
-// ── Roles ────────────────────────────────────────────────────────────────────
+// ── Groups ───────────────────────────────────────────────────────────────────
 
-export const ROLE = {
+export const GROUP = {
   ADMIN: 'admin',
   IT_ADMIN: 'it-admin',
   SECURITY: 'security',
   HR: 'hr',
   MANAGER: 'manager',
   HELPDESK: 'helpdesk',
+  APPROVER: 'approver',
   AUDITOR: 'auditor',
   EMPLOYEE: 'employee',
 } as const;
 
-/** Union of every valid system-role key. */
-export type RoleKey = (typeof ROLE)[keyof typeof ROLE];
+/** Union of every valid system-group key. */
+export type GroupKey = (typeof GROUP)[keyof typeof GROUP];
 
-export const ROLE_NAMES: Record<RoleKey, string> = {
-  [ROLE.ADMIN]: 'Platform Administrator',
-  [ROLE.IT_ADMIN]: 'IT Administrator',
-  [ROLE.SECURITY]: 'Security Officer',
-  [ROLE.HR]: 'HR Manager',
-  [ROLE.MANAGER]: 'People Manager',
-  [ROLE.HELPDESK]: 'Help Desk',
-  [ROLE.AUDITOR]: 'Auditor (read-only)',
-  [ROLE.EMPLOYEE]: 'Employee',
+export const GROUP_NAMES: Record<GroupKey, string> = {
+  [GROUP.ADMIN]: 'Platform Administrator',
+  [GROUP.IT_ADMIN]: 'IT Administrator',
+  [GROUP.SECURITY]: 'Security Officer',
+  [GROUP.HR]: 'HR Manager',
+  [GROUP.MANAGER]: 'People Manager',
+  [GROUP.HELPDESK]: 'Help Desk',
+  [GROUP.APPROVER]: 'Approver',
+  [GROUP.AUDITOR]: 'Auditor (read-only)',
+  [GROUP.EMPLOYEE]: 'Employee',
 };
 
 /**
- * Role → permission bundles, seeded into `authz.role_permissions`.
+ * Group → permission bundles, seeded into `authz.group_permissions`.
  *
  * `admin` holds only the wildcard, deliberately: enumerating every code for it
  * would need editing here on every new permission, and a missed edit would make
@@ -515,13 +524,13 @@ export const ROLE_NAMES: Record<RoleKey, string> = {
  * request, read your own records) is expressed by the `self` SCOPE on a grant,
  * not by a permission code — so an empty bundle here is correct, not a stub.
  */
-export const ROLE_PERMISSIONS: Record<
-  RoleKey,
+export const GROUP_PERMISSIONS: Record<
+  GroupKey,
   readonly (Permission | typeof WILDCARD_PERMISSION)[]
 > = {
-  [ROLE.ADMIN]: [WILDCARD_PERMISSION],
+  [GROUP.ADMIN]: [WILDCARD_PERMISSION],
 
-  [ROLE.IT_ADMIN]: [
+  [GROUP.IT_ADMIN]: [
     PERMISSION.EMPLOYEE_READ,
     PERMISSION.EMPLOYEE_WRITE,
     PERMISSION.ASSET_READ,
@@ -549,7 +558,7 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.DOOR_MANAGE,
   ],
 
-  [ROLE.SECURITY]: [
+  [GROUP.SECURITY]: [
     PERMISSION.COMPLIANCE_READ,
     PERMISSION.COMPLIANCE_MANAGE,
     PERMISSION.SECURITY_VIEW,
@@ -591,12 +600,12 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.LICENSE_READ,
   ],
 
-  [ROLE.HR]: [
+  [GROUP.HR]: [
     PERMISSION.EMPLOYEE_READ,
     PERMISSION.EMPLOYEE_WRITE,
     PERMISSION.EMPLOYEE_OFFBOARD,
-    PERMISSION.POSITION_READ,
-    PERMISSION.POSITION_MANAGE,
+    PERMISSION.ROLE_READ,
+    PERMISSION.ROLE_MANAGE,
     PERMISSION.CONTRACT_READ,
     PERMISSION.CONTRACT_MANAGE,
     PERMISSION.CONTRACT_COMPENSATION_READ,
@@ -629,9 +638,9 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.DOOR_MANAGE,
   ],
 
-  [ROLE.MANAGER]: [
+  [GROUP.MANAGER]: [
     PERMISSION.EMPLOYEE_READ,
-    PERMISSION.POSITION_READ,
+    PERMISSION.ROLE_READ,
     PERMISSION.TRAINING_READ,
     // Read, but NOT `PERFORMANCE_APPROVE`: a manager writes the review, so approving it would make
     // the calibration step a formality. Rating a review they were ASSIGNED needs no code — the
@@ -650,7 +659,29 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.ONBOARDING_APPROVE,
   ],
 
-  [ROLE.HELPDESK]: [
+  /**
+   * The general approval group: whoever decides requests for the people they answer for.
+   *
+   * GENERAL ON PURPOSE, not "wfh-approver". A group is named for the kind of person it holds, so a new
+   * approval permission is one more line here and nobody has to be moved between groups; a permission that
+   * is wanted for ONE person is granted to that person directly (`employee_permissions`), not by inventing a
+   * group for them. It carries the decisions only: no directory, contract, training or report access, which
+   * `manager` adds on top. Both halves of a workforce decision are here — `workforce.approve` is what the
+   * review routes ask for, and the `*.review` codes are what the request engine asks of the decider.
+   *
+   * No `request.read`: that would show every request in the company, whatever its type and state. The engine
+   * lets whoever may decide a request read it, so this group sees the open tickets it can decide and no more.
+   */
+  [GROUP.APPROVER]: [
+    PERMISSION.WORKFORCE_APPROVE,
+    PERMISSION.WORKFORCE_LEAVE_REVIEW,
+    PERMISSION.WORKFORCE_OVERTIME_REVIEW,
+    PERMISSION.WORKFORCE_WFH_REVIEW,
+    PERMISSION.WORKFORCE_ATTENDANCE_REVIEW,
+    PERMISSION.REQUEST_DECIDE_ANY,
+  ],
+
+  [GROUP.HELPDESK]: [
     PERMISSION.ASSET_READ,
     PERMISSION.ASSET_WRITE,
     PERMISSION.ACCESS_REQUEST_READ,
@@ -658,14 +689,14 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.EMPLOYEE_READ,
   ],
 
-  [ROLE.AUDITOR]: [
+  [GROUP.AUDITOR]: [
     PERMISSION.RBAC_READ,
     PERMISSION.AUDIT_READ,
     PERMISSION.COMPLIANCE_READ,
     PERMISSION.SECURITY_VIEW,
     PERMISSION.EMPLOYEE_READ,
     PERMISSION.ASSET_READ,
-    PERMISSION.POSITION_READ,
+    PERMISSION.ROLE_READ,
     // Deliberately WITHOUT `CONTRACT_COMPENSATION_READ`: an auditor checks that every employee has
     // a signed contract, which does not require knowing what any of them pays.
     PERMISSION.CONTRACT_READ,
@@ -692,5 +723,5 @@ export const ROLE_PERMISSIONS: Record<
     PERMISSION.WORKFORCE_ATTENDANCE_READ,
   ],
 
-  [ROLE.EMPLOYEE]: [],
+  [GROUP.EMPLOYEE]: [],
 };

@@ -102,13 +102,14 @@ describe('audit trail integrity', () => {
     ).toEqual([{ action: AUDIT_ACTION.EMPLOYEE_CREATED, count: 1 }]);
   });
 
-  it('records a role creation exactly once, under one action name', async () => {
+  it('records a group creation exactly once, under one action name', async () => {
     // The differing-name case: the service wrote `authz.role.created` and the controller
-    // `rbac.role_created`, so the same event appeared under two vocabularies.
+    // `rbac.role_created` (the permission groups were then called roles), so the same event appeared
+    // under two vocabularies.
     const unique = Date.now().toString(36);
     const res = await app.inject({
       method: 'POST',
-      url: '/v1/authz/roles',
+      url: '/v1/authz/groups',
       headers: authHeaders(admin),
       payload: {
         key: `audit-once-${unique}`,
@@ -118,11 +119,11 @@ describe('audit trail integrity', () => {
       },
     });
     expect(res.statusCode, res.body).toBe(201);
-    const roleId = (JSON.parse(res.body) as { id: string }).id;
+    const groupId = (JSON.parse(res.body) as { id: string }).id;
 
-    const entries = await entriesFor(roleId);
+    const entries = await entriesFor(groupId);
 
-    expect(entries).toEqual([{ action: AUDIT_ACTION.ROLE_CREATED, count: 1 }]);
+    expect(entries).toEqual([{ action: AUDIT_ACTION.GROUP_CREATED, count: 1 }]);
     // Named explicitly: these are the codes that used to double up, and a regression would
     // reintroduce one of them rather than a second copy of the survivor.
     expect(entries.map((e) => e.action)).not.toContain('rbac.role_created');

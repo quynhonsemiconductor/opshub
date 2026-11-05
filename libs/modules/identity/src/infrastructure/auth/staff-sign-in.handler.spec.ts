@@ -33,7 +33,7 @@ function setup(
   const handler = new StaffSignInHandler(
     { insert, select } as never,
     {
-      syncUserRolesByKeys: sync,
+      syncEmployeeGroupsByKeys: sync,
     } as never,
   );
   return { handler, insert, values, onConflictDoUpdate, sync, select };

@@ -28,6 +28,17 @@
  */
 export const AUDIT_ACTION = {
   // ── Access / RBAC ──
+  GROUP_CREATED: 'group.created',
+  GROUP_DELETED: 'group.deleted',
+  GROUP_PERMISSIONS_UPDATED: 'group.permissions_updated',
+  GROUP_ASSIGNED: 'group.assigned',
+  GROUP_REVOKED: 'group.revoked',
+  GROUP_SYNCED: 'group.synced',
+  /**
+   * LEGACY — what the permission groups were called when they were "roles". Rows already written carry these
+   * codes and nothing writes them any more; they stay so the Audit Log viewer can still filter the history,
+   * because a code is added, never renamed in place (see above). Their replacements are the `GROUP_*` codes.
+   */
   ROLE_CREATED: 'role.created',
   ROLE_UPDATED: 'role.updated',
   ROLE_DELETED: 'role.deleted',
@@ -35,6 +46,8 @@ export const AUDIT_ACTION = {
   ROLE_ASSIGNED: 'role.assigned',
   ROLE_REVOKED: 'role.revoked',
   ROLE_SYNCED: 'role.synced',
+  EMPLOYEE_PERMISSION_GRANTED: 'employee_permission.granted',
+  EMPLOYEE_PERMISSION_REVOKED: 'employee_permission.revoked',
   DELEGATION_CREATED: 'delegation.created',
   DELEGATION_REVOKED: 'delegation.revoked',
 
@@ -124,11 +137,22 @@ export const AUDIT_ACTION = {
   ONBOARDING_SUBMITTED: 'onboarding.submitted',
   OFFBOARDING_SUBMITTED: 'offboarding.submitted',
 
-  // ── Positions ──
+  // ── Job roles ──
+  // `job_role.*`, not `role.*`: the permission groups were called roles until 0047, so the `role.*` codes
+  // already in `audit_logs` mean groups, and reusing them for job roles would make two meanings of one code.
+  JOB_ROLE_CREATED: 'job_role.created',
+  JOB_ROLE_UPDATED: 'job_role.updated',
+  JOB_ROLE_ASSIGNED: 'job_role.assigned',
+  JOB_ROLE_UNASSIGNED: 'job_role.unassigned',
+  /** LEGACY — the same four events when job roles were called positions; rows already written carry them. */
   POSITION_CREATED: 'position.created',
   POSITION_UPDATED: 'position.updated',
   POSITION_ASSIGNED: 'position.assigned',
   POSITION_UNASSIGNED: 'position.unassigned',
+  JOB_RANK_CREATED: 'job_rank.created',
+  JOB_RANK_UPDATED: 'job_rank.updated',
+  JOB_RANK_DELETED: 'job_rank.deleted',
+  JOB_RANK_BENEFITS_SET: 'job_rank.benefits_set',
 
   // ── Employment contracts ──
   CONTRACT_DRAFTED: 'contract.drafted',
@@ -334,8 +358,12 @@ export type AuditAction = (typeof AUDIT_ACTION)[keyof typeof AUDIT_ACTION];
  * the viewer by resource type needed you to know which spelling a given writer had picked.
  */
 export const AUDIT_RESOURCE = {
+  GROUP: 'group',
+  EMPLOYEE_GROUP: 'employee_group',
+  /** LEGACY — the same two resources before the rename; kept so existing rows stay filterable. */
   ROLE: 'role',
   ROLE_ASSIGNMENT: 'role_assignment',
+  EMPLOYEE_PERMISSION: 'employee_permission',
   DELEGATION: 'delegation',
   ACCESS_REQUEST: 'access_request',
   ACCESS_GRANT: 'access_grant',
@@ -360,8 +388,12 @@ export const AUDIT_RESOURCE = {
   ATTENDANCE_MONTH: 'attendance_month',
   DOCUMENT: 'document',
   DOCUMENT_VERSION: 'document_version',
+  JOB_ROLE: 'job_role',
+  EMPLOYEE_ROLE: 'employee_role',
+  /** LEGACY — the same two resources when job roles were called positions; kept so existing rows stay filterable. */
   POSITION: 'position',
   EMPLOYEE_POSITION: 'employee_position',
+  JOB_RANK: 'job_rank',
   EMPLOYMENT_CONTRACT: 'employment_contract',
   TRAINING_COURSE: 'training_course',
   TRAINING_REQUIREMENT: 'training_requirement',

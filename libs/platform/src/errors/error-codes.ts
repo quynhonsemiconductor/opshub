@@ -52,6 +52,8 @@ export const ErrorCodes = {
   WFH_REQUEST_NOT_FOUND: 'WFH_REQUEST_NOT_FOUND',
   WFH_REQUEST_NOT_PENDING: 'WFH_REQUEST_NOT_PENDING',
   WFH_OVERLAPPING: 'WFH_OVERLAPPING',
+  WFH_QUOTA_NONE: 'WFH_QUOTA_NONE',
+  WFH_QUOTA_EXCEEDED: 'WFH_QUOTA_EXCEEDED',
   ATTENDANCE_MONTH_CLOSED: 'ATTENDANCE_MONTH_CLOSED',
   ATTENDANCE_JUSTIFICATION_NOT_FOUND: 'ATTENDANCE_JUSTIFICATION_NOT_FOUND',
   ATTENDANCE_JUSTIFICATION_NOT_PENDING: 'ATTENDANCE_JUSTIFICATION_NOT_PENDING',
@@ -70,10 +72,10 @@ export const ErrorCodes = {
    * `ck_leave_single_day_portions_match` and its siblings in words. See `domain/leave-window.ts`.
    */
   LEAVE_INVALID_WINDOW: 'LEAVE_INVALID_WINDOW',
-  /** Assigning would exceed the position's approved headcount. */
-  POSITION_HEADCOUNT_EXCEEDED: 'POSITION_HEADCOUNT_EXCEEDED',
-  /** An assignment would end before it began — `ck_employee_position_window` in words. */
-  POSITION_INVALID_WINDOW: 'POSITION_INVALID_WINDOW',
+  /** Assigning would exceed the role's approved headcount. */
+  ROLE_HEADCOUNT_EXCEEDED: 'ROLE_HEADCOUNT_EXCEEDED',
+  /** An assignment would end before it began — `ck_employee_role_window` in words. */
+  ROLE_INVALID_WINDOW: 'ROLE_INVALID_WINDOW',
 
   // ── Employment contracts ───────────────────────────────────────────────────
   /** A contract date range runs backwards — `ck_contract_window` and its siblings in words. */
@@ -104,11 +106,17 @@ export const ErrorCodes = {
   AUDIT_LOG_NOT_FOUND: 'AUDIT_LOG_NOT_FOUND',
 
   // Authorization (RBAC)
-  ROLE_NOT_FOUND: 'ROLE_NOT_FOUND',
-  ROLE_KEY_TAKEN: 'ROLE_KEY_TAKEN',
-  ROLE_IMMUTABLE: 'ROLE_IMMUTABLE',
-  ROLE_ASSIGNMENT_NOT_FOUND: 'ROLE_ASSIGNMENT_NOT_FOUND',
+  GROUP_NOT_FOUND: 'GROUP_NOT_FOUND',
+  GROUP_KEY_TAKEN: 'GROUP_KEY_TAKEN',
+  GROUP_IMMUTABLE: 'GROUP_IMMUTABLE',
+  EMPLOYEE_GROUP_NOT_FOUND: 'EMPLOYEE_GROUP_NOT_FOUND',
   PERMISSION_NOT_FOUND: 'PERMISSION_NOT_FOUND',
+  EMPLOYEE_PERMISSION_NOT_FOUND: 'EMPLOYEE_PERMISSION_NOT_FOUND',
+  // Job ranks
+  JOB_RANK_NOT_FOUND: 'JOB_RANK_NOT_FOUND',
+  JOB_RANK_ORDINAL_TAKEN: 'JOB_RANK_ORDINAL_TAKEN',
+  JOB_RANK_NAME_TAKEN: 'JOB_RANK_NAME_TAKEN',
+  JOB_RANK_IN_USE: 'JOB_RANK_IN_USE',
 
   // Universal Request Engine
   REQUEST_NOT_FOUND: 'REQUEST_NOT_FOUND',

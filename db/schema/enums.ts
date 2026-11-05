@@ -14,6 +14,9 @@ export const doorEventResultEnum = pgEnum('door_event_result', ['allow', 'deny']
 // ── Authorization (RBAC scopes) ──────────────────────────────────────────────
 export const scopeTypeEnum = pgEnum('scope_type', ['global', 'self', 'team', 'dept', 'region']);
 
+/** Who put an employee in a group: a person (`manual`) or the identity provider's sign-in sync (`idp`). */
+export const membershipSourceEnum = pgEnum('membership_source', ['manual', 'idp']);
+
 // ── Universal Request Engine ─────────────────────────────────────────────────
 export const requestStatusEnum = pgEnum('request_status', [
   'pending',
@@ -104,12 +107,7 @@ export const overtimeStatusEnum = pgEnum('overtime_status', ['pending', 'approve
  * asked and nobody answered, which is not a refusal — while overtime expiry writes `rejected`
  * because work already done unpaid reads differently. The lists share the vocabulary either way.
  */
-export const wfhStatusEnum = pgEnum('wfh_status', [
-  'pending',
-  'approved',
-  'rejected',
-  'cancelled',
-]);
+export const wfhStatusEnum = pgEnum('wfh_status', ['pending', 'approved', 'rejected', 'cancelled']);
 export const shiftTypeEnum = pgEnum('shift_type', ['night', 'on_call', 'weekend']);
 /** What a manager can be asked to sign off to repair an attendance day. */
 export const justificationKindEnum = pgEnum('attendance_justification_kind', [
@@ -213,12 +211,21 @@ export const documentVersionStatusEnum = pgEnum('document_version_status', [
 ]);
 
 /**
- * Lifecycle of a job position.
+ * Lifecycle of a job role.
  *
- * `frozen` is the state a hiring pause needs and a boolean cannot express: the position still
+ * `frozen` is the state a hiring pause needs and a boolean cannot express: the role still
  * exists and its occupants keep it, but no new assignment may be made against it.
  */
-export const positionStatusEnum = pgEnum('position_status', ['active', 'frozen', 'closed']);
+export const roleStatusEnum = pgEnum('role_status', ['active', 'frozen', 'closed']);
+
+/**
+ * A benefit a job rank entitles its holders to — the codes `rank_benefits.benefit_code` may carry.
+ *
+ * ONE VALUE TODAY, AND A LIST BY DESIGN. `wfh_weekly_days` is the number of work-from-home days an employee of
+ * the rank may take in one Monday–Sunday week. A further per-rank entitlement is one more value here and one
+ * more row per rank, never a new column on `job_ranks`.
+ */
+export const rankBenefitCodeEnum = pgEnum('rank_benefit_code', ['wfh_weekly_days']);
 
 /**
  * Kind of employment agreement.

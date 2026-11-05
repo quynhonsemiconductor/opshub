@@ -2,7 +2,7 @@
  * Offboarding removes privilege, and leaves evidence that it did.
  *
  * `OffboardingTypeDef.onApprove` performs the five removals that end somebody's access — status,
- * roles, access grants, hardware, sessions — and it recorded NOTHING. Not `role.revoked`, not
+ * roles, access grants, hardware, sessions — and it recorded NOTHING. Not `group.revoked`, not
  * `access_grant.revoked`, not `asset.unassigned`. Every one of those events is audited when a person
  * does it by hand, because the services that own those tables write the entry; this hook writes the
  * tables directly and so wrote no entry. An access-removal review saw a leaver whose privileges had
@@ -38,6 +38,8 @@ let hr: Session;
 /** The employee created for this spec, offboarded by it, and referenced by nothing else. */
 let employeeId: string;
 let assignmentId: string;
+/** A permission granted to the leaver directly, outside any group: offboarding has to strip it too. */
+let directGrantId: string;
 
 beforeAll(async () => {
   app = await createTestApp();
@@ -90,24 +92,32 @@ describe('offboarding leaves evidence', () => {
     });
     employeeId = employee.id as string;
 
-    // A role to strip. Without one, "no role.revoked entry" would be true of a leaver who held no
-    // roles, and the assertion below would pass against the unfixed code.
-    const roles = await app.inject({
+    // A group to strip. Without one, "no group.revoked entry" would be true of a leaver who belonged to no
+    // group, and the assertion below would pass against the unfixed code.
+    const groups = await app.inject({
       method: 'GET',
-      url: '/v1/authz/roles',
+      url: '/v1/authz/groups',
       headers: authHeaders(admin),
     });
-    expect(roles.statusCode, roles.body).toBe(200);
-    // A bare array, not a paged envelope — this route returns `RoleResponseDto[]`.
-    const roleList = JSON.parse(roles.body) as { id: string; key: string }[];
-    const helpdesk = roleList.find((r) => r.key === 'helpdesk');
-    expect(helpdesk, 'the seeded helpdesk role is missing').toBeDefined();
+    expect(groups.statusCode, groups.body).toBe(200);
+    // A bare array, not a paged envelope — this route returns `GroupResponseDto[]`.
+    const groupList = JSON.parse(groups.body) as { id: string; key: string }[];
+    const helpdesk = groupList.find((g) => g.key === 'helpdesk');
+    expect(helpdesk, 'the seeded helpdesk group is missing').toBeDefined();
 
-    const assignment = await post(admin, '/v1/authz/assignments', {
-      userId: employeeId,
-      roleId: helpdesk!.id,
+    const assignment = await post(admin, '/v1/authz/employee-groups', {
+      employeeId,
+      groupId: helpdesk!.id,
     });
     assignmentId = assignment.id as string;
+
+    // A permission outside any group, which removing the memberships alone would leave in the leaver's hands.
+    const directGrant = await post(admin, '/v1/authz/employee-permissions', {
+      employeeId,
+      permissionKey: 'audit.read',
+      reason: 'e2e: offboarding must strip direct grants too',
+    });
+    directGrantId = directGrant.id as string;
 
     /*
      * THE LEAVER SIGNS IN, so there is a session to revoke.
@@ -140,14 +150,30 @@ describe('offboarding leaves evidence', () => {
     expect(change!.actorId).toBe(FIXTURE.ADMIN.id);
   });
 
-  it('records the role revocation against the assignment it removed', async () => {
-    // Keyed on the ASSIGNMENT id, the same resource `AuthzAdminService.revokeAssignment` uses — so a
-    // reviewer reading a role's history sees one shape whether it was revoked by hand or by a leaver.
-    const entries = await auditEntries('role_assignment', assignmentId);
+  it('records the group revocation against the membership it removed', async () => {
+    // Keyed on the ASSIGNMENT id, the same resource `AuthzAdminService.revokeEmployeeGroup` uses — so a
+    // reviewer reading a group's history sees one shape whether it was revoked by hand or by a leaver.
+    const entries = await auditEntries('employee_group', assignmentId);
     expect(
       entries.map((e) => e.action),
       JSON.stringify(entries),
-    ).toContain('role.revoked');
+    ).toContain('group.revoked');
+  });
+
+  it('strips the permissions granted directly, and records each one', async () => {
+    const entries = await auditEntries('employee_permission', directGrantId);
+    expect(
+      entries.map((e) => e.action),
+      JSON.stringify(entries),
+    ).toContain('employee_permission.revoked');
+
+    const remaining = await app.inject({
+      method: 'GET',
+      url: `/v1/authz/employees/${employeeId}/permissions`,
+      headers: authHeaders(admin),
+    });
+    expect(remaining.statusCode, remaining.body).toBe(200);
+    expect(JSON.parse(remaining.body)).toEqual([]);
   });
 
   it('records the forced logout as a revocation, not as a logout', async () => {
@@ -169,14 +195,14 @@ describe('offboarding leaves evidence', () => {
       headers: authHeaders(admin),
     });
     expect(res.statusCode, res.body).toBe(200);
-    const employee = JSON.parse(res.body) as { status: string; roles: string[] };
+    const employee = JSON.parse(res.body) as { status: string; groups: string[] };
 
     expect(employee.status).toBe('offboarded');
     /*
-     * `employees.roles` is the denormalised copy that feeds `/v1/auth/me`, and nothing maintained it
+     * `employees.group_keys` is the denormalised copy that feeds `/v1/auth/me`, and nothing maintained it
      * here — so an offboarded row still listed `helpdesk` after the assignment behind it was deleted.
      * A stale claim is not merely cosmetic: it is what a token is minted from.
      */
-    expect(employee.roles, 'the denormalised role claims still list a revoked role').toEqual([]);
+    expect(employee.groups, 'the denormalised group keys still list a revoked group').toEqual([]);
   });
 });

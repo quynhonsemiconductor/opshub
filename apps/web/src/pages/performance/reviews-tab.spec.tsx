@@ -132,7 +132,7 @@ function routeGet(review: Record<string, unknown>) {
 function renderAs(who: string, permissions: string[], review = REVIEW) {
   held = permissions;
   useAuthStore.setState({
-    user: { sub: who, email: 'me@example.com', name: 'Me', roles: [], permissions },
+    user: { sub: who, email: 'me@example.com', name: 'Me', groups: [], permissions },
   });
   routeGet(review);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -229,7 +229,7 @@ describe('ReviewsTab', () => {
 
   it('lets the SUBJECT self-assess holding no permission whatsoever', async () => {
     /*
-     * A SELF-SCOPED ACTION MUST SURVIVE THE GATING. `ROLE.EMPLOYEE` holds no permission codes at all,
+     * A SELF-SCOPED ACTION MUST SURVIVE THE GATING. `GROUP.EMPLOYEE` holds no permission codes at all,
      * deliberately, and the route refuses everybody but the subject — so "hide it unless you hold
      * something" would have hidden it from the only person who can use it. This is the assertion that
      * fails if somebody wraps the row actions in `canManage` on the way past.

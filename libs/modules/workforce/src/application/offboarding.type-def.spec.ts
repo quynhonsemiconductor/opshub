@@ -1,7 +1,7 @@
 /**
  * OffboardingTypeDef.onApprove() unit tests.
  *
- * Tests that the 5 cleanup operations (employee status, role assignments,
+ * Tests that the 5 cleanup operations (employee status, group memberships,
  * access grants, asset assignments + asset status reset, ban + session
  * removal) are all called with the correct table arguments, and that the Entra disable +
  * session revoke are QUEUED in the same transaction rather than called.
@@ -12,8 +12,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OffboardingTypeDef } from './offboarding.type-def';
 import {
+  employeePermissions,
   employees,
-  userRoleAssignments,
+  employeeGroups,
   accessGrants,
   assetAssignments,
   assets,
@@ -32,9 +33,10 @@ import {
  */
 function makeTx(
   assetReturnRows: Array<{ assetId: string }> = [],
-  roleReturnRows: Array<{ id: string; roleId: string }> = [],
+  roleReturnRows: Array<{ id: string; groupId: string }> = [],
   sessionReturnRows: Array<{ id: string }> = [{ id: 'token-1' }],
   entraOid: string | null = null,
+  directPermissionReturnRows: Array<{ id: string; permissionKey: string }> = [],
 ) {
   const updateCalls: Array<{ table: unknown; chain: ReturnType<typeof makeUpdateChain> }> = [];
   const deleteCalls: Array<{ table: unknown }> = [];
@@ -63,7 +65,9 @@ function makeTx(
     deleteCalls.push({ table });
     // `.returning()` because each removed assignment is audited individually — the chain has to
     // resolve to the removed rows, not to `undefined`.
-    const rows = table === identitySession ? sessionReturnRows : roleReturnRows;
+    let rows: unknown[] = roleReturnRows;
+    if (table === identitySession) rows = sessionReturnRows;
+    if (table === employeePermissions) rows = directPermissionReturnRows;
     const where = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(rows) });
     return { where };
   });
@@ -132,12 +136,22 @@ describe('OffboardingTypeDef.onApprove()', () => {
     );
   });
 
-  it('deletes user_role_assignments for the employee', async () => {
+  it('deletes employee_groups for the employee', async () => {
     const tx = makeTx();
     await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-    const roleDeleteCall = tx._deleteCalls.find((c) => c.table === userRoleAssignments);
+    const roleDeleteCall = tx._deleteCalls.find((c) => c.table === employeeGroups);
     expect(roleDeleteCall).toBeDefined();
+  });
+
+  it('deletes the permissions granted straight to the employee, and audits each one', async () => {
+    const tx = makeTx([], [], [{ id: 'token-1' }], null, [
+      { id: 'grant-1', permissionKey: 'door.manage' },
+    ]);
+    await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
+
+    expect(tx._deleteCalls.some((c) => c.table === employeePermissions)).toBe(true);
+    expect(recordedActions()).toContain('employee_permission.revoked');
   });
 
   it('updates access_grants to set revokedAt (only active grants)', async () => {
@@ -204,25 +218,27 @@ describe('OffboardingTypeDef.onApprove()', () => {
     // see the comment at that call site for why it is not a post-commit sync.
     expect(tx._updateCalls).toHaveLength(6);
     expect(tx._updateCalls.filter((c) => c.table === employees)).toHaveLength(2);
-    // user_role_assignments + identity session rows = 2 deletes
-    expect(tx._deleteCalls).toHaveLength(2);
+    // employee_groups + employee_permissions + identity session rows = 3 deletes
+    expect(tx._deleteCalls).toHaveLength(3);
   });
 
   it('clears the denormalised role claims alongside the assignments', async () => {
-    const tx = makeTx([], [{ id: 'a-1', roleId: 'r-1' }]);
+    const tx = makeTx([], [{ id: 'a-1', groupId: 'g-1' }]);
     await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-    // `employees.roles` feeds the JWT claims and nothing maintained it here, so an offboarded row
-    // still listed the roles whose assignments had just been deleted.
-    const rolesWrite = tx._updateCalls
+    // `employees.group_keys` is what `/auth/me` displays and nothing maintained it here, so an offboarded row
+    // still listed the groups whose memberships had just been deleted.
+    const groupKeysWrite = tx._updateCalls
       .filter((c) => c.table === employees)
       .find((c) =>
         c.chain.set.mock.calls.some((args) =>
-          Array.isArray((args[0] as { roles?: unknown }).roles),
+          Array.isArray((args[0] as { groupKeys?: unknown }).groupKeys),
         ),
       );
-    expect(rolesWrite, 'no write cleared employees.roles').toBeDefined();
-    expect(rolesWrite!.chain.set).toHaveBeenCalledWith(expect.objectContaining({ roles: [] }));
+    expect(groupKeysWrite, 'no write cleared employees.group_keys').toBeDefined();
+    expect(groupKeysWrite!.chain.set).toHaveBeenCalledWith(
+      expect.objectContaining({ groupKeys: [] }),
+    );
   });
 
   describe('the audit trail — the evidence an access review reads', () => {
@@ -236,18 +252,18 @@ describe('OffboardingTypeDef.onApprove()', () => {
       expect(recordedActions()).not.toContain('auth.logout');
     });
 
-    it('records one entry per role removed, not one for the batch', async () => {
+    it('records one entry per group membership removed, not one for the batch', async () => {
       const tx = makeTx(
         [],
         [
-          { id: 'assign-1', roleId: 'role-1' },
-          { id: 'assign-2', roleId: 'role-2' },
+          { id: 'assign-1', groupId: 'group-1' },
+          { id: 'assign-2', groupId: 'group-2' },
         ],
       );
       await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-      // An access review asks when this person lost THIS role; "2 roles removed" cannot answer it.
-      const revocations = record.mock.calls.filter((c) => c[0] === 'role.revoked');
+      // An access review asks when this person left THIS group; "2 groups removed" cannot answer it.
+      const revocations = record.mock.calls.filter((c) => c[0] === 'group.revoked');
       expect(revocations).toHaveLength(2);
       expect(revocations.map((c) => c[1] as string)).toEqual(['assign-1', 'assign-2']);
     });
@@ -273,12 +289,12 @@ describe('OffboardingTypeDef.onApprove()', () => {
     });
 
     it('writes no entry for a step that removed nothing', async () => {
-      // A leaver with no roles, no assets and no live session. Recording those anyway would put
+      // A leaver in no groups, no assets and no live session. Recording those anyway would put
       // three events in the trail that did not happen.
       const tx = makeTx([], [], []);
       await typeDef.onApprove(PAYLOAD, 'req-1', 'hr-user', tx as never);
 
-      expect(recordedActions()).not.toContain('role.revoked');
+      expect(recordedActions()).not.toContain('group.revoked');
       expect(recordedActions()).not.toContain('asset.unassigned');
       expect(recordedActions()).not.toContain('session.revoked');
       // The status change always happened, so it is always recorded.

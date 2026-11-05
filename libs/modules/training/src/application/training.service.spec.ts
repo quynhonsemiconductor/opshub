@@ -70,7 +70,7 @@ function makeService(repoOver: Record<string, unknown> = {}) {
     retireCourse: vi.fn().mockResolvedValue(course({ retiredAt: new Date() })),
     addRequirement: vi.fn().mockResolvedValue({
       id: 'req-1',
-      positionId: 'pos-1',
+      roleId: 'pos-1',
       courseId: 'course-1',
       kind: 'mandatory',
       graceDays: null,
@@ -79,13 +79,13 @@ function makeService(repoOver: Record<string, unknown> = {}) {
     findRequirement: vi.fn().mockResolvedValue(null),
     removeRequirement: vi.fn().mockResolvedValue({
       id: 'req-1',
-      positionId: 'pos-1',
+      roleId: 'pos-1',
       courseId: 'course-1',
       kind: 'mandatory',
       graceDays: null,
       createdAt: new Date(),
     }),
-    listRequirementsForPosition: vi.fn().mockResolvedValue([]),
+    listRequirementsForRole: vi.fn().mockResolvedValue([]),
     createRecord: vi
       .fn()
       .mockImplementation((input: Record<string, unknown>) =>
@@ -182,7 +182,7 @@ describe('addRequirement', () => {
     });
 
     await expect(
-      service.addRequirement({ positionId: 'pos-1', courseId: 'course-1' }, ACTOR),
+      service.addRequirement({ roleId: 'pos-1', courseId: 'course-1' }, ACTOR),
     ).rejects.toThrow(PreconditionFailedException);
     expect(repo.addRequirement).not.toHaveBeenCalled();
   });
@@ -193,7 +193,7 @@ describe('addRequirement', () => {
     });
 
     await expect(
-      service.addRequirement({ positionId: 'pos-1', courseId: 'course-1' }, ACTOR),
+      service.addRequirement({ roleId: 'pos-1', courseId: 'course-1' }, ACTOR),
     ).rejects.toThrow(ConflictException);
     expect(repo.addRequirement).not.toHaveBeenCalled();
   });
@@ -201,7 +201,7 @@ describe('addRequirement', () => {
   it('defaults the kind to mandatory', async () => {
     const { service, repo } = makeService();
 
-    await service.addRequirement({ positionId: 'pos-1', courseId: 'course-1' }, ACTOR);
+    await service.addRequirement({ roleId: 'pos-1', courseId: 'course-1' }, ACTOR);
 
     expect(repo.addRequirement).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'mandatory' }),
@@ -518,7 +518,7 @@ describe('competencyGaps', () => {
 
     expect(repo.competencyGaps).toHaveBeenCalledWith({
       employeeId: 'emp-1',
-      positionId: undefined,
+      roleId: undefined,
       asOf: today(),
       includeRecommended: false,
     });

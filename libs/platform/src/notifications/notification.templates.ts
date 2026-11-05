@@ -46,6 +46,7 @@ export const NOTIFICATION_TEMPLATE_NAMES = [
   'request.no_approver',
   'request.approved',
   'request.rejected',
+  'request.expired',
   'door.low_battery',
   'door.terminal_offline',
 ] as const;
@@ -157,6 +158,11 @@ export interface NotificationTemplateVars {
     requestType: string;
     requestId: string;
     reason?: string;
+  };
+  /** Fired when a request is not decided in time, so the requester learns it lapsed rather than was refused. */
+  'request.expired': {
+    requestType: string;
+    requestId: string;
   };
 }
 
@@ -279,6 +285,12 @@ const templates: {
     return {
       title: `Your ${v.requestType} request was rejected`,
       body: `Your ${v.requestType} request (${v.requestId}) has been rejected.${extra}`,
+    };
+  },
+  'request.expired'(v) {
+    return {
+      title: `Your ${v.requestType} request expired`,
+      body: `Your ${v.requestType} request (${v.requestId}) was not decided in time and has expired, so it was not approved. File a new one if you still need it.`,
     };
   },
   'door.low_battery'(v) {

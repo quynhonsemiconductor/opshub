@@ -4,7 +4,7 @@
  *
  * WHY A COMPONENT TEST. All eight Playwright seats are administrators holding `training.manage`, so the
  * browser suite can only ever exercise this flow as somebody who did not need it. The tier this tab was
- * written for — `ROLE.EMPLOYEE`, which holds NO permission code at all — is not constructible from
+ * written for — `GROUP.EMPLOYEE`, which holds NO permission code at all — is not constructible from
  * there, and that is precisely how the gap survived: the API's `assertMayAttach` has permitted "an
  * employee may attach evidence to their OWN record" since the module shipped, and the only
  * `CertificatesPanel` in the product sat behind the Records tab, which needs `training.read`. The flow
@@ -122,12 +122,12 @@ describe('MyTrainingTab', () => {
     vi.clearAllMocks();
     /*
      * A PERMISSION-LESS EMPLOYEE — the tier that cannot be seated in Playwright. `permissions: []` and
-     * `roles: []` is the whole point: nothing below may pass because the reader happened to hold a code.
+     * `groups: []` is the whole point: nothing below may pass because the reader happened to hold a code.
      * The real store rather than a mock, because the ownership comparison reads `user.sub` from it and a
      * mock would let some other field satisfy the assertion.
      */
     useAuthStore.setState({
-      user: { sub: ME, email: 'me@example.com', name: 'Me', roles: [], permissions: [] },
+      user: { sub: ME, email: 'me@example.com', name: 'Me', groups: [], permissions: [] },
     });
   });
 

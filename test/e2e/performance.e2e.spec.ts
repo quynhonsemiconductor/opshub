@@ -6,7 +6,7 @@
  * Every rule here is invisible from a single row, so each needs a flow:
  *
  *   - a review cannot be created outside an OPEN cycle, and nobody reviews themselves
- *   - the employee's CURRENT position is frozen onto the review at creation
+ *   - the employee's CURRENT role is frozen onto the review at creation
  *   - only the SUBJECT writes the self-assessment; only the ASSIGNED REVIEWER rates
  *   - a rating whose scale entry demands a development plan is refused without one
  *   - goals must total 100% and all be graded before the review can be submitted
@@ -66,7 +66,7 @@ interface ReviewRow {
   reviewerId: string;
   /** Resolved server-side. Null when the reviewer has left — which is why reassignment exists. */
   reviewerName: string | null;
-  positionId: string | null;
+  roleId: string | null;
   status: string;
   selfAssessment: string | null;
   managerSummary: string | null;
@@ -1119,8 +1119,8 @@ describe('my reviews', () => {
     expect(unwrap<ReviewRow[]>(notMine.body)).toEqual([]);
   });
 
-  it('freezes the position the employee held when the review was created', async () => {
-    // The review is a record of THEN. `positionId` is copied at creation and never recomputed, so a
+  it('freezes the role the employee held when the review was created', async () => {
+    // The review is a record of THEN. `roleId` is copied at creation and never recomputed, so a
     // transfer afterwards does not restate what the review was about.
     const cycle = await openCycle('POS');
     const review = await createReview(cycle.id, FIXTURE.NO_PERMISSIONS.id, FIXTURE.MANAGER.id);
@@ -1128,7 +1128,7 @@ describe('my reviews', () => {
       (await apiRequest(app, hr, 'GET', `/performance/reviews/${review.id}`)).body,
     );
     // Whatever the seed gave them — the point is that the review carries its own copy, not that the
-    // fixture has a position.
-    expect(fetched.positionId).toBe(review.positionId);
+    // fixture has a role.
+    expect(fetched.roleId).toBe(review.roleId);
   });
 });

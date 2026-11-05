@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
  * undescriptored route is not an escalation.
  *
  * It is the reverse: the scoped-grant feature is INERT on these routes. `scope_type` is a five-value
- * enum, `POST /authz/assignments` accepts and validates `scopeType` + `scopeId`, and the row is
+ * enum, `POST /authz/employee-groups` accepts and validates `scopeType` + `scopeId`, and the row is
  * stored — and then every route without a descriptor refuses that holder. An operator can grant
  * "asset.write @ dept=Engineering" through the supported API and watch it do nothing except produce
  * 403s.
@@ -56,7 +56,19 @@ const ROOT = join(__dirname, '..');
  * a scoped `workforce.approve` grant instead of failing closed for its holder; the engine's own
  * separation-of-duties check still refuses a requester approving their own request.
  */
-const MAX_UNSCOPED_ROW_ROUTES = 151;
+/*
+ * 153 after the two row-addressed routes of direct employee permissions (list one employee's grants,
+ * revoke one grant). They are administrative and global by nature, like the `rbac.*` routes already counted:
+ * a department-scoped holder of `rbac.read` or `group.assign` is not a thing anyone wants, and granting a
+ * permission is further bounded by the no-escalation rule in `AuthzAdminService`.
+ */
+/*
+ * 156 after the three row-addressed routes of job ranks (rename or reorder, replace benefits, delete). A
+ * rank is organisation-wide reference data, not something owned by an employee or a department, so there is
+ * no row attribute a `self`/`dept` grant could be compared against; the same is true of the other
+ * `role.manage` administration already counted.
+ */
+const MAX_UNSCOPED_ROW_ROUTES = 156;
 
 /** Sanity floor: if the scanner stops finding routes, fail loudly rather than silently. */
 const MIN_ROW_ROUTES_FOUND = 120;

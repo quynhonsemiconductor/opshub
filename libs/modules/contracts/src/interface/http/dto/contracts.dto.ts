@@ -29,8 +29,8 @@ export const CompensationSchema = z.object({
 
 export const DraftContractSchema = z.object({
   employeeId: z.string().uuid(),
-  positionId: z.string().uuid().nullable().optional(),
-  /** Quoted in correspondence, so the same uppercase shape as position and document codes. */
+  roleId: z.string().uuid().nullable().optional(),
+  /** Quoted in correspondence, so the same uppercase shape as role and document codes. */
   reference: z
     .string()
     .min(3)
@@ -56,7 +56,7 @@ export const DraftContractSchema = z.object({
 export class DraftContractDto extends createZodDto(DraftContractSchema) {}
 
 export const UpdateContractSchema = DraftContractSchema.pick({
-  positionId: true,
+  roleId: true,
   contractType: true,
   startDate: true,
   endDate: true,
@@ -105,7 +105,7 @@ export const ListContractsQuerySchema = z
     employeeId: z.string().uuid().optional(),
     status: contractStatus.optional(),
     contractType: contractType.optional(),
-    positionId: z.string().uuid().optional(),
+    roleId: z.string().uuid().optional(),
     /** Active contracts ending on or before this date — the renewal queue. */
     endingOnOrBefore: z.string().date().optional(),
   })
@@ -126,7 +126,7 @@ export class ContractResponseDto {
    * contract is exactly the record that has to outlive the person it was signed with.
    */
   employeeName!: string | null;
-  positionId!: string | null;
+  roleId!: string | null;
   reference!: string;
   @ApiProperty({ enum: contractTypeEnum.enumValues })
   contractType!: (typeof contractTypeEnum.enumValues)[number];

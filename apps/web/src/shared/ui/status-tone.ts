@@ -74,7 +74,7 @@ export const SEVERITY_TONE: Record<string, BadgeTone> = {
   info: 'neutral',
 };
 
-/** Whether a thing is in service: employees, assets, positions, vendors, controlled documents. */
+/** Whether a thing is in service: employees, assets, roles, vendors, controlled documents. */
 export const LIFECYCLE_TONE: Record<string, BadgeTone> = {
   active: 'green',
   // Shared by licences and employment contracts: both have a window that is about to close, and both

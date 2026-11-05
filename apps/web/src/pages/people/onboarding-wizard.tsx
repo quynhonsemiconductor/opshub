@@ -16,7 +16,7 @@ import { cn } from '@/shared/lib/utils';
 import { formatDate } from '@/shared/lib/format';
 import type { EmployeeResponse, EquipmentType, PreferredOs } from './people.types';
 
-const WIZARD_STEPS = ['Position', 'Equipment', 'Access', 'Review'] as const;
+const WIZARD_STEPS = ['Role', 'Equipment', 'Access', 'Review'] as const;
 
 const EQUIPMENT_OPTIONS = [
   { value: 'laptop', label: 'Laptop', desc: 'Standard mobile workstation' },
@@ -69,7 +69,7 @@ interface OnboardingWizardProps {
 export function OnboardingWizard({ employee, onClose, onSuccess }: OnboardingWizardProps) {
   const [step, setStep] = useState(0);
 
-  // Step 0 — Position
+  // Step 0 — Role
   const [startDate, setStartDate] = useState('');
   const [department, setDepartment] = useState(employee.department ?? '');
   const [jobTitle, setJobTitle] = useState(employee.jobTitle ?? '');
@@ -131,7 +131,7 @@ export function OnboardingWizard({ employee, onClose, onSuccess }: OnboardingWiz
       onClose={onClose}
       width="lg"
       title={`Onboard — ${employee.displayName}`}
-      description="Set up position, equipment, and system access for the new hire."
+      description="Set up role, equipment, and system access for the new hire."
       footer={
         <div className="flex items-center justify-between">
           <Button
@@ -272,7 +272,7 @@ export function OnboardingWizard({ employee, onClose, onSuccess }: OnboardingWiz
 
         {step === 3 && (
           <div className="flex flex-col gap-4">
-            <ReviewCard title="Position">
+            <ReviewCard title="Role">
               <DescriptionList
                 columns={1}
                 items={[

@@ -3,7 +3,7 @@
  * WHO IS OFFERED A DECISION ON AN OVERTIME ENTRY.
  *
  * The same gap as the Leave tab and the same reason it survived: every Playwright seat is a seeded admin,
- * so a caller holding nothing — which is precisely what `ROLE.EMPLOYEE` holds — is a tier no browser test
+ * so a caller holding nothing — which is precisely what `GROUP.EMPLOYEE` holds — is a tier no browser test
  * can render. See `leave-tab.spec.tsx` for the full account.
  *
  * WHAT IS DIFFERENT HERE, and why this is not a copy of that file rather than a shared helper: the pair of

@@ -266,3 +266,11 @@ export interface RequestTypeDef<TPayload = Record<string, unknown>> {
    */
   afterApprove?(payload: TPayload, requestId: string, approverId: string): Promise<void>;
 }
+
+/** How a decision got past a request's assignee; both `null` when the assignee decided or none was named. */
+export interface AssigneeGateOutcome {
+  /** An unavailable assignee (offboarded, or lacking the step permission) covered for by HR/admin. */
+  fallbackFor: string | null;
+  /** An available assignee passed over by a holder of the override permission. */
+  overriddenFor: string | null;
+}

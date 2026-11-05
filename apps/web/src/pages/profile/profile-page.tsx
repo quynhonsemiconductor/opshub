@@ -2,7 +2,7 @@
  * ProfilePage — "My Account" / personal settings for the current user.
  *
  * Sections:
- *   1. Identity summary (avatar initials, email, roles — read-only from JWT)
+ *   1. Identity summary (avatar initials, email, groups — read-only from the session)
  *   2. Profile fields (displayName, jobTitle, department) — editable via
  *      PATCH /v1/employees/:id (requires fetching the employee record first)
  *   3. Sessions — active session count + sign out all sessions
@@ -214,33 +214,34 @@ function useEmployee(id: string | undefined) {
   });
 }
 
-// ── Role badge ────────────────────────────────────────────────────────────────
+// ── Group badge ───────────────────────────────────────────────────────────────
 
 /*
- * NO ROLE OR STATUS COLOUR MAPS.
+ * NO GROUP OR STATUS COLOUR MAPS.
  *
- * `ROLE_LABELS` duplicated `ROLE_NAMES` from the permission catalogue, and the two colour maps
- * (`colors` inside `RoleBadge`, `statusColors` inside the page) each invented their own palette for
+ * `GROUP_LABELS` duplicated `GROUP_NAMES` from the permission catalogue, and the two colour maps
+ * (`colors` inside `GroupBadge`, `statusColors` inside the page) each invented their own palette for
  * words the shared tone map already answers. `humanizeStatus` turns `it-admin` into `It-admin`, which
- * is wrong for a role key, so roles keep an explicit label — but their COLOUR is shared.
+ * is wrong for a group key, so groups keep an explicit label — but their COLOUR is shared.
  */
-const ROLE_LABEL: Record<string, string> = {
+const GROUP_LABEL: Record<string, string> = {
   admin: 'Platform Admin',
   'it-admin': 'IT Admin',
   security: 'Security',
   hr: 'HR',
   manager: 'Manager',
+  approver: 'Approver',
   auditor: 'Auditor',
   helpdesk: 'Helpdesk',
   employee: 'Employee',
 };
 
-/** The privileged roles read as violet; everything else is neutral. Colour is not the only signal. */
+/** The privileged groups read as violet; everything else is neutral. Colour is not the only signal. */
 const PRIVILEGED = new Set(['admin', 'it-admin', 'security']);
 
-function RoleBadge({ role }: { role: string }) {
+function GroupBadge({ group }: { group: string }) {
   return (
-    <Badge tone={PRIVILEGED.has(role) ? 'violet' : 'neutral'}>{ROLE_LABEL[role] ?? role}</Badge>
+    <Badge tone={PRIVILEGED.has(group) ? 'violet' : 'neutral'}>{GROUP_LABEL[group] ?? group}</Badge>
   );
 }
 
@@ -335,10 +336,10 @@ export function ProfilePage() {
                   </Button>
                 </div>
               </div>
-              {me.roles.length > 0 && (
+              {me.groups.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {me.roles.map((r) => (
-                    <RoleBadge key={r} role={r} />
+                  {me.groups.map((g) => (
+                    <GroupBadge key={g} group={g} />
                   ))}
                 </div>
               )}
@@ -375,7 +376,7 @@ export function ProfilePage() {
             employee could not see their own role history or contract anywhere in the product. */}
         <SectionCard
           title="Your roles"
-          subtitle="The positions you have held, newest first. Read from your own record."
+          subtitle="The roles you have held, newest first. Read from your own record."
         >
           <MyRoleHistory />
         </SectionCard>

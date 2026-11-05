@@ -45,7 +45,7 @@ import type { TrainingRecord } from './training.types';
  * a nightly job.
  *
  * THREE WRITE CONTROLS, ALL `training.manage`. `POST /training/records`, `POST /training/records/{id}/verify`
- * and `POST /training/records/{id}/revoke` each carry `@RequirePermission('training.manage')`. `ROLE.AUDITOR`
+ * and `POST /training/records/{id}/revoke` each carry `@RequirePermission('training.manage')`. `GROUP.AUDITOR`
  * holds `training.read` and no manage code, so before this gate the one role whose whole job is to read
  * competency evidence was offered Verify and Revoke on every row — an auditor able to attest to the
  * evidence they are auditing is the exact separation the verify route's own docblock exists to keep.

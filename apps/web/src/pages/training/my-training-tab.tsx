@@ -34,7 +34,7 @@ import type { CompetencyGap, TrainingRecord } from './training.types';
  * `assertMayAttach` in the training controller permits an employee to attach a certificate to their OWN
  * record holding NO permission code — the record already names who it belongs to, and its docblock calls
  * that "the ordinary flow". There was nowhere in the product to perform it. The only `CertificatesPanel`
- * was in the Records tab, which needs `training.read`; `ROLE.EMPLOYEE` holds nothing, so the tab is not
+ * was in the Records tab, which needs `training.read`; `GROUP.EMPLOYEE` holds nothing, so the tab is not
  * even rendered for them. The flow the API was built for was unreachable by the people it was built for,
  * and "Current certificates" — a count tile — was the whole of what this tab said about evidence.
  *
@@ -181,7 +181,7 @@ export function MyTrainingTab() {
           isLoading={gaps.isLoading}
           isError={gaps.isError}
           errorMessage="Failed to load your outstanding training."
-          emptyMessage="Nothing outstanding — every course your position requires is current"
+          emptyMessage="Nothing outstanding — every course your role requires is current"
           emptyIcon={ShieldCheck}
         />
       </section>

@@ -40,6 +40,7 @@ const TYPE_ICON: Record<string, string> = {
   'request.submitted': '📋',
   'request.approved': '✅',
   'request.rejected': '❌',
+  'request.expired': '⌛',
   'request.step_ready': '👆',
   'request.sla_breach': '⚠️',
   'request.delegation_created': '🤝',

@@ -28,10 +28,10 @@ describe('PaginationFooter', () => {
       <PaginationFooter
         pageInfo={{ total: 5, limit: 25, offset: 0, hasNextPage: false }}
         onOffsetChange={vi.fn()}
-        noun="positions"
+        noun="roles"
       />,
     );
-    expect(screen.getByText(/5 positions results/)).toBeInTheDocument();
+    expect(screen.getByText(/5 roles results/)).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 

@@ -3,8 +3,8 @@
  * WHO MAY ATTEST TO COMPETENCY EVIDENCE, and the bug that hid inside a boolean.
  *
  * WHY A COMPONENT TEST. All eight Playwright seats are administrators holding `training.manage`, so the
- * browser suite only ever renders the write tier of this tab. The read tier — `ROLE.MANAGER` and
- * `ROLE.AUDITOR`, both of which hold `training.read` and neither of which holds `training.manage` — is
+ * browser suite only ever renders the write tier of this tab. The read tier — `GROUP.MANAGER` and
+ * `GROUP.AUDITOR`, both of which hold `training.read` and neither of which holds `training.manage` — is
  * structurally unreachable from there, and that is exactly why three ungated controls and one disguised
  * one survived on the most audit-sensitive screen in the module.
  *
@@ -149,7 +149,7 @@ describe('RecordsTab', () => {
     // The signed-in principal. The real store rather than a mock, because the ownership half of the
     // certificate rule is read from it and a mock would let the wrong field satisfy the test.
     useAuthStore.setState({
-      user: { sub: ME, email: 'me@example.com', name: 'Me', roles: [], permissions: [] },
+      user: { sub: ME, email: 'me@example.com', name: 'Me', groups: [], permissions: [] },
     });
   });
 

@@ -50,8 +50,8 @@ export const FIXTURE = {
     email: 'admin@opshub.local',
   },
   /**
-   * Holds the READ half of several bundles without the MANAGE half — `position.read` but not
-   * `position.manage`, `workforce.read` but not `workforce.manage`.
+   * Holds the READ half of several bundles without the MANAGE half — `role.read` but not
+   * `role.manage`, `workforce.read` but not `workforce.manage`.
    *
    * The tier that catches a route guarded by the wrong permission of a pair. `NO_PERMISSIONS`
    * cannot: it is rejected by either code, so a 403 for it proves nothing about WHICH one was
@@ -60,6 +60,15 @@ export const FIXTURE = {
   MANAGER: {
     id: '00000000-0000-7000-8000-000000000005',
     email: 'manager@opshub.local',
+  },
+  /**
+   * The general approval group: decides workforce requests and nothing else — no directory, contract or
+   * report access. The tier that separates "may decide" from "may read the organisation", which `HR` and
+   * `MANAGER` both hold together.
+   */
+  APPROVER: {
+    id: '00000000-0000-7000-8000-000000000010',
+    email: 'approver@opshub.local',
   },
   /**
    * Read-only across the platform, and the tier for FIELD-LEVEL redaction.

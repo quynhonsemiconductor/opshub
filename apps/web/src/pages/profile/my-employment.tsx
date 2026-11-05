@@ -3,12 +3,12 @@ import { Briefcase, FileText } from 'lucide-react';
 import { api } from '@/shared/api/client';
 import { Badge, PanelState, StatusBadge, humanizeStatus, statusTone } from '@/shared/ui';
 import { formatDate } from '@/shared/lib/format';
-import type { ContractResponse, EmployeePositionHistory } from '@/shared/api/types';
+import type { ContractResponse, EmployeeRoleHistory } from '@/shared/api/types';
 
 /**
  * What the reader's own employment record says — their roles over time, and their contracts.
  *
- * BOTH ROUTES ARE `@SelfScoped` AND NEITHER HAD A CALLER. `/v1/positions/me` and `/v1/contracts/me` take no
+ * BOTH ROUTES ARE `@SelfScoped` AND NEITHER HAD A CALLER. `/v1/roles/me` and `/v1/contracts/me` take no
  * id and need no permission, so they answer a question every employee is entitled to ask about themselves —
  * and the product could not answer it anywhere. Reading it through the people or contracts registers instead
  * needs `employee.read` / `contract.read`, which a plain employee does not hold.
@@ -22,10 +22,10 @@ import type { ContractResponse, EmployeePositionHistory } from '@/shared/api/typ
  */
 
 export function MyRoleHistory() {
-  const roles = useQuery<EmployeePositionHistory[]>({
-    queryKey: ['positions', 'me'],
+  const roles = useQuery<EmployeeRoleHistory[]>({
+    queryKey: ['roles', 'me'],
     queryFn: async () => {
-      const { data, error } = await api.GET('/v1/positions/me');
+      const { data, error } = await api.GET('/v1/roles/me');
       if (error || !data) throw new Error('Failed to load your role history');
       return data;
     },
@@ -37,9 +37,9 @@ export function MyRoleHistory() {
       {roles.isLoading && <p className="text-xs text-fg-subtle">Loading…</p>}
       {roles.isError && <p className="text-xs text-danger">Failed to load your role history.</p>}
       {!roles.isLoading && !roles.isError && rows.length === 0 && (
-        // Named as the state it is. An employee with no position on record is an onboarding gap, not an
+        // Named as the state it is. An employee with no role on record is an onboarding gap, not an
         // error, and the org chart is what it feeds.
-        <p className="text-xs text-fg-subtle">No position on record yet</p>
+        <p className="text-xs text-fg-subtle">No role on record yet</p>
       )}
 
       {rows.map((role) => (
@@ -53,10 +53,10 @@ export function MyRoleHistory() {
             aria-hidden="true"
           />
           <div className="min-w-0 flex-1">
-            {/* The TITLE, not the id. `/positions/me` resolves it server-side precisely because a
-                self-scoped caller cannot look a position up. */}
-            <p className="truncate text-xs font-medium text-fg">{role.positionTitle}</p>
-            <p className="truncate font-mono text-xs text-fg-subtle">{role.positionCode}</p>
+            {/* The TITLE, not the id. `/roles/me` resolves it server-side precisely because a
+                self-scoped caller cannot look a role up. */}
+            <p className="truncate text-xs font-medium text-fg">{role.roleTitle}</p>
+            <p className="truncate font-mono text-xs text-fg-subtle">{role.roleCode}</p>
           </div>
           <span className="shrink-0 text-xs text-fg-subtle">
             {formatDate(role.effectiveFrom)} —{' '}

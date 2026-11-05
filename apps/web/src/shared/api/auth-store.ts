@@ -5,11 +5,12 @@ export interface SessionUser {
   sub: string;
   email: string;
   name: string;
-  roles: string[];
+  /** Keys of the permission groups the user belongs to — for display, never for gating. */
+  groups: string[];
   /**
    * Effective permission keys resolved from the database. `'*'` means super-admin. Gate
-   * UI on THIS, never on `roles` — the server authorizes from the same list, so anything
-   * derived from role names can drift out of agreement with it.
+   * UI on THIS, never on `groups` — the server authorizes from the same list, so anything
+   * derived from group names can drift out of agreement with it.
    */
   permissions: string[];
 }

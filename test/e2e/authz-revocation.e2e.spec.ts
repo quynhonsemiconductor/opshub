@@ -3,7 +3,7 @@
  * no re-login, and nothing for the client to do.
  *
  * The property under test is the ABSENCE of a snapshot. opshub's session carries
- * identity and NOTHING else (the roles shown by `/v1/auth/me` are read from `employees.roles`): `PolicyGuard` resolves
+ * identity and NOTHING else (the groups shown by `/v1/auth/me` are read from `employees.group_keys`): `PolicyGuard` resolves
  * permissions from the database on every request, cached per user in Valkey and invalidated
  * by the write paths. So there is no embedded permission list to go stale, and no epoch
  * counter needed to expire one early — the same token simply gets a different answer.
@@ -26,13 +26,13 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   AuthzAdminService,
-  ROLE_ASSIGNMENT_REPOSITORY,
-  ROLE_REPOSITORY,
+  EMPLOYEE_GROUP_REPOSITORY,
+  GROUP_REPOSITORY,
   type Actor,
-  type IRoleAssignmentRepository,
-  type IRoleRepository,
+  type IEmployeeGroupRepository,
+  type IGroupRepository,
 } from '@modules/authz';
-import { DRIZZLE, type DrizzleDB, type RoleAssignment, type RoleWithPermissions } from '@platform';
+import { DRIZZLE, type DrizzleDB, type EmployeeGroup, type GroupWithPermissions } from '@platform';
 import { eq } from 'drizzle-orm';
 import { employees } from '../../db/schema';
 import { FIXTURE, authHeaders, createTestApp, login, type Session } from './support/harness';
@@ -42,30 +42,30 @@ const PROBE_ROUTE = '/v1/audit-logs';
 let app: NestFastifyApplication;
 let admin: AuthzAdminService;
 let db: DrizzleDB;
-let roles: IRoleRepository;
-let assignments: IRoleAssignmentRepository;
-/** The `auditor` role — the smallest seeded bundle that includes `audit.read`. */
-let auditorRole: RoleWithPermissions;
+let groups: IGroupRepository;
+let assignments: IEmployeeGroupRepository;
+/** The `auditor` group — the smallest seeded bundle that includes `audit.read`. */
+let auditorGroup: GroupWithPermissions;
 /** Session for the fixture that holds NO permissions. */
 let victim: Session;
 
 /**
- * Acting admin for the grant/revoke calls. `assertCanGrantRole` requires the actor's own
- * permissions to be a superset of the role being granted, so this must be the wildcard
+ * Acting admin for the grant/revoke calls. `assertCanGrantGroup` requires the actor's own
+ * permissions to be a superset of the group being granted, so this must be the wildcard
  * holder — and `granted_by` is a real uuid column, so a synthetic id fails the insert.
  */
 const ACTOR: Actor = { sub: FIXTURE.ADMIN.id, email: FIXTURE.ADMIN.email };
 
 /** Assignments created by a test, torn down after it so each starts from the seed state. */
-let created: RoleAssignment[] = [];
+let created: EmployeeGroup[] = [];
 
 async function grantAuditor(
   overrides: { scopeType?: 'global' | 'self' | 'dept'; scopeId?: string; expiresAt?: Date } = {},
-): Promise<RoleAssignment> {
-  const assignment = await admin.assignRole(
+): Promise<EmployeeGroup> {
+  const assignment = await admin.assignGroup(
     {
-      userId: FIXTURE.NO_PERMISSIONS.id,
-      roleId: auditorRole.id,
+      employeeId: FIXTURE.NO_PERMISSIONS.id,
+      groupId: auditorGroup.id,
       scopeType: overrides.scopeType ?? 'global',
       scopeId: overrides.scopeId ?? null,
       expiresAt: overrides.expiresAt ?? null,
@@ -80,27 +80,27 @@ function probe() {
   return app.inject({ method: 'GET', url: PROBE_ROUTE, headers: authHeaders(victim) });
 }
 
-/** The roles `/v1/auth/me` displays for a session: a DISPLAY list, read from `employees.roles`. */
+/** The groups `/v1/auth/me` displays for a session: a DISPLAY list, read from `employees.group_keys`. */
 async function displayedRoles(session: Session): Promise<string[]> {
   const res = await app.inject({
     method: 'GET',
     url: '/v1/auth/me',
     headers: { cookie: session.cookieHeader },
   });
-  return res.json<{ roles: string[] }>().roles;
+  return res.json<{ groups: string[] }>().groups;
 }
 
 beforeAll(async () => {
   app = await createTestApp();
   admin = app.get(AuthzAdminService);
   db = app.get<DrizzleDB>(DRIZZLE);
-  roles = app.get<IRoleRepository>(ROLE_REPOSITORY);
-  assignments = app.get<IRoleAssignmentRepository>(ROLE_ASSIGNMENT_REPOSITORY);
+  groups = app.get<IGroupRepository>(GROUP_REPOSITORY);
+  assignments = app.get<IEmployeeGroupRepository>(EMPLOYEE_GROUP_REPOSITORY);
 
-  const auditor = await roles.findByKey('auditor');
-  expect(auditor, 'seeded `auditor` role missing — run pnpm db:seed').not.toBeNull();
+  const auditor = await groups.findByKey('auditor');
+  expect(auditor, 'seeded `auditor` group missing — run pnpm db:seed').not.toBeNull();
   expect(auditor!.permissions).toContain('audit.read');
-  auditorRole = auditor!;
+  auditorGroup = auditor!;
 
   victim = await login(app, FIXTURE.NO_PERMISSIONS);
 }, 60_000);
@@ -110,7 +110,7 @@ afterEach(async () => {
   // a repository-level delete would leave the next test reading a stale grant and passing
   // for the wrong reason.
   for (const assignment of created) {
-    await admin.revokeAssignment(assignment.id, ACTOR).catch(() => undefined);
+    await admin.revokeEmployeeGroup(assignment.id, ACTOR).catch(() => undefined);
   }
   created = [];
 });
@@ -144,7 +144,7 @@ describe('permission changes take effect on the next request', () => {
   });
 
   it('a GRANT takes effect on the same session, on the very next request', async () => {
-    // 1. The fixture holds the `employee` role, whose permission bundle is empty by design.
+    // 1. The fixture holds the `employee` group, whose permission bundle is empty by design.
     expect((await probe()).statusCode).toBe(403);
 
     // 2. The admin action that, with an embedded permission list, would have required the
@@ -161,7 +161,7 @@ describe('permission changes take effect on the next request', () => {
     const assignment = await grantAuditor();
     expect((await probe()).statusCode).toBe(200);
 
-    await admin.revokeAssignment(assignment.id, ACTOR);
+    await admin.revokeEmployeeGroup(assignment.id, ACTOR);
     created = created.filter((a) => a.id !== assignment.id);
 
     // 403, not 401: the token is still perfectly valid and authentication never became the
@@ -171,15 +171,15 @@ describe('permission changes take effect on the next request', () => {
     expect(after.statusCode).toBe(403);
   });
 
-  it('does not authorize from the displayed roles list', async () => {
-    // The strongest form of the property, and the reason the RoleGuard that read a roles array
-    // was removed. `syncEmployeeRoleClaims` rewrites `employees.roles` on every grant, and
+  it('does not authorize from the displayed groups list', async () => {
+    // The strongest form of the property, and the reason the RoleGuard that read a groups array
+    // was removed. `syncEmployeeGroupKeys` rewrites `employees.group_keys` on every grant, and
     // `/v1/auth/me` shows it. So write `auditor` there WITHOUT an assignment: the list says
     // auditor, the authorization decision must still say no.
     const before = await displayedRoles(victim);
     await db
       .update(employees)
-      .set({ roles: [...before, 'auditor'] })
+      .set({ groupKeys: [...before, 'auditor'] })
       .where(eq(employees.id, FIXTURE.NO_PERMISSIONS.id));
     try {
       expect(await displayedRoles(victim)).toEqual(expect.arrayContaining(['auditor']));
@@ -187,7 +187,7 @@ describe('permission changes take effect on the next request', () => {
     } finally {
       await db
         .update(employees)
-        .set({ roles: before })
+        .set({ groupKeys: before })
         .where(eq(employees.id, FIXTURE.NO_PERMISSIONS.id));
     }
   });
@@ -219,15 +219,15 @@ describe('permission changes take effect on the next request', () => {
   });
 
   it('records the grant as a global-scoped assignment row', async () => {
-    // Structural, and narrower than it first looked: the roles[] claim sync is already
+    // Structural, and narrower than it first looked: the groups[] claim sync is already
     // covered by the stale-claim test above, which logs in fresh and reads the token. This
     // asserts only that the row landed with the scope that was asked for — a grant silently
     // written as `self` would make every check above fail closed for a reason no assertion
     // would name.
     await grantAuditor();
 
-    const rows = await assignments.listForUser(FIXTURE.NO_PERMISSIONS.id);
-    expect(rows.some((r) => r.roleId === auditorRole.id && r.scopeType === 'global')).toBe(true);
+    const rows = await assignments.listForEmployee(FIXTURE.NO_PERMISSIONS.id);
+    expect(rows.some((r) => r.groupId === auditorGroup.id && r.scopeType === 'global')).toBe(true);
   });
 
   it('still rejects an unauthenticated probe', async () => {

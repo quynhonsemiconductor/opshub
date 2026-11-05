@@ -14,7 +14,7 @@ export interface Compensation {
 
 export interface DraftContractInput {
   employeeId: string;
-  positionId?: string | null;
+  roleId?: string | null;
   reference: string;
   contractType: ContractType;
   startDate: string;
@@ -35,7 +35,7 @@ export interface DraftContractInput {
 export type UpdateContractInput = Partial<
   Pick<
     DraftContractInput,
-    | 'positionId'
+    | 'roleId'
     | 'contractType'
     | 'startDate'
     | 'endDate'
@@ -50,7 +50,7 @@ export interface ContractFilters {
   employeeId?: string;
   status?: ContractStatus;
   contractType?: ContractType;
-  positionId?: string;
+  roleId?: string;
   /** Active contracts whose `end_date` falls on or before this date. Drives the renewal queue. */
   endingOnOrBefore?: string;
 }

@@ -389,7 +389,7 @@ describe('request visibility', () => {
   it('tells a read-only role it may not decide, instead of offering it', async () => {
     /*
      * THE 403 WALL. The inbox gated Approve and Reject on the request's STATUS alone, so any holder of
-     * `request.read` saw them on every pending request in the tenant. `ROLE.AUDITOR` is exactly that
+     * `request.read` saw them on every pending request in the tenant. `GROUP.AUDITOR` is exactly that
      * tier — `request.read` and no approval code anywhere — so every click it made was a permanent
      * refusal, reported as "please try again".
      *

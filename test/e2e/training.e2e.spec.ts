@@ -1,5 +1,5 @@
 /**
- * Training records end to end: the catalogue, position requirements, the retraining chain, the
+ * Training records end to end: the catalogue, role requirements, the retraining chain, the
  * competency gap report, and a REAL certificate upload.
  *
  * WHAT THIS EXISTS TO PIN
@@ -8,7 +8,7 @@
  *     index. Only a real Postgres can prove it, which is why this file exists at all.
  *   - `expires_on` is DERIVED from the course and then frozen; editing the course afterwards does
  *     not restate it
- *   - the GAP REPORT reads the employee's CURRENT position, so it answers "is the org competent?"
+ *   - the GAP REPORT reads the employee's CURRENT role, so it answers "is the org competent?"
  *     and survives a transfer with no backfill
  *   - the certificate path is exercised against real S3: presigned PUT with exactly the signed
  *     headers, `Content-Disposition` stored as object METADATA, confirm verifying size, the
@@ -47,11 +47,11 @@ let employee: Session;
 /**
  * The SUBJECT of every record below, and deliberately NOT the shared `NO_PERMISSIONS` employee.
  *
- * The gap report needs its subject to hold a current position, so this suite assigns them to one —
- * and `positions-headcount.e2e.spec.ts` and `contracts.e2e.spec.ts` both drive `NO_PERMISSIONS`
- * through position transfers of their own. Sharing the fixture makes the three files
+ * The gap report needs its subject to hold a current role, so this suite assigns them to one —
+ * and `roles-headcount.e2e.spec.ts` and `contracts.e2e.spec.ts` both drive `NO_PERMISSIONS`
+ * through role transfers of their own. Sharing the fixture makes the three files
  * order-dependent in BOTH directions: whichever runs first leaves an open assignment, and the next
- * one's transfer is dated behind it and refused with `POSITION_INVALID_WINDOW`. That is exactly
+ * one's transfer is dated behind it and refused with `ROLE_INVALID_WINDOW`. That is exactly
  * what happened in CI, where the file order differs from the local one.
  *
  * `SECURITY` holds no training permission either, so the self-service assertions below still prove
@@ -116,23 +116,23 @@ async function createCourse(over: Record<string, unknown> = {}): Promise<CourseR
   return unwrap<CourseRow>(res.body);
 }
 
-/** A position nobody else is using, with the employee assigned to it from `effectiveFrom`. */
-async function positionWithEmployee(effectiveFrom: string): Promise<string> {
-  const created = await apiRequest(app, hr, 'POST', '/positions', {
+/** A role nobody else is using, with the employee assigned to it from `effectiveFrom`. */
+async function roleWithEmployee(effectiveFrom: string): Promise<string> {
+  const created = await apiRequest(app, hr, 'POST', '/roles', {
     code: nextCode(),
     title: 'Training Subject',
     department: `E2E-TRAIN-${RUN}`,
     headcount: 5,
   });
   expect(created.status).toBe(201);
-  const positionId = unwrap<{ id: string }>(created.body).id;
+  const roleId = unwrap<{ id: string }>(created.body).id;
 
-  const assigned = await apiRequest(app, hr, 'POST', `/positions/${positionId}/assignments`, {
+  const assigned = await apiRequest(app, hr, 'POST', `/roles/${roleId}/assignments`, {
     employeeId: FIXTURE.SECURITY.id,
     effectiveFrom,
   });
   expect(assigned.status, JSON.stringify(assigned.body)).toBe(201);
-  return positionId;
+  return roleId;
 }
 
 /** Whether this environment has S3 — the upload assertions need it and cannot fake it. */
@@ -193,20 +193,14 @@ describe('the course catalogue', () => {
 
   it('refuses to require or complete a retired course', async () => {
     const course = await createCourse();
-    const positionId = await positionWithEmployee('2050-01-01');
+    const roleId = await roleWithEmployee('2050-01-01');
     expect(
       (await apiRequest(app, hr, 'POST', `/training/courses/${course.id}/retire`)).status,
     ).toBe(200);
 
-    const required = await apiRequest(
-      app,
-      hr,
-      'POST',
-      `/training/positions/${positionId}/requirements`,
-      {
-        courseId: course.id,
-      },
-    );
+    const required = await apiRequest(app, hr, 'POST', `/training/roles/${roleId}/requirements`, {
+      courseId: course.id,
+    });
     expect(required.status).toBe(412);
 
     const completed = await apiRequest(app, hr, 'POST', '/training/records', {
@@ -546,18 +540,18 @@ describe('the competency gap report', () => {
   it('reports never_completed, clears on completion, and reports expired by asOf', async () => {
     const mandatory = await createCourse({ validityMonths: 12 });
     const recommended = await createCourse({ validityMonths: null });
-    const positionId = await positionWithEmployee('2051-01-01');
+    const roleId = await roleWithEmployee('2051-01-01');
 
     expect(
       (
-        await apiRequest(app, hr, 'POST', `/training/positions/${positionId}/requirements`, {
+        await apiRequest(app, hr, 'POST', `/training/roles/${roleId}/requirements`, {
           courseId: mandatory.id,
         })
       ).status,
     ).toBe(201);
     expect(
       (
-        await apiRequest(app, hr, 'POST', `/training/positions/${positionId}/requirements`, {
+        await apiRequest(app, hr, 'POST', `/training/roles/${roleId}/requirements`, {
           courseId: recommended.id,
           kind: 'recommended',
         })
@@ -615,12 +609,12 @@ describe('the competency gap report', () => {
   });
 
   it('follows the employee when they transfer', async () => {
-    // The whole reason requirements hang off the position rather than the person.
+    // The whole reason requirements hang off the role rather than the person.
     const course = await createCourse({ validityMonths: null });
-    const oldPosition = await positionWithEmployee('2052-01-01');
+    const oldRole = await roleWithEmployee('2052-01-01');
     expect(
       (
-        await apiRequest(app, hr, 'POST', `/training/positions/${oldPosition}/requirements`, {
+        await apiRequest(app, hr, 'POST', `/training/roles/${oldRole}/requirements`, {
           courseId: course.id,
         })
       ).status,
@@ -631,8 +625,8 @@ describe('the competency gap report', () => {
     );
     expect(before.map((g) => g.courseCode)).toContain(course.code);
 
-    // Transfer to a position with no requirements at all.
-    await positionWithEmployee('2053-01-01');
+    // Transfer to a role with no requirements at all.
+    await roleWithEmployee('2053-01-01');
 
     const after = unwrap<GapRow[]>(
       (await apiRequest(app, hr, 'GET', `/training/gaps?employeeId=${FIXTURE.SECURITY.id}`)).body,
@@ -653,7 +647,7 @@ describe('naming the person a record and a gap are about', () => {
    *
    * The record list is the org-wide view — filtered by COURSE as often as by employee — so its
    * Employee column is the only thing on a row that says which person completed the training. The
-   * gap report is worse still: filtered by position it is a list of different people against the
+   * gap report is worse still: filtered by role it is a list of different people against the
    * same course, so the employee column IS the output.
    *
    * Asserted through the API rather than the SPA because the name has to be resolved server-side:
@@ -720,22 +714,22 @@ describe('naming the person a record and a gap are about', () => {
 
   it('names the person who is missing the training, in the gap report', async () => {
     /*
-     * `2054-01-01` because the assignments in this file are strictly increasing: `positionWithEmployee`
+     * `2054-01-01` because the assignments in this file are strictly increasing: `roleWithEmployee`
      * transfers the same subject, and a date behind the open assignment is refused with
-     * `POSITION_INVALID_WINDOW`.
+     * `ROLE_INVALID_WINDOW`.
      */
     const course = await createCourse({ validityMonths: null });
-    const positionId = await positionWithEmployee('2054-01-01');
+    const roleId = await roleWithEmployee('2054-01-01');
     expect(
       (
-        await apiRequest(app, hr, 'POST', `/training/positions/${positionId}/requirements`, {
+        await apiRequest(app, hr, 'POST', `/training/roles/${roleId}/requirements`, {
           courseId: course.id,
         })
       ).status,
     ).toBe(201);
 
     const gaps = unwrap<GapRow[]>(
-      (await apiRequest(app, hr, 'GET', `/training/gaps?positionId=${positionId}`)).body,
+      (await apiRequest(app, hr, 'GET', `/training/gaps?roleId=${roleId}`)).body,
     );
     const gap = gaps.find((g) => g.courseCode === course.code);
     expect(gap, 'the requirement did not produce a gap to name anybody in').toBeDefined();

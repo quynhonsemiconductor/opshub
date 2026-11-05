@@ -46,7 +46,7 @@ import type { Cycle } from './performance.types';
  * THE COVERAGE REPORT IS ALSO WHY A READ-ONLY TIER BELONGS HERE. `GET cycles`, `GET cycles/{id}/progress`
  * and `GET cycles/{id}/coverage` all ask for `performance.read`; the four write controls — `POST cycles`,
  * `POST cycles/{id}/open`, `POST cycles/{id}/close` and `POST cycles/{id}/reviews` — every one of them
- * carries `@RequirePermission(PERMISSION.PERFORMANCE_MANAGE)`. `ROLE.MANAGER` holds the read code and
+ * carries `@RequirePermission(PERMISSION.PERFORMANCE_MANAGE)`. `GROUP.MANAGER` holds the read code and
  * not the manage code, which is the whole persona this screen serves: a People Manager comes here to see
  * whether their team got reviewed, and was previously shown New cycle, Open, Close and Add a review —
  * six dead buttons on the one page written for them.

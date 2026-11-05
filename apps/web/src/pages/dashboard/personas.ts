@@ -15,7 +15,7 @@ import {
   Users,
   Webhook,
 } from 'lucide-react';
-import type { AppRole } from '@/shared/hooks/use-permissions';
+import type { GroupKey } from '@/shared/hooks/use-permissions';
 import type { BadgeTone } from '@/shared/ui';
 import type { DashboardIcon } from './dashboard-widgets';
 import type { DashboardCounts } from './use-dashboard-counts';
@@ -124,7 +124,7 @@ const LINK = {
   },
   accessControl: {
     label: 'Access Control',
-    sub: 'Roles, permissions and assignments',
+    sub: 'Groups, permissions and memberships',
     to: '/settings/access-control',
     icon: UserCog,
     tone: 'violet',
@@ -216,7 +216,7 @@ const TILE = {
  * It held no dashboard of its own before either — the page fell through to `EmployeeDashboard` for it
  * — and this makes that explicit rather than leaving it to a boolean in a render condition.
  */
-export const PERSONAS: Record<AppRole, PersonaDef> = {
+export const PERSONAS: Record<GroupKey, PersonaDef> = {
   admin: {
     tiles: [TILE.assets, TILE.pendingAccess, TILE.openFindings, TILE.myQueue],
     sections: [
@@ -267,6 +267,11 @@ export const PERSONAS: Record<AppRole, PersonaDef> = {
       { title: 'Approvals', icon: CheckCircle, links: [LINK.requests, LINK.workforce] },
       { title: 'Team', icon: Users, links: [LINK.people, LINK.reports] },
     ],
+  },
+
+  approver: {
+    tiles: [TILE.myQueue, TILE.pendingLeave],
+    sections: [{ title: 'Approvals', icon: CheckCircle, links: [LINK.requests, LINK.workforce] }],
   },
 
   hr: {
@@ -329,12 +334,13 @@ export const PERSONAS: Record<AppRole, PersonaDef> = {
   },
 };
 
-/** Role → the label in the page title. */
-export const ROLE_TITLE: Record<AppRole, string> = {
+/** Group → the label in the page title. */
+export const GROUP_TITLE: Record<GroupKey, string> = {
   admin: 'Platform Admin',
   'it-admin': 'IT Admin',
   security: 'Security',
   manager: 'Manager',
+  approver: 'Approver',
   hr: 'HR',
   auditor: 'Auditor',
   helpdesk: 'Helpdesk',

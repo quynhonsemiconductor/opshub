@@ -1,11 +1,11 @@
 import type {
   trainingCourses,
-  trainingPositionRequirements,
+  trainingRoleRequirements,
   trainingRecords,
 } from '../../../../../db/schema';
 
 export type TrainingCourse = typeof trainingCourses.$inferSelect;
-export type TrainingRequirement = typeof trainingPositionRequirements.$inferSelect;
+export type TrainingRequirement = typeof trainingRoleRequirements.$inferSelect;
 export type TrainingRecord = typeof trainingRecords.$inferSelect;
 export type RequirementKind = TrainingRequirement['kind'];
 export type RecordStatus = TrainingRecord['status'];
@@ -55,7 +55,7 @@ export interface RecordFilters {
  */
 export interface CompetencyGap {
   employeeId: string;
-  positionId: string;
+  roleId: string;
   courseId: string;
   courseCode: string;
   courseTitle: string;

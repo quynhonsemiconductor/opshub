@@ -36,7 +36,7 @@ import type { Course } from './training.types';
  * READING THE CATALOGUE AND CHANGING IT ARE DIFFERENT CODES. Every route behind this tab's three write
  * controls — `POST /training/courses`, `PATCH /training/courses/{id}`, `POST /training/courses/{id}/retire`
  * — carries `@RequirePermission('training.manage')`, while the list itself needs only `training.read`.
- * `ROLE.MANAGER` and `ROLE.AUDITOR` hold the read code and not the manage code, so before this gate both
+ * `GROUP.MANAGER` and `GROUP.AUDITOR` hold the read code and not the manage code, so before this gate both
  * of them were shown New course, an Edit pencil on every row and a Retire button, and every one of them
  * answered 403. An auditor in particular was handed what looked like edit rights over the competency
  * catalogue an audit reads.
@@ -181,7 +181,7 @@ export function CoursesTab() {
         onCancel={() => setRetiring(null)}
         onConfirm={retire}
         title="Retire this course?"
-        description="It can no longer be required by a position or recorded against anybody. Existing records and certificates are kept, because an audit asks what somebody was trained in at the time."
+        description="It can no longer be required by a role or recorded against anybody. Existing records and certificates are kept, because an audit asks what somebody was trained in at the time."
         confirmLabel="Retire course"
       />
 

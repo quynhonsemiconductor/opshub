@@ -9,7 +9,7 @@ import type { Course } from './training.types';
 /**
  * Create or edit a course.
  *
- * The CODE is immutable, like a position's: requirements, records and certificates all quote it, so the
+ * The CODE is immutable, like a role's: requirements, records and certificates all quote it, so the
  * edit form omits the field rather than offering one the API would reject.
  *
  * VALIDITY IS WHAT MAKES A RECORD EXPIRE. `validityMonths` is optional, and its absence is a real

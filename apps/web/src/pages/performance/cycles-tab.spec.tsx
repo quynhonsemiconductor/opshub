@@ -2,7 +2,7 @@
 /**
  * WHO MAY RUN A REVIEW CYCLE, versus who may only look at whether it worked.
  *
- * THIS IS THE PERSONA THE SCREEN WAS BUILT FOR, and it was the one getting dead buttons. `ROLE.MANAGER`
+ * THIS IS THE PERSONA THE SCREEN WAS BUILT FOR, and it was the one getting dead buttons. `GROUP.MANAGER`
  * holds `performance.read` and NOT `performance.manage` (`db/permissions.catalog.ts`), and a People
  * Manager is exactly who the coverage report is written for: "did my team get reviewed" is not
  * answerable from the review list, because the people missing from it are the answer. Every read behind
@@ -13,7 +13,7 @@
  * zero worked, on the one page that exists for them.
  *
  * WHY NO BROWSER TEST COULD HAVE CAUGHT IT. All eight Playwright seats are administrators and hold the
- * manage code, so the suite renders this tab in one state only. Note also that `ROLE.AUDITOR` holds no
+ * manage code, so the suite renders this tab in one state only. Note also that `GROUP.AUDITOR` holds no
  * `performance.read` at all — deliberately, a review being a personal judgement — so unlike the training
  * tabs there is exactly one read-only tier here, and it is the manager.
  */

@@ -13,7 +13,7 @@
  * atomic — and because both layers wrote, every one of those events was recorded TWICE.
  * Measured, not inferred:
  *   - `POST /employees`   → 2 rows, both `employee.created`, same `resource_id`
- *   - `POST /authz/roles` → `role.created` AND the controller's old `rbac.role_created`
+ *   - `POST /authz/roles` (now `/authz/groups`) → `role.created` (now `group.created`) AND the controller's old `rbac.role_created`
  *   - `POST /compliance/software` → `software.added` AND `compliance.software_added`
  * Three more pairs (timesheet, leave and overtime approve/reject) were hidden behind
  * ternaries, so no grep for `action: '...'` found them — the typed catalogue did, as compile

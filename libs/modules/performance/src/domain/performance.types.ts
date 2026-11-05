@@ -39,7 +39,7 @@ export interface PerformanceReview {
   employeeId: string;
   reviewerId: string;
   /** The role the employee was reviewed IN, frozen at creation. */
-  positionId: string | null;
+  roleId: string | null;
   status: PerformanceReviewStatus;
   selfAssessment: string | null;
   selfAssessmentSubmittedAt: Date | null;
@@ -81,7 +81,7 @@ export interface CreateReviewInput {
   cycleId: string;
   employeeId: string;
   reviewerId: string;
-  positionId: string | null;
+  roleId: string | null;
   createdBy: string;
   /**
    * The state the review OPENS IN, which depends on the cycle rather than on the column default.
@@ -123,7 +123,7 @@ export interface CoverageGap {
   employeeId: string;
   employeeName: string;
   email: string;
-  positionId: string | null;
+  roleId: string | null;
   /** Null when no review exists at all — the case the report exists for. */
   reviewId: string | null;
   status: PerformanceReviewStatus | null;

@@ -2,8 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import { InjectDrizzle, type DrizzleDB } from '../database/drizzle.provider';
 import { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { rolePermissions, userRoleAssignments } from '../../../../db/schema';
+import { employeePermissions, groupPermissions, employeeGroups } from '../../../../db/schema';
 import { ScopeEvaluator } from './scope-evaluator';
+import { permissionCacheTtlSeconds } from './permission-cache-ttl.helper';
 import { permissionGrants } from '@shared-kernel';
 import {
   type EffectivePermissions,
@@ -16,9 +17,10 @@ import {
  * Resolves and caches a principal's effective permissions, and answers
  * permission checks for the PolicyGuard.
  *
- * Resolution is a single indexed join (assignments ⋈ role_permissions) filtered
- * to non-expired grants, cached in Valkey under a per-user key with a bounded
- * TTL. The cache is shared across replicas, so {@link invalidate} busts every
+ * Resolution is the union of two indexed reads, both filtered to non-expired grants: the
+ * permissions of the groups the user belongs to (employee_groups ⋈ group_permissions) and the permissions
+ * granted to the user directly (`employee_permissions`). The result is cached in Valkey under a
+ * per-user key with a bounded TTL. The cache is shared across replicas, so {@link invalidate} busts every
  * instance at once; the TTL is the safety net for role-definition edits.
  *
  * Fail-closed: any resolution error denies access (returns empty permissions).
@@ -46,31 +48,55 @@ export class AuthzService {
     if (cached) return cached;
 
     try {
-      const rows = await this.db
-        .select({
-          permissionKey: rolePermissions.permissionKey,
-          scopeType: userRoleAssignments.scopeType,
-          scopeId: userRoleAssignments.scopeId,
-        })
-        .from(userRoleAssignments)
-        .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoleAssignments.roleId))
-        .where(
-          and(
-            eq(userRoleAssignments.userId, userId),
-            or(
-              isNull(userRoleAssignments.expiresAt),
-              gt(userRoleAssignments.expiresAt, new Date()),
+      const [groupRows, directRows] = await Promise.all([
+        this.db
+          .select({
+            permissionKey: groupPermissions.permissionKey,
+            scopeType: employeeGroups.scopeType,
+            scopeId: employeeGroups.scopeId,
+            expiresAt: employeeGroups.expiresAt,
+          })
+          .from(employeeGroups)
+          .innerJoin(groupPermissions, eq(groupPermissions.groupId, employeeGroups.groupId))
+          .where(
+            and(
+              eq(employeeGroups.employeeId, userId),
+              or(isNull(employeeGroups.expiresAt), gt(employeeGroups.expiresAt, new Date())),
             ),
           ),
-        );
+        this.db
+          .select({
+            permissionKey: employeePermissions.permissionKey,
+            scopeType: employeePermissions.scopeType,
+            scopeId: employeePermissions.scopeId,
+            expiresAt: employeePermissions.expiresAt,
+          })
+          .from(employeePermissions)
+          .where(
+            and(
+              eq(employeePermissions.employeeId, userId),
+              or(
+                isNull(employeePermissions.expiresAt),
+                gt(employeePermissions.expiresAt, new Date()),
+              ),
+            ),
+          ),
+      ]);
 
       const effective: EffectivePermissions = {};
-      for (const row of rows) {
+      for (const row of [...groupRows, ...directRows]) {
         const scope: Scope = { type: row.scopeType, id: row.scopeId };
         (effective[row.permissionKey] ??= []).push(scope);
       }
 
-      await this.cache.setJson(key, effective, AuthzService.CACHE_TTL_SECONDS);
+      // Bounded by the earliest expiry in the set, so a time-boxed grant ends when it says it does rather than
+      // up to one cache lifetime later.
+      const ttlSeconds = permissionCacheTtlSeconds(
+        AuthzService.CACHE_TTL_SECONDS,
+        [...groupRows, ...directRows].map((row) => row.expiresAt),
+        new Date(),
+      );
+      await this.cache.setJson(key, effective, ttlSeconds);
       return effective;
     } catch (err) {
       // Fail closed — never grant access when resolution fails.
@@ -104,25 +130,39 @@ export class AuthzService {
   async globalHoldersOf(permission: string, executor?: DrizzleDB): Promise<string[]> {
     const db = executor ?? this.db;
     try {
-      const rows = await db
-        .select({
-          userId: userRoleAssignments.userId,
-          permissionKey: rolePermissions.permissionKey,
-        })
-        .from(userRoleAssignments)
-        .innerJoin(rolePermissions, eq(rolePermissions.roleId, userRoleAssignments.roleId))
-        .where(
-          and(
-            eq(userRoleAssignments.scopeType, 'global'),
-            or(
-              isNull(userRoleAssignments.expiresAt),
-              gt(userRoleAssignments.expiresAt, new Date()),
+      const [groupRows, directRows] = await Promise.all([
+        db
+          .select({
+            userId: employeeGroups.employeeId,
+            permissionKey: groupPermissions.permissionKey,
+          })
+          .from(employeeGroups)
+          .innerJoin(groupPermissions, eq(groupPermissions.groupId, employeeGroups.groupId))
+          .where(
+            and(
+              eq(employeeGroups.scopeType, 'global'),
+              or(isNull(employeeGroups.expiresAt), gt(employeeGroups.expiresAt, new Date())),
             ),
           ),
-        );
+        db
+          .select({
+            userId: employeePermissions.employeeId,
+            permissionKey: employeePermissions.permissionKey,
+          })
+          .from(employeePermissions)
+          .where(
+            and(
+              eq(employeePermissions.scopeType, 'global'),
+              or(
+                isNull(employeePermissions.expiresAt),
+                gt(employeePermissions.expiresAt, new Date()),
+              ),
+            ),
+          ),
+      ]);
 
       const holders = new Set<string>();
-      for (const row of rows) {
+      for (const row of [...groupRows, ...directRows]) {
         if (permissionGrants([row.permissionKey], permission)) holders.add(row.userId);
       }
       return [...holders];

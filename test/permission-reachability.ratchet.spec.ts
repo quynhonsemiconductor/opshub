@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   PERMISSION,
-  ROLE,
-  ROLE_PERMISSIONS,
+  GROUP,
+  GROUP_PERMISSIONS,
   permissionGrants,
   type Permission,
 } from '../db/permissions.catalog';
@@ -66,10 +66,10 @@ const ADMIN_ONLY: Record<string, string> = {
 
   // ── privilege administration: granting privilege is not a delegable operation ──────────────
   'rbac.manage':
-    'defining roles and permissions is the one action that can grant every other one, so it stays ' +
+    'defining groups and permissions is the one action that can grant every other one, so it stays ' +
     "with the super-admin. Also the engine's admin-cancel check (RequestEngine.cancel)",
-  'role.assign':
-    'assigning a role hands out its whole bundle; kept with rbac.manage rather than delegated',
+  'group.assign':
+    'putting an employee in a group hands out its whole bundle, and a direct grant hands out a single permission; kept with rbac.manage rather than delegated',
 };
 
 /**
@@ -145,7 +145,9 @@ function referenceIndex(side: 'backend' | 'web'): Map<Permission, string[]> {
   return index;
 }
 
-const NON_ADMIN_BUNDLES = Object.entries(ROLE_PERMISSIONS).filter(([role]) => role !== ROLE.ADMIN);
+const NON_ADMIN_BUNDLES = Object.entries(GROUP_PERMISSIONS).filter(
+  ([role]) => role !== GROUP.ADMIN,
+);
 
 /** Roles other than `admin` that can satisfy `code`, wildcard semantics included. */
 function holders(code: Permission): string[] {

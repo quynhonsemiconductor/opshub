@@ -18,7 +18,7 @@ import { RequirementsTab } from './requirements-tab';
  * The tab ORDER puts "My training" first for anybody who cannot manage: the first tab is the one that
  * opens, and for most of the company that is the only one worth opening.
  *
- * COMPOSITION ONLY. Each tab is its own module for the reason workforce's four are: a page that also
+ * COMROLE ONLY. Each tab is its own module for the reason workforce's four are: a page that also
  * contains three forms, five tables and a drawer is not composing anything.
  */
 
@@ -47,7 +47,7 @@ export function TrainingPage() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Training"
-        description="Courses, what each position requires, who has completed what, and what is missing."
+        description="Courses, what each role requires, who has completed what, and what is missing."
       />
 
       <Tabs items={tabs} value={tab} onChange={setTab} idPrefix="training" />

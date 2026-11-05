@@ -1,7 +1,7 @@
 import { PageHeader } from '@/shared/ui';
 import { usePermissions } from '@/shared/hooks/use-permissions';
 import { DomainLink, SectionCard, StatTileLink } from './dashboard-widgets';
-import { PERSONAS, ROLE_TITLE } from './personas';
+import { PERSONAS, GROUP_TITLE } from './personas';
 import { useDashboardCounts } from './use-dashboard-counts';
 
 /**
@@ -18,18 +18,18 @@ import { useDashboardCounts } from './use-dashboard-counts';
  * COMPOSITION ONLY: read the role, look up its layout, render the two widgets.
  */
 export function DashboardPage() {
-  const { primaryRole, isLoading } = usePermissions();
+  const { primaryGroup, isLoading } = usePermissions();
   const counts = useDashboardCounts();
 
   // `employee` is the fallback, as it was before: an unknown role sees the least privileged layout
   // rather than a blank screen.
-  const persona = PERSONAS[primaryRole] ?? PERSONAS.employee;
+  const persona = PERSONAS[primaryGroup] ?? PERSONAS.employee;
 
   return (
     <div className="flex flex-col gap-7">
       <PageHeader
         size="display"
-        title={isLoading ? 'Overview' : `Overview · ${ROLE_TITLE[primaryRole] ?? 'Employee'}`}
+        title={isLoading ? 'Overview' : `Overview · ${GROUP_TITLE[primaryGroup] ?? 'Employee'}`}
         description="Operations summary across IT and HR domains."
       />
 

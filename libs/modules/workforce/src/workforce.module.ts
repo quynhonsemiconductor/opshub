@@ -4,6 +4,7 @@ import { GraphTasksModule } from '@modules/graph';
 import { EmployeesModule } from '@modules/identity';
 import { LeaveBalanceService } from './application/leave-balance.service';
 import { WorkforceService } from './application/workforce.service';
+import { WfhQuotaService } from './application/wfh-quota.service';
 import { WioCalendarService } from './application/wio-calendar.service';
 import { LeaveRequestTypeDef } from './application/leave-request.type-def';
 import { WfhRequestTypeDef } from './application/wfh-request.type-def';
@@ -23,6 +24,7 @@ import { WORKFORCE_REPOSITORY } from './domain/ports/workforce.repository';
   controllers: [WorkforceController, WioCalendarController, AttendanceController],
   providers: [
     WorkforceService,
+    WfhQuotaService,
     WioCalendarService,
     AttendanceService,
     LeaveBalanceService,

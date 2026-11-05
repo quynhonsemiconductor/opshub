@@ -8,7 +8,7 @@
  * three ungated write controls survived here — so the tier has to be constructed, and the only way to
  * construct it is to drive `usePermissions` from the test.
  *
- * THE TIER THAT MATTERS IS REAL, not hypothetical. `ROLE.MANAGER` and `ROLE.AUDITOR` both hold
+ * THE TIER THAT MATTERS IS REAL, not hypothetical. `GROUP.MANAGER` and `GROUP.AUDITOR` both hold
  * `training.read` and neither holds `training.manage` (`db/permissions.catalog.ts`), and the API is
  * unambiguous about the consequence: `POST /training/courses`, `PATCH /training/courses/{id}` and
  * `POST /training/courses/{id}/retire` each carry `@RequirePermission('training.manage')`, while the

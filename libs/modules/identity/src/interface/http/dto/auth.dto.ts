@@ -2,9 +2,10 @@ export class MeResponseDto {
   sub!: string;
   email!: string;
   name!: string;
-  roles!: string[];
+  /** Keys of the permission groups the caller belongs to — a display list, never used to authorize. */
+  groups!: string[];
   /**
-   * Effective permission keys resolved from the user's role assignments (DB).
+   * Effective permission keys resolved from the user's group memberships and direct grants (DB).
    * `'*'` means super-admin (all permissions). This is the single source of
    * truth the SPA uses to gate UI — it must never re-derive permissions itself.
    */

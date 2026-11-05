@@ -1,14 +1,14 @@
 /**
  * contracts schema — employment contracts: their terms, their dates, and their succession.
  *
- * WHAT A CONTRACT ADDS THAT `employees` AND `positions` DO NOT HAVE
+ * WHAT A CONTRACT ADDS THAT `employees` AND `roles` DO NOT HAVE
  * ----------------------------------------------------------------
- * `employees` says who someone is and `employee_positions` says what role they occupy. Neither says
+ * `employees` says who someone is and `employee_roles` says what role they occupy. Neither says
  * on what TERMS: whether the engagement ends, when probation closes, what notice either side owes,
  * or what the agreed pay is. Those are the questions HR is actually asked, and none of them can be
  * answered from a job title.
  *
- * A contract is FOR a position, which is why `positions` was built first. `position_id` is nullable
+ * A contract is FOR a role, which is why `roles` was built first. `role_id` is nullable
  * only because a contractor engagement may be scoped to work rather than to a seat in the org chart.
  *
  * THREE INVARIANTS IN THE DATABASE
@@ -48,7 +48,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { contractStatusEnum, contractTypeEnum, salaryPeriodEnum } from './enums';
-import { positions } from './positions';
+import { roles } from './roles';
 
 export const contractsSchema = pgSchema('contracts');
 
@@ -58,12 +58,12 @@ export const employmentContracts = contractsSchema.table(
     id: uuid('id').primaryKey().defaultRandom(),
     employeeId: uuid('employee_id').notNull(),
     /**
-     * The position the contract is for.
+     * The role the contract is for.
      *
      * Nullable for a contractor engaged for work rather than a seat, and `restrict` on delete so a
-     * position with contract history cannot be erased out from under it.
+     * role with contract history cannot be erased out from under it.
      */
-    positionId: uuid('position_id').references(() => positions.id, { onDelete: 'restrict' }),
+    roleId: uuid('role_id').references(() => roles.id, { onDelete: 'restrict' }),
     /** Human reference quoted in correspondence, e.g. `EMP-2026-0042`. */
     reference: varchar('reference', { length: 40 }).notNull(),
     contractType: contractTypeEnum('contract_type').notNull(),
@@ -114,7 +114,7 @@ export const employmentContracts = contractsSchema.table(
       .where(sql`status = 'active'`),
     referenceIdx: uniqueIndex('uq_contract_reference').on(t.reference),
     employeeIdx: index('ix_contract_employee').on(t.employeeId, t.startDate),
-    positionIdx: index('ix_contract_position').on(t.positionId),
+    roleIdx: index('ix_contract_role').on(t.roleId),
     /** The sweep's query: active contracts ordered by when they end. */
     expiryIdx: index('ix_contract_status_end').on(t.status, t.endDate),
   }),

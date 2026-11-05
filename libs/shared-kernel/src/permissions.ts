@@ -17,12 +17,12 @@ export {
   PERMISSION,
   PERMISSION_DESCRIPTIONS,
   WILDCARD_PERMISSION,
-  ROLE,
-  ROLE_NAMES,
-  ROLE_PERMISSIONS,
+  GROUP,
+  GROUP_NAMES,
+  GROUP_PERMISSIONS,
   moduleOf,
   permissionModules,
   permissionGrants,
 } from '@db/permissions.catalog';
 
-export type { Permission, RoleKey } from '@db/permissions.catalog';
+export type { Permission, GroupKey } from '@db/permissions.catalog';

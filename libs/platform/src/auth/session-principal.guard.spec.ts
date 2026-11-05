@@ -59,7 +59,7 @@ describe('SessionAuthGuard', () => {
       sub: 'user-1',
       email: 'jane@qnsc.vn',
       name: 'Jane',
-      // roles are NOT read from the session: `/v1/auth/me` shows employees.roles, and authorization is
+      // roles are NOT read from the session: `/v1/auth/me` shows employees.group_keys, and authorization is
       // resolved from the database on every request
       roles: [],
       sessionId: 'session-1',

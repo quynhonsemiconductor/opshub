@@ -302,9 +302,9 @@ export function ContractsPage() {
                   ),
                 },
                 {
-                  label: 'Position',
-                  value: selected.positionId ? (
-                    <span className="font-mono text-xs">{selected.positionId}</span>
+                  label: 'Role',
+                  value: selected.roleId ? (
+                    <span className="font-mono text-xs">{selected.roleId}</span>
                   ) : null,
                 },
                 { label: 'Start', value: formatDate(selected.startDate) },

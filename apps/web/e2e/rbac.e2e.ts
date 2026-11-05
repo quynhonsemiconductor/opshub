@@ -5,36 +5,42 @@ import { expect, gotoInShell } from './support/fixtures';
  * Access control, in depth — the third screen decomposed onto the kit, and the one whose route the
  * shell spec never visited.
  *
- * The roles list used to be clickable `<div>`s: no table semantics, no header, no empty state. It is a
+ * The groups list used to be clickable `<div>`s: no table semantics, no header, no empty state. It is a
  * real table now, which is what lets this spec assert on `row` and `columnheader` rather than on
  * class names.
  *
- * FULL LIFECYCLE, ON A ROLE IT CREATES. Creating a role is additive and safe in a shared database;
+ * FULL LIFECYCLE, ON A GROUP IT CREATES. Creating a group is additive and safe in a shared database;
  * this then adds a permission to it and deletes it again, which is the only honest way to exercise the
  * confirm dialog and leaves nothing behind.
  */
 test.describe('access control', () => {
-  test('lists roles in a real table and moves between tabs by keyboard', async ({ page }) => {
+  test('lists groups in a real table and moves between tabs by keyboard', async ({ page }) => {
     await gotoInShell(page, '/settings/access-control');
 
     const table = page.getByRole('table');
     await expect(table).toBeVisible();
-    // Role · Type · Permissions · (actions)
+    // Group · Type · Permissions · (actions)
     await expect(table.getByRole('columnheader')).toHaveCount(4);
-    // The seed's system roles are always there, so an empty table is a failure.
+    // The seed's system groups are always there, so an empty table is a failure.
     await expect(page.getByText('Platform Administrator')).toBeVisible();
     await expect(page.getByText('System').first()).toBeVisible();
 
     // A real tablist, so the arrow keys move it.
-    await page.getByRole('tab', { name: 'Roles' }).focus();
+    await page.getByRole('tab', { name: 'Groups' }).focus();
     await page.keyboard.press('ArrowRight');
-    await expect(page.getByRole('tab', { name: 'Assignments' })).toHaveAttribute(
+    await expect(page.getByRole('tab', { name: 'Memberships' })).toHaveAttribute(
       'aria-selected',
       'true',
     );
-    // Assignments fetches nothing until a user is named, and says so rather than showing an empty
-    // table that would read as "this user has no roles".
-    await expect(page.getByText(/enter a user id/i)).toBeVisible();
+    // Memberships fetches nothing until an employee is named, and says so rather than showing an empty
+    // table that would read as "this employee is in no group".
+    await expect(page.getByText(/enter an employee id/i)).toBeVisible();
+
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByRole('tab', { name: 'Direct permissions' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
 
     await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('tab', { name: 'Delegations' })).toHaveAttribute(
@@ -44,12 +50,12 @@ test.describe('access control', () => {
     await expect(page.getByRole('table')).toBeVisible();
   });
 
-  test('creates a role, grants it a permission, then deletes it', async ({ page }) => {
+  test('creates a group, grants it a permission, then deletes it', async ({ page }) => {
     const key = `playwright-${Date.now()}`;
     const name = `Playwright ${Date.now()}`;
 
     await gotoInShell(page, '/settings/access-control');
-    await page.getByRole('button', { name: /new role/i }).click();
+    await page.getByRole('button', { name: /new group/i }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
@@ -67,7 +73,7 @@ test.describe('access control', () => {
     // nothing while the row is plainly on screen. Measured, not guessed.
     const row = page.locator('tbody tr', { hasText: key });
     await expect(row).toBeVisible();
-    // A CUSTOM role, so it is deletable — the system ones deliberately have no delete control.
+    // A CUSTOM group, so it is deletable — the system ones deliberately have no delete control.
     await expect(row.getByText('Custom')).toBeVisible();
 
     // The drawer grants a permission. Re-read from the list rather than a captured row, so the chip
@@ -99,7 +105,7 @@ test.describe('access control', () => {
     await page.getByRole('button', { name: `Delete ${name}` }).click();
     const confirm = page.getByRole('alertdialog');
     await expect(confirm.getByText(/cannot be undone/i)).toBeVisible();
-    await confirm.getByRole('button', { name: /delete role/i }).click();
+    await confirm.getByRole('button', { name: /delete group/i }).click();
 
     await expect(page.locator('tbody tr', { hasText: key })).toHaveCount(0, { timeout: 10_000 });
   });

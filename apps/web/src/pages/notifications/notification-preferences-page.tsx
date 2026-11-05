@@ -83,6 +83,11 @@ const EVENT_GROUPS: EventGroup[] = [
       { type: 'request.approved', label: 'Your request was approved' },
       { type: 'request.rejected', label: 'Your request was rejected' },
       {
+        type: 'request.expired',
+        label: 'Your request expired without a decision',
+        hint: 'Sent when nobody decided it in time, so you know it was not approved.',
+      },
+      {
         type: 'request.sla_breach',
         label: 'A request has breached its SLA',
         hint: 'Sent when a decision is overdue against the target the request type sets.',

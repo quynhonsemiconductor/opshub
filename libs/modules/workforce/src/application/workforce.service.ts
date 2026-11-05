@@ -22,6 +22,7 @@ import {
   type ResourceAuditTrail,
 } from '@modules/audit';
 import { LeaveBalanceService, type LeaveBalance } from './leave-balance.service';
+import { WfhQuotaService, type WfhWeekQuota } from './wfh-quota.service';
 import { AttendanceService } from './attendance.service';
 import { MS_PER_HOUR, type Actor } from '@shared-kernel';
 import {
@@ -87,6 +88,7 @@ export class WorkforceService {
     private readonly actorScope: ActorScope,
     private readonly balances: LeaveBalanceService,
     private readonly attendance: AttendanceService,
+    private readonly wfhQuota: WfhQuotaService,
     @InjectDrizzle() private readonly db: DrizzleDB,
   ) {
     this.timesheetTrail = audit.forResource(AUDIT_RESOURCE.TIMESHEET);
@@ -400,7 +402,12 @@ export class WorkforceService {
     return this.repo.listLeave(await this.narrowToActor(filters, actor), limit, offset);
   }
 
-  async reviewLeave(id: string, approve: boolean, actor: Actor): Promise<LeaveRequest> {
+  async reviewLeave(
+    id: string,
+    approve: boolean,
+    actor: Actor,
+    note: string | null = null,
+  ): Promise<LeaveRequest> {
     const l = await this.getLeave(id);
     await this.attendance.assertMonthsOpen(l.startDate, l.endDate, 'Deciding a leave request');
     if (l.status !== 'pending') {
@@ -412,9 +419,9 @@ export class WorkforceService {
 
     if (l.requestId) {
       if (approve) {
-        await this.engine.approve(l.requestId, null, actor);
+        await this.engine.approve(l.requestId, note, actor);
       } else {
-        await this.engine.reject(l.requestId, null, actor);
+        await this.engine.reject(l.requestId, note, actor);
       }
     } else {
       /*
@@ -564,7 +571,7 @@ export class WorkforceService {
   }
 
   async createWfh(
-    input: Omit<CreateWfhInput, 'employeeId' | 'workingDays'>,
+    input: Omit<CreateWfhInput, 'employeeId' | 'workingDays' | 'workingDates'>,
     actor: Actor,
   ): Promise<WfhRequest> {
     await this.attendance.assertMonthsOpen(input.startDate, input.endDate, 'A WFH request');
@@ -611,8 +618,16 @@ export class WorkforceService {
           'You already have a leave or WFH request covering part of that window',
         );
       }
+      // The weekly quota, counted under the same lock and in the same transaction as the insert, so two
+      // requests filed at once cannot both pass against the last remaining day.
+      await this.wfhQuota.assertWithinQuota(actor.sub, workingDays, tx);
       return this.repo.createWfh(
-        { ...input, employeeId: actor.sub, workingDays: workingDays.length },
+        {
+          ...input,
+          employeeId: actor.sub,
+          workingDays: workingDays.length,
+          workingDates: workingDays,
+        },
         tx,
       );
     });
@@ -626,8 +641,9 @@ export class WorkforceService {
       reason: request.reason,
     };
     // The decision is WAITING ON the requester's manager when there is a usable one (active, holds
-    // the review permission): the engine refuses any other holder while an assignee is set. No
-    // usable manager leaves it unassigned, which hands it to any holder — the HR/admin fallback.
+    // the review permission): the engine refuses any other holder while an assignee is set, except
+    // a holder of `request.decide_any` (the `approver` group). No usable manager leaves it
+    // unassigned, which hands it to any holder — the HR/admin fallback.
     const engineItem = await this.engine.submit('wfh_request', enginePayload, actor, {
       expiresAt: new Date(Date.now() + 72 * MS_PER_HOUR), // 3-day review window
       assigneeId: (await this.managerOf(actor.sub, 'workforce.wfh.review')) ?? undefined,
@@ -647,6 +663,20 @@ export class WorkforceService {
     return { ...request, requestId: engineItem.id };
   }
 
+  /**
+   * Reads the caller's work-from-home quota for one week.
+   *
+   * Args:
+   *   employeeId: The employee whose quota is read; always the caller.
+   *   dateInWeek: Any `YYYY-MM-DD` date in the wanted Monday–Sunday week; defaults to the current week.
+   *
+   * Returns:
+   *   The week's allowance, the days already claimed by pending and approved requests, and what remains.
+   */
+  getWfhQuota(employeeId: string, dateInWeek?: string): Promise<WfhWeekQuota> {
+    return this.wfhQuota.getWeekQuota(employeeId, dateInWeek);
+  }
+
   async getWfh(id: string): Promise<WfhRequest> {
     const w = await this.repo.findWfhById(id);
     if (!w) throw new NotFoundException(ErrorCodes.WFH_REQUEST_NOT_FOUND, 'WFH request not found');
@@ -662,7 +692,12 @@ export class WorkforceService {
     return this.repo.listWfh(await this.narrowToActor(filters, actor), limit, offset);
   }
 
-  async reviewWfh(id: string, approve: boolean, actor: Actor): Promise<WfhRequest> {
+  async reviewWfh(
+    id: string,
+    approve: boolean,
+    actor: Actor,
+    note: string | null = null,
+  ): Promise<WfhRequest> {
     const w = await this.getWfh(id);
     await this.attendance.assertMonthsOpen(w.startDate, w.endDate, 'Deciding a WFH request');
     if (w.status !== 'pending') {
@@ -681,9 +716,9 @@ export class WorkforceService {
       );
     }
     if (approve) {
-      await this.engine.approve(w.requestId, null, actor);
+      await this.engine.approve(w.requestId, note, actor);
     } else {
-      await this.engine.reject(w.requestId, null, actor);
+      await this.engine.reject(w.requestId, note, actor);
     }
     return this.getWfh(id);
   }
@@ -758,7 +793,12 @@ export class WorkforceService {
     return this.repo.listOvertime(await this.narrowToActor(filters, actor), limit, offset);
   }
 
-  async reviewOvertime(id: string, approve: boolean, actor: Actor): Promise<OvertimeEntry> {
+  async reviewOvertime(
+    id: string,
+    approve: boolean,
+    actor: Actor,
+    note: string | null = null,
+  ): Promise<OvertimeEntry> {
     const o = await this.getOvertime(id);
     if (o.status !== 'pending') {
       throw new PreconditionFailedException(
@@ -769,9 +809,9 @@ export class WorkforceService {
 
     if (o.requestId) {
       if (approve) {
-        await this.engine.approve(o.requestId, null, actor);
+        await this.engine.approve(o.requestId, note, actor);
       } else {
-        await this.engine.reject(o.requestId, null, actor);
+        await this.engine.reject(o.requestId, note, actor);
       }
     } else {
       /*

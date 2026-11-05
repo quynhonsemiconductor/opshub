@@ -14,8 +14,9 @@ import { AUDIT_ACTION, AUDIT_RESOURCE, AuditService } from '@modules/audit';
 import { GRAPH_TASK, GraphTaskQueue } from '@modules/graph';
 import { REQUEST_TYPE } from '@shared-kernel';
 import {
+  employeePermissions,
   employees,
-  userRoleAssignments,
+  employeeGroups,
   accessGrants,
   assetAssignments,
   assets,
@@ -35,7 +36,8 @@ export interface OffboardingPayload extends Record<string, unknown> {
  *
  * `onApprove` atomically:
  *   1. Sets employee status → `offboarded`
- *   2. Removes all RBAC role assignments, and clears the cached role claims with them
+ *   2. Removes every group membership and every permission granted straight to the employee, and clears
+ *      the cached role claims with them
  *   3. Revokes all active access grants
  *   4. Returns all assigned hardware assets (sets returnedAt, status → in_stock)
  *   5. Blocks the employee from signing in (identity user `banned`) and deletes every session row
@@ -71,7 +73,8 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
   readonly slaHours = 24; // same-day SLA for security
 
   private readonly employeeTrail;
-  private readonly roleAssignmentTrail;
+  private readonly employeeGroupTrail;
+  private readonly employeePermissionTrail;
   private readonly grantTrail;
   private readonly assetTrail;
   private readonly sessionTrail;
@@ -93,7 +96,8 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     // One trail per resource the workflow touches, bound once — the same shape the owning services
     // use, so the entries this hook writes are indistinguishable from the ones they write.
     this.employeeTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE);
-    this.roleAssignmentTrail = audit.forResource(AUDIT_RESOURCE.ROLE_ASSIGNMENT);
+    this.employeeGroupTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE_GROUP);
+    this.employeePermissionTrail = audit.forResource(AUDIT_RESOURCE.EMPLOYEE_PERMISSION);
     this.grantTrail = audit.forResource(AUDIT_RESOURCE.ACCESS_GRANT);
     this.assetTrail = audit.forResource(AUDIT_RESOURCE.ASSET);
     this.sessionTrail = audit.forResource(AUDIT_RESOURCE.SESSION);
@@ -138,36 +142,59 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
     });
 
     /*
-     * 2. Remove all RBAC role assignments.
+     * 2. Remove every group membership.
      *
      * `returning()` so each removal can be recorded individually. One entry per assignment, not one
      * summarising them: an access review asks "when did this person lose THIS role", and a single
      * row saying "5 roles removed" cannot answer it.
      */
     const removedRoles = await tx
-      .delete(userRoleAssignments)
-      .where(eq(userRoleAssignments.userId, employeeId))
-      .returning({ id: userRoleAssignments.id, roleId: userRoleAssignments.roleId });
+      .delete(employeeGroups)
+      .where(eq(employeeGroups.employeeId, employeeId))
+      .returning({ id: employeeGroups.id, groupId: employeeGroups.groupId });
 
     for (const assignment of removedRoles) {
-      await this.roleAssignmentTrail.record(AUDIT_ACTION.ROLE_REVOKED, assignment.id, actor, tx, {
-        before: { userId: employeeId, roleId: assignment.roleId },
+      await this.employeeGroupTrail.record(AUDIT_ACTION.GROUP_REVOKED, assignment.id, actor, tx, {
+        before: { userId: employeeId, roleId: assignment.groupId },
       });
     }
 
     /*
-     * The cached role claims go with them, IN THIS TRANSACTION.
+     * Permissions granted straight to the employee, outside any group, go in the same step: they bypass
+     * the groups, so removing the memberships alone would leave a leaver holding them. One entry per
+     * grant, for the same reason as above.
+     */
+    const removedDirectPermissions = await tx
+      .delete(employeePermissions)
+      .where(eq(employeePermissions.employeeId, employeeId))
+      .returning({
+        id: employeePermissions.id,
+        permissionKey: employeePermissions.permissionKey,
+      });
+
+    for (const grant of removedDirectPermissions) {
+      await this.employeePermissionTrail.record(
+        AUDIT_ACTION.EMPLOYEE_PERMISSION_REVOKED,
+        grant.id,
+        actor,
+        tx,
+        { before: { employeeId, permissionKey: grant.permissionKey } },
+      );
+    }
+
+    /*
+     * The cached group keys go with them, IN THIS TRANSACTION.
      *
-     * `employees.roles` is a denormalised copy of the active assignments that feeds the JWT claims,
+     * `employees.group_keys` is a denormalised copy of the active memberships that `/auth/me` displays,
      * and nothing here maintained it — so an offboarded employee's row still listed `it-admin` after
-     * every assignment behind it was gone. `AuthzAdminService` keeps it in step by calling
-     * `syncEmployeeRoleClaims` after its own transaction; here the answer is known without a query,
+     * every membership behind it was gone. `AuthzAdminService` keeps it in step by calling
+     * `syncEmployeeGroupKeys` after its own transaction; here the answer is known without a query,
      * because step 2 removed ALL of them, and setting it inside the transaction means the copy can
      * never disagree with the rows it copies.
      */
     await tx
       .update(employees)
-      .set({ roles: [], updatedAt: now })
+      .set({ groupKeys: [], updatedAt: now })
       .where(eq(employees.id, employeeId));
 
     // 3. Revoke all active access grants
@@ -263,7 +290,7 @@ export class OffboardingTypeDef implements RequestTypeDef<OffboardingPayload>, O
    *
    * THE CACHE INVALIDATION IS THE SECURITY-CRITICAL HALF, and it was missing entirely.
    * `AuthzService` caches a principal's resolved permissions for `CACHE_TTL_SECONDS = 300`, and every
-   * other privilege-removal path calls `invalidate` — `AuthzAdminService.revokeAssignment` does it on
+   * other privilege-removal path calls `invalidate` — `AuthzAdminService.revokeEmployeeGroup` does it on
    * the line after its transaction. This hook did not, so for up to five minutes after being
    * offboarded a leaver's requests were still authorised against the roles they no longer held. Their
    * session was revoked, but an access token already in hand keeps working until it expires.

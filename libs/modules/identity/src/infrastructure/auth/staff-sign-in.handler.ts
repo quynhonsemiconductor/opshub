@@ -61,10 +61,12 @@ export interface StaffSignIn {
  *  1. THE EMPLOYEE EXISTS, with the user's id. A person HR created has one already (UserDirectory gave the
  *     user the employee's id). Anyone else from the tenant gets one now: `id = user.id`, `entra_oid` recorded
  *     (the employee API and the Graph code read it), and no role of their own.
- *  2. THE ROLES FOLLOW ENTRA, on every sign-in: the App Roles of the id_token are reconciled into the global
- *     role assignments by `AuthzAdminService.syncUserRolesByKeys`. A person is never granted more than the token
- *     names: with no role claim (or only roles opshub does not know) they hold `employee` and nothing else, and
- *     a role removed in Entra is revoked here at their next sign-in. Authorization itself is not read from the
+ *  2. THE GROUPS FOLLOW ENTRA, on every sign-in: the App Roles of the id_token are reconciled into the global
+ *     group memberships by `AuthzAdminService.syncEmployeeGroupsByKeys` (an App Role names a group by its key).
+ *     A person is never granted more than the token names: with no role claim (or only roles opshub does not
+ *     know) they are in the `employee` group and nothing else, and a role removed in Entra is revoked here at
+ *     their next sign-in. A membership a person granted by hand in the admin UI is not the token's to take
+ *     back, so it survives the reconcile. Authorization itself is not read from the
  *     token: `PolicyGuard` resolves permissions from the database on every request.
  *
  * A failure of any step fails the sign-in, which is the right way round: a session with stale roles is the
@@ -81,7 +83,7 @@ export class StaffSignInHandler {
     this.refuseOutsideStaff(user, claims);
     await this.refuseIfNotAllowed(user, claims.oid);
     await this.ensureEmployee(user, claims.oid);
-    await this.authzAdmin.syncUserRolesByKeys(
+    await this.authzAdmin.syncEmployeeGroupsByKeys(
       user.id,
       claims.roles,
       { sub: user.id, email: user.email },

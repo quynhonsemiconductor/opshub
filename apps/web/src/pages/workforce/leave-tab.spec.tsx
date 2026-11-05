@@ -131,7 +131,7 @@ beforeEach(() => {
 describe('the Leave tab, for an employee who holds no permissions', () => {
   it('offers no decision on their own request, and says who makes it', async () => {
     /*
-     * THE DEFECT THIS FILE WAS WRITTEN FOR. `ROLE.EMPLOYEE` holds no permission codes at all — the
+     * THE DEFECT THIS FILE WAS WRITTEN FOR. `GROUP.EMPLOYEE` holds no permission codes at all — the
      * catalogue says self-service is expressed by scope, not by a code — and the list narrows to the
      * caller, so every row an employee saw was their own and every one carried Approve and Reject. Both
      * were guaranteed 403s: the route guard has no `workforce.approve` to find, and the engine would

@@ -309,6 +309,69 @@
       "when": 1793121174922,
       "tag": "0043_runtime_role_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793207574922,
+      "tag": "0044_job_ranks_and_rank_benefits",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1793293974922,
+      "tag": "0045_employee_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793380374922,
+      "tag": "0046_position_rank",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793466774922,
+      "tag": "0047_rename_roles_to_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793553174922,
+      "tag": "0048_rename_role_assign_permission",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1793639574922,
+      "tag": "0049_rename_positions_to_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793725974922,
+      "tag": "0050_rename_position_permissions_to_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1793812374922,
+      "tag": "0051_employee_group_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1793898774922,
+      "tag": "0052_wfh_request_working_dates",
+      "breakpoints": true
     }
   ]
 }

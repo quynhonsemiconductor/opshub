@@ -119,15 +119,13 @@ export default defineConfig({
       // lines 49.35 / statements 49.18 / branches 40.40 / functions 33+; floors ~0.5 under.
       // Raised again 2026-10-28 with the attendance specs (CSV scope/guard, morning sweep, cron, month
       // roster): measured lines 51.56 / statements 51.36 / branches 43.23 / functions 35.80.
-      // Raised 2026-11-05 by the version-display PR (the meta controller, the web config's app
-      // version, the footer specs): CI measured lines 51.23 / statements 51.08 / branches 43.70 /
-      // functions 36.01. Only functions was past the 3-point limit (floor 33, +3.01); it moves to
-      // 34, about two points under actual, and the others stay where they are and still inside it.
+      // Raised 2026-11-04 with the rank, quota, direct-permission and assignee-override specs:
+      // measured lines 52.52 / statements 52.30 / branches 44.09 / functions 36.26.
       thresholds: {
-        lines: 49,
-        functions: 34,
-        branches: 41,
-        statements: 49,
+        lines: 51,
+        functions: 35,
+        branches: 43,
+        statements: 51,
       },
     },
   },

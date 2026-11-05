@@ -18,7 +18,7 @@ import {
   AuditService,
   type ResourceAuditTrail,
 } from '@modules/audit';
-import { PositionsService } from '@modules/positions';
+import { RolesService } from '@modules/roles';
 import {
   PERFORMANCE_REPOSITORY,
   SETTLED_REVIEW_STATUSES,
@@ -103,7 +103,7 @@ export class PerformanceService {
     @InjectDrizzle() private readonly db: DrizzleDB,
     private readonly audit: AuditService,
     private readonly engine: RequestEngine,
-    private readonly positions: PositionsService,
+    private readonly roles: RolesService,
   ) {
     this.cycleTrail = audit.forResource(AUDIT_RESOURCE.PERFORMANCE_CYCLE);
     this.reviewTrail = audit.forResource(AUDIT_RESOURCE.PERFORMANCE_REVIEW);
@@ -252,7 +252,7 @@ export class PerformanceService {
   /**
    * Create the review for one employee in an open cycle.
    *
-   * The POSITION IS FROZEN here, read from the employee's current assignment. A review is a
+   * The ROLE IS FROZEN here, read from the employee's current assignment. A review is a
    * judgement about how somebody did in a role, so a transfer afterwards must not restate what the
    * review was about.
    */
@@ -283,7 +283,7 @@ export class PerformanceService {
       );
     }
 
-    const current = await this.positions.currentAssignment(input.employeeId);
+    const current = await this.roles.currentAssignment(input.employeeId);
 
     /*
      * WHERE THE REVIEW STARTS depends on whether the cycle HAS a self-assessment step.
@@ -301,7 +301,7 @@ export class PerformanceService {
       const review = await this.repo.createReview(
         {
           ...input,
-          positionId: current?.positionId ?? null,
+          roleId: current?.roleId ?? null,
           createdBy: actor.sub,
           status: initialStatus,
         },
@@ -312,7 +312,7 @@ export class PerformanceService {
           cycleId: review.cycleId,
           employeeId: review.employeeId,
           reviewerId: review.reviewerId,
-          positionId: review.positionId,
+          roleId: review.roleId,
         },
       });
       return review;

@@ -13,7 +13,7 @@
  * strings, not one supplier with one owner and one assessment history.
  *
  * `software_licenses.vendor_id` is added alongside the text rather than replacing it, which is the
- * same move `positions` made with `employees.job_title`: the free text stays because existing
+ * same move `roles` made with `employees.job_title`: the free text stays because existing
  * screens read it and not every line item deserves a due-diligence file, and the real reference is
  * what makes "what do we buy from this supplier, and did anyone assess them" a join instead of a
  * string match. The pairing also produces the report worth having — money going to suppliers nobody

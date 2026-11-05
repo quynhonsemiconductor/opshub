@@ -12,7 +12,7 @@ export * from './access';
 export * from './compliance';
 export * from './workforce';
 export * from './documents';
-export * from './positions';
+export * from './roles';
 export * from './contracts';
 export * from './training';
 export * from './isms';

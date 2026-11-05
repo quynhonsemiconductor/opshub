@@ -30,7 +30,7 @@ import { Pool } from 'pg';
 import { pgOptions, tlsFromEnv } from './pg-ssl';
 import { resolveDatabaseUrl } from './database-url';
 import { log } from './script-log';
-import { permissions, roles, rolePermissions, userRoleAssignments } from './schema/authz';
+import { permissions, groups, groupPermissions, employeeGroups } from './schema/authz';
 import { employees } from './schema/identity';
 import { user as identityUser } from './schema/identity-auth';
 import { controls } from './schema/isms-controls';
@@ -38,9 +38,9 @@ import { ANNEX_A_CONTROLS } from './annex-a-controls';
 import {
   PERMISSION,
   PERMISSION_DESCRIPTIONS,
-  ROLE,
-  ROLE_NAMES,
-  ROLE_PERMISSIONS,
+  GROUP,
+  GROUP_NAMES,
+  GROUP_PERMISSIONS,
   WILDCARD_PERMISSION,
 } from './permissions.catalog';
 
@@ -58,14 +58,14 @@ const PERMISSIONS: Array<{ key: string; description: string }> = [
   })),
 ];
 
-const ROLES: Array<{ key: string; name: string; permissions: string[] }> = Object.values(ROLE).map(
-  (key) => ({ key, name: ROLE_NAMES[key], permissions: [...ROLE_PERMISSIONS[key]] }),
-);
+const GROUPS: Array<{ key: string; name: string; permissions: string[] }> = Object.values(
+  GROUP,
+).map((key) => ({ key, name: GROUP_NAMES[key], permissions: [...GROUP_PERMISSIONS[key]] }));
 
 // ── Demo employees — one per system role, for RBAC + test-login testing ───────
 // Fixed UUIDs keep re-seeds idempotent. Each employee gets the matching legacy
-// `employees.roles` jsonb (the denormalised copy) AND a global
-// `user_role_assignments` row (drives effective permissions via authz.resolve).
+// `employees.group_keys` jsonb (the denormalised copy) AND a global
+// `employee_groups` row (drives effective permissions via authz.resolve).
 // Sign in locally with any of these via `POST /api/auth/test-login` (IDENTITY_TEST_LOGIN=enabled).
 const ADMIN_EMPLOYEE_ID = '00000000-0000-7000-8000-000000000001';
 
@@ -193,6 +193,12 @@ const DEMO_EMPLOYEES: Array<{
     roleKey: 'auditor',
   },
   {
+    id: '00000000-0000-7000-8000-000000000010',
+    email: 'approver@opshub.local',
+    displayName: 'Approver',
+    roleKey: 'approver',
+  },
+  {
     id: '00000000-0000-7000-8000-000000000008',
     email: 'employee@opshub.local',
     displayName: 'Regular Employee',
@@ -219,40 +225,40 @@ async function seedRbacCatalogInto(db: SeedDb): Promise<void> {
 
     // 2. System roles — upsert so display names reconcile on re-run.
     await tx
-      .insert(roles)
-      .values(ROLES.map((r) => ({ key: r.key, name: r.name, system: true })))
+      .insert(groups)
+      .values(GROUPS.map((r) => ({ key: r.key, name: r.name, system: true })))
       .onConflictDoUpdate({
-        target: roles.key,
+        target: groups.key,
         set: { name: sql`excluded.name`, system: sql`excluded.system` },
       });
 
     const roleRows = await tx
-      .select({ id: roles.id, key: roles.key })
-      .from(roles)
+      .select({ id: groups.id, key: groups.key })
+      .from(groups)
       .where(
         inArray(
-          roles.key,
-          ROLES.map((r) => r.key),
+          groups.key,
+          GROUPS.map((r) => r.key),
         ),
       );
     const roleIdByKey = new Map(roleRows.map((r) => [r.key, r.id]));
 
     // 3. Role → permission membership — rebuild each system role's grants so the
     //    join table is authoritative (edits to a role's permission list apply).
-    for (const r of ROLES) {
+    for (const r of GROUPS) {
       const roleId = roleIdByKey.get(r.key);
       if (!roleId) continue;
-      await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+      await tx.delete(groupPermissions).where(eq(groupPermissions.groupId, roleId));
       if (r.permissions.length > 0) {
         await tx
-          .insert(rolePermissions)
-          .values(r.permissions.map((permissionKey) => ({ roleId, permissionKey })))
+          .insert(groupPermissions)
+          .values(r.permissions.map((permissionKey) => ({ groupId: roleId, permissionKey })))
           .onConflictDoNothing();
       }
     }
   });
 
-  log.info(`✅ RBAC catalogue seeded: ${PERMISSIONS.length} permissions | ${ROLES.length} roles`);
+  log.info(`✅ RBAC catalogue seeded: ${PERMISSIONS.length} permissions | ${GROUPS.length} groups`);
 }
 
 /**
@@ -313,7 +319,7 @@ export async function seedRbacCatalog(connectionUrl?: string): Promise<void> {
 async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
   const adminEmail = process.env['ADMIN_EMAIL'] ?? 'admin@opshub.local';
 
-  // 1. Employees — `employees.roles` is the denormalised copy of the role assignments below.
+  // 1. Employees — `employees.group_keys` is the denormalised copy of the group memberships below.
   await db
     .insert(employees)
     .values(
@@ -325,7 +331,7 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
         // `onConflictDoNothing`, and test-login minted a NEW user instead of finding the fixture.
         email: e.id === ADMIN_EMPLOYEE_ID ? adminEmail : e.email,
         displayName: e.displayName,
-        roles: [e.roleKey],
+        groupKeys: [e.roleKey],
         status: 'active' as const,
       })),
     )
@@ -361,13 +367,13 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
     )
     .onConflictDoNothing();
 
-  // 2. Global role assignments — drive effective permissions via authz.resolve.
+  // 2. Global group memberships — drive effective permissions via authz.resolve.
   const roleRows = await db
-    .select({ id: roles.id, key: roles.key })
-    .from(roles)
+    .select({ id: groups.id, key: groups.key })
+    .from(groups)
     .where(
       inArray(
-        roles.key,
+        groups.key,
         DEMO_EMPLOYEES.map((e) => e.roleKey),
       ),
     );
@@ -377,17 +383,17 @@ async function seedDemoEmployeesInto(db: SeedDb): Promise<void> {
     const roleId = roleIdByKey.get(e.roleKey);
     if (!roleId) continue;
     await db
-      .insert(userRoleAssignments)
+      .insert(employeeGroups)
       .values({
-        userId: e.id,
-        roleId,
+        employeeId: e.id,
+        groupId: roleId,
         scopeType: 'global',
         grantedBy: ADMIN_EMPLOYEE_ID,
       })
       .onConflictDoNothing();
   }
 
-  log.info(`✅ Demo employees seeded: ${DEMO_EMPLOYEES.length} (one per role)`);
+  log.info(`✅ Demo employees seeded: ${DEMO_EMPLOYEES.length} (one per group)`);
 }
 
 /**
@@ -407,7 +413,7 @@ export async function seed(connectionUrl?: string): Promise<void> {
   const pool = new Pool({ ...pgOptions(url, tlsFromEnv()), max: 1 });
   const db = drizzle(pool);
   try {
-    // Reference catalogue first so role assignments below resolve.
+    // Reference catalogue first so the group memberships below resolve.
     await seedRbacCatalogInto(db);
     await seedControlCatalogueInto(db);
     await seedDemoEmployeesInto(db);

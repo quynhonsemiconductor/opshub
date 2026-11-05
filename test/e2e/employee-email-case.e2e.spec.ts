@@ -88,7 +88,7 @@ describe('EXISTING mixed-case employees keep working, against PostgreSQL', () =>
 
   /** The sign-in hook with a stub role sync: this suite is about WHICH employee it finds, not about roles. */
   const hook = () =>
-    new StaffSignInHandler(db, { syncUserRolesByKeys: () => Promise.resolve([]) } as never);
+    new StaffSignInHandler(db, { syncEmployeeGroupsByKeys: () => Promise.resolve([]) } as never);
 
   it('the sign-in of a mixed-case employee MATCHES the row: no second insert, no 23505', async () => {
     const lowered = `ada.nguyen.${suffix}@qnsc.vn`;

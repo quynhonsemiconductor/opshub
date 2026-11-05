@@ -19,11 +19,11 @@ import {
 import { useEmployeeAvatarUrl } from '@/shared/api/attachment-urls';
 import { useListState } from '@/shared/hooks/use-list-state';
 import { usePermissions } from '@/shared/hooks/use-permissions';
-import { EmployeePositionHistoryPanel } from './position-history-panel';
+import { EmployeeRoleHistoryPanel } from './role-history-panel';
 import { EmployeeModal } from './employee-modal';
 import { OnboardingWizard } from './onboarding-wizard';
 import { OffboardingModal } from './offboarding-modal';
-import { Avatar, EmployeeStatusBadge, RoleChip, StatusSelect } from './people-shared';
+import { Avatar, EmployeeStatusBadge, GroupChip, StatusSelect } from './people-shared';
 import { STATUS_FILTERS, type EmployeeResponse } from './people.types';
 import { orDash } from '@/shared/lib/format';
 
@@ -87,9 +87,9 @@ export function PeoplePage() {
   };
   // Removing an avatar is `employee.write`, unlike reading one.
   const canManage = can('employee.write');
-  // The position register is its own permission: a screen that can read people cannot assume it may read
+  // The role register is its own permission: a screen that can read people cannot assume it may read
   // the org structure they sit in.
-  const canReadPositions = can('position.read');
+  const canReadRoles = can('role.read');
 
   async function removeAvatar() {
     if (!selected) return;
@@ -136,12 +136,12 @@ export function PeoplePage() {
       hideOnMobile: true,
     },
     {
-      key: 'roles',
-      header: 'Roles',
+      key: 'groups',
+      header: 'Groups',
       cell: (emp) => (
         <div className="flex flex-wrap gap-1">
-          {emp.roles.length ? (
-            emp.roles.map((r) => <RoleChip key={r} role={r} />)
+          {emp.groups.length ? (
+            emp.groups.map((g) => <GroupChip key={g} group={g} />)
           ) : (
             <span className="text-fg-subtle">—</span>
           )}
@@ -286,11 +286,11 @@ export function PeoplePage() {
                 // two it does.
                 { label: 'Status', value: <EmployeeStatusBadge status={selected.status} /> },
                 {
-                  label: 'Roles',
-                  value: selected.roles.length ? (
+                  label: 'Groups',
+                  value: selected.groups.length ? (
                     <div className="flex flex-wrap gap-1">
-                      {selected.roles.map((r) => (
-                        <RoleChip key={r} role={r} />
+                      {selected.groups.map((g) => (
+                        <GroupChip key={g} group={g} />
                       ))}
                     </div>
                   ) : null,
@@ -302,12 +302,12 @@ export function PeoplePage() {
       >
         {selected && (
           <>
-            {/* WHOSE ROLE, NOT WHICH ID. `/positions/employees/{id}/history` needs `position.read`, and
-                its rows now carry the position's code and title — resolved in the same query that powers
-                the self-scoped `/positions/me`, so both sides read the same way. */}
-            {canReadPositions && (
-              <SlideOverSection title="Position history">
-                <EmployeePositionHistoryPanel employeeId={selected.id} />
+            {/* WHOSE ROLE, NOT WHICH ID. `/roles/employees/{id}/history` needs `role.read`, and
+                its rows now carry the role's code and title — resolved in the same query that powers
+                the self-scoped `/roles/me`, so both sides read the same way. */}
+            {canReadRoles && (
+              <SlideOverSection title="Role history">
+                <EmployeeRoleHistoryPanel employeeId={selected.id} />
               </SlideOverSection>
             )}
 

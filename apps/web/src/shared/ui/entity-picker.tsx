@@ -8,7 +8,7 @@ import { cn } from '@/shared/lib/utils';
  * EntityPicker — choose a record by NAME, when the API wants its id.
  *
  * WHY THIS EXISTS. Four forms in the SPA asked the user to type a UUID into a text box with the
- * placeholder "UUID": draft a contract, assign somebody to a position, and now record a completed
+ * placeholder "UUID": draft a contract, assign somebody to a role, and now record a completed
  * course. Nobody knows an employee's UUID. The only way to fill those fields was to open another
  * screen, click a row, and copy the id out of the URL — so the forms worked in a demo and not in use.
  *
@@ -38,7 +38,7 @@ export interface EntityPickerProps {
    * The chosen id, and the option it came from.
    *
    * The second argument exists because the picker is the only thing that knows the LABEL — a caller that
-   * wants to say "Require a course for Senior Engineer" would otherwise have to fetch the position again
+   * wants to say "Require a course for Senior Engineer" would otherwise have to fetch the role again
    * to learn its title. Absent when the selection is cleared.
    */
   onChange: (value: string, option?: PickerOption) => void;

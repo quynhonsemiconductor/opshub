@@ -1,7 +1,16 @@
 /**
  * assets schema — hardware inventory + assignment history.
  */
-import { pgSchema, uuid, varchar, jsonb, timestamp, date, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  pgSchema,
+  uuid,
+  varchar,
+  jsonb,
+  timestamp,
+  date,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { assetTypeEnum, assetStatusEnum } from './enums';
 
 export const assetsSchema = pgSchema('assets');

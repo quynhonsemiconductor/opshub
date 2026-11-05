@@ -18,6 +18,7 @@ import {
   GraduationCap,
   Users,
   Briefcase,
+  Layers,
   FileText,
   Webhook,
   Inbox,
@@ -61,7 +62,7 @@ export interface NavGroup {
  * Exported for `app-shell.spec.tsx`, which asserts WHICH entries a permission-less employee can see.
  *
  * Not merely a convenience: the gate on an entry is a product decision about who a page is for, and
- * `/access` was gated on `access_request.read` — a code `ROLE.EMPLOYEE` deliberately does not hold —
+ * `/access` was gated on `access_request.read` — a code `GROUP.EMPLOYEE` deliberately does not hold —
  * while every route behind the page is self-scoped or self-narrowing. A test over this array is the
  * cheapest place to catch that, since all eight browser seats are admins and see everything.
  */
@@ -73,10 +74,11 @@ export const navGroups: NavGroup[] = [
     label: 'Directory',
     items: [
       { to: '/people', label: 'People', icon: Users, cap: 'employee.read' },
-      // `position.read` and `contract.read` are separate codes on purpose: who may see the org chart
+      // `role.read` and `contract.read` are separate codes on purpose: who may see the org chart
       // and who may see engagements are different questions, and the auditor holds both while a
       // manager holds only the first.
-      { to: '/positions', label: 'Positions', icon: Briefcase, cap: 'position.read' },
+      { to: '/roles', label: 'Roles', icon: Briefcase, cap: 'role.read' },
+      { to: '/ranks', label: 'Ranks', icon: Layers, cap: 'role.read' },
       { to: '/contracts', label: 'Contracts', icon: FileText, cap: 'contract.read' },
     ],
   },
@@ -88,7 +90,7 @@ export const navGroups: NavGroup[] = [
        * UNGATED, like the Inbox above it, and for the same reason: this page is self-service before it
        * is administrative.
        *
-       * It was gated on `access_request.read`, which `ROLE.EMPLOYEE` deliberately does not hold — the
+       * It was gated on `access_request.read`, which `GROUP.EMPLOYEE` deliberately does not hold — the
        * permission catalogue says so in as many words, because self-service access "is expressed by
        * the `self` SCOPE on a grant, not by a permission code". So the nav hid the page from the
        * majority of the organisation while the API would have served them: `POST /access-requests` is
@@ -124,7 +126,7 @@ export const navGroups: NavGroup[] = [
     label: 'Workforce',
     items: [
       { to: '/workforce', label: 'Workforce', icon: CalendarClock },
-      // NO `cap`, deliberately, unlike Positions and Contracts: the screen's first tab is the
+      // NO `cap`, deliberately, unlike Roles and Contracts: the screen's first tab is the
       // caller's OWN training, which is self-scoped and holds no permission code. Gating the nav
       // entry on `training.read` would hide an employee's own certificates from them.
       { to: '/training', label: 'Training', icon: GraduationCap },

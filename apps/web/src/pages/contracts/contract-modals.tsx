@@ -14,7 +14,7 @@ import {
   Textarea,
   humanizeStatus,
 } from '@/shared/ui';
-import { activeEmployeeOptions, positionOptions } from '@/shared/api/picker-sources';
+import { activeEmployeeOptions, roleOptions } from '@/shared/api/picker-sources';
 import { isoInstantFromDate, todayIso } from '@/shared/lib/format';
 import { CONTRACT_TYPES, SALARY_PERIODS, type Contract } from './contract.types';
 
@@ -38,7 +38,7 @@ export function DraftContractModal({
 }) {
   const [form, setForm] = useState({
     employeeId: '',
-    positionId: '',
+    roleId: '',
     reference: '',
     contractType: 'permanent' as (typeof CONTRACT_TYPES)[number],
     startDate: '',
@@ -59,7 +59,7 @@ export function DraftContractModal({
       const { error: err } = await api.POST('/v1/contracts', {
         body: {
           employeeId: form.employeeId,
-          positionId: form.positionId || null,
+          roleId: form.roleId || null,
           reference: form.reference,
           contractType: form.contractType,
           startDate: form.startDate,
@@ -104,7 +104,7 @@ export function DraftContractModal({
         className="flex flex-col gap-4 p-5"
       >
         <div className="grid grid-cols-2 gap-3">
-          {/* Both were UUID text boxes. A contract is drafted about a PERSON and a POSITION, and
+          {/* Both were UUID text boxes. A contract is drafted about a PERSON and a ROLE, and
               neither is something anybody can type from memory. */}
           <FormField label="Employee" htmlFor="c-employee" required>
             <EntityPicker
@@ -116,14 +116,14 @@ export function DraftContractModal({
               placeholder="Search people…"
             />
           </FormField>
-          <FormField label="Position" htmlFor="c-position" hint="Optional but recommended.">
+          <FormField label="Role" htmlFor="c-role" hint="Optional but recommended.">
             <EntityPicker
-              id="c-position"
-              queryKey="positions"
-              value={form.positionId}
-              onChange={(v) => set('positionId', v)}
-              fetchOptions={positionOptions}
-              placeholder="Search positions…"
+              id="c-role"
+              queryKey="roles"
+              value={form.roleId}
+              onChange={(v) => set('roleId', v)}
+              fetchOptions={roleOptions}
+              placeholder="Search roles…"
             />
           </FormField>
         </div>

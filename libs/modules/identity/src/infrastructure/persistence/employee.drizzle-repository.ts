@@ -27,7 +27,7 @@ export class EmployeeDrizzleRepository implements IEmployeeRepository {
         department: input.department ?? null,
         jobTitle: input.jobTitle ?? null,
         managerId: input.managerId ?? null,
-        roles: input.roles ?? [],
+        groupKeys: input.groupKeys ?? [],
         entraOid: input.entraOid ?? null,
       })
       .returning();

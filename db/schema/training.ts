@@ -1,17 +1,17 @@
 /**
- * training schema — the course catalogue, what each POSITION requires, and who has completed what.
+ * training schema — the course catalogue, what each ROLE requires, and who has completed what.
  *
  * WHY THREE TABLES AND NOT A `trainings` LIST ON THE EMPLOYEE
  * ----------------------------------------------------------
  * "Mai did fire safety in March" is a fact about a person. The questions actually asked are about
  * the ORG: which courses does a QA Engineer have to hold, who is missing one, whose certificate
  * expires this quarter. None of those is answerable from a list on an employee row, because the
- * requirement does not live on the person — it lives on the POSITION they occupy, which is exactly
+ * requirement does not live on the person — it lives on the ROLE they occupy, which is exactly
  * the ISO 9001 / ISO 27001 competency framing ("training required for THIS ROLE").
  *
- * So: `courses` is the catalogue, `position_requirements` says which position needs which course,
+ * So: `courses` is the catalogue, `role_requirements` says which role needs which course,
  * and `records` says who completed what and until when. The gap report is the join, and it stays
- * correct through a transfer because it reads the employee's CURRENT position rather than a
+ * correct through a transfer because it reads the employee's CURRENT role rather than a
  * snapshot copied onto the record.
  *
  * VALIDITY IS ON THE COURSE, EXPIRY IS ON THE RECORD. `courses.validity_months` is the rule
@@ -38,7 +38,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { trainingRecordStatusEnum, trainingRequirementKindEnum } from './enums';
-import { positions } from './positions';
+import { roles } from './roles';
 
 export const trainingSchema = pgSchema('training');
 
@@ -71,19 +71,19 @@ export const trainingCourses = trainingSchema.table(
   }),
 );
 
-export const trainingPositionRequirements = trainingSchema.table(
-  'position_requirements',
+export const trainingRoleRequirements = trainingSchema.table(
+  'role_requirements',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    positionId: uuid('position_id')
+    roleId: uuid('role_id')
       .notNull()
-      .references(() => positions.id, { onDelete: 'cascade' }),
+      .references(() => roles.id, { onDelete: 'cascade' }),
     courseId: uuid('course_id')
       .notNull()
       .references(() => trainingCourses.id, { onDelete: 'restrict' }),
     kind: trainingRequirementKindEnum('kind').notNull().default('mandatory'),
     /**
-     * How long after taking up the position the course must be completed.
+     * How long after taking up the role the course must be completed.
      *
      * NULL means "before starting". A grace period is what makes the gap report usable: without
      * one, every new hire is non-compliant on day one and the report is noise.
@@ -92,9 +92,9 @@ export const trainingPositionRequirements = trainingSchema.table(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    /** One requirement row per (position, course) — listing it twice says nothing new. */
-    uniqueIdx: uniqueIndex('uq_training_requirement').on(t.positionId, t.courseId),
-    positionIdx: index('ix_training_requirement_position').on(t.positionId),
+    /** One requirement row per (role, course) — listing it twice says nothing new. */
+    uniqueIdx: uniqueIndex('uq_training_requirement').on(t.roleId, t.courseId),
+    roleIdx: index('ix_training_requirement_role').on(t.roleId),
     courseIdx: index('ix_training_requirement_course').on(t.courseId),
   }),
 );
@@ -131,7 +131,7 @@ export const trainingRecords = trainingSchema.table(
      *
      * Retraining is normal, so history must accumulate; what must not accumulate is two rows both
      * claiming to be the live answer to "is Mai's fire safety current?". Superseding is therefore
-     * forced to happen in the same transaction as the new completion, exactly as a position
+     * forced to happen in the same transaction as the new completion, exactly as a role
      * transfer is: the index makes the other order impossible rather than merely discouraged.
      */
     currentIdx: uniqueIndex('uq_training_record_current')

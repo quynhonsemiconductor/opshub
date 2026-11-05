@@ -57,6 +57,8 @@ function service(): WorkforceService {
     // AttendanceService: only its month-close lock is in these paths, and none of the narrowing
     // tests reach a closed month; a stub keeps this spec about scoping.
     { assertMonthsOpen: vi.fn().mockResolvedValue(undefined) } as never,
+    // WfhQuotaService: the quota is only read by createWfh, which no narrowing test calls.
+    {} as never,
     // db: createTimesheetsBulk is the one narrowing-adjacent path that opens a transaction (so its
     // batch and the batch's audit trail commit together) — the callback just runs against a stub
     // executor, since the repo and audit fake underneath are mocked either way.

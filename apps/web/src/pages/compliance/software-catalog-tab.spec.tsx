@@ -5,7 +5,7 @@
  * WHAT ONLY A COMPONENT TEST REACHES:
  *   - THE TWO FILTERS ARE ACTUALLY SENT. `listing` and `search` are parameters `/v1/compliance/software`
  *     has always taken and this tab never passed. A filter that renders and filters nothing looks identical
- *     in a screenshot — it is the same fault the positions picker had, where the term was dropped.
+ *     in a screenshot — it is the same fault the roles picker had, where the term was dropped.
  *   - AN EMPTIED NOTE SENDS `null`, not `''`. The column is nullable and "no reason recorded" is a real
  *     state; an empty string would store a blank the next reader cannot tell from a missing one.
  *   - RECLASSIFY IS WITHHELD WITHOUT `compliance.manage`, since the route is guarded by it.

@@ -39,9 +39,9 @@ import { resolveMigrationUrl } from './database-url';
  *   • `identity.employees` IS the fixture set. The e2e specs authenticate as those rows
  *     (`employee@opshub.local`, `hr@opshub.local`), so truncating them removes the very
  *     thing the suite logs in as.
- *   • `authz.*` holds the permission catalogue, the system roles, their grants and the
- *     `user_role_assignments` that make `hr` an unconstrained `workforce.read` holder.
- *     Dropping a role takes its assignments with it, and the tier fixtures stop meaning
+ *   • `authz.*` holds the permission catalogue, the system groups, their grants and the
+ *     `employee_groups` that make `hr` an unconstrained `workforce.read` holder.
+ *     Dropping a group takes its memberships with it, and the tier fixtures stop meaning
  *     anything.
  *
  * Both are reconciled idempotently by `seedRbacCatalog` / `seed`, so they need no reset.
@@ -51,6 +51,9 @@ export const FIXTURE_TABLES = [
   // `identity.user` and `identity.account` are deliberately NOT here: the users ARE the fixture set.
   'identity.session',
   'identity.verification',
+  // authz — only what the suites ADD on top of the seeded catalogue: grants made straight to an employee.
+  // The groups, their permissions and the membership fixtures stay, as the note above says.
+  'authz.employee_permissions',
   // door — what the door suites create on every run (events especially: every terminal-sim run)
   'door.events',
   'door.cards',
@@ -105,22 +108,24 @@ export const FIXTURE_TABLES = [
   'documents.document_versions',
   'documents.documents',
   /**
-   * positions — BOTH tables, and `employee_positions` matters most.
+   * roles — BOTH tables, and `employee_roles` matters most.
    *
    * Left out, an employee keeps the open assignment a previous run gave them, and the next run's
    * first transfer is dated BEFORE it and refused as `POSITION_INVALID_WINDOW`. That is a suite
    * which passes exactly once per database, and it fails ten tests in with a status that looks
    * like a product bug rather than a stale row. Measured, not predicted.
    */
-  'positions.employee_positions',
-  'positions.positions',
+  'roles.employee_roles',
+  'roles.roles',
+  'roles.rank_benefits',
+  'roles.job_ranks',
   // employment contracts — `uq_employee_active_contract` is per employee, so one left active by a
   // previous run makes the next run's first activation a 409 that names a contract nobody wrote.
   'contracts.employment_contracts',
   // training — `uq_training_record_current` is per (employee, course), so a record left current by a
   // previous run makes the next run's first completion for that pair a 409 nobody wrote.
   'training.records',
-  'training.position_requirements',
+  'training.role_requirements',
   'training.courses',
   // ISMS — `uq_risk_reference` is global, and a risk left `accepted` by a previous run makes the
   // next run's acceptance a 412 nobody wrote. Treatments cascade from risks, listed for intent.

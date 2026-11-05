@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
 import { FormActions, FormError, FormField, Input, Modal } from '@/shared/ui';
-import { RoleChip } from './people-shared';
+import { GroupChip } from './people-shared';
 import type { EmployeeResponse } from './people.types';
 
 interface EmployeeModalProps {
@@ -16,7 +16,7 @@ interface EmployeeModalProps {
 /**
  * Create or edit a directory record.
  *
- * ROLES ARE DELIBERATELY NOT EDITABLE HERE. Role assignment is a governance action on
+ * GROUPS ARE DELIBERATELY NOT EDITABLE HERE. Group membership is a governance action on
  * Settings → Access Control, enforced server-side with an escalation guard; this modal manages
  * profile fields. The chips are shown so the reader can see what the person holds without being
  * invited to change it here.
@@ -119,16 +119,16 @@ export function EmployeeModal({ mode, employee, onClose, onSuccess }: EmployeeMo
           </FormField>
         </div>
 
-        <FormField label="Roles" hint="Roles are managed in Settings → Access Control.">
-          {mode === 'edit' && employee && employee.roles.length > 0 ? (
+        <FormField label="Groups" hint="Groups are managed in Settings → Access Control.">
+          {mode === 'edit' && employee && employee.groups.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
-              {employee.roles.map((r) => (
-                <RoleChip key={r} role={r} />
+              {employee.groups.map((g) => (
+                <GroupChip key={g} group={g} />
               ))}
             </div>
           ) : (
             <p className="text-xs text-fg-subtle">
-              {mode === 'create' ? 'New employees start with no roles.' : 'No roles assigned.'}
+              {mode === 'create' ? 'New employees start in no group.' : 'Not in any group.'}
             </p>
           )}
         </FormField>

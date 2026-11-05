@@ -33,7 +33,7 @@ let approver: Session;
  *
  * `AUDITOR` rather than `NO_PERMISSIONS`, because a caller holding nothing proves less: it could be
  * refused for lacking any permission at all rather than for lacking THIS one. And NOT `MANAGER`,
- * which my first draft used — `ROLE.MANAGER` holds `WORKFORCE_APPROVE`, so it is a legitimate
+ * which my first draft used — `GROUP.MANAGER` holds `WORKFORCE_APPROVE`, so it is a legitimate
  * approver and its 200 was the correct answer. The fixture, not the fix, was wrong.
  */
 let colleague: Session;

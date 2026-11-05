@@ -4,7 +4,7 @@ import { ClipboardList, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/shared/api/client';
 import { apiErrorMessage } from '@/shared/api/errors';
-import { courseOptions, positionOptions } from '@/shared/api/picker-sources';
+import { courseOptions, roleOptions } from '@/shared/api/picker-sources';
 import {
   Badge,
   Button,
@@ -30,32 +30,32 @@ import { useRequirements } from './use-training';
 import type { Requirement } from './training.types';
 
 /**
- * Which courses a POSITION requires — the rule the gap report is computed from.
+ * Which courses a ROLE requires — the rule the gap report is computed from.
  *
- * KEYED ON THE POSITION, NOT THE PERSON. That is the whole design: requirements attach to the job, so
+ * KEYED ON THE ROLE, NOT THE PERSON. That is the whole design: requirements attach to the job, so
  * moving somebody into a role gives them its training obligations automatically and nobody maintains a
- * per-employee checklist. It is also why this tab starts empty and asks which position, rather than
+ * per-employee checklist. It is also why this tab starts empty and asks which role, rather than
  * showing a list of requirements with no context.
  *
  * GRACE DAYS are how long after a lapse the requirement still counts as met — a week to re-sit a course
  * without the person showing up as non-compliant on the day it expired.
  *
  * WRITING THE RULE NEEDS `training.manage`; READING IT NEEDS `training.read`. `POST
- * /training/positions/{positionId}/requirements` and `DELETE /training/requirements/{id}` both carry
- * `@RequirePermission('training.manage')`, while `GET /training/positions/{positionId}/requirements`
+ * /training/roles/{roleId}/requirements` and `DELETE /training/requirements/{id}` both carry
+ * `@RequirePermission('training.manage')`, while `GET /training/roles/{roleId}/requirements`
  * asks only for `training.read`. That asymmetry is the point of the tab for a read-only holder: a
  * manager or an auditor comes here to see what a job demands, not to change what it demands — and a
  * requirement is the input to the gap report, so an auditor able to delete one could delete the finding
  * along with it.
  */
 function AddRequirementModal({
-  positionId,
-  positionTitle,
+  roleId,
+  roleTitle,
   onClose,
   onSuccess,
 }: {
-  positionId: string;
-  positionTitle: string;
+  roleId: string;
+  roleTitle: string;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -66,8 +66,8 @@ function AddRequirementModal({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const { error: err } = await api.POST('/v1/training/positions/{positionId}/requirements', {
-        params: { path: { positionId } },
+      const { error: err } = await api.POST('/v1/training/roles/{roleId}/requirements', {
+        params: { path: { roleId } },
         body: { courseId, kind, graceDays: graceDays ? Number(graceDays) : null },
       });
       if (err) throw new Error(apiErrorMessage(err, 'Failed to add the requirement.'));
@@ -81,7 +81,7 @@ function AddRequirementModal({
   });
 
   return (
-    <Modal open onClose={onClose} size="sm" title={`Require a course for ${positionTitle}`}>
+    <Modal open onClose={onClose} size="sm" title={`Require a course for ${roleTitle}`}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -147,12 +147,12 @@ export function RequirementsTab() {
   const qc = useQueryClient();
   const { can } = usePermissions();
   const canManage = can('training.manage');
-  const [positionId, setPositionId] = useState('');
-  const [positionTitle, setPositionTitle] = useState('');
+  const [roleId, setRoleId] = useState('');
+  const [roleTitle, setRoleTitle] = useState('');
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Requirement | null>(null);
 
-  const requirements = useRequirements(positionId || null);
+  const requirements = useRequirements(roleId || null);
   const invalidate = () => qc.invalidateQueries({ queryKey: ['training'] });
 
   async function remove() {
@@ -222,10 +222,10 @@ export function RequirementsTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      {adding && positionId && (
+      {adding && roleId && (
         <AddRequirementModal
-          positionId={positionId}
-          positionTitle={positionTitle || 'this position'}
+          roleId={roleId}
+          roleTitle={roleTitle || 'this role'}
           onClose={() => setAdding(false)}
           onSuccess={invalidate}
         />
@@ -236,7 +236,7 @@ export function RequirementsTab() {
         onCancel={() => setRemoving(null)}
         onConfirm={remove}
         title="Remove this requirement?"
-        description="Nobody in this position will be expected to hold the course any more, and it disappears from their gap report. Existing records are untouched."
+        description="Nobody in this role will be expected to hold the course any more, and it disappears from their gap report. Existing records are untouched."
         confirmLabel="Remove requirement"
         variant="danger"
       />
@@ -245,33 +245,28 @@ export function RequirementsTab() {
         filter={
           <div className="w-72">
             <EntityPicker
-              ariaLabel="Position"
-              queryKey="positions"
-              value={positionId}
+              ariaLabel="Role"
+              queryKey="roles"
+              value={roleId}
               onChange={(value, option) => {
-                setPositionId(value);
-                // The picker is the only thing that knows the title, so the modal can name the position
+                setRoleId(value);
+                // The picker is the only thing that knows the title, so the modal can name the role
                 // instead of repeating its id.
-                setPositionTitle(option?.label ?? '');
+                setRoleTitle(option?.label ?? '');
               }}
-              selectedLabel={positionTitle || undefined}
-              fetchOptions={positionOptions}
-              placeholder="Choose a position…"
+              selectedLabel={roleTitle || undefined}
+              fetchOptions={roleOptions}
+              placeholder="Choose a role…"
             />
           </div>
         }
         action={
           // TWO DIFFERENT REASONS TO WITHHOLD THIS, and they are not interchangeable. `disabled` means
-          // "not yet — name a position first", which is actionable and resolves in one click, so the
+          // "not yet — name a role first", which is actionable and resolves in one click, so the
           // button stays on screen saying so. No `training.manage` means "not you, ever, on this
           // screen", which no amount of clicking resolves, so the button is absent instead of greyed.
           canManage ? (
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!positionId}
-              onClick={() => setAdding(true)}
-            >
+            <Button variant="primary" size="sm" disabled={!roleId} onClick={() => setAdding(true)}>
               <Plus className="h-3.5 w-3.5" strokeWidth={2} />
               Require a course
             </Button>
@@ -280,11 +275,11 @@ export function RequirementsTab() {
       />
 
       {/* Nothing chosen is not an empty result — saying "no requirements" here would be a claim about a
-          position nobody named. */}
-      {!positionId ? (
+          role nobody named. */}
+      {!roleId ? (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-12 text-center">
           <ClipboardList className="h-6 w-6 text-fg-subtle" strokeWidth={1.5} />
-          <p className="text-sm text-fg-muted">Choose a position to see what it requires.</p>
+          <p className="text-sm text-fg-muted">Choose a role to see what it requires.</p>
         </div>
       ) : (
         <DataTable
@@ -293,7 +288,7 @@ export function RequirementsTab() {
           isLoading={requirements.isLoading}
           isError={requirements.isError}
           errorMessage="Failed to load requirements."
-          emptyMessage="This position requires no training yet"
+          emptyMessage="This role requires no training yet"
           emptyIcon={ClipboardList}
           emptyAction={
             !canManage ? undefined : (

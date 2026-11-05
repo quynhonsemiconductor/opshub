@@ -8,7 +8,7 @@
  * closed. The cycle owns the period and the deadlines, so coverage is an anti-join against the
  * employees with no review in it — the same shape as the competency gap report.
  *
- * THE POSITION IS FROZEN, THE ASSIGNMENT IS NOT. `reviews.position_id` is copied from the current
+ * THE ROLE IS FROZEN, THE ASSIGNMENT IS NOT. `reviews.role_id` is copied from the current
  * assignment at creation and never updated: a review is a judgement about how somebody did IN A
  * ROLE, so a transfer in March must not restate what December's review was about. That is the
  * opposite choice from the competency gap report, which reads the LIVE assignment — a gap is a fact
@@ -42,7 +42,7 @@ import {
   performanceRatingEnum,
   performanceReviewStatusEnum,
 } from './enums';
-import { positions } from './positions';
+import { roles } from './roles';
 import { requestItems } from './requests';
 
 export const performanceSchema = pgSchema('performance');
@@ -105,7 +105,7 @@ export const performanceReviews = performanceSchema.table(
      * Nullable because somebody can be between assignments, and refusing to review them for that
      * reason would be the tail wagging the dog.
      */
-    positionId: uuid('position_id').references(() => positions.id, { onDelete: 'set null' }),
+    roleId: uuid('role_id').references(() => roles.id, { onDelete: 'set null' }),
     status: performanceReviewStatusEnum('status').notNull().default('self_assessment'),
 
     selfAssessment: text('self_assessment'),
