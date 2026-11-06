@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { McpPrincipalContext } from '@platform';
+import type { McpPrincipalContext } from '@platform/mcp-call-token';
 
 /**
  * The plumbing shared by every MCP tool (MCP-PLAN §4/§11): tools reach opshub ONLY through
@@ -63,15 +63,18 @@ export function encodeOffset(offset: number): string {
   return Buffer.from(String(offset), 'utf8').toString('base64url');
 }
 
-/** A malformed or unknown cursor starts from the first page rather than failing a read. */
+/** A cursor past any honest page is treated like a malformed one: start over, never scan. */
+const MAX_CURSOR_OFFSET = 1_000_000;
+
+/**
+ * A malformed or unknown cursor starts from the first page rather than failing a read.
+ * `Buffer.from(…, 'base64url')` never throws on bad input (it drops invalid characters), so the
+ * only guard needed is the decoded value: a finite, non-negative integer within the cap.
+ */
 export function decodeOffset(cursor: string | undefined): number {
   if (!cursor) return 0;
-  try {
-    const decoded = Number(Buffer.from(cursor, 'base64url').toString('utf8'));
-    return Number.isInteger(decoded) && decoded >= 0 ? decoded : 0;
-  } catch {
-    return 0;
-  }
+  const decoded = Number(Buffer.from(cursor, 'base64url').toString('utf8'));
+  return Number.isInteger(decoded) && decoded >= 0 && decoded <= MAX_CURSOR_OFFSET ? decoded : 0;
 }
 
 /** Passes a REST denial through unchanged: the same status and body the person's REST call gets. */
@@ -98,12 +101,9 @@ interface PageInfo {
 function pageInfoOf(json: unknown, offset: number, limit: number, rowCount: number): PageInfo {
   const page = (json as { pageInfo?: Record<string, unknown> } | null)?.pageInfo;
   const total = typeof page?.['total'] === 'number' ? page['total'] : null;
-  const hasNextPage =
-    typeof page?.['hasNextPage'] === 'boolean'
-      ? page['hasNextPage']
-      : total !== null
-        ? offset + rowCount < total
-        : false;
+  let hasNextPage = false;
+  if (typeof page?.['hasNextPage'] === 'boolean') hasNextPage = page['hasNextPage'];
+  else if (total !== null) hasNextPage = offset + rowCount < total;
   return {
     total,
     hasNextPage,
@@ -127,7 +127,7 @@ export function listResult(
   const rows = Array.isArray(json) ? json : (json as { data?: unknown } | null)?.data;
   // A 2xx that is not the documented shape is contract drift: surface it as an upstream failure,
   // never as a successful empty list.
-  if (!Array.isArray(rows)) return denied(statusCode >= 400 ? statusCode : 502, json);
+  if (!Array.isArray(rows)) return denied(502, json);
   return {
     content: [
       {
@@ -154,7 +154,7 @@ export function arrayResult(
   page: { offset: number; limit: number },
 ) {
   if (statusCode >= 400) return denied(statusCode, json);
-  if (!Array.isArray(json)) return denied(statusCode >= 400 ? statusCode : 502, json);
+  if (!Array.isArray(json)) return denied(502, json);
   const rows = json.slice(page.offset, page.offset + page.limit) as Record<string, unknown>[];
   return {
     content: [

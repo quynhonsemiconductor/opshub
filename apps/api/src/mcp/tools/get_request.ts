@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { denied, result, type ToolContext } from './rest';
+import { toToolRequest } from './list_requests';
 
 /**
  * `opshub_get_request` — one request item with its approval history
@@ -26,28 +27,21 @@ export function registerGetRequest(server: McpServer, ctx: ToolContext) {
         return denied(statusCode, json);
       const r = json as Record<string, unknown>;
       const approvals = Array.isArray(r['approvals'])
-        ? (r['approvals'] as Record<string, unknown>[]).map((a) => ({
-            step: a['step'],
-            approverName: a['approverName'] ?? null,
-            decision: a['decision'],
-            decidedAt: a['decidedAt'],
-            delegatedFromId: a['delegatedFromId'] ?? null,
-          }))
+        ? r['approvals']
+            .filter((a): a is Record<string, unknown> => typeof a === 'object' && a !== null)
+            .map((a) => ({
+              step: a['step'],
+              approverName: a['approverName'] ?? null,
+              decision: a['decision'],
+              decidedAt: a['decidedAt'],
+              delegatedFromId: a['delegatedFromId'] ?? null,
+            }))
         : [];
       return result(statusCode, json, {
-        id: r['id'],
-        type: r['type'],
-        status: r['status'],
-        priority: r['priority'],
-        requesterName: r['requesterName'] ?? null,
-        assigneeName: r['assigneeName'] ?? null,
+        ...toToolRequest(r),
         payload: r['payload'] ?? {},
         resolutionNote: r['resolutionNote'] ?? null,
-        submittedAt: r['submittedAt'],
         resolvedAt: r['resolvedAt'] ?? null,
-        currentStep: r['currentStep'],
-        totalSteps: r['totalSteps'],
-        viewerMayDecide: r['viewerMayDecide'],
         viewerCannotDecideReason: r['viewerCannotDecideReason'] ?? null,
         approvals,
       });

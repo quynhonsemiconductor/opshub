@@ -153,10 +153,11 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     bodyWaitMs?: number,
   ): void {
     const userId = currentUserId();
-    // An MCP tool call is an inject() whose URL carries the person's search terms and ids. The
-    // access log must not grow a search index of what staff asked for, so a bridged request logs
-    // ONLY the URL length. `raw.url` is rewritten too: pino's request binding serializes it on
-    // every line, and the credential/query must not survive there.
+    // An MCP tool call is an inject() whose query travels in the call token, never the URL (the
+    // bootstrap's query bridge), so no log line — this one or any earlier pino-bound line — can
+    // carry a search term. A bridged request still logs only the URL length: the path holds ids,
+    // and an agent id is not something the access log needs. The `raw.url` rewrite is the
+    // belt-and-braces for any future caller that forgets the token rule.
     const bridged = isMcpBridged(req);
     const urlLength = req.url.length;
     if (bridged) req.raw.url = req.url.split('?')[0];

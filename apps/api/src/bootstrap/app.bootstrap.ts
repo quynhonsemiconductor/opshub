@@ -11,8 +11,6 @@ import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import {
   AppConfigService,
   DRIZZLE,
-  MCP_CALL_TOKEN_HEADER,
-  peekMcpCallToken,
   SESSION_COOKIE,
   CSRF_HEADER,
   CSRF_SECRET_COOKIE,
@@ -84,17 +82,11 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
   // arrival time for exactly the requests worth investigating.
   registerRequestTiming(fastify);
 
-  // The MCP call token carries the injected request's query parameters, so the URL (which the
-  // access log and pino's request binding record) never contains a person's search terms. This
-  // runs after Fastify parsed the URL and before the route handler reads `@Query()`. Registered
-  // even when MCP is off: a request can only carry a token minted in this process, so it is inert.
-  fastify.addHook('onRequest', function mcpQueryBridge(req, _reply, done) {
-    const pending = peekMcpCallToken(req.headers[MCP_CALL_TOKEN_HEADER]);
-    if (pending?.query) {
-      req.query = { ...(req.query as Record<string, string>), ...pending.query };
-    }
-    done();
-  });
+  // Registered even when MCP is off: a request can only carry a token minted in this process,
+  // so the bridge is inert. Same function the transport spec uses, so this exact registration is
+  // covered by a test rather than by a copy.
+  const { registerMcpQueryBridge } = await import('../mcp/query-bridge');
+  registerMcpQueryBridge(fastify);
 
   // /mcp — the MCP endpoint, OFF everywhere by default (MCP_ENABLED). Raw Fastify route, outside
   // /v1, the session guards and Swagger: Cloudflare Access is its authentication, and the edge

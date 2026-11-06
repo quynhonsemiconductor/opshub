@@ -177,7 +177,14 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
     registerTools(server, { principal, callRest });
     await server.connect(transport);
     reply.hijack();
-    await transport.handleRequest(request.raw, reply.raw, request.body);
+    try {
+      await transport.handleRequest(request.raw, reply.raw, request.body);
+    } catch (err) {
+      // Fastify no longer owns a hijacked reply: an SDK write failure would otherwise reach the
+      // framework's handler on a sent reply. Attribute it, then tear the socket down.
+      routeLogger.error({ err }, 'MCP transport failed');
+      reply.raw.destroy(err as Error);
+    }
     return reply;
   });
 

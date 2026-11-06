@@ -17,12 +17,12 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CacheService } from '@quynhonsemiconductor/platform-cache';
-import { MCP_CALL_TOKEN_HEADER, peekMcpCallToken } from '@platform';
 import { enableCorrelationId } from '@quynhonsemiconductor/platform-http';
 import {
   accessTokenOf,
   McpAccessDeniedError,
   McpModule,
+  registerMcpQueryBridge,
   registerMcpRoute,
   UNCONFIGURED_MCP_ACCESS_VERIFIER,
 } from './index';
@@ -253,12 +253,7 @@ async function boot(
   // prefix, exactly as in the real bootstrap.
   app.setGlobalPrefix('v1');
   const fastify = app.getHttpAdapter().getInstance();
-  // The production bootstrap's query bridge: query params travel in the call token, never the URL.
-  fastify.addHook('onRequest', function mcpQueryBridge(req, _reply, done) {
-    const pending = peekMcpCallToken(req.headers[MCP_CALL_TOKEN_HEADER]);
-    if (pending?.query) req.query = { ...(req.query as Record<string, string>), ...pending.query };
-    done();
-  });
+  registerMcpQueryBridge(fastify);
   registerMcpRoute({
     app,
     fastify,
@@ -555,6 +550,11 @@ describe('/mcp (stateless transport, principal bridge, per-person budget)', () =
       requestId: '0194a000-0000-7000-8000-000000000301',
     });
     expect(out['requesterName']).toBe('Employee');
+    expect((out['approvals'] as Record<string, unknown>[])[0]).toMatchObject({
+      step: 1,
+      approverName: 'Manager',
+      decision: 'approved',
+    });
   });
 
   it('the asset and request list/detail shapes are what the detail pages show', async () => {

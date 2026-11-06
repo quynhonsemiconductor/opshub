@@ -18,6 +18,9 @@
 ALTER TABLE identity.employees
   ADD COLUMN IF NOT EXISTS access_sub varchar(255);
 
+-- Plain CREATE UNIQUE INDEX, not CONCURRENTLY: the drizzle migrator runs migrations inside one
+-- transaction, where CONCURRENTLY cannot run (the 0039 precedent); identity.employees is one row
+-- per person, so the brief write lock is acceptable.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_access_sub
   ON identity.employees (access_sub)
   WHERE access_sub IS NOT NULL;

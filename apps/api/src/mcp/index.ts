@@ -1,6 +1,7 @@
 export { McpModule } from './mcp.module';
 export { McpPrincipalGuard } from './principal.guard';
 export { accessTokenOf, registerMcpRoute, type McpRouteDeps } from './route';
+export { registerMcpQueryBridge } from './query-bridge';
 export {
   createMcpAccessJwtAdapter,
   McpAccessDeniedError,

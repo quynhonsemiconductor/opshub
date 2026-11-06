@@ -75,7 +75,8 @@ export default defineConfig({
       // `check:coverage-floors` refused the change until they moved, which is the mechanism
       // working: a floor 3 points behind reality protects nothing.
       //
-      // These went 21/14/17/21 → 24/24/19/16 when abstract-outbox-relay.spec.ts landed, then      // DOWN to 23 when the unconsumed outbox leg was deleted (migration 0013). Lowering a
+      // These went 21/14/17/21 → 24/24/19/16 when abstract-outbox-relay.spec.ts landed, then
+      // DOWN to 23 when the unconsumed outbox leg was deleted (migration 0013). Lowering a
       // ratchet normally means a regression; this one is the benign case and the distinction
       // matters: no test was removed from surviving code. The deleted relay and
       // aws-client.config were better covered than the repo average, so removing them and
@@ -122,6 +123,10 @@ export default defineConfig({
       // version, the footer specs): CI measured lines 51.23 / statements 51.08 / branches 43.70 /
       // functions 36.01. Only functions was past the 3-point limit (floor 33, +3.01); it moves to
       // 34, about two points under actual, and the others stay where they are and still inside it.
+      // 2026-11-06: raised 49/34/41/49 → 51/36/43/51 when the MCP read-only slice landed (the
+      // adapter, principal guard, transport and tool specs). Measured: lines 52.45 / statements
+      // 52.26 / branches 44.67 / functions 37.94. `check:coverage-floors` refused the change until
+      // these moved, exactly as intended.
       thresholds: {
         lines: 51,
         functions: 36,

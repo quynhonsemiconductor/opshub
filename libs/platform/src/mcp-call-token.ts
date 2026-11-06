@@ -47,9 +47,6 @@ export const MCP_CALL_TOKEN_HEADER = 'authorization';
 /** A token outlives its one inject() by seconds, not minutes. */
 const TOKEN_TTL_MS = 5_000;
 
-/** Bound on pending tokens: far above anything one person can pipeline, swept when exceeded. */
-const MAX_PENDING = 1_000;
-
 /** What a call token carries: the principal, plus the query the injected route must see. */
 export interface McpCallEntry {
   principal: McpPrincipalContext;
@@ -73,11 +70,12 @@ export function mintMcpCallToken(
   principal: McpPrincipalContext,
   query?: Record<string, string>,
 ): string {
-  if (pending.size >= MAX_PENDING) {
-    const now = Date.now();
-    for (const [key, entry] of pending) {
-      if (entry.expiresAt <= now) pending.delete(key);
-    }
+  // Sweep on EVERY mint: lazy-only expiry would let an unconsumed token (a @Public route, a 404,
+  // a failed inject) hold the person's email, name and search terms for the life of the process.
+  // The map is tiny, and an entry past TTL is dead whether or not anyone reads it.
+  const now = Date.now();
+  for (const [key, entry] of pending) {
+    if (entry.expiresAt <= now) pending.delete(key);
   }
   const token = randomBytes(32).toString('base64url');
   const entry: McpCallEntry = { principal, ...(query ? { query } : {}) };
@@ -109,7 +107,11 @@ export function peekMcpCallToken(raw: string | string[] | undefined): McpCallEnt
   const token = headerValue(raw);
   if (!token) return undefined;
   const entry = pending.get(token);
-  if (!entry || entry.expiresAt <= Date.now()) return undefined;
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    pending.delete(token);
+    return undefined;
+  }
   return entry.entry;
 }
 

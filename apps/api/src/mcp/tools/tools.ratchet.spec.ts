@@ -55,16 +55,19 @@ function moduleReferences(src: string): string[] {
 }
 
 /**
- * The ONLY things a tool file may reference as a module: the MCP SDK, zod, node builtins, the
- * platform primitive the bridge runs on, and this module's own plumbing (rest caller, sibling
- * tools, registry). Anything else — a controller, an application service, `@modules/*`, drizzle,
- * the DB schema — is a layer skip.
+ * The ONLY things a tool file may reference as a module: the MCP SDK, zod, the ONE platform
+ * primitive the bridge runs on, and this module's own plumbing (rest caller, sibling tools,
+ * registry). Anything else — a controller, an application service, `@modules/*`, drizzle, the DB
+ * schema — is a layer skip.
+ *
+ * Deliberately NOT the `@platform` barrel (it re-exports the DB, storage, email and outbox) and
+ * NOT `node:*` (a tool has no legitimate filesystem, network or process need). The single named
+ * import tools may take is the principal's TYPE.
  */
 const ALLOWED_IMPORTS = [
   /^@modelcontextprotocol\//,
   /^zod$/,
-  /^node:/,
-  /^@platform$/,
+  /^@platform\/mcp-call-token$/,
   /^\.\/[^/]*$/,
 ];
 
@@ -105,7 +108,7 @@ describe('MCP tools ratchet', () => {
       // A tool may name a TARGET employee (`get_employee`), never the acting one. The caller is
       // `ToolContext.principal`, minted from the Access JWT, and no argument can reach it.
       expect(
-        src.match(/actor(Id|UserId|EmployeeId)\s*:/i),
+        src.match(/(actor|caller|acting|onBehalfOf|asEmployee|user)(Id|UserId|EmployeeId)?\s*:/i),
         `${file}: a tool must not take the acting employee as an argument`,
       ).toBeNull();
     }
