@@ -32,9 +32,14 @@ function paramsOf(node: unknown, out: unknown[] = []): unknown[] {
   return out;
 }
 
-/** A drizzle stand-in for the adapter's single employee select. */
-function dbWith(queue: DbQueue) {
+/**
+ * A drizzle stand-in for the adapter's employee select and its one conditional bind UPDATE.
+ * `bindWins` = the conditional update returned the row; false simulates the race where another
+ * call bound first (or the sub is already bound elsewhere), so the adapter re-reads.
+ */
+function dbWith(queue: DbQueue, bindWins = true) {
   const captured: unknown[][] = [];
+  const bound: Array<Record<string, unknown>> = [];
   const db = {
     select: () => ({
       from: () => ({
@@ -46,8 +51,18 @@ function dbWith(queue: DbQueue) {
         }),
       }),
     }),
+    update: () => ({
+      set: (values: Record<string, unknown>) => ({
+        where: () => ({
+          returning: () => {
+            bound.push(values);
+            return Promise.resolve(bindWins ? [{ id: USER }] : []);
+          },
+        }),
+      }),
+    }),
   };
-  return { db: db as never as DrizzleDB, captured };
+  return { db: db as never as DrizzleDB, captured, bound };
 }
 
 const logger = { warn: vi.fn() };
@@ -101,7 +116,9 @@ describe('McpAccessJwtAdapter', () => {
     const { privateKey, publicJwk } = await mintingKey();
     const { server, port } = await listen({ keys: [publicJwk] });
     try {
-      const { db, captured } = dbWith([[{ id: USER, email: 'jane@qnsc.vn', name: 'Jane' }]]);
+      const { db, captured, bound } = dbWith([
+        [{ id: USER, email: 'jane@qnsc.vn', name: 'Jane', accessSub: null }],
+      ]);
       const adapter = createMcpAccessJwtAdapter({
         db,
         teamDomain: TEAM(port),
@@ -114,6 +131,8 @@ describe('McpAccessJwtAdapter', () => {
       expect(out).toEqual({ userId: USER, email: 'jane@qnsc.vn', name: 'Jane' });
       // the status predicate is part of the lookup: an offboarded row never matches
       expect(JSON.stringify(captured[0])).toContain('offboarded');
+      // the FIRST verified sub was bound to the employee
+      expect(bound).toEqual([{ accessSub: 'access-sub-1' }]);
     } finally {
       server.close();
     }
@@ -137,6 +156,62 @@ describe('McpAccessJwtAdapter', () => {
         { accessSub: 'access-sub-1', reason: 'no_active_employee' },
         'MCP access denied',
       );
+    } finally {
+      server.close();
+    }
+  });
+
+  it('refuses a DIFFERENT sub on the same employee — a reassigned mailbox must not inherit grants', async () => {
+    const { privateKey, publicJwk } = await mintingKey();
+    const { server, port } = await listen({ keys: [publicJwk] });
+    try {
+      const { db, bound } = dbWith([
+        [{ id: USER, email: 'jane@qnsc.vn', name: 'Jane', accessSub: 'the-original-sub' }],
+      ]);
+      const adapter = createMcpAccessJwtAdapter({
+        db,
+        teamDomain: TEAM(port),
+        audience: AUD,
+        logger: logger as never,
+      });
+      await expect(
+        adapter.verify(
+          await mint({ privateKey, team: TEAM(port), email: 'jane@qnsc.vn', sub: 'a-new-sub' }),
+        ),
+      ).rejects.toThrow(McpAccessDeniedError);
+      expect(logger.warn).toHaveBeenCalledWith(
+        { accessSub: 'a-new-sub', reason: 'access_sub_mismatch' },
+        'MCP access denied',
+      );
+      // a refusal never rebinds
+      expect(bound).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('loses a first-binding race safely: the re-read must match, otherwise 403', async () => {
+    const { privateKey, publicJwk } = await mintingKey();
+    const { server, port } = await listen({ keys: [publicJwk] });
+    try {
+      const { db } = dbWith(
+        [
+          [{ id: USER, email: 'jane@qnsc.vn', name: 'Jane', accessSub: null }],
+          [{ accessSub: 'the-winner-sub' }], // re-read after the conditional update matched nothing
+        ],
+        false,
+      );
+      const adapter = createMcpAccessJwtAdapter({
+        db,
+        teamDomain: TEAM(port),
+        audience: AUD,
+        logger: logger as never,
+      });
+      await expect(
+        adapter.verify(
+          await mint({ privateKey, team: TEAM(port), email: 'jane@qnsc.vn', sub: 'the-loser-sub' }),
+        ),
+      ).rejects.toThrow(McpAccessDeniedError);
     } finally {
       server.close();
     }

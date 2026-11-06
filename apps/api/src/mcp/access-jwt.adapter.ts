@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { and, ne, sql } from 'drizzle-orm';
+import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import {
   AccessJwtError,
   type AccessPrincipal,
@@ -22,6 +22,10 @@ import type { McpAccessPrincipal, McpAccessVerifier } from './access-verifier';
  *    refused unless the row is an employee who has not been offboarded;
  *  - opshub has no workspace: the employee IS the principal, and `PolicyGuard` resolves every
  *    permission from the database per request. Nothing is copied from the token but the email;
+ *  - the FIRST verified `sub` is BOUND to the employee (`identity.employees.access_sub`, nullable,
+ *    unique) and every later call must match it. Email is the lookup key but can be reassigned, so
+ *    a different Access identity reaching the same address is refused rather than inheriting the
+ *    grants — the same fix KB made in kb#388. rova still has this gap; noted, not changed here;
  *  - the Entra `oid` claim is absent today and is NOT required (`allowEmailFallback` on);
  *  - an unknown or offboarded employee is a uniform 403 ({@link McpAccessDeniedError}), logged
  *    with the Access `sub` and a stable reason code — never the email, never distinguishing
@@ -35,7 +39,7 @@ export class McpAccessDeniedError extends Error {
 }
 
 /** Stable refusal reasons for the log (never the email, never unknown-vs-offboarded). */
-type DenyReason = 'no_email_claim' | 'no_active_employee';
+type DenyReason = 'no_email_claim' | 'no_active_employee' | 'access_sub_mismatch';
 
 export interface McpAccessJwtAdapterOptions {
   db: DrizzleDB;
@@ -76,7 +80,12 @@ export function createMcpAccessJwtAdapter(opts: McpAccessJwtAdapterOptions): Mcp
       const email = principal.email?.trim().toLowerCase();
       if (!email) return deny(logger, principal.sub, 'no_email_claim');
       const [employee] = await opts.db
-        .select({ id: employees.id, email: employees.email, name: employees.displayName })
+        .select({
+          id: employees.id,
+          email: employees.email,
+          name: employees.displayName,
+          accessSub: employees.accessSub,
+        })
         .from(employees)
         .where(
           and(
@@ -90,9 +99,47 @@ export function createMcpAccessJwtAdapter(opts: McpAccessJwtAdapterOptions): Mcp
         .limit(1);
       if (!employee) return deny(logger, principal.sub, 'no_active_employee');
 
+      await bindAccessSub(opts.db, employee, principal.sub, logger);
+
       return { userId: employee.id, email: employee.email, name: employee.name };
     },
   };
+}
+
+/**
+ * The first verified `sub` wins, atomically. A concurrent first call for the same employee is
+ * settled by the conditional UPDATE: exactly one writes, the other re-reads the winner and must
+ * match it. A `sub` already bound elsewhere hits the unique index (23505) and is refused the same
+ * way. Any other database error is infrastructure and propagates (the route answers 503).
+ */
+async function bindAccessSub(
+  db: DrizzleDB,
+  employee: { id: string; accessSub: string | null },
+  sub: string,
+  logger: Logger,
+): Promise<void> {
+  if (employee.accessSub === sub) return;
+  if (employee.accessSub !== null) deny(logger, sub, 'access_sub_mismatch');
+
+  try {
+    const [bound] = await db
+      .update(employees)
+      .set({ accessSub: sub })
+      .where(and(eq(employees.id, employee.id), isNull(employees.accessSub)))
+      .returning({ id: employees.id });
+    if (bound) return;
+  } catch (err) {
+    // 23505: this sub is already bound to a DIFFERENT employee. Re-read decides below; every
+    // other error is availability, not a refusal.
+    if ((err as { code?: string }).code !== '23505') throw err;
+  }
+
+  const [current] = await db
+    .select({ accessSub: employees.accessSub })
+    .from(employees)
+    .where(eq(employees.id, employee.id))
+    .limit(1);
+  if (current?.accessSub !== sub) deny(logger, sub, 'access_sub_mismatch');
 }
 
 /** One uniform 403: logged as `{ accessSub, reason }` — never the email, never a distinction. */
