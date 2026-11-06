@@ -681,3 +681,36 @@ describe('EnvSchema — EMAIL_PROVIDER=smtp (Mailpit, development only)', () => 
     expect(EnvSchema.safeParse(env({ ...smtp, MAIL_SMTP_PORT: '70000' })).success).toBe(false);
   });
 });
+
+describe('EnvSchema — MCP (/mcp)', () => {
+  const mcp = {
+    MCP_ENABLED: 'true',
+    MCP_CF_TEAM_DOMAIN: 'https://qnsc.cloudflareaccess.com',
+    MCP_ACCESS_AUD: 'aud-tag',
+    VALKEY_URL: 'redis://localhost:6379',
+  };
+
+  it('is off by default and asks for nothing', () => {
+    expect(EnvSchema.safeParse(env()).success).toBe(true);
+  });
+
+  it('refuses a boot with MCP_ENABLED and no VALKEY_URL: the limiter would fail open', () => {
+    const result = EnvSchema.safeParse(env({ ...mcp, VALKEY_URL: undefined }));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.some((i) => i.path.includes('VALKEY_URL'))).toBe(true);
+  });
+
+  it('accepts a complete MCP configuration', () => {
+    expect(EnvSchema.safeParse(env(mcp)).success).toBe(true);
+  });
+
+  it('still requires the Access team origin and audience', () => {
+    for (const key of ['MCP_CF_TEAM_DOMAIN', 'MCP_ACCESS_AUD'] as const) {
+      const result = EnvSchema.safeParse(env({ ...mcp, [key]: undefined }));
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.issues.some((i) => i.path.includes(key))).toBe(true);
+    }
+  });
+});

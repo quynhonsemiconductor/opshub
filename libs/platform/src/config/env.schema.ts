@@ -498,6 +498,7 @@ const refineMcp = (
     MCP_ENABLED?: boolean;
     MCP_CF_TEAM_DOMAIN?: string;
     MCP_ACCESS_AUD?: string;
+    VALKEY_URL?: string;
   },
   ctx: z.RefinementCtx,
 ): void => {
@@ -510,6 +511,18 @@ const refineMcp = (
         message: `${key} is required when MCP_ENABLED=true: the Access JWT is verified against both.`,
       });
     }
+  }
+  // The per-person MCP budget is the ONLY thing bounding an agent turn, and the cache module is
+  // optional: without VALKEY_URL `consumeRateLimit` answers "allowed" without a client. Refuse the
+  // boot rather than serve an unbudgeted /mcp.
+  if (!env.VALKEY_URL) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['VALKEY_URL'],
+      message:
+        'VALKEY_URL is required when MCP_ENABLED=true: /mcp refuses to run without its ' +
+        'per-person rate limiter.',
+    });
   }
 };
 

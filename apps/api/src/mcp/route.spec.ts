@@ -16,7 +16,7 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { CacheService } from '@quynhonsemiconductor/platform-cache';
+import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import { enableCorrelationId } from '@quynhonsemiconductor/platform-http';
 import {
   accessTokenOf,
@@ -445,6 +445,22 @@ describe('/mcp (stateless transport, principal bridge, per-person budget)', () =
     });
     expect(res.statusCode).toBe(429);
     expect(consumedKeys.filter((k) => k === `mcp:uid:${VICTIM}`).length).toBeGreaterThan(1);
+  });
+
+  it('refuses 503 when the cache has NO client (optional mode), not only when a call rejects', async () => {
+    // The REAL CacheService in optional mode with no URL: `consumeRateLimit` would answer
+    // `allowed: true` without a client, which is exactly the fail-open this guards.
+    const noClient = new CacheService({ mode: 'optional' });
+    expect(noClient.redis).toBeNull();
+    const { app, fastify } = await boot(verifier, noClient);
+    cleanup = () => app.close();
+    const res = await rpc(fastify, VICTIM_TOKEN, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json.error).toBe('MCP rate limiter unavailable');
   });
 
   it('fails CLOSED (503) when the rate limiter is unavailable — never an unbudgeted agent turn', async () => {

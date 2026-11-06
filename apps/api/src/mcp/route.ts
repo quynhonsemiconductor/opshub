@@ -142,6 +142,14 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
     // CLOSED, unlike the REST limiter: an unbudgeted agent turn can issue dozens of calls, and an
     // MCP endpoint that silently loses its budget is worse than one briefly unavailable. 503, not
     // 500: the caller did nothing wrong and may retry.
+    // A cache with no client (optional mode, VALKEY_URL unset) would answer "allowed" without
+    // consuming anything — an unbudgeted agent turn. The schema refuses this at boot; a runtime
+    // without a client (an odd embedding) is answered 503 rather than silently unbounded.
+    if (cache.redis === null) {
+      routeLogger.error('MCP rate limiter has no cache client — refusing the request');
+      return reply.code(503).send({ error: 'MCP rate limiter unavailable' });
+    }
+
     let allowed: boolean;
     let resetAt: number;
     try {
