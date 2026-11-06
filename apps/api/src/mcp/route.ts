@@ -131,7 +131,7 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
     // Per person, from the VERIFIED principal — never per IP (MCP-PLAN §4). A cache outage FAILS
     // OPEN, like every other rate limiter in opshub: the budget is back-pressure, not authorization,
     // and the REST calls this route makes are themselves limited per person. The failure is logged
-    // with the error class only — never the caller or their arguments.
+    // with its own message — never the caller or their arguments.
     let allowed = true;
     let resetAt = 0;
     try {
@@ -141,10 +141,9 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
         MCP_RATE_LIMIT.windowSeconds,
       ));
     } catch (err) {
-      routeLogger.error(
-        { err: (err as Error)?.constructor?.name },
-        'MCP rate limiter unavailable — allowing the request (fail open)',
-      );
+      // The full error, like the shared RateLimitGuard's fail-open log: a cache client error
+      // names the backend and address, never the caller or their arguments.
+      routeLogger.error({ err }, 'MCP rate limiter unavailable — allowing the request (fail open)');
     }
     if (!allowed) {
       const retryAfter = Math.max(resetAt - Math.floor(Date.now() / 1000), 1);
