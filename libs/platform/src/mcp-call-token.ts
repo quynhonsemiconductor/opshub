@@ -65,18 +65,23 @@ function headerValue(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
+/**
+ * Drops tokens past TTL. Called on every mint AND every peek: the query bridge peeks on every
+ * incoming HTTP request, so a token whose inject() never ran (a @Public route, a 404, a failed
+ * inject) cannot hold the person's email and search terms for the process lifetime.
+ */
+function sweepExpired(now: number): void {
+  for (const [key, entry] of pending) {
+    if (entry.expiresAt <= now) pending.delete(key);
+  }
+}
+
 /** Mints a single-use token standing for `principal`. Called ONLY by the MCP transport. */
 export function mintMcpCallToken(
   principal: McpPrincipalContext,
   query?: Record<string, string>,
 ): string {
-  // Sweep on EVERY mint: lazy-only expiry would let an unconsumed token (a @Public route, a 404,
-  // a failed inject) hold the person's email, name and search terms for the life of the process.
-  // The map is tiny, and an entry past TTL is dead whether or not anyone reads it.
-  const now = Date.now();
-  for (const [key, entry] of pending) {
-    if (entry.expiresAt <= now) pending.delete(key);
-  }
+  sweepExpired(Date.now());
   const token = randomBytes(32).toString('base64url');
   const entry: McpCallEntry = { principal, ...(query ? { query } : {}) };
   pending.set(token, { entry, expiresAt: Date.now() + TOKEN_TTL_MS });
@@ -104,6 +109,7 @@ export function consumeMcpCallToken(
  * principal guard spends the one unlock.
  */
 export function peekMcpCallToken(raw: string | string[] | undefined): McpCallEntry | undefined {
+  sweepExpired(Date.now());
   const token = headerValue(raw);
   if (!token) return undefined;
   const entry = pending.get(token);

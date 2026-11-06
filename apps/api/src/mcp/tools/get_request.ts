@@ -30,10 +30,10 @@ export function registerGetRequest(server: McpServer, ctx: ToolContext) {
         ? r['approvals']
             .filter((a): a is Record<string, unknown> => typeof a === 'object' && a !== null)
             .map((a) => ({
-              step: a['step'],
+              step: a['step'] ?? null,
               approverName: a['approverName'] ?? null,
-              decision: a['decision'],
-              decidedAt: a['decidedAt'],
+              decision: a['decision'] ?? null,
+              decidedAt: a['decidedAt'] ?? null,
               delegatedFromId: a['delegatedFromId'] ?? null,
             }))
         : [];

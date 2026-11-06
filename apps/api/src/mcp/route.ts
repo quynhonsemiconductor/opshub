@@ -43,6 +43,9 @@ import type { McpRestCaller } from './tools/rest';
  * session.
  */
 
+/** The single source of the MCP path: the edge scopes the Access application to exactly this path. */
+const MCP_PATH = '/mcp';
+
 /** Per-person MCP budget, tighter than the REST DEFAULT tier: one agent turn is dozens of calls. */
 const MCP_RATE_LIMIT = { limit: 60, windowSeconds: 60 };
 
@@ -92,7 +95,7 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
     return { statusCode: injected.statusCode, json };
   };
 
-  fastify.post('/mcp', async (request, reply) => {
+  fastify.post(MCP_PATH, async (request, reply) => {
     const token = accessTokenOf(request.headers);
     if (!token) {
       return reply.code(401).send({ error: 'MCP requires a Cloudflare Access identity' });
@@ -193,7 +196,7 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
   for (const method of ['GET', 'DELETE'] as const) {
     fastify.route({
       method,
-      url: '/mcp',
+      url: MCP_PATH,
       handler: (_req, reply) => {
         reply.code(405).header('Allow', 'POST').send({
           error: 'The opshub MCP endpoint is stateless: only POST is supported',
