@@ -63,6 +63,9 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
   // Runs each tool's REST call with the request's ONE principal. The call token is minted here
   // (never in a tool) and is the only thing the inject() carries.
   const callRest: McpRestCaller = async (principal, rest) => {
+    // Query params travel INSIDE the call token, never in the injected URL: the access log and
+    // pino's request binding record the URL, and a search term must not become a log entry. The
+    // bootstrap's onRequest bridge puts them back on `request.query` before the route reads them.
     const query = rest.query
       ? Object.fromEntries(
           Object.entries(rest.query)
@@ -73,8 +76,12 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
     const injected = await app.inject({
       method: rest.method,
       url: rest.url,
-      ...(query ? { query } : {}),
-      headers: { [MCP_CALL_TOKEN_HEADER]: mintMcpCallToken(principal) },
+      headers: {
+        [MCP_CALL_TOKEN_HEADER]: mintMcpCallToken(
+          principal,
+          query && Object.keys(query).length > 0 ? query : undefined,
+        ),
+      },
     });
     let json: Record<string, unknown> | unknown[] | undefined;
     try {
@@ -129,11 +136,11 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
     };
 
     // Per person, from the VERIFIED principal — never per IP (MCP-PLAN §4). A cache outage FAILS
-    // OPEN, like every other rate limiter in opshub: the budget is back-pressure, not authorization,
-    // and the REST calls this route makes are themselves limited per person. The failure is logged
-    // with its own message — never the caller or their arguments.
-    let allowed = true;
-    let resetAt = 0;
+    // CLOSED, unlike the REST limiter: an unbudgeted agent turn can issue dozens of calls, and an
+    // MCP endpoint that silently loses its budget is worse than one briefly unavailable. 503, not
+    // 500: the caller did nothing wrong and may retry.
+    let allowed: boolean;
+    let resetAt: number;
     try {
       ({ allowed, resetAt } = await cache.consumeRateLimit(
         `mcp:uid:${principal.userId}`,
@@ -141,9 +148,8 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
         MCP_RATE_LIMIT.windowSeconds,
       ));
     } catch (err) {
-      // The full error, like the shared RateLimitGuard's fail-open log: a cache client error
-      // names the backend and address, never the caller or their arguments.
-      routeLogger.error({ err }, 'MCP rate limiter unavailable — allowing the request (fail open)');
+      routeLogger.error({ err }, 'MCP rate limiter unavailable — refusing the request');
+      return reply.code(503).send({ error: 'MCP rate limiter unavailable' });
     }
     if (!allowed) {
       const retryAfter = Math.max(resetAt - Math.floor(Date.now() / 1000), 1);

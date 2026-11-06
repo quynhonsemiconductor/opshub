@@ -17,6 +17,7 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CacheService } from '@quynhonsemiconductor/platform-cache';
+import { MCP_CALL_TOKEN_HEADER, peekMcpCallToken } from '@platform';
 import { enableCorrelationId } from '@quynhonsemiconductor/platform-http';
 import {
   accessTokenOf,
@@ -252,6 +253,12 @@ async function boot(
   // prefix, exactly as in the real bootstrap.
   app.setGlobalPrefix('v1');
   const fastify = app.getHttpAdapter().getInstance();
+  // The production bootstrap's query bridge: query params travel in the call token, never the URL.
+  fastify.addHook('onRequest', function mcpQueryBridge(req, _reply, done) {
+    const pending = peekMcpCallToken(req.headers[MCP_CALL_TOKEN_HEADER]);
+    if (pending?.query) req.query = { ...(req.query as Record<string, string>), ...pending.query };
+    done();
+  });
   registerMcpRoute({
     app,
     fastify,
@@ -445,15 +452,19 @@ describe('/mcp (stateless transport, principal bridge, per-person budget)', () =
     expect(consumedKeys.filter((k) => k === `mcp:uid:${VICTIM}`).length).toBeGreaterThan(1);
   });
 
-  it('fails OPEN when the rate limiter is unavailable, and the REST layer still authorizes', async () => {
+  it('fails CLOSED (503) when the rate limiter is unavailable — never an unbudgeted agent turn', async () => {
     const broken = {
       consumeRateLimit: () => Promise.reject(new Error('valkey down')),
     } as unknown as CacheService;
     const { app, fastify } = await boot(verifier, broken);
     cleanup = () => app.close();
-    await initialize(fastify, VICTIM_TOKEN);
-    const out = await callTool(fastify, VICTIM_TOKEN, 'opshub_whoami', {});
-    expect(out['id']).toBe(VICTIM);
+    const res = await rpc(fastify, VICTIM_TOKEN, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+    });
+    expect(res.statusCode).toBe(503);
+    expect(res.json.error).toBe('MCP rate limiter unavailable');
   });
 
   it('TOOL BUDGET: the read-only catalogue is exactly the budgeted 7, and every tool is read-only', async () => {
