@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeOffset, encodeOffset, listResult, pageQuery } from './rest';
+import { arrayResult, decodeOffset, encodeOffset, listResult, pageQuery } from './rest';
 
 /** The cursor is opaque to clients, so the only contract is round-trip + bomb-proofing. */
 describe('MCP list plumbing', () => {
@@ -30,6 +30,29 @@ describe('MCP list plumbing', () => {
 
     const drift = listResult(200, { not: 'a list' }, (r) => r, 'rows', { offset: 0, limit: 20 });
     expect('isError' in drift && drift.isError).toBe(true);
+    expect((JSON.parse(drift.content[0].text) as { statusCode: number }).statusCode).toBe(502);
+  });
+
+  it('slices a bare-array feed and reports its own cursor', () => {
+    const out = arrayResult(
+      200,
+      [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+      (r) => ({ id: r['id'] }),
+      'rows',
+      { offset: 0, limit: 2 },
+    );
+    const body = JSON.parse(out.content[0].text) as {
+      rows: unknown[];
+      pageInfo: { total: number; hasNextPage: boolean; nextCursor: string | null };
+    };
+    expect(body.rows).toEqual([{ id: 'a' }, { id: 'b' }]);
+    expect(body.pageInfo).toMatchObject({
+      total: 3,
+      hasNextPage: true,
+      nextCursor: encodeOffset(2),
+    });
+
+    const drift = arrayResult(200, { not: 'array' }, (r) => r, 'rows', { offset: 0, limit: 2 });
     expect((JSON.parse(drift.content[0].text) as { statusCode: number }).statusCode).toBe(502);
   });
 

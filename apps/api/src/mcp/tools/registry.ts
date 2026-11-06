@@ -13,6 +13,17 @@ export const TOOL_ROUTES = {
   opshub_get_asset: { method: 'GET', url: '/v1/assets/:id' },
   opshub_list_requests: { method: 'GET', url: '/v1/requests' },
   opshub_get_request: { method: 'GET', url: '/v1/requests/:id' },
+  opshub_list_access_requests: { method: 'GET', url: '/v1/access-requests' },
+  opshub_my_active_grants: { method: 'GET', url: '/v1/access-requests/grants/me/active' },
+  opshub_list_catalog: { method: 'GET', url: '/v1/catalog' },
+  opshub_my_leave_balance: { method: 'GET', url: '/v1/workforce/leave/balance' },
+  opshub_outstanding_documents: {
+    method: 'GET',
+    url: '/v1/documents/acknowledgements/outstanding',
+  },
+  opshub_list_documents: { method: 'GET', url: '/v1/documents' },
+  opshub_list_notifications: { method: 'GET', url: '/v1/notifications' },
+  opshub_unread_notifications: { method: 'GET', url: '/v1/notifications/unread-count' },
 } as const;
 
 export type ToolName = keyof typeof TOOL_ROUTES;

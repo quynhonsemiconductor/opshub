@@ -220,6 +220,146 @@ class FixtureRequestsController {
   }
 }
 
+@Controller('access-requests')
+@UseGuards(RequirePrincipalGuard)
+class FixtureAccessRequestsController {
+  @Get()
+  list(@Req() req: R) {
+    if (req.user!.sub === RESTRICTED) throw new ForbiddenException('Forbidden resource');
+    return {
+      data: [
+        {
+          id: '0194a000-0000-7000-8000-000000000401',
+          accessType: 'ssh',
+          target: 'bastion-01',
+          durationHours: 4,
+          status: 'approved',
+          reviewedAt: '2026-11-02T00:00:00.000Z',
+          createdAt: '2026-11-01T00:00:00.000Z',
+        },
+      ],
+      pageInfo: { total: 1, limit: 20, offset: 0, hasNextPage: false },
+    };
+  }
+
+  @Get('grants/me/active')
+  grants() {
+    return [
+      {
+        id: '0194a000-0000-7000-8000-000000000402',
+        requestId: '0194a000-0000-7000-8000-000000000401',
+        accessType: 'ssh',
+        target: 'bastion-01',
+        grantedAt: '2026-11-02T00:00:00.000Z',
+        expiresAt: '2026-11-02T04:00:00.000Z',
+        revokedAt: null,
+      },
+    ];
+  }
+}
+
+@Controller('catalog')
+@UseGuards(RequirePrincipalGuard)
+class FixtureCatalogController {
+  @Get()
+  list() {
+    return [
+      {
+        id: '0194a000-0000-7000-8000-000000000501',
+        name: 'Laptop',
+        description: 'A standard laptop',
+        category: 'Hardware',
+        slaHours: 48,
+      },
+    ];
+  }
+}
+
+@Controller('workforce/leave')
+@UseGuards(RequirePrincipalGuard)
+class FixtureLeaveController {
+  @Get('balance')
+  balance() {
+    return [
+      {
+        leaveType: 'annual',
+        year: 2026,
+        grantedDays: 12,
+        accruedDays: 10,
+        carriedOverDays: 2,
+        carriedOverExpiresOn: null,
+        consumedDays: 3,
+        availableDays: 9,
+        remainingDays: 11,
+      },
+    ];
+  }
+}
+
+@Controller('documents')
+@UseGuards(RequirePrincipalGuard)
+class FixtureDocumentsController {
+  @Get('acknowledgements/outstanding')
+  outstanding() {
+    return [
+      {
+        documentId: '0194a000-0000-7000-8000-000000000601',
+        code: 'POL-001',
+        title: 'Acceptable Use',
+        category: 'Policy',
+        versionId: '0194a000-0000-7000-8000-000000000602',
+        version: 2,
+        publishedAt: '2026-10-01T00:00:00.000Z',
+      },
+    ];
+  }
+
+  @Get()
+  list() {
+    return {
+      data: [
+        {
+          id: '0194a000-0000-7000-8000-000000000601',
+          code: 'POL-001',
+          title: 'Acceptable Use',
+          category: 'Policy',
+          ownerName: 'Security',
+          retiredAt: null,
+        },
+      ],
+      pageInfo: { total: 1, limit: 20, offset: 0, hasNextPage: false },
+    };
+  }
+}
+
+@Controller('notifications')
+@UseGuards(RequirePrincipalGuard)
+class FixtureNotificationsController {
+  @Get()
+  list() {
+    return {
+      items: [
+        {
+          id: '0194a000-0000-7000-8000-000000000701',
+          type: 'request.approved',
+          title: 'Request approved',
+          body: 'Your laptop request was approved.',
+          resourceType: 'request',
+          resourceId: '0194a000-0000-7000-8000-000000000301',
+          isRead: false,
+          createdAt: '2026-11-02T00:00:00.000Z',
+        },
+      ],
+      nextCursor: null,
+    };
+  }
+
+  @Get('unread-count')
+  unread() {
+    return { count: 1 };
+  }
+}
+
 @Module({
   imports: [McpModule],
   controllers: [
@@ -227,6 +367,11 @@ class FixtureRequestsController {
     FixtureEmployeesController,
     FixtureAssetsController,
     FixtureRequestsController,
+    FixtureAccessRequestsController,
+    FixtureCatalogController,
+    FixtureLeaveController,
+    FixtureDocumentsController,
+    FixtureNotificationsController,
   ],
 })
 class FixtureModule {}
@@ -478,7 +623,7 @@ describe('/mcp (stateless transport, principal bridge, per-person budget)', () =
     expect(res.json.error).toBe('MCP rate limiter unavailable');
   });
 
-  it('TOOL BUDGET: the read-only catalogue is exactly the budgeted 7, and every tool is read-only', async () => {
+  it('TOOL BUDGET: the read-only catalogue is exactly the budgeted 15, and every tool is read-only', async () => {
     const { app, fastify } = await boot();
     cleanup = () => app.close();
     await initialize(fastify, VICTIM_TOKEN);
@@ -486,7 +631,7 @@ describe('/mcp (stateless transport, principal bridge, per-person budget)', () =
     const tools = list.json.result!.tools!;
     // MCP-PLAN §4: ~15-30 task-shaped tools per app, not 1:1 with routes. This app is a
     // read-only first slice and may grow to that ceiling; it may not drift past it silently.
-    expect(tools.length).toBe(7);
+    expect(tools.length).toBe(15);
     expect(tools.length).toBeLessThanOrEqual(20);
     for (const tool of tools) {
       expect(tool.annotations?.readOnlyHint, `${tool.name} must be read-only`).toBe(true);
@@ -499,9 +644,17 @@ describe('/mcp (stateless transport, principal bridge, per-person budget)', () =
       'opshub_get_asset',
       'opshub_get_employee',
       'opshub_get_request',
+      'opshub_list_access_requests',
       'opshub_list_assets',
+      'opshub_list_catalog',
+      'opshub_list_documents',
       'opshub_list_employees',
+      'opshub_list_notifications',
       'opshub_list_requests',
+      'opshub_my_active_grants',
+      'opshub_my_leave_balance',
+      'opshub_outstanding_documents',
+      'opshub_unread_notifications',
       'opshub_whoami',
     ]);
   });
@@ -591,6 +744,50 @@ describe('/mcp (stateless transport, principal bridge, per-person budget)', () =
     const requests = await callTool(fastify, VICTIM_TOKEN, 'opshub_list_requests', {});
     const [request] = requests['requests'] as Record<string, unknown>[];
     expect(request).toMatchObject({ type: 'laptop', status: 'pending', currentStep: 1 });
+  });
+  it('the self-service tools answer with their documented shapes', async () => {
+    const { app, fastify } = await boot();
+    cleanup = () => app.close();
+    await initialize(fastify, VICTIM_TOKEN);
+
+    const access = await callTool(fastify, VICTIM_TOKEN, 'opshub_list_access_requests', {});
+    expect((access['accessRequests'] as Record<string, unknown>[])[0]).toMatchObject({
+      accessType: 'ssh',
+      status: 'approved',
+    });
+
+    const grants = await callTool(fastify, VICTIM_TOKEN, 'opshub_my_active_grants', {});
+    expect((grants['grants'] as Record<string, unknown>[])[0]).toMatchObject({
+      target: 'bastion-01',
+    });
+
+    const catalog = await callTool(fastify, VICTIM_TOKEN, 'opshub_list_catalog', {});
+    expect((catalog['catalog'] as Record<string, unknown>[])[0]).toMatchObject({ name: 'Laptop' });
+
+    const balances = await callTool(fastify, VICTIM_TOKEN, 'opshub_my_leave_balance', {});
+    expect((balances['balances'] as Record<string, unknown>[])[0]).toMatchObject({
+      leaveType: 'annual',
+      availableDays: 9,
+    });
+
+    const outstanding = await callTool(fastify, VICTIM_TOKEN, 'opshub_outstanding_documents', {});
+    expect((outstanding['outstandingDocuments'] as Record<string, unknown>[])[0]).toMatchObject({
+      code: 'POL-001',
+    });
+
+    const documents = await callTool(fastify, VICTIM_TOKEN, 'opshub_list_documents', {});
+    expect((documents['documents'] as Record<string, unknown>[])[0]).toMatchObject({
+      ownerName: 'Security',
+    });
+
+    const notifications = await callTool(fastify, VICTIM_TOKEN, 'opshub_list_notifications', {});
+    expect((notifications['notifications'] as Record<string, unknown>[])[0]).toMatchObject({
+      isRead: false,
+    });
+    expect((notifications['pageInfo'] as { nextCursor: unknown }).nextCursor).toBeNull();
+
+    const unread = await callTool(fastify, VICTIM_TOKEN, 'opshub_unread_notifications', {});
+    expect(unread).toEqual({ count: 1 });
   });
 });
 
