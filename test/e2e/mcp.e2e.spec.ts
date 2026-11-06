@@ -199,7 +199,9 @@ describe('/mcp over the real guard chain (e2e)', () => {
           host: '127.0.0.1',
           port,
           path: '/v1/auth/me',
-          headers: { 'x-opshub-mcp-call': 'forged-token', 'cf-access-jwt-assertion': 'a.b.c' },
+          // The in-process principal travels in `authorization`; a network request carrying a
+          // forged value must not become anybody.
+          headers: { authorization: 'Bearer forged-token', 'cf-access-jwt-assertion': 'a.b.c' },
         },
         (res) => {
           res.resume();
