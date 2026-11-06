@@ -50,14 +50,29 @@ const TOKEN_TTL_MS = 5_000;
 /** Bound on pending tokens: far above anything one person can pipeline, swept when exceeded. */
 const MAX_PENDING = 1_000;
 
-const pending = new Map<string, { principal: McpPrincipalContext; expiresAt: number }>();
+/** What a call token carries: the principal, plus the query the injected route must see. */
+export interface McpCallEntry {
+  principal: McpPrincipalContext;
+  /**
+   * Query parameters for the injected request. They travel in the token, NOT in the URL: the
+   * access log records the request URL (and pino binds it to every line), and an MCP search term
+   * must not become a log entry. The onRequest bridge puts these back on `request.query` before
+   * the route handler reads them.
+   */
+  query?: Record<string, string>;
+}
+
+const pending = new Map<string, { entry: McpCallEntry; expiresAt: number }>();
 
 function headerValue(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
 /** Mints a single-use token standing for `principal`. Called ONLY by the MCP transport. */
-export function mintMcpCallToken(principal: McpPrincipalContext): string {
+export function mintMcpCallToken(
+  principal: McpPrincipalContext,
+  query?: Record<string, string>,
+): string {
   if (pending.size >= MAX_PENDING) {
     const now = Date.now();
     for (const [key, entry] of pending) {
@@ -65,7 +80,8 @@ export function mintMcpCallToken(principal: McpPrincipalContext): string {
     }
   }
   const token = randomBytes(32).toString('base64url');
-  pending.set(token, { principal, expiresAt: Date.now() + TOKEN_TTL_MS });
+  const entry: McpCallEntry = { principal, ...(query ? { query } : {}) };
+  pending.set(token, { entry, expiresAt: Date.now() + TOKEN_TTL_MS });
   return token;
 }
 
@@ -82,7 +98,19 @@ export function consumeMcpCallToken(
   const entry = pending.get(token);
   pending.delete(token);
   if (!entry || entry.expiresAt <= Date.now()) return undefined;
-  return entry.principal;
+  return entry.entry.principal;
+}
+
+/**
+ * Reads a token WITHOUT consuming it: the onRequest query bridge needs the query before the
+ * principal guard spends the one unlock.
+ */
+export function peekMcpCallToken(raw: string | string[] | undefined): McpCallEntry | undefined {
+  const token = headerValue(raw);
+  if (!token) return undefined;
+  const entry = pending.get(token);
+  if (!entry || entry.expiresAt <= Date.now()) return undefined;
+  return entry.entry;
 }
 
 /**

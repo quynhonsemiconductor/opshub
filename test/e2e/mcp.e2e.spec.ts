@@ -35,6 +35,8 @@ describe('/mcp over the real guard chain (e2e)', () => {
   let app: NestFastifyApplication;
   let fastify: FastifyInstance;
   let db: DrizzleDB;
+  /** Every line the shared logger wrote during this suite, for the log-capture assertions. */
+  const logLines: string[] = [];
   const people = new Map<string, McpAccessPrincipal>();
   const verifier: McpAccessVerifier = {
     verify: (bearer) => Promise.resolve(people.get(bearer) ?? null),
@@ -88,7 +90,11 @@ describe('/mcp over the real guard chain (e2e)', () => {
 
   beforeAll(async () => {
     // The production boot, with /mcp registered before Fastify's routing table is finalized.
-    app = await prepareHttpApp(apiAppOptions);
+    app = await prepareHttpApp({
+      ...apiAppOptions,
+      env: { ...process.env, LOG_PRETTY: 'false', LOG_LEVEL: 'info' },
+      logStream: { write: (line: string) => logLines.push(line) },
+    });
     fastify = app.getHttpAdapter().getInstance();
     db = app.get(DRIZZLE);
     registerMcpRoute({
@@ -229,6 +235,19 @@ describe('/mcp over the real guard chain (e2e)', () => {
       await setUserBanned(auth, FIXTURE.HR.id, false, 'e2e: restore the mcp user');
     }
     expect((await callTool(token, 'opshub_whoami', {}))['id']).toBe(FIXTURE.HR.id);
+  });
+
+  it('the access log never carries an MCP search term — length only', async () => {
+    const token = tokenFor(FIXTURE.HR.email);
+    await initialize(token);
+    const marker = 'mcp-search-marker-9f3c';
+    const out = await callTool(token, 'opshub_list_employees', { search: marker });
+    // the query reached the route (the bridge works), while the log never saw it
+    expect((out['employees'] as unknown[]).length).toBe(0);
+    // pino writes asynchronously; one turn is enough for the access line to land
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(logLines.length).toBeGreaterThan(0);
+    expect(logLines.join('\n')).not.toContain(marker);
   });
 
   it('tools/list is the budgeted read-only catalogue', async () => {

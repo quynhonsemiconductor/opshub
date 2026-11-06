@@ -9,6 +9,7 @@ import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { HttpMetrics, normalizeRoute } from '@quynhonsemiconductor/observability';
 import { albReceivedAtMs, albWaitMs, arrivalAtMs } from '@quynhonsemiconductor/platform-runtime';
+import { isMcpBridged } from '../mcp-call-token';
 
 /** Health/readiness probes — suppress from access logs to avoid noise. */
 const SILENT_PREFIXES = ['/v1/healthz', '/v1/readyz', '/favicon.ico'];
@@ -152,9 +153,16 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     bodyWaitMs?: number,
   ): void {
     const userId = currentUserId();
+    // An MCP tool call is an inject() whose URL carries the person's search terms and ids. The
+    // access log must not grow a search index of what staff asked for, so a bridged request logs
+    // ONLY the URL length. `raw.url` is rewritten too: pino's request binding serializes it on
+    // every line, and the credential/query must not survive there.
+    const bridged = isMcpBridged(req);
+    const urlLength = req.url.length;
+    if (bridged) req.raw.url = req.url.split('?')[0];
     const base = {
       method: req.method,
-      url: req.url,
+      ...(bridged ? { urlLength } : { url: req.url }),
       statusCode,
       durationMs: Date.now() - start,
       ip,
