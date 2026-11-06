@@ -107,6 +107,24 @@ export function createMcpAccessJwtAdapter(opts: McpAccessJwtAdapterOptions): Mcp
 }
 
 /**
+ * Drizzle WRAPS driver errors in `DrizzleQueryError`, so the pg code is on `.cause` — a check
+ * against `err.code` alone never matches and turns a unique violation into a 500.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  let current: unknown = err;
+  while (current !== null && current !== undefined) {
+    if (typeof current === 'object' && 'code' in current) {
+      if ((current as Record<string, unknown>).code === '23505') return true;
+    }
+    current =
+      typeof current === 'object' && 'cause' in current
+        ? (current as Record<string, unknown>).cause
+        : undefined;
+  }
+  return false;
+}
+
+/**
  * The first verified `sub` wins, atomically. A concurrent first call for the same employee is
  * settled by the conditional UPDATE: exactly one writes, the other re-reads the winner and must
  * match it. A `sub` already bound elsewhere hits the unique index (23505) and is refused the same
@@ -129,9 +147,9 @@ async function bindAccessSub(
       .returning({ id: employees.id });
     if (bound) return;
   } catch (err) {
-    // 23505: this sub is already bound to a DIFFERENT employee. Re-read decides below; every
-    // other error is availability, not a refusal.
-    if ((err as { code?: string }).code !== '23505') throw err;
+    // 23505 (however deeply Drizzle wrapped it): this sub is already bound to a DIFFERENT
+    // employee. Re-read decides below; every other error is availability, not a refusal.
+    if (!isUniqueViolation(err)) throw err;
   }
 
   const [current] = await db
