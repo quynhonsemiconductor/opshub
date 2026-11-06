@@ -102,6 +102,7 @@ export class NotificationRelayService
     leaseToken: notificationOutbox.leaseToken,
     lockedUntil: notificationOutbox.lockedUntil,
     seq: notificationOutbox.seq,
+    terminalAt: notificationOutbox.terminalAt,
   };
 
   protected async selectDue(
@@ -264,7 +265,7 @@ export class NotificationRelayService
   protected async markSent(tx: DrizzleTx, row: Claimed<NotificationOutboxRow>): Promise<void> {
     await tx
       .update(notificationOutbox)
-      .set({ status: 'sent', dispatchedAt: DB_NOW })
+      .set({ status: 'sent', dispatchedAt: DB_NOW, terminalAt: DB_NOW })
       .where(eq(notificationOutbox.id, row.id));
   }
 
@@ -280,7 +281,12 @@ export class NotificationRelayService
       // scheduledAt IS the retry gate — selectDue selects on `scheduledAt <= now()`, so leaving it alone
       // made every retry immediate and burned all five attempts inside ~25 seconds. A dependency blip
       // therefore dead-lettered the row permanently.
-      .set({ status: newStatus, lastError, scheduledAt: dbDelay(delayMs) })
+      .set({
+        status: newStatus,
+        lastError,
+        scheduledAt: dbDelay(delayMs),
+        terminalAt: newStatus === 'failed' ? DB_NOW : null,
+      })
       .where(eq(notificationOutbox.id, row.id));
   }
 }

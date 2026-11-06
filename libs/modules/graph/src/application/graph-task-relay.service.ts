@@ -92,6 +92,7 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
     leaseToken: graphTaskOutbox.leaseToken,
     lockedUntil: graphTaskOutbox.lockedUntil,
     seq: graphTaskOutbox.seq,
+    terminalAt: graphTaskOutbox.terminalAt,
   };
 
   protected leaseMsFor(row: TaskRow): number {
@@ -209,7 +210,7 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
   protected async markSent(tx: DrizzleTx, row: Claimed<TaskRow>): Promise<void> {
     await tx
       .update(graphTaskOutbox)
-      .set({ status: 'sent', sentAt: DB_NOW, lastError: null })
+      .set({ status: 'sent', sentAt: DB_NOW, lastError: null, terminalAt: DB_NOW })
       .where(eq(graphTaskOutbox.id, row.id));
   }
 
@@ -226,6 +227,7 @@ export abstract class GraphTaskRelay extends AbstractOutboxRelay<TaskRow> {
         status: newStatus,
         lastError: error.slice(0, MAX_ERROR_LENGTH),
         nextAttemptAt: dbDelay(delayMs),
+        terminalAt: newStatus === 'failed' ? DB_NOW : null,
       })
       .where(eq(graphTaskOutbox.id, row.id));
   }

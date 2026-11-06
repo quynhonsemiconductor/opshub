@@ -141,6 +141,8 @@ export interface OutboxLeaseTable {
   leaseToken: AnyPgColumn;
   lockedUntil: AnyPgColumn;
   seq: AnyPgColumn;
+  /** Stamped in the same UPDATE that makes the row terminal; retention counts from here. */
+  terminalAt: AnyPgColumn;
 }
 
 /** The row as the claim step hands it to the relay: `attempts` includes this attempt. */
@@ -352,6 +354,7 @@ export abstract class AbstractOutboxRelay<
         lastError: sql`'abandoned: the lease lapsed with every attempt used (the process died or the call never returned)'`,
         leaseToken: null,
         lockedUntil: null,
+        terminalAt: sql`now()`,
       })
       .where(
         and(

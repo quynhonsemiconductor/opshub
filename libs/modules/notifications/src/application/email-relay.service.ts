@@ -83,6 +83,7 @@ export class EmailRelayService
     leaseToken: emailOutbox.leaseToken,
     lockedUntil: emailOutbox.lockedUntil,
     seq: emailOutbox.seq,
+    terminalAt: emailOutbox.terminalAt,
   };
 
   /** Held for the SUM of the batch's leases (90 s each): 5 rows is 7.5 minutes if a worker dies. */
@@ -142,7 +143,7 @@ export class EmailRelayService
     // risks a `sent` row that can never be bounce-matched.
     await tx
       .update(emailOutbox)
-      .set({ status: 'sent', sentAt: DB_NOW, messageId })
+      .set({ status: 'sent', sentAt: DB_NOW, messageId, terminalAt: DB_NOW })
       .where(eq(emailOutbox.id, row.id));
   }
 
@@ -157,7 +158,12 @@ export class EmailRelayService
       .update(emailOutbox)
       // scheduledAt IS the retry gate — selectDue selects on `scheduledAt <= now()`, so leaving it alone
       // made every retry immediate and burned all five attempts inside ~25 seconds.
-      .set({ status: newStatus, lastError, scheduledAt: dbDelay(delayMs) })
+      .set({
+        status: newStatus,
+        lastError,
+        scheduledAt: dbDelay(delayMs),
+        terminalAt: newStatus === 'failed' ? DB_NOW : null,
+      })
       .where(eq(emailOutbox.id, row.id));
   }
 }

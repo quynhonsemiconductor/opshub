@@ -105,6 +105,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
       .set({
         status: 'failed',
         lastError: `expired: pending longer than ${this.maxAgeHours} h`,
+        terminalAt: DB_NOW,
         leaseToken: null,
         lockedUntil: null,
       })
@@ -147,6 +148,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
     leaseToken: webhookDeliveries.leaseToken,
     lockedUntil: webhookDeliveries.lockedUntil,
     seq: webhookDeliveries.seq,
+    terminalAt: webhookDeliveries.terminalAt,
   };
 
   protected async selectDue(tx: DrizzleTx, limit: number, now: SQL): Promise<DeliveryRow[]> {
@@ -250,7 +252,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
   protected async markSent(tx: DrizzleTx, row: Claimed<DeliveryRow>): Promise<void> {
     await tx
       .update(webhookDeliveries)
-      .set({ status: 'delivered', deliveredAt: DB_NOW })
+      .set({ status: 'delivered', deliveredAt: DB_NOW, terminalAt: DB_NOW })
       .where(eq(webhookDeliveries.id, row.id));
   }
 
@@ -272,6 +274,7 @@ export class WebhookRelayService extends AbstractOutboxRelay<DeliveryRow> {
         status: newStatus,
         lastError: error.slice(0, MAX_DELIVERY_ERROR_LENGTH),
         nextAttemptAt: newStatus === 'failed' ? DB_NOW : dbDelay(delaySeconds * MS_PER_SEC),
+        terminalAt: newStatus === 'failed' ? DB_NOW : null,
       })
       .where(eq(webhookDeliveries.id, row.id));
   }
