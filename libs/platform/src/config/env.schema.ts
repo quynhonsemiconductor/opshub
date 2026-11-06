@@ -157,6 +157,12 @@ const baseShape = {
   // ── Background jobs ────────────────────────────────────────────────────────
   /** Audit log retention in days (SOC 2 baseline: 730 = 2 years). */
   AUDIT_RETENTION_DAYS: z.coerce.number().int().positive().default(730),
+  /**
+   * Ships TRUE: the nightly retention sweep COUNTS and logs the rows each rule would delete, and
+   * deletes nothing. The first production run is a dry run by default; set false once the counts
+   * in the log look right.
+   */
+  RETENTION_DRY_RUN: booleanish(true),
 
   // ── Door attendance terminal ───────────────────────────────────────────────
   /**

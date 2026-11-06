@@ -73,6 +73,8 @@ export const notificationOutbox = messagingSchema.table(
     idempotencyKey: varchar('idempotency_key', { length: 255 }),
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull().defaultNow(),
     dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+    /** When the row reached a terminal status; retention counts from HERE, not created/scheduled. */
+    terminalAt: timestamp('terminal_at', { withTimezone: true }),
     ...outboxLease(),
   },
   (t) => ({
@@ -115,6 +117,8 @@ export const emailOutbox = messagingSchema.table(
     messageId: varchar('message_id', { length: 255 }),
     /** When the feedback loop recorded a bounce or complaint. NULL unless it did. */
     feedbackAt: timestamp('feedback_at', { withTimezone: true }),
+    /** When the row reached a terminal status; retention counts from HERE, not created/scheduled. */
+    terminalAt: timestamp('terminal_at', { withTimezone: true }),
     ...outboxLease(),
   },
   (t) => ({
@@ -179,6 +183,8 @@ export const webhookDeliveries = messagingSchema.table(
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     lastError: text('last_error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** When the row reached a terminal status; retention counts from HERE, not created time. */
+    terminalAt: timestamp('terminal_at', { withTimezone: true }),
     ...outboxLease(),
   },
   (t) => ({
@@ -221,6 +227,8 @@ export const graphTaskOutbox = messagingSchema.table(
     lastError: text('last_error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     sentAt: timestamp('sent_at', { withTimezone: true }),
+    /** When the row reached a terminal status; retention counts from HERE, not created time. */
+    terminalAt: timestamp('terminal_at', { withTimezone: true }),
     ...outboxLease(),
   },
   (t) => ({
