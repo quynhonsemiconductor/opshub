@@ -39,8 +39,17 @@ export interface McpPrincipalContext {
  * Header the in-process call token travels in (between the MCP transport and its guard, never
  * stored, never on the wire). `authorization` is deliberate: the shared pino configuration
  * already redacts that header on every request line, so a credential cannot be written to the log
- * sink by a logger change made in another repository. Nothing reads an Authorization header for
- * authentication in opshub (sessions are cookies), and the guard consumes the token once.
+ * sink by a logger change made in another repository.
+ *
+ * Collision analysis — two other readers exist, and neither can mistake this token:
+ *
+ *  - `TerminalAuthGuard` (the door) requires `Bearer <uuid>.<secret>`. This token is raw base64url
+ *    with NO `Bearer ` prefix and no dot, so it fails that guard's shape check before any lookup;
+ *    MCP tools also never inject into `/v1/door/terminal/*`.
+ *  - `accessTokenOf` reads the NETWORK `/mcp` request, not an injected one.
+ *
+ * The MCP principal guard consumes and deletes the header before any route-level guard runs, so an
+ * injected request cannot carry it into a terminal route either.
  */
 export const MCP_CALL_TOKEN_HEADER = 'authorization';
 

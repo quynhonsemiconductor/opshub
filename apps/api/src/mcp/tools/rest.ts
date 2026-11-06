@@ -140,3 +140,38 @@ export function listResult(
     ],
   };
 }
+
+/**
+ * Wraps a BARE-ARRAY route (the reference feeds: catalogue, grants, balances) in the same
+ * `limit` + `cursor` contract. The route returns everything; the tool slices and reports the
+ * cursor, so the agent-facing contract does not depend on which REST route is paginated.
+ */
+export function arrayResult(
+  statusCode: number,
+  json: unknown,
+  mapItem: (item: Record<string, unknown>) => Record<string, unknown>,
+  listKey: string,
+  page: { offset: number; limit: number },
+) {
+  if (statusCode >= 400) return denied(statusCode, json);
+  if (!Array.isArray(json)) return denied(502, json);
+  const rows = json.slice(page.offset, page.offset + page.limit) as Record<string, unknown>[];
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify({
+          [listKey]: rows.map(mapItem),
+          pageInfo: {
+            total: json.length,
+            hasNextPage: page.offset + rows.length < json.length,
+            nextCursor:
+              page.offset + rows.length < json.length
+                ? encodeOffset(page.offset + rows.length)
+                : null,
+          },
+        }),
+      },
+    ],
+  };
+}

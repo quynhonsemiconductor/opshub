@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { mintMcpCallToken } from '@platform';
 import { sha256Hex } from '../../application/door.service';
 import { TerminalAuthGuard, type DoorTerminalRequest } from './terminal-auth.guard';
 
@@ -71,6 +72,24 @@ describe('TerminalAuthGuard', () => {
       UnauthorizedException,
     );
     expect(terminals.findById).not.toHaveBeenCalled();
+  });
+
+  it('never mistakes an in-process MCP call token for a terminal credential', async () => {
+    // The MCP token travels in `authorization` (so pino redacts it), but it is raw base64url: no
+    // `Bearer ` prefix and no dot. BOTH shapes fail before the repository is consulted.
+    const mcpToken = mintMcpCallToken({
+      userId: 'u-1',
+      email: 'jane@qnsc.vn',
+      name: 'Jane',
+      sessionId: 'mcp:1',
+    });
+    for (const authorization of [mcpToken, `Bearer ${mcpToken}`]) {
+      const { guard, terminals } = makeGuard();
+      await expect(guard.canActivate(context(request(authorization)))).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(terminals.findById).not.toHaveBeenCalled();
+    }
   });
 
   it('401s on an unknown terminal', async () => {

@@ -258,9 +258,17 @@ describe('/mcp over the real guard chain (e2e)', () => {
       'opshub_get_asset',
       'opshub_get_employee',
       'opshub_get_request',
+      'opshub_list_access_requests',
       'opshub_list_assets',
+      'opshub_list_catalog',
+      'opshub_list_documents',
       'opshub_list_employees',
+      'opshub_list_notifications',
       'opshub_list_requests',
+      'opshub_my_active_grants',
+      'opshub_my_leave_balance',
+      'opshub_outstanding_documents',
+      'opshub_unread_notifications',
       'opshub_whoami',
     ]);
   });
