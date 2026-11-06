@@ -32,7 +32,9 @@ export function registerListNotifications(server: McpServer, ctx: ToolContext) {
       if (statusCode >= 400) return denied(statusCode, json);
       const page = json as { items?: unknown; nextCursor?: string | null } | null;
       if (!page || !Array.isArray(page.items)) {
-        return denied(statusCode >= 400 ? statusCode : 502, json);
+        // A 2xx that is not { items, nextCursor } is contract drift: upstream failure, never a
+        // successful empty list (same rule as listResult).
+        return denied(502, json);
       }
       return {
         content: [
