@@ -23,6 +23,13 @@ export const employees = identitySchema.table(
     status: employeeStatusEnum('status').notNull().default('active'),
     /** S3 stored_files.id for the employee's profile photo — null until uploaded. */
     photoStorageKey: varchar('photo_storage_key', { length: 512 }),
+    /**
+     * The first verified Cloudflare Access `sub` this employee used for MCP. Written ONCE, on the
+     * first /mcp call, and never changed: the mailbox is the lookup key, and a mailbox can be
+     * reassigned, so a different Access identity reaching the same address must be refused rather
+     * than inherit the grants (the KB parity fix, kb#388). Nullable for everyone who never used MCP.
+     */
+    accessSub: varchar('access_sub', { length: 255 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -36,5 +43,9 @@ export const employees = identitySchema.table(
       .on(t.entraOid)
       .where(sql`entra_oid IS NOT NULL`),
     statusIdx: index('ix_employee_status').on(t.status),
+    // Partial: NULL is "not bound yet" and may repeat; a bound sub is one person.
+    accessSubIdx: uniqueIndex('uq_employee_access_sub')
+      .on(t.accessSub)
+      .where(sql`access_sub IS NOT NULL`),
   }),
 );

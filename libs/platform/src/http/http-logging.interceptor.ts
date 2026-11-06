@@ -9,6 +9,7 @@ import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { HttpMetrics, normalizeRoute } from '@quynhonsemiconductor/observability';
 import { albReceivedAtMs, albWaitMs, arrivalAtMs } from '@quynhonsemiconductor/platform-runtime';
+import { isMcpBridged } from '../mcp-call-token';
 
 /** Health/readiness probes — suppress from access logs to avoid noise. */
 const SILENT_PREFIXES = ['/v1/healthz', '/v1/readyz', '/favicon.ico'];
@@ -152,9 +153,17 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     bodyWaitMs?: number,
   ): void {
     const userId = currentUserId();
+    // An MCP tool call is an inject() whose query travels in the call token, never the URL (the
+    // bootstrap's query bridge), so no log line — this one or any earlier pino-bound line — can
+    // carry a search term. A bridged request still logs only the URL length: the path holds ids,
+    // and an agent id is not something the access log needs. The `raw.url` rewrite is the
+    // belt-and-braces for any future caller that forgets the token rule.
+    const bridged = isMcpBridged(req);
+    const urlLength = req.url.length;
+    if (bridged) req.raw.url = req.url.split('?')[0];
     const base = {
       method: req.method,
-      url: req.url,
+      ...(bridged ? { urlLength } : { url: req.url }),
       statusCode,
       durationMs: Date.now() - start,
       ip,

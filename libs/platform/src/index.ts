@@ -6,6 +6,7 @@ export * from './database/index';
 export * from './errors/index';
 export * from './http/index';
 export * from './auth/index';
+export * from './mcp-call-token';
 export * from './outbox/index';
 export * from './observability/index';
 export * from './cache/index';

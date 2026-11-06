@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@quynhonsemiconductor/platform-http';
 import { HttpMetrics, requestContextStorage } from '@quynhonsemiconductor/observability';
 import { HttpLoggingInterceptor } from './http-logging.interceptor';
+import { markMcpBridged } from '../mcp-call-token';
 
 /**
  * The access-log interceptor also feeds the RED metrics the HTTP alarms are written against. What matters:
@@ -10,7 +11,9 @@ import { HttpLoggingInterceptor } from './http-logging.interceptor';
  * one it carries (a 404 thrown as a DomainException must not count as a 5xx), and a request counts once.
  */
 
-function setup(over: { url?: string; routeUrl?: string; status?: number; ip?: string } = {}) {
+function setup(
+  over: { url?: string; routeUrl?: string; status?: number; ip?: string; bridged?: boolean } = {},
+) {
   const record = vi.spyOn(HttpMetrics.prototype, 'record').mockImplementation(() => undefined);
   const interceptor = new HttpLoggingInterceptor();
   // the access log goes to Nest's logger; keep the test output quiet
@@ -24,8 +27,10 @@ function setup(over: { url?: string; routeUrl?: string; status?: number; ip?: st
     url: over.url ?? '/v1/assets/019f8a00-0000-7000-8000-000000000001?x=1',
     headers: { 'cf-connecting-ip': over.ip ?? '203.0.113.7', 'x-real-ip': '192.0.2.99' },
     routeOptions: over.routeUrl === undefined ? { url: '/v1/assets/:id' } : { url: over.routeUrl },
+    raw: { url: over.url ?? '/v1/assets/019f8a00-0000-7000-8000-000000000001?x=1' },
     body: undefined,
   };
+  if (over.bridged) markMcpBridged(req);
   const res = { statusCode: over.status ?? 200 };
   const context = {
     getType: () => 'http',
@@ -109,6 +114,20 @@ describe('HttpLoggingInterceptor', () => {
     await firstValueFrom(interceptor.intercept(context, { handle: () => of({}) }));
 
     expect(log).toHaveBeenCalledWith(expect.objectContaining({ ip: '203.0.113.7' }));
+  });
+
+  it('logs ONLY the URL length for a bridged MCP request, never the search terms it carries', async () => {
+    const { interceptor, context, log } = setup({
+      url: '/v1/employees?search=janedoe-secret-term&limit=20',
+      bridged: true,
+    });
+
+    await firstValueFrom(interceptor.intercept(context, { handle: () => of({}) }));
+
+    const line = log.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(line['url']).toBeUndefined();
+    expect(line['urlLength']).toBe('/v1/employees?search=janedoe-secret-term&limit=20'.length);
+    expect(JSON.stringify(line)).not.toContain('janedoe-secret-term');
   });
 
   it('does not log or record a probe path', async () => {

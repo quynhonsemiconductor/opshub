@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { setRequestPrincipal } from '@quynhonsemiconductor/observability';
 import { IS_PUBLIC_KEY } from './decorators';
 import type { JwtPayload } from './principal';
+import { isMcpBridged } from '../mcp-call-token';
 
 /** What identity's global `SessionGuard` leaves on the request: the `{ session, user }` of the cookie. */
 interface RequestWithSession {
@@ -50,6 +51,12 @@ export class SessionAuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<RequestWithSession>();
+    // An MCP tool call has NO session cookie: its principal was consumed from the single-use call
+    // token by McpPrincipalGuard, which runs BEFORE identity's global SessionGuard and
+    // BEFORE this one. The marker is what makes that a checked fact: a request cannot set it, and
+    // `request.user` alone would also be true for any route that forgot to authenticate.
+    if (isMcpBridged(request) && request.user?.sub) return true;
+
     const found = request.session;
     if (!found?.user?.id) {
       // identity's global guard answers first; this is the belt for a route mounted without it
