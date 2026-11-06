@@ -1,6 +1,7 @@
 import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 import { describe, expect, it, vi } from 'vitest';
 import type { DrizzleDB } from '@platform';
 import { createMcpAccessJwtAdapter, McpAccessDeniedError } from './access-jwt.adapter';
@@ -37,7 +38,7 @@ function paramsOf(node: unknown, out: unknown[] = []): unknown[] {
  * `bindWins` = the conditional update returned the row; false simulates the race where another
  * call bound first (or the sub is already bound elsewhere), so the adapter re-reads.
  */
-function dbWith(queue: DbQueue, bindWins = true) {
+function dbWith(queue: DbQueue, bindWins = true, updateError?: Error) {
   const captured: unknown[][] = [];
   const bound: Array<Record<string, unknown>> = [];
   const db = {
@@ -56,6 +57,7 @@ function dbWith(queue: DbQueue, bindWins = true) {
         where: () => ({
           returning: () => {
             bound.push(values);
+            if (updateError) return Promise.reject(updateError);
             return Promise.resolve(bindWins ? [{ id: USER }] : []);
           },
         }),
@@ -212,6 +214,40 @@ describe('McpAccessJwtAdapter', () => {
           await mint({ privateKey, team: TEAM(port), email: 'jane@qnsc.vn', sub: 'the-loser-sub' }),
         ),
       ).rejects.toThrow(McpAccessDeniedError);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('recognises a unique violation through DrizzleQueryError and answers the uniform 403', async () => {
+    const { privateKey, publicJwk } = await mintingKey();
+    const { server, port } = await listen({ keys: [publicJwk] });
+    try {
+      const pgErr = Object.assign(new Error('duplicate key'), { code: '23505' });
+      const wrapped = new DrizzleQueryError('', [], pgErr);
+      const { db } = dbWith(
+        [
+          [{ id: USER, email: 'jane@qnsc.vn', name: 'Jane', accessSub: null }],
+          [{ accessSub: null }], // the sub is bound to ANOTHER employee; this row stays null
+        ],
+        true,
+        wrapped,
+      );
+      const adapter = createMcpAccessJwtAdapter({
+        db,
+        teamDomain: TEAM(port),
+        audience: AUD,
+        logger: logger as never,
+      });
+      await expect(
+        adapter.verify(
+          await mint({ privateKey, team: TEAM(port), email: 'jane@qnsc.vn', sub: 'taken-sub' }),
+        ),
+      ).rejects.toThrow(McpAccessDeniedError);
+      expect(logger.warn).toHaveBeenCalledWith(
+        { accessSub: 'taken-sub', reason: 'access_sub_mismatch' },
+        'MCP access denied',
+      );
     } finally {
       server.close();
     }
