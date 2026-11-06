@@ -3,6 +3,7 @@ import { requestContextStorage } from '@quynhonsemiconductor/observability';
 import { describe, expect, it, vi } from 'vitest';
 import { IS_PUBLIC_KEY } from './decorators';
 import { SessionAuthGuard } from './session-principal.guard';
+import { markMcpBridged } from '../mcp-call-token';
 
 /**
  * The route-level half of authentication on identity 8: it turns the session identity's global guard
@@ -118,5 +119,39 @@ describe('SessionAuthGuard', () => {
 
     expect(guard.canActivate(context)).toBe(true);
     expect(request.user).toBeUndefined();
+  });
+
+  it('accepts an MCP-bridged request with no session cookie — the marker AND a principal are both required', () => {
+    const { guard, context, request } = setup();
+    request.user = {
+      sub: 'user-1',
+      email: 'jane@qnsc.vn',
+      name: 'Jane',
+      roles: [],
+      sessionId: 'mcp:req-1',
+    };
+    markMcpBridged(request);
+
+    expect(guard.canActivate(context)).toBe(true);
+  });
+
+  it('refuses a bridged request with no principal', () => {
+    const { guard, context, request } = setup();
+    markMcpBridged(request);
+
+    expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
+  });
+
+  it('refuses a request that has a principal but was NOT bridged — user presence alone is not authentication', () => {
+    const { guard, context, request } = setup();
+    request.user = {
+      sub: 'user-1',
+      email: 'jane@qnsc.vn',
+      name: 'Jane',
+      roles: [],
+      sessionId: 'forged',
+    };
+
+    expect(() => guard.canActivate(context)).toThrow(UnauthorizedException);
   });
 });

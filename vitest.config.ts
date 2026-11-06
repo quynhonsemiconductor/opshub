@@ -75,8 +75,7 @@ export default defineConfig({
       // `check:coverage-floors` refused the change until they moved, which is the mechanism
       // working: a floor 3 points behind reality protects nothing.
       //
-      // These went 21/14/17/21 → 24/24/19/16 when abstract-outbox-relay.spec.ts landed, then
-      // DOWN to 23 when the unconsumed outbox leg was deleted (migration 0013). Lowering a
+      // These went 21/14/17/21 → 24/24/19/16 when abstract-outbox-relay.spec.ts landed, then      // DOWN to 23 when the unconsumed outbox leg was deleted (migration 0013). Lowering a
       // ratchet normally means a regression; this one is the benign case and the distinction
       // matters: no test was removed from surviving code. The deleted relay and
       // aws-client.config were better covered than the repo average, so removing them and
@@ -124,10 +123,10 @@ export default defineConfig({
       // functions 36.01. Only functions was past the 3-point limit (floor 33, +3.01); it moves to
       // 34, about two points under actual, and the others stay where they are and still inside it.
       thresholds: {
-        lines: 49,
-        functions: 34,
-        branches: 41,
-        statements: 49,
+        lines: 51,
+        functions: 36,
+        branches: 43,
+        statements: 51,
       },
     },
   },

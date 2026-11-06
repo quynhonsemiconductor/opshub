@@ -490,6 +490,30 @@ const refineApiAuth = (
 };
 
 /**
+ * An enabled MCP route is authenticated by a pinned Access JWT, so it refuses to boot without both
+ * halves of that pin. This is asserted here, where the failure names the variable.
+ */
+const refineMcp = (
+  env: Common & {
+    MCP_ENABLED?: boolean;
+    MCP_CF_TEAM_DOMAIN?: string;
+    MCP_ACCESS_AUD?: string;
+  },
+  ctx: z.RefinementCtx,
+): void => {
+  if (!env.MCP_ENABLED) return;
+  for (const key of ['MCP_CF_TEAM_DOMAIN', 'MCP_ACCESS_AUD'] as const) {
+    if (!env[key]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} is required when MCP_ENABLED=true: the Access JWT is verified against both.`,
+      });
+    }
+  }
+};
+
+/**
  * The API process. Holds everything sign-in needs and NO Graph variable: a request that needs Graph writes a
  * task row and the worker performs it, so there is no Graph credential here to steal.
  */
@@ -528,12 +552,35 @@ export const ApiEnvSchema = z
     EDGE_CLIENT_IP_SECRET: emptyToUndefined(edgeSecret.optional()),
     /** The previous key, accepted for verification only while the Pages secret is being rotated. */
     EDGE_CLIENT_IP_SECRET_PREVIOUS: emptyToUndefined(edgeSecret.optional()),
+
+    // ── MCP (`/mcp`, MCP-PLAN §5/§10) — API ONLY ──────────────────────────
+    /**
+     * The MCP endpoint. Defaults OFF everywhere and must be turned on explicitly. The route is raw
+     * (outside `/v1`, the session guards and Swagger), verifies the Cloudflare Access JWT per
+     * request, and composes opshub's own REST routes in-process with the person as principal.
+     */
+    MCP_ENABLED: booleanish(false),
+    /**
+     * The Access team origin the JWT `iss` must equal. Required only when MCP_ENABLED is true
+     * (asserted by `refineMcp`). The /mcp Access application must allow ONLY the Entra IdP — no
+     * One-time PIN, no social IdPs — because the adapter maps by email.
+     */
+    MCP_CF_TEAM_DOMAIN: emptyToUndefined(
+      z
+        .string()
+        .regex(/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/)
+        .optional(),
+    ),
+    /** The AUD tag of the `/mcp` Access application. A token minted for another app is rejected. */
+    MCP_ACCESS_AUD: emptyToUndefined(z.string().min(1).optional()),
+
     GRAPH_CLIENT_ID: forbidden('GRAPH_CLIENT_ID', 'API', GRAPH_WHY),
     AZURE_CLIENT_CERTIFICATE_PATH: forbidden('AZURE_CLIENT_CERTIFICATE_PATH', 'API', GRAPH_WHY),
     GRAPH_FEDERATED_TOKEN_FILE: forbidden('GRAPH_FEDERATED_TOKEN_FILE', 'API', GRAPH_WHY),
   })
   .superRefine(refineEnv)
   .superRefine(refineApiAuth)
+  .superRefine(refineMcp)
   .transform(deriveEnv);
 
 /**

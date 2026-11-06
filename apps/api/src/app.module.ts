@@ -33,11 +33,15 @@ import { AiModule } from '@modules/ai';
 import { SecurityPostureModule } from '@modules/security-posture';
 import { DoorModule } from '@modules/door';
 import { MetaController } from './meta/meta.controller';
+import { McpModule } from './mcp/mcp.module';
 
 @Module({
   imports: [
     // Logging is NOT wired here: `createHttpApp` (main.ts) registers the shared pino logger around this module.
     PlatformModule,
+    // BEFORE AuthModule: global guard order is module order, and McpPrincipalGuard must run before
+    // identity's SessionGuard (see mcp.module.ts). It does nothing on a request with no MCP token.
+    McpModule,
     AuditModule,
     NotificationsModule,
     EmployeesModule,

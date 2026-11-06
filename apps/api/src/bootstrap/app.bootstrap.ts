@@ -7,8 +7,10 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { assertEdgeClientIpEnv } from '@quynhonsemiconductor/platform-http';
 import { enableHealth } from '@quynhonsemiconductor/platform-runtime';
 import { DOOR_TERMINAL_BODY_LIMIT, isDoorTerminalRoute } from './door-body-limit';
+import { CacheService } from '@quynhonsemiconductor/platform-cache';
 import {
   AppConfigService,
+  DRIZZLE,
   SESSION_COOKIE,
   CSRF_HEADER,
   CSRF_SECRET_COOKIE,
@@ -79,6 +81,37 @@ export async function bootstrapApp(app: NestFastifyApplication): Promise<void> {
   // process — including ones something later refuses — or the access log loses the
   // arrival time for exactly the requests worth investigating.
   registerRequestTiming(fastify);
+
+  // /mcp — the MCP endpoint, OFF everywhere by default (MCP_ENABLED). Raw Fastify route, outside
+  // /v1, the session guards and Swagger: Cloudflare Access is its authentication, and the edge
+  // scopes the Access application to exactly this path. Registered BEFORE the CSRF hook below,
+  // deliberately: an MCP client carries no session cookie, so the hook would never apply to it,
+  // and a raw route added after it would still be reachable — but registering it first keeps that
+  // fact visible rather than incidental.
+  if (config.get('MCP_ENABLED')) {
+    const teamDomain = config.get('MCP_CF_TEAM_DOMAIN');
+    const audience = config.get('MCP_ACCESS_AUD');
+    if (!teamDomain || !audience) {
+      throw new Error(
+        'MCP_ENABLED=true requires MCP_CF_TEAM_DOMAIN (the Access team origin) and ' +
+          'MCP_ACCESS_AUD (the /mcp Access application AUD tag).',
+      );
+    }
+    const { registerMcpRoute, createMcpAccessJwtAdapter } = await import('../mcp/index');
+    registerMcpRoute({
+      app,
+      fastify,
+      verifier: createMcpAccessJwtAdapter({
+        db: app.get(DRIZZLE),
+        teamDomain,
+        audience,
+      }),
+      cache: app.get(CacheService),
+      // SERVICE_VERSION (the image's release, set by the deployment), not `npm_package_version`:
+      // that is only set under `npm`/`pnpm run`, so `node dist/main.js` would report 0.0.0.
+      serverVersion: config.get('SERVICE_VERSION'),
+    });
+  }
 
   // Route-level body cap for the door-terminal listener (SA review #493 item 6): Fastify
   // enforces bodyLimit on the STREAM of received bytes, so chunked or missing Content-Length
