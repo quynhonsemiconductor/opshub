@@ -71,6 +71,13 @@ const ALLOWED_IMPORTS = [
   /^\.\/[^/]*$/,
 ];
 
+/** Whether a list_* tool source omits the pagination contract (the rule the spec enforces). */
+export function paginationMissing(filename: string, src: string): boolean {
+  if (filename.endsWith('list_notifications.ts')) return false; // native cursor route
+  if (!/list_[a-z_]*\.ts$/.test(filename)) return false;
+  return !src.includes('pageArgs') || !/\bcursor\b/.test(src) || !/\blimit\b/.test(src);
+}
+
 describe('MCP tools ratchet', () => {
   it('every tool file references only allowed modules (imports, require, dynamic import)', () => {
     const files = toolFiles();
@@ -93,13 +100,22 @@ describe('MCP tools ratchet', () => {
     }
   });
 
-  it('every list tool declares a limit and a cursor (agent-sized pages, MCP-PLAN §11)', () => {
+  it('every list_* tool declares pagination — the SAME rule the synthetic test proves', () => {
     for (const file of toolFiles()) {
       const src = stripComments(readFileSync(file, 'utf8'));
-      if (!src.includes('pageArgs') && !src.match(/\bcursor\b/)) continue;
-      expect(src.match(/\bcursor\b/), `${file}: no cursor`).not.toBeNull();
-      expect(src.match(/\blimit\b/), `${file}: no limit`).not.toBeNull();
+      expect(paginationMissing(file, src), `${file}: list tool without pagination`).toBe(false);
     }
+  });
+
+  it('the list-tool rule FAILS a synthetic list tool that forgot pagination', () => {
+    // The exact defect the rule exists for: a new list tool with no pageArgs and no cursor.
+    const offender =
+      'export function registerListNew(server, ctx) { return server.registerTool(...) }';
+    expect(paginationMissing('list_new_thing.ts', offender)).toBe(true);
+    expect(paginationMissing('get_new_thing.ts', offender)).toBe(false);
+    expect(
+      paginationMissing('list_new_thing.ts', 'inputSchema: { ...pageArgs }, cursor, limit'),
+    ).toBe(false);
   });
 
   it('no tool takes an employeeId as the CALLER: the principal is resolved once, by the adapter', () => {

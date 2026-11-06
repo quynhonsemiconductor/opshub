@@ -19,8 +19,11 @@ export function registerWhoami(server: McpServer, ctx: ToolContext) {
         method: 'GET',
         url: '/v1/auth/me',
       });
-      if (statusCode >= 400 || json === null || typeof json !== 'object' || Array.isArray(json))
-        return denied(statusCode, json);
+      if (statusCode >= 400) return denied(statusCode, json);
+      // A 2xx that is not the documented identity object is contract drift, not a success with
+      // missing fields: the same 502 rule the list plumbing uses.
+      if (json === null || typeof json !== 'object' || Array.isArray(json))
+        return denied(502, json);
       const p = json as Record<string, unknown>;
       return result(statusCode, json, {
         id: p['sub'],

@@ -121,9 +121,10 @@ export default defineConfig({
       // roster): measured lines 51.56 / statements 51.36 / branches 43.23 / functions 35.80.
       // Raised 2026-11-05 by the version-display PR (the meta controller, the web config's app
       // version, the footer specs): CI measured lines 51.23 / statements 51.08 / branches 43.70 /
-      // functions 36.01. Only functions was past the 3-point limit (floor 33, +3.01); it moves to
-      // 34, about two points under actual, and the others stay where they are and still inside it.
-      // 2026-11-06: raised 49/34/41/49 → 51/36/43/51 when the MCP read-only slice landed (the
+      // functions 36.01. Only functions was past the 3-point limit at that head (floor 33, +3.01);
+      // it moved to 34, about two points under actual, and the other three stayed where they were.
+      // 2026-11-06 (supersedes the "functions only" sentence above, which describes the 11-05 head):
+      // raised 49/34/41/49 → 51/36/43/51 when the MCP read-only slice landed (the
       // adapter, principal guard, transport and tool specs). Measured: lines 52.45 / statements
       // 52.26 / branches 44.67 / functions 37.94. `check:coverage-floors` refused the change until
       // these moved, exactly as intended.
