@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -44,6 +45,8 @@ import type { McpRestCaller } from './tools/rest';
 
 /** Per-person MCP budget, tighter than the REST DEFAULT tier: one agent turn is dozens of calls. */
 const MCP_RATE_LIMIT = { limit: 60, windowSeconds: 60 };
+
+const routeLogger = new Logger('McpRoute');
 
 export interface McpRouteDeps {
   app: NestFastifyApplication;
@@ -125,12 +128,24 @@ export function registerMcpRoute(deps: McpRouteDeps): void {
       sessionId: `mcp:${request.id}`,
     };
 
-    // Per person, from the VERIFIED principal — never per IP (MCP-PLAN §4).
-    const { allowed, resetAt } = await cache.consumeRateLimit(
-      `mcp:uid:${principal.userId}`,
-      MCP_RATE_LIMIT.limit,
-      MCP_RATE_LIMIT.windowSeconds,
-    );
+    // Per person, from the VERIFIED principal — never per IP (MCP-PLAN §4). A cache outage FAILS
+    // OPEN, like every other rate limiter in opshub: the budget is back-pressure, not authorization,
+    // and the REST calls this route makes are themselves limited per person. The failure is logged
+    // with the error class only — never the caller or their arguments.
+    let allowed = true;
+    let resetAt = 0;
+    try {
+      ({ allowed, resetAt } = await cache.consumeRateLimit(
+        `mcp:uid:${principal.userId}`,
+        MCP_RATE_LIMIT.limit,
+        MCP_RATE_LIMIT.windowSeconds,
+      ));
+    } catch (err) {
+      routeLogger.error(
+        { err: (err as Error)?.constructor?.name },
+        'MCP rate limiter unavailable — allowing the request (fail open)',
+      );
+    }
     if (!allowed) {
       const retryAfter = Math.max(resetAt - Math.floor(Date.now() / 1000), 1);
       return reply

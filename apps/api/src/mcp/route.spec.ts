@@ -445,6 +445,17 @@ describe('/mcp (stateless transport, principal bridge, per-person budget)', () =
     expect(consumedKeys.filter((k) => k === `mcp:uid:${VICTIM}`).length).toBeGreaterThan(1);
   });
 
+  it('fails OPEN when the rate limiter is unavailable, and the REST layer still authorizes', async () => {
+    const broken = {
+      consumeRateLimit: () => Promise.reject(new Error('valkey down')),
+    } as unknown as CacheService;
+    const { app, fastify } = await boot(verifier, broken);
+    cleanup = () => app.close();
+    await initialize(fastify, VICTIM_TOKEN);
+    const out = await callTool(fastify, VICTIM_TOKEN, 'opshub_whoami', {});
+    expect(out['id']).toBe(VICTIM);
+  });
+
   it('TOOL BUDGET: the read-only catalogue is exactly the budgeted 7, and every tool is read-only', async () => {
     const { app, fastify } = await boot();
     cleanup = () => app.close();
