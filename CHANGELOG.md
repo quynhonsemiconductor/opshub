@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.11](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.10...v0.4.11) (2026-11-06)
+
+
+### ✨ Features
+
+* **mcp:** eight more read-only tools for self-service ([#560](https://github.com/quynhonsemiconductor/opshub/issues/560)) ([a6f9942](https://github.com/quynhonsemiconductor/opshub/commit/a6f9942a1c880c3ecc92495f71edfe004ecbb5d3))
+* **mcp:** read-only /mcp with the Access-JWT principal bridge ([#559](https://github.com/quynhonsemiconductor/opshub/issues/559)) ([e438ef7](https://github.com/quynhonsemiconductor/opshub/commit/e438ef7b544fc31e6aca22454df4b8a96df28485))
+* **worker:** nightly retention for the unbounded app tables ([#563](https://github.com/quynhonsemiconductor/opshub/issues/563)) ([6466408](https://github.com/quynhonsemiconductor/opshub/commit/646640834e88ced6675cac2b75c835b1c021122a))
+
+
+### 🐛 Bug Fixes
+
+* **mcp:** unwrap Drizzle errors before classifying the sub conflict ([#562](https://github.com/quynhonsemiconductor/opshub/issues/562)) ([060c8d9](https://github.com/quynhonsemiconductor/opshub/commit/060c8d933744761bf7cbf69447eab6e1ab32a374))
+
 ## [0.4.10](https://github.com/quynhonsemiconductor/opshub/compare/v0.4.9...v0.4.10) (2026-11-05)
 
 
