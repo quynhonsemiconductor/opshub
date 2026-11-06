@@ -67,9 +67,9 @@ export class McpPrincipalGuard implements CanActivate {
     const mcp: McpPrincipalContext | undefined = consumeMcpCallToken(raw);
     if (!mcp) return true;
 
-    // The token has served its purpose (the exchange above), so remove it before anything can
-    // serialize the request: the shared pino redaction list covers the rova header name, and a
-    // credential must not depend on that list matching this product's constant.
+    // The token has served its purpose (the exchange above), so remove it as well. The header
+    // name is already on the shared log redaction list, and deleting it means a request object
+    // that outlives this guard cannot be replayed by anything that serializes it.
     delete (request.headers as Record<string, unknown>)[MCP_CALL_TOKEN_HEADER];
 
     // The belt guards key off this marker, not off `request.user`'s mere presence.

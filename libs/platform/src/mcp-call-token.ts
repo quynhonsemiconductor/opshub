@@ -35,8 +35,14 @@ export interface McpPrincipalContext {
   sessionId: string;
 }
 
-/** Header the in-process call token travels in (between the MCP transport and its guard, never stored). */
-export const MCP_CALL_TOKEN_HEADER = 'x-opshub-mcp-call';
+/**
+ * Header the in-process call token travels in (between the MCP transport and its guard, never
+ * stored, never on the wire). `authorization` is deliberate: the shared pino configuration
+ * already redacts that header on every request line, so a credential cannot be written to the log
+ * sink by a logger change made in another repository. Nothing reads an Authorization header for
+ * authentication in opshub (sessions are cookies), and the guard consumes the token once.
+ */
+export const MCP_CALL_TOKEN_HEADER = 'authorization';
 
 /** A token outlives its one inject() by seconds, not minutes. */
 const TOKEN_TTL_MS = 5_000;
