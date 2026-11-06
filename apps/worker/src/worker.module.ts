@@ -20,6 +20,7 @@ import { SlaBreachCron } from './cron/sla-breach.cron';
 import { DelegationExpiryCron } from './cron/delegation-expiry.cron';
 import { ContractExpiryCron } from './cron/contract-expiry.cron';
 import { StorageCleanupCron } from './cron/storage-cleanup.cron';
+import { RetentionCleanupCron } from './cron/retention-cleanup.cron';
 import { ReviewDueCron } from './cron/review-due.cron';
 import { AttendanceFlagsCron } from './cron/attendance-flags.cron';
 import { WorkforceModule } from '@modules/workforce';
@@ -51,6 +52,7 @@ import { WorkerHeartbeatService } from './heartbeat/worker-heartbeat.service';
     DelegationExpiryCron,
     ContractExpiryCron,
     StorageCleanupCron,
+    RetentionCleanupCron,
     ReviewDueCron,
     AttendanceFlagsCron,
   ],
