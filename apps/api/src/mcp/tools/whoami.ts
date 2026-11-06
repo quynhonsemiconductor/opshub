@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { result, type ToolContext } from './rest';
+import { denied, result, type ToolContext } from './rest';
 
 /**
  * `opshub_whoami` — the person as opshub sees them (GET /v1/auth/me, self-scoped).
@@ -19,6 +19,8 @@ export function registerWhoami(server: McpServer, ctx: ToolContext) {
         method: 'GET',
         url: '/v1/auth/me',
       });
+      if (statusCode >= 400 || json === null || typeof json !== 'object' || Array.isArray(json))
+        return denied(statusCode, json);
       const p = json as Record<string, unknown>;
       return result(statusCode, json, {
         id: p['sub'],

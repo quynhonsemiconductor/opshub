@@ -125,7 +125,9 @@ export function listResult(
 ) {
   if (statusCode >= 400) return denied(statusCode, json);
   const rows = Array.isArray(json) ? json : (json as { data?: unknown } | null)?.data;
-  if (!Array.isArray(rows)) return denied(statusCode, json);
+  // A 2xx that is not the documented shape is contract drift: surface it as an upstream failure,
+  // never as a successful empty list.
+  if (!Array.isArray(rows)) return denied(statusCode >= 400 ? statusCode : 502, json);
   return {
     content: [
       {
@@ -152,7 +154,7 @@ export function arrayResult(
   page: { offset: number; limit: number },
 ) {
   if (statusCode >= 400) return denied(statusCode, json);
-  if (!Array.isArray(json)) return denied(statusCode, json);
+  if (!Array.isArray(json)) return denied(statusCode >= 400 ? statusCode : 502, json);
   const rows = json.slice(page.offset, page.offset + page.limit) as Record<string, unknown>[];
   return {
     content: [

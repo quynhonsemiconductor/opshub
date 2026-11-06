@@ -564,6 +564,10 @@ export const ApiEnvSchema = z
      * The Access team origin the JWT `iss` must equal. Required only when MCP_ENABLED is true
      * (asserted by `refineMcp`). The /mcp Access application must allow ONLY the Entra IdP — no
      * One-time PIN, no social IdPs — because the adapter maps by email.
+     *
+     * The QNSC team uses the default `<team>.cloudflareaccess.com` origin, so the schema accepts
+     * only that shape. A custom team domain would fail here, naming the variable; switching to
+     * one is a deliberate change that must update this regex and the verifier pin together.
      */
     MCP_CF_TEAM_DOMAIN: emptyToUndefined(
       z
